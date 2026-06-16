@@ -59,7 +59,7 @@ flowchart TB
   AR["agent_run.py<br/>drive_invocation()"] --> RES["providers/resolve.py<br/>tier → provider + model"]
   AR --> PROV["provider (AgentRunner)<br/>anthropic · openai · claude_code · codex"]
   PROV --> TOOLS["agents/tools<br/>bash · fs · query_events ·<br/>complete_step · wait_for_user"]
-  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>implementer · reviewers"]
+  TOOLS --> SUB["subagents.py<br/>dispatch_task()<br/>implementer · reviewers ·<br/>explorer · researcher"]
   SUB -.->|"nested invocation"| AR
   PROV -->|"audit events"| LOG[("event log")]
   TOOLS -->|"audit events"| LOG
@@ -79,14 +79,15 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. The final merge is lock-protected; completed changes are preserved on an orphan journal ref even after the worktree is pruned.
+All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/change/` (gitignored) and are committed to a per-change `refs/imp/journal-wip/<id>` ref as they're written. The final merge is lock-protected; at completion the wip ref is folded into the orphan `refs/imp/journal` ref, so each change's events, transcripts, and artifacts survive even after the worktree is pruned.
 
 ```mermaid
 flowchart LR
   WT["worktree.py"] --> ADD["add -b imp/&lt;id&gt;"]
   WT --> MERGE["merge-to-base<br/>(RepoGitLock)"]
   WT --> RM["remove worktree<br/>(on completion)"]
-  WT --> J[("journal.py<br/>refs/imp/journal")]
+  WT --> WIP[("refs/imp/journal-wip/&lt;id&gt;<br/>spec · plan artifacts")]
+  WIP -. "fold on completion" .-> J[("journal.py<br/>refs/imp/journal")]
   ADD --> REPO[("git repo")]
   MERGE --> REPO
 ```
@@ -101,7 +102,7 @@ flowchart LR
   NB --> RT["render_text.py"]
   RT --> DRV["LiveDriver / TuiDriver"]
   DRV --> term([terminal])
-  SIG["signals.py<br/>InterruptCoordinator<br/>ESC · SIGINT · watchdog"] -.->|"pause"| DRV
+  SIG["cli/signals.py<br/>InterruptCoordinator<br/>ESC · SIGINT · watchdog"] -.->|"pause"| DRV
 ```
 
 ### Component reference
@@ -117,9 +118,11 @@ flowchart LR
 | Providers | `providers/*.py`, `providers/resolve.py` | `resolve_run()` maps tiers→(provider, model) once per run; each provider implements the `AgentRunner` protocol. |
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
-| Git | `engine/worktree.py`, `engine/journal.py` | Worktree create/remove, lock-protected merge-to-base, `refs/imp/journal`. |
+| Git | `engine/worktree.py`, `engine/journal.py` | Worktree create/remove, lock-protected merge-to-base, per-change `journal-wip` artifact ref folded into `refs/imp/journal`. |
+| Workflow lifecycle | `engine/workflow_lifecycle.py`, `assets/__init__.py` | The bundled `imp/` workflow is an imp-managed base: content-hash `.pristine` stamp, drift classification (up-to-date / update-available / locally-modified), `imp update-workflow`. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
-| Control plane | `engine/signals.py`, `engine/recovery.py` | Interrupt/pause + watchdog; gate-safe rewind for `imp resume --from`. |
+| Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
+| Live drivers | `engine/drivers.py`, `engine/selfhost.py` | Per-agent live-driver capability (`drivers:` frontmatter, e.g. `impty`): stdio MCP servers granted to an agent, launched self-hosted. |
 
 **Invariants:** the event log is the single source of truth (state is a rebuildable cursor); the same `NarrativeBuilder` path renders both live and `imp log`.
 
@@ -127,7 +130,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/default/workflow.yaml` (workflow name: **feature**). Five phases, with a per-task loop inside *implement* and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips review/supercycle gates.
+Defined in `src/imp/assets/workflows/imp/workflow.yaml` (workflow name: **feature**; the `imp/` directory is the imp-managed base workflow — see the [component reference](#component-reference)). Five phases, with a per-task loop **and** a per-plan review panel inside *implement*, and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the review/supercycle gates.
 
 ### Overview
 
@@ -140,7 +143,7 @@ flowchart LR
   REVIEW --> MERGE["⑤ merge"]
   MERGE --> done([done])
   IMPL -. "supercycle" .-> PLAN
-  REVIEW -. "rework" .-> IMPL
+  REVIEW -. "rework" .-> PLAN
 ```
 
 Step kinds across all phases:
@@ -154,86 +157,85 @@ Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedbac
 
 ### Phase ① spec
 
-Brainstorm → name the change → write+commit the spec, verify it committed, then optionally review (skipped on a user-confirmed gate or a trivial `fast_path`).
+Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the change → write the spec under `.imp/change/artifacts/spec/` and commit it to the change's journal-wip ref, verify it committed, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
 
 ```mermaid
 flowchart TD
-  in([intent / seed]) --> SW["spec-writer"]
+  in([intent / seed]) --> SW["spec-writer<br/>(explorer · researcher)"]
   SW --> SVC{{"spec-verify-commit"}}
   SVC -. fail .-> SW
-  SVC --> SXG{"spec-exit-gate"}
-  SXG -->|"gated / fast_path"| out([→ plan])
-  SXG -->|else| SR["spec-reviewer"]
+  SVC -->|fast_path| out([→ plan])
+  SVC --> SR["spec-reviewer"]
   SR -->|"Critical / Major"| SW
-  SR -->|"minors pass"| SW
+  SR -->|"minors: one pass"| SW
   SR -->|clean| out
 ```
 
 ### Phase ② plan
 
-Write the next bite-sized `plan-N`, verify the commit, then review (skipped on `fast_path`). Mirrors the spec loop.
+Write the next bite-sized `plan-N` (same read-only helper subagents), verify the commit, then a **plan-review panel** dispatches independent `plan-reviewer` subagents that read the plan's prescribed code like a diff (2 reviewers first pass, 1 on bounce-back). `fast_path` skips review. Mirrors the spec minors loop.
 
 ```mermaid
 flowchart TD
-  in([from spec]) --> PW["plan-writer"]
+  in([from spec]) --> PW["plan-writer<br/>(explorer · researcher)"]
   PW --> PVC{{"plan-verify-commit"}}
   PVC -. fail .-> PW
-  PVC --> FPG{"fast-path-plan-gate"}
-  FPG -->|fast_path| out([→ implement])
-  FPG -->|else| PR["plan-reviewer"]
+  PVC -->|fast_path| out([→ implement])
+  PVC --> PR["plan-review<br/>panel → plan-reviewer ×N"]
   PR -->|"Critical / Major"| PW
-  PR -->|"minors pass"| PW
+  PR -->|"minors: one pass"| PW
   PR -->|clean| out
 ```
 
 ### Phase ③ implement
 
-`task-lead` drives one task at a time (dispatching `implementer` + `quality-reviewer`), committing a clean unit each loop. After all tasks: verify, autosquash fixups, stamp trailers, run the 4-slice review panel, drain deferred followups, then decide whether the spec needs another plan (supercycle).
+`task-lead` drives one task at a time (dispatching `implementer` + `quality-reviewer`), committing a clean unit each loop. After all tasks: `commit-check`, then `verify` (the project's own test/lint gate — a gate **timeout** pauses to a human rather than looping), autosquash fixups into one-commit-per-task, run the 4-slice review panel, drain deferred followups, re-verify, stamp trailers, then `plan-cycle-check` decides whether the spec needs another plan (supercycle). After the last plan of a multi-plan change it routes once more through the panel for a **whole-change pass** (`review_scope=change`) before the review phase.
 
 ```mermaid
 flowchart TD
   in([from plan]) --> TL["task-lead<br/>implementer + quality-reviewer"]
   TL -->|deviation| toplan([→ plan-writer])
   TL -->|"done = false"| TL
-  TL -->|done| CC{{"commit-check · run-tests"}}
+  TL -->|done| CC{{"commit-check"}}
   CC -. fail .-> TL
-  CC --> AS{{"autosquash"}}
+  CC --> V{{"verify"}}
+  V -. fail .-> TL
+  V -. "timeout" .-> HUMAN([pause → human])
+  V --> AS{{"autosquash"}}
   AS -->|conflict| ASR["autosquash-resolve"]
-  AS -. "hard fail" .-> HUMAN([pause → human])
-  AS --> ST{{"stamp-trailers"}}
-  ASR --> ST
-  ST --> RVW["review-panel<br/>code · completeness ·<br/>spec · boundaries"]
+  ASR --> AS
+  AS -. "hard fail" .-> HUMAN
+  AS --> RVW["review panel<br/>code · completeness ·<br/>spec · boundaries"]
   RVW -->|task_gap| TL
   RVW -->|plan_gap| toplan
-  RVW -->|approve| DS["deferred-sweep"]
-  DS --> PCC{"plan-cycle-check"}
+  RVW --> DS["deferred-sweep"]
+  DS --> SV{{"sweep-verify"}}
+  SV -. fail .-> DS
+  SV --> ST{{"stamp-trailers"}}
+  ST --> PCC{"plan-cycle-check"}
   PCC -->|"more_plans (supercycle)"| toplan
+  PCC -->|"whole-change pass"| RVW
   PCC -->|covered| out([→ review])
 ```
 
 ### Phase ④ review (end-of-change)
 
-For multi-plan changes only: a trimmed whole-diff integration pass and cross-plan sweep, then merge base→branch (`integrator` resolves conflicts, `integration-review` verifies), a structured summary, and the interactive `final-review` human gate.
+Rebase the branch onto base (`integrate-rebase`); on conflicts the `integrator` agent resolves them and `integrate-verify` re-runs the test gate. Then `finalize` **always** runs: it reviews the base-merge resolution with independent eyes (when one occurred), writes the structured end-of-change summary (queryable via `imp log`), and is the interactive human gate — merge, rework, or pause.
 
 ```mermaid
 flowchart TD
-  in([from implement]) --> IG{"integration-gate<br/>multi_plan?"}
-  IG -->|"single plan"| SST{{"stamp-sweep-trailers"}}
-  IG -->|multi_plan| IP["integration-pass<br/>completeness + boundaries"]
-  IP -->|task_gap| back1([→ task-lead])
-  IP -->|plan_gap| back2([→ plan-writer])
-  IP -->|clean| ISW["integration-sweep + tests"]
-  ISW --> SST
-  SST --> IM{{"integrate-rebase"}}
-  IM --> INT["integrator"]
-  INT --> IR["integration-review"]
-  IR -->|gaps| INT
-  IR -->|ok| SUM["summarizer"]
-  SUM --> FRG{"final-review-gate"}
-  FRG -->|skip| out([→ merge])
-  FRG -->|else| FR["final-review<br/>HUMAN: merge or rework?"]
-  FR -->|rework| back1
-  FR -->|merge| out
+  in([from implement]) --> IR{{"integrate-rebase<br/>branch onto base"}}
+  IR -->|"already current"| FIN
+  IR -->|"clean rebase"| IV
+  IR -->|conflicts| INT["integrator<br/>resolve conflicts"]
+  IR -. "bad ref / dirty" .-> HUMAN([pause → human])
+  INT --> IV{{"integrate-verify"}}
+  IV -. fail .-> INT
+  IV -. timeout .-> HUMAN
+  IV --> FIN["finalize<br/>review resolution · summarize ·<br/>HUMAN: merge / rework / pause"]
+  FIN -->|rework| back([→ plan-writer])
+  FIN -. pause .-> HUMAN
+  FIN -->|merge| out([→ merge])
 ```
 
 ### Phase ⑤ merge
@@ -256,28 +258,31 @@ flowchart TD
 | `spec-writer` | high | Brainstorm with user, name the change, write+commit the spec. |
 | `spec-reviewer` | high | Review spec vs captured intent; blocking iff Critical/Major. |
 | `plan-writer` | high | Write the next bite-sized `plan-N` from spec + progress. |
-| `plan-reviewer` | high | Review plan for coverage, placeholders, type consistency. |
+| `plan-review-panel` | medium | Plan-review coordinator; dispatches `plan-reviewer` subagents and collapses their verdicts into one envelope. |
+| `plan-reviewer` | high | Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
 | `task-lead` | medium | Implement controller: pick task, dispatch implementer + reviewer, adjudicate, commit one unit, record progress. |
 | `implementer` | medium | Implement one task / apply directed fixes; commit. |
 | `quality-reviewer` | medium | Per-task read-only quality review back to task-lead. |
-| `review-panel` | medium | Whole-diff coordinator; dispatches the four slices, collapses verdicts, routes approve / task_gap / plan_gap. |
+| `review-panel` | medium | Whole-diff coordinator; dispatches the four opus reviewers, dedupes/filters their advisory findings, routes approve / task_gap / plan_gap. |
 | `code-reviewer` | high | Generalist whole-change review vs spec (correctness + completeness). |
 | `completeness-slice` | high | Every changed symbol's callers and parallel paths. |
 | `spec-compliance-slice` | high | Does the code do exactly what the spec/task says. |
 | `boundaries-slice` | high | Edge cases: empty/None/overflow, error handling at extremes. |
+| `deferred-sweep` | medium | Drain deferred followups with a 3-way disposition (silent / fix+FYI / surface); may dispatch implementer + quality-reviewer for fixes. |
 | `plan-cycle-check` | medium | Decide if the spec needs another plan (supercycle) or is covered. |
-| `deferred-sweep` | medium | Drain deferred followups with a 3-way disposition (silent / fix+FYI / surface). |
 | `autosquash-resolve` | high | Resolve a fixup-fold rebase conflict, preserving the pre-squash tree. |
 | `integrator` | high | Merge base into the branch; resolve textual + semantic conflicts. |
-| `integration-reviewer` | high | Verify the integrator's merge: no lost work, no silent breakage. |
-| `summarizer` | high | Structured end-of-change summary (queryable via `imp log`). |
-| `final-review` | medium | Interactive human gate: show summary, take comments, route merge vs rework. |
+| `finalize` | high | Final gate: review the base-merge resolution, write the end-of-change summary (queryable via `imp log`), and decide merge / rework / pause. |
+| `explorer` | — | Read-only helper: fast codebase exploration with file:line citations (dispatched by spec-writer / plan-writer). |
+| `researcher` | — | Read-only helper: web search + fetch (and codebase grounding), reports cited findings. |
 
 ### Data files
 
+All four live under `.imp/change/` (gitignored); spec/plan artifacts are committed to the change's `journal-wip` ref (see [Zoom 4](#zoom-4--worktree--git)).
+
 | File | Written by | Read by |
 |---|---|---|
-| `imp/specs/{slug}.md` | spec-writer | all phases |
-| `imp/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-cycle-check, deferred-sweep, integration-reviewer |
+| `.imp/change/artifacts/spec/{slug}.md` | spec-writer | all phases |
+| `.imp/change/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-review, plan-cycle-check, deferred-sweep, finalize |
 | `.imp/change/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
-| `.imp/change/integration-notes.md` | integrator | integration-reviewer, summarizer |
+| `.imp/change/integration-notes.md` | integrator | finalize |
