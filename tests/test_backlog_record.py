@@ -42,3 +42,7 @@ def test_remove_record(tmp_path: Path) -> None:
     backlog.remove_record(tmp_path, "2026-06-16-aaa111")
     assert backlog.read_record(tmp_path, "2026-06-16-aaa111") is None
     assert backlog.list_ids(tmp_path) == []
+
+
+def test_remove_record_nonexistent_is_safe(tmp_path: Path) -> None:
+    backlog.remove_record(tmp_path, "2026-06-16-nope00")  # must not raise

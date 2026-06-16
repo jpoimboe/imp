@@ -40,7 +40,7 @@ def list_ids(control_root: Path) -> list[str]:
     d = _dir(control_root)
     if not d.is_dir():
         return []
-    return [p.stem for p in d.glob("*.json")]
+    return sorted(p.stem for p in d.glob("*.json"))
 
 
 def list_records(control_root: Path) -> list[dict[str, Any]]:
