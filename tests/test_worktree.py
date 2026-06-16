@@ -215,6 +215,21 @@ def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()             # branch worktree intact
 
 
+def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    # Park control root so main is checked out nowhere — forces _merge_detached.
+    _git(tmp_path, "checkout", "-q", "-b", "parking")
+    body = "We chose X over Y because Z."
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
+    assert result.status == "MERGED"
+    msg = _git(tmp_path, "log", "-1", "--format=%B", "main").stdout
+    assert "Merge My Feature" in msg
+    assert "We chose X over Y because Z." in msg
+    assert "(imp/feat)" in msg
+
+
 def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     # Conflict: both base and branch edit README.md differently.
@@ -372,6 +387,113 @@ def test_merge_already_in_base_is_idempotent_merged(tmp_path: Path) -> None:
     assert again.status == "MERGED"   # idempotent, NOT STALE
 
 
+def test_artifact_commit_writes_flat_and_accumulates(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    spec = stage / "spec.md"
+    spec.write_text("# the spec\n")
+    # First artifact commit: wip ref does not exist yet -> root commit, no parent.
+    wt.artifact_commit(tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec")
+    assert _git(tmp_path, "show",
+                "refs/imp/journal-wip/feat:spec/feat.md").stdout == "# the spec\n"
+    first = _git(tmp_path, "rev-parse", "refs/imp/journal-wip/feat").stdout.strip()
+
+    # Second commit accumulates: the prior file survives, a new one is added,
+    # and the new commit is parented on the first (history grows, not replaced).
+    plan = stage / "plan.md"
+    plan.write_text("# plan 1\n")
+    wt.artifact_commit(tmp_path, "feat", {"plans/feat-plan-1.md": plan},
+                       message="artifact: plan")
+    assert _git(tmp_path, "show",
+                "refs/imp/journal-wip/feat:plans/feat-plan-1.md").stdout == "# plan 1\n"
+    assert _git(tmp_path, "show",
+                "refs/imp/journal-wip/feat:spec/feat.md").returncode == 0
+    second = _git(tmp_path, "rev-parse", "refs/imp/journal-wip/feat").stdout.strip()
+    assert second != first
+    assert _git(tmp_path, "rev-parse",
+                "refs/imp/journal-wip/feat~1").stdout.strip() == first
+    # Files live FLAT at the tree root (no <id>/ prefix) and the code tree is untouched.
+    assert "feat/" not in _git(tmp_path, "ls-tree", "--name-only",
+                               "refs/imp/journal-wip/feat").stdout
+    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
+    # The shared journal ref is NOT touched by an artifact commit.
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/journal").returncode != 0
+
+
+def test_fold_wip_into_journal_carries_artifacts_and_runtime(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    spec = stage / "spec.md"
+    spec.write_text("# spec body\n")
+    wt.artifact_commit(tmp_path, "feat", {"spec/feat.md": spec},
+                       message="artifact: spec")
+    events = stage / "events.jsonl"
+    events.write_text('{"e":1}\n')
+    state = stage / "state.json"
+    state.write_text('{"status":"completed"}')
+
+    wt.fold_wip_into_journal(tmp_path, "feat",
+                             {"events.jsonl": events, "state.json": state})
+
+    # ONE journal commit holds BOTH the artifacts (under <id>/) and the runtime files.
+    assert _git(tmp_path, "show",
+                "refs/imp/journal:feat/spec/feat.md").stdout == "# spec body\n"
+    assert _git(tmp_path, "show",
+                "refs/imp/journal:feat/events.jsonl").stdout == '{"e":1}\n'
+    assert _git(tmp_path, "show",
+                "refs/imp/journal:feat/state.json").stdout == '{"status":"completed"}'
+    assert _git(tmp_path, "log", "--oneline", "refs/imp/journal").stdout.count("\n") == 1
+    # The wip ref is deleted after the fold.
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/journal-wip/feat").returncode != 0
+
+
+def test_fold_without_wip_ref_journals_runtime_only(tmp_path: Path) -> None:
+    # Abandoned before any artifact was committed: no wip ref exists.
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    events = stage / "events.jsonl"
+    events.write_text('{"e":9}\n')
+    wt.fold_wip_into_journal(tmp_path, "bare", {"events.jsonl": events})
+    assert _git(tmp_path, "show",
+                "refs/imp/journal:bare/events.jsonl").stdout == '{"e":9}\n'
+    assert _git(tmp_path, "show",
+                "refs/imp/journal:bare").returncode == 0
+
+
+def test_fold_wip_idempotent_on_crash_retry(tmp_path: Path) -> None:
+    # Simulate a crash-then-retry: first call succeeds; second call must not error
+    # and the journal content must remain correct (no duplicate subtree).
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    spec = stage / "spec.md"
+    spec.write_text("# spec\n")
+    wt.artifact_commit(tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec")
+    events = stage / "events.jsonl"
+    events.write_text('{"e":1}\n')
+
+    # First call folds wip into journal and deletes the wip ref.
+    wt.fold_wip_into_journal(tmp_path, "feat", {"events.jsonl": events})
+    first_journal = _git(tmp_path, "rev-parse", "refs/imp/journal").stdout.strip()
+
+    # Second call (crash-retry): wip ref is gone; only runtime blobs are re-journaled.
+    events.write_text('{"e":2}\n')   # updated runtime content
+    wt.fold_wip_into_journal(tmp_path, "feat", {"events.jsonl": events})
+
+    # The journal advanced (second entry added) and the spec artifact is still accessible.
+    second_journal = _git(tmp_path, "rev-parse", "refs/imp/journal").stdout.strip()
+    assert second_journal != first_journal
+    assert _git(tmp_path, "show", "refs/imp/journal:feat/spec/feat.md").returncode == 0
+    # No error raised on re-run; wip ref stays absent.
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/journal-wip/feat").returncode != 0
+
+
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
@@ -388,5 +510,29 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
     assert ".imp/" in exclude.read_text()
     assert _make_worktree_and_check(tmp_path)
+
+
+def test_merge_body_carries_decisions(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    body = "We chose X over Y because Z."
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
+    assert result.status == "MERGED"
+    msg = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout
+    assert "Merge My Feature" in msg
+    assert "We chose X over Y because Z." in msg
+    assert "(imp/feat)" in msg
+
+
+def test_merge_body_none_keeps_minimal(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=None)
+    assert result.status == "MERGED"
+    msg = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
+    # Minimal body: subject + the id trailer only.
+    assert msg == "Merge My Feature\n\n(imp/feat)"
 
 

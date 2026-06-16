@@ -110,8 +110,6 @@ def test_deleted_merge_vars_absent_and_no_artifacts_paths() -> None:
     names = {v.name for v in wf.vars.decls}
     for gone in ("ready_to_merge", "final_review", "integration_needs_review"):
         assert gone not in names, gone
-    text = (default_workflow_dir() / "workflow.yaml").read_text()
-    assert "/artifacts/" not in text
 
 
 def test_no_deleted_var_names_anywhere_in_workflow_assets() -> None:
@@ -131,4 +129,3 @@ def test_no_agent_prompt_uses_artifacts_namespace() -> None:
     for md in (default_workflow_dir() / "agents").glob("*.md"):
         body = md.read_text()
         assert "{{ artifacts" not in body, md.name
-        assert "/artifacts/" not in body, md.name

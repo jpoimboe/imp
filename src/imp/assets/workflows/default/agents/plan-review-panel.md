@@ -14,11 +14,11 @@ You dispatch independent `plan-reviewer` subagents, then **mechanically collapse
 their outputs into one `{status, findings, blocking, has_minor_findings}` envelope —
 identical in shape to a single reviewer's — that the engine routes.
 
-Spec file: `imp/specs/{{ change.slug }}.md`
+Spec file: `.imp/change/artifacts/spec/{{ change.slug }}.md`
 
 ## Choose the reviewer count, then dispatch
 
-The plan under review is the newest `imp/plans/{{ change.slug }}-plan-*.md` (highest
+The plan under review is the newest `.imp/change/artifacts/plans/{{ change.slug }}-plan-*.md` (highest
 N). Give every dispatched reviewer the same context: review that newest plan against
 the spec above. **Every `task` dispatch MUST name its tier explicitly** — an omitted
 tier silently inherits your own weaker tier and lowers the gate, with no error to

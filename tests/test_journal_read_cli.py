@@ -9,13 +9,14 @@ from __future__ import annotations
 import io
 import json
 import re
+import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
 from imp.cli.main import main
-from imp.engine import worktree
+from imp.engine import journal, worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -419,3 +420,76 @@ def test_status_default_inflight_columns_and_color(
     assert "Add version flag" in out
     assert "\x1b[32mrunning\x1b[0m" in out
     assert lines[1].rstrip().endswith("yaitd7")
+
+
+def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Doomed", change_id="doomed",
+                       base_branch="main")
+    art = ch.change_dir / "artifacts" / "plans"
+    art.mkdir(parents=True)
+    (art / "doomed-plan-1.md").write_text("# plan\n")
+    worktree.artifact_commit(
+        tmp_path, "doomed",
+        {"plans/doomed-plan-1.md": art / "doomed-plan-1.md"},
+        message="artifact: plan")
+
+    rc = m._abandon(tmp_path, "doomed", assume_yes=True)
+    assert rc == 0
+    assert journal.journal_show(tmp_path, "doomed", "plans/doomed-plan-1.md") \
+        == b"# plan\n"
+    assert journal.journal_show(tmp_path, "doomed", "state.json") is not None
+    assert subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/doomed"],
+        cwd=tmp_path, capture_output=True).returncode != 0
+
+
+def test_abandon_without_wip_still_journals_runtime(tmp_path: Path) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Bare", change_id="bare",
+                  base_branch="main")
+    # No artifact committed → no wip ref exists.
+    rc = m._abandon(tmp_path, "bare", assume_yes=True)
+    assert rc == 0
+    # Runtime state is journaled even without any artifact.
+    assert journal.journal_show(tmp_path, "bare", "state.json") is not None
+    assert subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/bare"],
+        cwd=tmp_path, capture_output=True).returncode != 0
+
+
+def test_finalize_journals_artifacts_from_wip(tmp_path: Path) -> None:
+    from imp.engine import executor
+    from imp.engine.state import JsonlEventLog
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Doc Thing", change_id="doc-thing",
+                       base_branch="main")
+    # An artifact accumulated on the wip ref during the run.
+    art = ch.change_dir / "artifacts" / "spec"
+    art.mkdir(parents=True)
+    (art / "doc-thing.md").write_text("# the spec\n")
+    files = {str(p.relative_to(ch.change_dir / "artifacts")): p
+             for p in (art / "doc-thing.md",)}
+    worktree.artifact_commit(tmp_path, "doc-thing", files, message="artifact: spec")
+    # Simulate a completed merge so _complete takes the finalize path.
+    st = State.load(ch.state_dir)
+    st.merge_commit = "0" * 40
+    st.save(ch.state_dir)
+
+    executor._complete(ch, State.load(ch.state_dir), JsonlEventLog(ch.events_path))
+
+    # The journal carries BOTH the artifact and the runtime snapshot, and the wip
+    # ref is gone.
+    assert journal.journal_show(tmp_path, "doc-thing", "spec/doc-thing.md") \
+        == b"# the spec\n"
+    assert journal.journal_show(tmp_path, "doc-thing", "events.jsonl") is not None
+    assert journal.journal_show(tmp_path, "doc-thing", "change.json") is not None
+    assert subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet",
+         "refs/imp/journal-wip/doc-thing"],
+        cwd=tmp_path, capture_output=True).returncode != 0

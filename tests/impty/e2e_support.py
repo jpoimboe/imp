@@ -90,15 +90,14 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         return {"name": "complete_step", "input": {"status": "Success", **fields}}
 
     spec_cmd = (
-        'cd "$IMP_PROJECT_ROOT" && mkdir -p imp/specs && '
-        'printf "# Spec\\n\\nstub spec\\n" > "imp/specs/$IMP_CHANGE_SLUG.md" && '
-        'git add "imp/specs/$IMP_CHANGE_SLUG.md" && git commit -qm "spec: add spec"'
+        'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/spec && '
+        'printf "# Spec\\n\\nstub spec\\n" > ".imp/change/artifacts/spec/$IMP_CHANGE_SLUG.md" && '
+        'imp artifact-commit spec'
     )
     plan_cmd = (
-        'cd "$IMP_PROJECT_ROOT" && mkdir -p imp/plans && '
-        'printf "# Plan 1\\n" > "imp/plans/$IMP_CHANGE_SLUG-plan-1.md" && '
-        'git add "imp/plans/$IMP_CHANGE_SLUG-plan-1.md" && '
-        'git commit -qm "docs: add plan 1"'
+        'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/plans && '
+        'printf "# Plan 1\\n" > ".imp/change/artifacts/plans/$IMP_CHANGE_SLUG-plan-1.md" && '
+        'imp artifact-commit plan'
     )
     lead_cmd = (
         'cd "$IMP_PROJECT_ROOT" && mkdir -p src && '
@@ -110,7 +109,8 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             "spec-writer": [{"text": "spec", "tools": [
                 {"name": "rename_change", "input": {"name": "demo change"}},
                 bash(spec_cmd),
-                done(phase="written", spec_path="imp/specs/SCRIPTED-STUB.md",
+                done(phase="written",
+                     spec_path=".imp/change/artifacts/spec/SCRIPTED-STUB.md",
                      complexity="trivial"),
             ]}],
             "spec-reviewer": [{"text": "review", "tools": [
@@ -118,7 +118,8 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             ]}],
             "plan-writer": [{"text": "plan", "tools": [
                 bash(plan_cmd),
-                done(plan_path="imp/plans/SCRIPTED-STUB-plan-1.md", plan_number=1),
+                done(plan_path=".imp/change/artifacts/plans/SCRIPTED-STUB-plan-1.md",
+                     plan_number=1),
             ]}],
             "task-lead": [{"text": "implement", "tools": [
                 bash(lead_cmd),

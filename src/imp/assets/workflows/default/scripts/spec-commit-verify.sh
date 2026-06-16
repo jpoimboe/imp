@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
-# Verify the spec commit: HEAD must touch imp/specs/<slug>.md. (The `Change:`
-# trailer is stamped later, in the review phase, so it is not checked here.)
-# Failure resumes spec-writer.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 SLUG="${IMP_CHANGE_SLUG:?IMP_CHANGE_SLUG not set by engine}"
-TARGET="imp/specs/${SLUG}.md"
+ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
+WIP="refs/imp/journal-wip/${ID}"
+LIVE=".imp/change/artifacts/spec/${SLUG}.md"
 
-# --root so a root commit (no parent) still reports its files; harmless otherwise.
-if ! git diff-tree --root --no-commit-id --name-only -r HEAD | grep -qxF "$TARGET"; then
-  echo "HEAD does not touch $TARGET" >&2
+if ! git rev-parse --verify --quiet "$WIP" >/dev/null; then
+  echo "wip ref $WIP does not exist (spec not committed via artifact-commit.sh?)" >&2
   exit 1
 fi
-
-# Clean-spec-path check (private worktree): no uncommitted/staged/untracked spec
-# changes may survive. Without `--ignored`, git status omits gitignored files
-# (ignored == declared acceptable); it catches modified, staged, and
-# untracked-unignored states. `--porcelain` just selects the stable output format.
-if [ -n "$(git status --porcelain -- imp/specs/)" ]; then
-  echo "uncommitted or untracked changes under imp/specs/ (must be committed or removed):" >&2
-  git status --porcelain -- imp/specs/ >&2
+committed=$(git rev-parse --verify --quiet "${WIP}:spec/${SLUG}.md") || {
+  echo "$WIP tip does not carry spec/${SLUG}.md" >&2; exit 1; }
+live=$(git hash-object "$LIVE") || { echo "live spec $LIVE missing" >&2; exit 1; }
+if [ "$committed" != "$live" ]; then
+  echo "live spec $LIVE differs from the committed blob on $WIP" >&2
   exit 1
 fi
-
-echo "ok: HEAD touches $TARGET and imp/specs/ is clean"
+echo "ok: $WIP carries spec/${SLUG}.md matching $LIVE"

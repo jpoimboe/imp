@@ -76,13 +76,31 @@ def check_atomic_coder_commit(repo: str, base: str, sentinel: str) -> Result:
                   if commits else f"no run commit modifies {_fmt(files)}")
 
 
-def check_artifact(repo: str, base: str, name: str, pathspec: str) -> Result:
-    out = _git(repo, "diff", "--name-only", f"{base}..HEAD", "--",
-               pathspec).stdout
-    paths = [ln for ln in out.splitlines() if ln.strip()]
-    return Result(name, bool(paths),
-                  f"committed: {_fmt(paths)}" if paths
-                  else f"no run-committed file matching {pathspec}")
+def check_artifacts_in_journal(repo: str) -> Result:
+    ids = journal_ids(repo)
+    if len(ids) != 1:
+        return Result("artifacts_in_journal", False,
+                      f"expected exactly one journaled change, got {_fmt(ids)}")
+    cid = ids[0]
+    spec = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal:{cid}/spec")
+    plans = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal:{cid}/plans")
+    ok = (spec.returncode == 0
+          and spec.stdout.strip().splitlines()[-1].endswith(".md")
+          and plans.returncode == 0 and "-plan-" in plans.stdout)
+    return Result("artifacts_in_journal", ok,
+                  f"journal {cid}/ carries spec + plan(s)" if ok else
+                  f"journal {cid}/ missing spec or plan "
+                  f"(spec rc={spec.returncode}, plans rc={plans.returncode})")
+
+
+def check_no_artifacts_on_code_branch(repo: str) -> Result:
+    spec = _git(repo, "ls-files", "imp/specs").stdout.strip()
+    plan = _git(repo, "ls-files", "imp/plans").stdout.strip()
+    ok = not spec and not plan
+    return Result("no_artifacts_on_code_branch", ok,
+                  "no imp/specs or imp/plans tracked on the code branch" if ok else
+                  f"code branch still tracks imp/specs or imp/plans files: "
+                  f"{_fmt((spec + ' ' + plan).split())}")
 
 
 def journal_ids(repo: str) -> list[str]:
@@ -150,12 +168,10 @@ def run_checks(repo: str, sentinel: str, base: str, imp: str) -> list[Result]:
          lambda: check_sentinel_in_src(repo, sentinel)),
         ("atomic_coder_commit",
          lambda: check_atomic_coder_commit(repo, base, sentinel)),
-        ("spec_artifact_committed",
-         lambda: check_artifact(repo, base, "spec_artifact_committed",
-                                "imp/specs/*.md")),
-        ("plan_artifact_committed",
-         lambda: check_artifact(repo, base, "plan_artifact_committed",
-                                "imp/plans/*-plan-*.md")),
+        ("artifacts_in_journal",
+         lambda: check_artifacts_in_journal(repo)),
+        ("no_artifacts_on_code_branch",
+         lambda: check_no_artifacts_on_code_branch(repo)),
         ("readback", lambda: check_readback(repo, imp)),
     ]
     return [_safe(name, thunk) for name, thunk in checks]

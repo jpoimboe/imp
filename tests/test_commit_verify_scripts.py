@@ -32,84 +32,120 @@ def _run(script: str, root: Path, slug: str) -> int:
     ).returncode
 
 
-def test_spec_verify_passes_on_commit_touching_spec(tmp_path: Path) -> None:
+def _run_id(script: str, root: Path, slug: str, change_id: str) -> int:
+    return subprocess.run(
+        ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_SLUG": slug,
+             "IMP_CHANGE_ID": change_id,
+             "PATH": __import__("os").environ["PATH"]},
+        capture_output=True, text=True,
+    ).returncode
+
+
+def _wip_commit(root: Path, change_id: str, rel: str, body: str) -> None:
+    """Write .imp/change/artifacts/<rel> and snapshot to refs/imp/journal-wip/<id>."""
+    from imp.engine import worktree
+    art = root / ".imp" / "change" / "artifacts"
+    dest = art / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body)
+    files = {str(p.relative_to(art)): p for p in sorted(art.rglob("*")) if p.is_file()}
+    worktree.artifact_commit(root, change_id, files, message="artifact: test")
+
+
+def test_spec_verify_passes_when_wip_matches_live(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec")        # no Change: trailer
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") == 0
-
-
-def test_spec_verify_fails_when_file_untouched(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "other.txt").write_text("x\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "chore: other\n\nChange: 2026-06-01-x")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_spec_verify_fails_on_uncommitted_spec_edit(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec")
-    # HEAD touches the spec (old check passes) but the working tree has an
-    # uncommitted edit to it -> new clean-spec-path check must fail.
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec edited\n")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_spec_verify_fails_on_untracked_stray_in_specs(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec")
-    # An untracked scratch file under imp/specs/ -> porcelain is non-empty -> fail.
-    (root / "imp" / "specs" / "scratch.md").write_text("draft\n")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_plan_verify_passes_on_newest_plan(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "imp" / "plans").mkdir(parents=True)
-    (root / "imp" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: plan 1\n\nChange: 2026-06-01-x")
-    (root / "imp" / "plans" / "2026-06-01-x-plan-2.md").write_text("# plan 2\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: plan 2\n\nChange: 2026-06-01-x")
-    assert _run("plan-commit-verify.sh", root, "2026-06-01-x") == 0
-
-
-
-def test_plan_verify_fails_when_plan_not_committed(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "README.md").write_text("seed\n")
+    (root / ".imp").mkdir()                       # gitignored stage for the temp index
+    (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    (root / "imp" / "plans").mkdir(parents=True)
-    (root / "imp" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1\n")  # uncommitted
-    assert _run("plan-commit-verify.sh", root, "2026-06-01-x") != 0
+    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
 
 
-def test_plan_verify_passes_when_head_is_fixup_of_plan(tmp_path: Path) -> None:
-    # Deviation case (HIGH-1): plan revised as a trailer-less fixup of the plan
-    # commit, which is now buried/HEAD-fixup. The gate must still pass off the
-    # original trailered plan commit.
+def test_spec_verify_fails_when_wip_ref_absent(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "imp" / "plans").mkdir(parents=True)
-    (root / "imp" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1\n")
+    (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
+    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    # No artifact_commit -> no wip ref.
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+
+
+def test_spec_verify_fails_when_blob_absent_from_wip(tmp_path: Path) -> None:
+    # Wip ref exists (from a different artifact kind) but carries no spec blob.
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: add plan 1 for 2026-06-01-x\n\nChange: 2026-06-01-x")
-    target = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
-                            capture_output=True, text=True, check=True).stdout.strip()
-    (root / "imp" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1 (revised)\n")
+    _git(root, "commit", "-m", "seed")
+    # Commit only a plan artifact — spec/<slug>.md is absent from the wip tree.
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan\n")
+    # Live spec file exists but was never committed to the wip tree.
+    (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
+    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+
+
+def test_spec_verify_fails_when_live_differs_from_committed(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
-    _git(root, "commit", f"--fixup={target}")
-    assert _run("plan-commit-verify.sh", root, "2026-06-01-x") == 0
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    # The agent edited the live file after committing it -> blob mismatch.
+    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# edited\n")
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+
+
+def test_plan_verify_passes_on_newest_committed_plan(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-2.md", "# plan 2\n")
+    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
+
+
+def test_plan_verify_fails_when_newest_plan_uncommitted(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    # A newer plan file exists live but was never committed to the wip ref.
+    (root / ".imp" / "change" / "artifacts" / "plans"
+     / "2026-06-01-x-plan-2.md").write_text("# plan 2\n")
+    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+
+
+def test_plan_verify_passes_after_plan_revision(tmp_path: Path) -> None:
+    # A revision is just another wip commit (no fixup machinery): re-snapshot the
+    # edited plan and the gate passes off the latest blob.
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1 (revised)\n")
+    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
+
+
+def test_plan_verify_fails_when_live_plan_differs_from_committed(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    # Agent edited the live plan after committing it -> blob mismatch.
+    (root / ".imp" / "change" / "artifacts" / "plans"
+     / "2026-06-01-x-plan-1.md").write_text("# plan 1 edited\n")
+    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
 
 
 def _impl_repo(tmp_path: Path, *, n_tasks: int = 1) -> Path:

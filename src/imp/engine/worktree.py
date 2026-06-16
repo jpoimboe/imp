@@ -210,8 +210,16 @@ def is_dirty(worktree: Path) -> bool:
     return bool(_git_ok(worktree, "status", "--porcelain").strip())
 
 
+def _merge_subject(title: str, change_id: str, body: str | None) -> str:
+    trailer = f"(imp/{change_id})"
+    if body:
+        return f"Merge {title}\n\n{body.strip()}\n\n{trailer}"
+    return f"Merge {title}\n\n{trailer}"
+
+
 def merge_to_base(
     control_root: Path, change_id: str, base: str, *, title: str,
+    body: str | None = None,
     project_root: Path | None = None, expected_base_sha: str | None = None,
 ) -> MergeResult:
     """Integrate imp/<id> into <base> (spec §4). B1: git decides on base dirt.
@@ -245,11 +253,12 @@ def merge_to_base(
                 return MergeResult("STALE")
         live = _worktree_on_branch(control_root, base)
         if live is not None:
-            return _merge_in_place(live, branch, title, change_id)
-        return _merge_detached(control_root, change_id, branch, base, title)
+            return _merge_in_place(live, branch, title, change_id, body)
+        return _merge_detached(control_root, change_id, branch, base, title, body)
 
 
-def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> MergeResult:
+def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str,
+                    body: str | None = None) -> MergeResult:
     """Branch 1: advance ref + index + working tree atomically in the live
     checkout. (See the dirty-safety note in merge_to_base.)
 
@@ -259,7 +268,7 @@ def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> 
     histories, …) starts nothing — calling `git merge --abort` there errors ("no
     merge to abort"). MERGE_HEAD answers this locale-independently. git's stderr
     is carried in `detail` so the surfaced reason is truthful for any refusal."""
-    subject = f"Merge {title}\n\n(imp/{change_id})"
+    subject = _merge_subject(title, change_id, body)
     proc = _git(worktree, "merge", "--no-ff", "-m", subject, branch)
     if proc.returncode == 0:
         commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
@@ -275,7 +284,7 @@ def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> 
 
 
 def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
-                    title: str) -> MergeResult:
+                    title: str, body: str | None = None) -> MergeResult:
     """Branch 3: <base> checked out nowhere. Merge in a detached scratch worktree,
     update-ref, remove the scratch."""
     scratch_rel = Path(".imp") / "worktrees" / f".merge-{change_id}"
@@ -283,7 +292,7 @@ def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
     _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
     shutil.rmtree(scratch, ignore_errors=True)
     _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
-    subject = f"Merge {title}\n\n(imp/{change_id})"
+    subject = _merge_subject(title, change_id, body)
     try:
         proc = _git(scratch, "merge", "--no-ff", "-m", subject, branch)
         if proc.returncode != 0:
@@ -296,31 +305,43 @@ def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
         _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
 
 
-def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
-    """Append one commit to refs/imp/journal (spec §4, §6) via plumbing — never
-    checks out the ref. Files land under <id>/ in the journal tree. On the
-    very first journaled Change the ref doesn't exist, so commit-tree runs with
-    no -p (a root commit, starting the orphan history)."""
-    with RepoGitLock(control_root).acquire():
-        env = dict(os.environ)
-        # Keep the transient index inside .imp/ (gitignored) so it never shows as
-        # untracked even momentarily. Do NOT "simplify" the unlink dance below.
-        with tempfile.NamedTemporaryFile(dir=control_root / ".imp", delete=False) as tf:
-            index_file = tf.name
-        # CRITICAL: a 0-byte index makes `git update-index` fail with "index file
-        # smaller than expected". git treats a *missing* GIT_INDEX_FILE as an empty
-        # index, which is what the bootstrap (no-parent) path needs. So unlink the
-        # placeholder before any git command touches it.
-        os.unlink(index_file)
-        env["GIT_INDEX_FILE"] = index_file
-        try:
-            parent = _git(control_root, "rev-parse", "--verify", "--quiet",
-                          "refs/imp/journal")
+@contextmanager
+def _temp_index(control_root: Path):  # type: ignore[no-untyped-def]
+    """Yield a throwaway GIT_INDEX_FILE env dict (file lives under .imp/).
+    Do NOT simplify the unlink dance: a 0-byte index makes `git update-index`
+    fail; a *missing* GIT_INDEX_FILE is treated as an empty index — exactly
+    what the no-parent bootstrap needs."""
+    env = dict(os.environ)
+    with tempfile.NamedTemporaryFile(dir=control_root / ".imp", delete=False) as tf:
+        index_file = tf.name
+    os.unlink(index_file)
+    env["GIT_INDEX_FILE"] = index_file
+    try:
+        yield env
+    finally:
+        Path(index_file).unlink(missing_ok=True)
+
+
+def _commit_files_to_ref(
+    control_root: Path, *, ref: str, prefix: str, files: Mapping[str, Path],
+    message: str, extra_tree: tuple[str, str] | None = None,
+) -> None:
+    """Append one commit to `ref` via plumbing — never checks out the ref.
+
+    The index is seeded from `ref` (so existing content accumulates), then
+    `extra_tree=(p, treeish)` — when given — is read in under prefix `p`, then
+    each `files` entry is hashed and added at `prefix+name`. The commit is
+    parented on `ref` when it already exists (else a root commit). CAS on the
+    final update-ref is cheap insurance (moot under the lock)."""
+    with RepoGitLock(control_root).acquire(), _temp_index(control_root) as env:
+            parent = _git(control_root, "rev-parse", "--verify", "--quiet", ref)
             have_parent = parent.returncode == 0
-            # Seed the temp index with the existing journal tree so prior ids
-            # survive (read-tree is a no-op miss when the ref is absent).
             if have_parent:
-                subprocess.run(["git", "read-tree", "refs/imp/journal"],
+                subprocess.run(["git", "read-tree", ref], cwd=control_root, env=env,
+                               check=True, capture_output=True, text=True)
+            if extra_tree is not None:
+                p, treeish = extra_tree
+                subprocess.run(["git", "read-tree", f"--prefix={p}", treeish],
                                cwd=control_root, env=env, check=True,
                                capture_output=True, text=True)
             for name, src in files.items():
@@ -330,24 +351,69 @@ def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]
                 ).stdout.decode().strip()
                 subprocess.run(
                     ["git", "update-index", "--add", "--cacheinfo",
-                     f"100644,{blob},{change_id}/{name}"],
-                    cwd=control_root, env=env, check=True, capture_output=True, text=True,
-                )
+                     f"100644,{blob},{prefix}{name}"],
+                    cwd=control_root, env=env, check=True, capture_output=True, text=True)
             tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
                                   check=True, capture_output=True, text=True).stdout.strip()
-            args = ["git", "commit-tree", tree, "-m", f"journal: {change_id}"]
+            args = ["git", "commit-tree", tree, "-m", message]
             if have_parent:
-                args += ["-p", "refs/imp/journal"]
+                args += ["-p", ref]
             commit = subprocess.run(args, cwd=control_root, env=env, check=True,
                                     capture_output=True, text=True).stdout.strip()
-            old = parent.stdout.strip() if have_parent else ""
-            # CAS for cheap insurance (moot under the lock).
-            cas = ["git", "update-ref", "refs/imp/journal", commit]
-            cas += [old] if have_parent else []
+            cas = ["git", "update-ref", ref, commit]
+            cas += [parent.stdout.strip()] if have_parent else []
             subprocess.run(cas, cwd=control_root, check=True,
                            capture_output=True, text=True)
-        finally:
-            Path(index_file).unlink(missing_ok=True)
+
+
+def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
+    """Append one commit to refs/imp/journal (spec §4, §6); files land under
+    <id>/ in the journal tree. Thin wrapper over the generalized writer."""
+    _commit_files_to_ref(
+        control_root, ref="refs/imp/journal", prefix=f"{change_id}/",
+        files=files, message=f"journal: {change_id}")
+
+
+def artifact_commit(
+    control_root: Path, change_id: str, files: Mapping[str, Path], *, message: str,
+) -> None:
+    """Append one commit to the per-change artifact lineage
+    refs/imp/journal-wip/<id>, accumulating on the prior wip tip. Files sit FLAT
+    at the wip tree root (e.g. spec/<slug>.md, plans/<slug>-plan-N.md)."""
+    _commit_files_to_ref(
+        control_root, ref=f"refs/imp/journal-wip/{change_id}", prefix="",
+        files=files, message=message)
+
+
+def _journal_has_id(control_root: Path, change_id: str) -> bool:
+    return _git(control_root, "cat-file", "-e",
+                f"refs/imp/journal:{change_id}").returncode == 0
+
+
+def fold_wip_into_journal(
+    control_root: Path, change_id: str, runtime_files: Mapping[str, Path],
+) -> None:
+    """Fold refs/imp/journal-wip/<id> into refs/imp/journal in ONE commit, then
+    delete the wip ref. The wip tip's whole tree is read in under <id>/ and the
+    runtime blobs are added under <id>/. When the wip ref is absent (abandoned
+    before any artifact) only the runtime files are journaled.
+
+    Crash-idempotent: if <id>/ already exists in the journal the fold already
+    ran, so the prefix read-tree (which would fail on an existing prefix) is
+    skipped — re-running only re-journals the runtime blobs and re-asserts the
+    wip ref is gone."""
+    wip_ref = f"refs/imp/journal-wip/{change_id}"
+    have_wip = _git(control_root, "rev-parse", "--verify", "--quiet",
+                    wip_ref).returncode == 0
+    extra_tree: tuple[str, str] | None = None
+    if have_wip and not _journal_has_id(control_root, change_id):
+        extra_tree = (f"{change_id}/", f"{wip_ref}^{{tree}}")
+    _commit_files_to_ref(
+        control_root, ref="refs/imp/journal", prefix=f"{change_id}/",
+        files=runtime_files, message=f"journal: {change_id}", extra_tree=extra_tree)
+    if have_wip:
+        with RepoGitLock(control_root).acquire():
+            _git_ok(control_root, "update-ref", "-d", wip_ref)
 
 
 def _common_dir(control_root: Path) -> Path:
