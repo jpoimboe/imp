@@ -342,15 +342,22 @@ def test_async_cmd_new_installs_benign_loop_handler(tmp_path, monkeypatch) -> No
         entered["n"] += 1
         yield
 
+    real = m.EscKeyReader
+
+    class _RecordingReader(real):
+        async def run(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
+            task_status.started()
+            return
+
     async def fake_session(change, *, tg, **kwargs):
         tg.cancel_scope.cancel()
         return 0
 
+    monkeypatch.setattr(m, "EscKeyReader", _RecordingReader)
     monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
     monkeypatch.setattr(m, "_run_change_session", fake_session)
 
-    rc = anyio.run(m._async_cmd_new, argparse.Namespace(
-        title="demo", tui=False, non_interactive=True, message="go"))
+    rc = anyio.run(m._async_cmd_new, argparse.Namespace(title="demo", tui=False))
     assert rc == 0
     assert entered["n"] == 1
 

@@ -38,6 +38,7 @@ from imp.cli.remote_channel import (
     effective_reply_fn,
     select_driver_config,
 )
+from imp.cli.session_run import make_headless_solicit, run_session_client
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.tui_app import TuiApp
@@ -1114,7 +1115,72 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    return await _run_fresh_session(change, args=args, seed_opening=opening_text)
+    non_interactive = bool(getattr(args, "non_interactive", False))
+    _warn_if_tui_unavailable(args, sys.stdout)
+    if non_interactive:
+        # Headless: the per-change session daemon owns the worktree + lock and
+        # runs the agent loop; this process is a thin client that delivers
+        # --message once, then detaches and lets the daemon hibernate at its gate.
+        print(_run_header_line(
+            change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_headless_solicit(args.message, coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=opening_text, status=status)
+
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+            print(_run_header_line(
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+            if _tui_requested(args):
+                return await _run_tui_session(
+                    change, args=args, seed_opening=opening_text)
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
+            rc = 0
+            esc_reader = EscKeyReader(coord)
+            # Task 11: the ESC reader (sole /dev/tty owner during thinking)
+            # also captures interject lines; the solicit/reply prompt is the
+            # router-flagged reply_input_fn. See _build_interactive_input.
+            _router, reply_input_fn = _build_interactive_input(
+                change, status, coord, esc_reader, driver)
+
+            try:
+                with _benign_interrupt_loop_handler(coord):
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(coord.run_signal_receiver)
+                        tg.start_soon(status.tick)
+                        # Block until the reader has armed (or given up): a
+                        # workflow whose first step is interactive must not start
+                        # its prompt before the ESC reader holds /dev/tty, or the
+                        # prompt and the reader race for the terminal's termios.
+                        await tg.start(esc_reader.run)
+                        rc = await _run_change_session(
+                            change, coord=coord, driver=driver, status=status,
+                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
+                            non_interactive=False, tg=tg, channel=channel,
+                            seed_opening=opening_text)
+            except* (LoadError, LoadErrors) as eg:
+                # A bad workflow/config raised on the FIRST run_change (it never
+                # reaches the loop). _run_change_session has already cleaned up
+                # (status.reset) in its finally; surface the error as rc 2.
+                driver.finish()
+                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
+                rc = 2
+            return rc
+    except LockHeld as e:
+        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
+              file=sys.stderr)
+        return 2
 
 
 def _cmd_new(args: argparse.Namespace) -> int:

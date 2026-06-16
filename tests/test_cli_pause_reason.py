@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -80,11 +81,16 @@ def test_new_spawns_esc_reader_as_taskgroup_sibling(
     assert seen == ["esc_reader.run"]
 
 
-def test_new_non_interactive_does_not_spawn_esc_reader(
+def test_new_non_interactive_routes_through_session_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Headless `imp new` is a thin session-client: it routes through
+    run_session_client (the daemon owns the worktree + lock), binds a headless
+    deliver-once solicit from --message, threads the seed, and never runs the
+    agent loop in-process nor spawns an ESC reader."""
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
+
     seen: list[str] = []
 
     class _RecordingReader:
@@ -94,14 +100,45 @@ def test_new_non_interactive_does_not_spawn_esc_reader(
 
     monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
 
-    async def _fake_run_change(_change: object, **_kw: object) -> RunResult:
-        return RunResult.COMPLETED
+    async def _fail_run_change(*_a: object, **_k: object) -> object:
+        raise AssertionError("run_change must not run in-process for headless new")
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run_change)
+    monkeypatch.setattr(cli_main, "run_change", _fail_run_change)
+
+    made: dict[str, str | None] = {}
+
+    def _fake_make_headless_solicit(message: str | None, _coord: object) -> Any:
+        made["message"] = message
+
+        async def _solicit(_prompt: str) -> str:
+            return message or ""
+
+        return _solicit
+
+    monkeypatch.setattr(
+        cli_main, "make_headless_solicit", _fake_make_headless_solicit,
+        raising=False)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_session_client(
+        change: Change, *, driver: object, coord: object, solicit: object,
+        seed_opening: object = None, status: object = None,
+    ) -> int:
+        captured["change_id"] = change.id
+        captured["seed_opening"] = seed_opening
+        return 7
+
+    monkeypatch.setattr(
+        cli_main, "run_session_client", _fake_run_session_client, raising=False)
+
     rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
-        title="ni", non_interactive=True, message=None))
-    assert rc == 0
+        title="ni", non_interactive=True, message="do it"))
+
+    assert rc == 7
     assert seen == []
+    assert made["message"] == "do it"
+    assert captured["seed_opening"] is None
 
 
 def test_resume_spawns_esc_reader_as_taskgroup_sibling(

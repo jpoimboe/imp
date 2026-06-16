@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -38,13 +39,20 @@ async def run_session_client(
         tg.start_soon(coord.run_signal_receiver)
         if status is not None:
             tg.start_soon(status.tick)
-        await run_terminal_client(
-            attach=attach, driver=driver, coord=coord, solicit=solicit)
+        with contextlib.suppress(TimeoutError):
+            await run_terminal_client(
+                attach=attach, driver=driver, coord=coord, solicit=solicit)
         tg.cancel_scope.cancel()
     # Lazy import: the CLI-flip plan makes imp.cli.main import this module, so a
     # module-level import of _handle_terminal_outcome would be circular.
     from imp.cli.main import _handle_terminal_outcome
-    return _handle_terminal_outcome(change, infer_session_result(change), coord)
+    result = infer_session_result(change)
+    outcome = _handle_terminal_outcome(change, result, coord)
+    # Ctrl-C/ESC forwarded to the daemon sets should_pause on the client coordinator;
+    # map the result to the conventional interrupt exit code.
+    if result is RunResult.PAUSED and coord.should_pause:
+        return 130
+    return outcome
 
 
 def make_headless_solicit(
