@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from imp.assets import default_workflow_dir
+from imp.assets import default_workflow_dir, playbooks_dir
 from imp.cli.verify_detect import (
     detect_verify_command,
     format_verify_command_yaml,
@@ -284,6 +284,10 @@ def run_init(
         (imp_dir / "workflows").mkdir(parents=True, exist_ok=True)
         shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
 
+    backfilled_playbooks = not (imp_dir / "playbooks").is_dir()
+    if backfilled_playbooks:
+        shutil.copytree(playbooks_dir(), imp_dir / "playbooks")
+
     # --- bootstrap user config (only if the machine has none) ---
     user_path = user_config_path()
     wrote_user_config = not user_path.exists()
@@ -306,6 +310,8 @@ def run_init(
     output_fn("")
     if already_initialized:
         output_fn("Project already initialized (imp/project.yaml is committed).")
+        if backfilled_playbooks:
+            output_fn("Added playbook library (imp/playbooks/ — track in git).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
         else:
@@ -314,6 +320,7 @@ def run_init(
         output_fn("Created:")
         output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
         output_fn("  imp/workflows/default/")
+        output_fn("  imp/playbooks/")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
     output_fn("")
     output_fn("Try: imp new \"Add a dark-mode toggle\"")

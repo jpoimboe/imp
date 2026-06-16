@@ -1,3 +1,7 @@
+---
+description: Drive imp's CLI/TUI with fresh eyes and emit a PASS/FAIL UX verdict plus polish suggestions (live, via the impty driver).
+---
+
 # imp UX polish playbook — surface-selectable usability pass (impty MCP)
 
 > **You are the test driver.** Drive `imp` *through the impty MCP server*

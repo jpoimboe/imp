@@ -71,6 +71,7 @@ from imp.agents.transcript import (
     resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
+from imp.engine.drivers import driver_allowed_tools, driver_stdio_servers
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -855,6 +856,10 @@ class ClaudeCodeAgentRunner:
         enabled_web = cc_enabled_web_builtins(invocation.agent_def)
         exempt = {"ToolSearch", *enabled_web}
         disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
+        drivers = invocation.agent_def.drivers
+        mcp_servers: dict[str, Any] = {"imp": mcp_server}
+        mcp_servers.update(driver_stdio_servers(
+            drivers, project_root=invocation.change_context.project_root))
         return ClaudeAgentOptions(
             model=self.model,
             # The claude_code provider drives the `claude` CLI, which
@@ -877,8 +882,12 @@ class ClaudeCodeAgentRunner:
             # subdir or via Popen(cwd=...) which doesn't update $PWD).
             cwd=str(invocation.change_context.project_root),
             system_prompt=invocation.system_prompt,
-            mcp_servers={"imp": mcp_server},
-            allowed_tools=[f"mcp__imp__{n}" for n in tool_names] + list(enabled_web),
+            mcp_servers=mcp_servers,
+            allowed_tools=(
+                [f"mcp__imp__{n}" for n in tool_names]
+                + list(enabled_web)
+                + driver_allowed_tools(drivers)
+            ),
             disallowed_tools=disallowed,
             setting_sources=[],
             strict_mcp_config=True,

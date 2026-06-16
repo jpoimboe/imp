@@ -31,9 +31,12 @@ import stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal
+
+from imp.engine.drivers import DRIVER_COMMANDS
+from imp.engine.selfhost import selfhost_env_overrides, selfhost_launch
 
 _logger = logging.getLogger(__name__)
 
@@ -41,6 +44,7 @@ _logger = logging.getLogger(__name__)
 
 def render_config_toml(
     *, host: str, port: int, bearer_env_var: str, web_search_enabled: bool,
+    drivers: Iterable[str] = (), project_root: Path | None = None,
 ) -> str:
     """Emit the `config.toml` text for a per-run CODEX_HOME.
 
@@ -58,6 +62,25 @@ def render_config_toml(
     emitted first.
     """
     web_search = "live" if web_search_enabled else "disabled"
+    driver_blocks = ""
+    for name in sorted(drivers):
+        argv = DRIVER_COMMANDS[name]
+        args_toml = "[" + ", ".join(f'"{a}"' for a in argv[1:]) + "]"
+        env_line = ""
+        if name == "impty" and project_root is not None:
+            # selfhost_launch writes the imp shim as a side effect; idempotent
+            launch = selfhost_launch(project_root)
+            if launch is not None:
+                overrides = selfhost_env_overrides(launch, os.environ)
+                pairs = ", ".join(f'{k} = "{v}"' for k, v in overrides.items())
+                env_line = f"env = {{ {pairs} }}\n"
+        driver_blocks += (
+            "\n"
+            f"[mcp_servers.{name}]\n"
+            f'command = "{argv[0]}"\n'
+            f"args = {args_toml}\n"
+            + env_line
+        )
     return (
         f'web_search = "{web_search}"\n'
         "\n"
@@ -69,6 +92,7 @@ def render_config_toml(
         "shell_tool = false\n"
         "plugins = false\n"
         "image_generation = false\n"
+        + driver_blocks
     )
 
 
@@ -79,7 +103,8 @@ _DIR_PREFIX = "imp-codex-"
 
 def provision_codex_home(
     *, tmp_root: Path, host: str, port: int, bearer_env_var: str,
-    web_search_enabled: bool,
+    web_search_enabled: bool, drivers: Iterable[str] = (),
+    project_root: Path | None = None,
 ) -> Path:
     """Create a per-run CODEX_HOME under `tmp_root` mode 0700, write its
     config.toml mode 0600, and return the dir path.
@@ -101,7 +126,8 @@ def provision_codex_home(
     home.chmod(stat.S_IRWXU)
     config_text = render_config_toml(
         host=host, port=port, bearer_env_var=bearer_env_var,
-        web_search_enabled=web_search_enabled,
+        web_search_enabled=web_search_enabled, drivers=drivers,
+        project_root=project_root,
     )
     cfg = home / "config.toml"
     cfg.write_text(config_text)

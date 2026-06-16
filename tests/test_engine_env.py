@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from imp.engine.env import engine_env, overlay_engine_env
+from tests.conftest import _make_imp_checkout
 
 
 def test_engine_env_exposes_slug_and_title_no_artifacts() -> None:
@@ -57,13 +58,6 @@ def test_overlay_configured_verify_command_overrides_inherited() -> None:
                          change_title="t", verify_command="make check")
     env = overlay_engine_env(parent, overlay)
     assert env["IMP_VERIFY_COMMAND"] == "make check"
-
-
-def _make_imp_checkout(root: Path) -> None:
-    """Lay down the minimal imp source-checkout marker (src/imp/__init__.py)."""
-    pkg = root / "src" / "imp"
-    pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("")
 
 
 def test_engine_env_injects_worktree_src_on_pythonpath_for_imp_checkout(

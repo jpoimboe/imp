@@ -24,7 +24,7 @@ import anyio
 
 from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.cli import change_row, resume_select
+from imp.cli import change_row, playbooks, resume_select
 from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
@@ -179,6 +179,19 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
         return SeedResolution(title, opening)
 
     return SeedResolution(title, None)
+
+
+def resolve_playbook_seed(
+    control: Path, name: str, args_text: str | None, *, findings_only: bool,
+) -> str:
+    pb = playbooks.find_playbook(control, name)
+    if pb is None:
+        available = ", ".join(p.name for p in playbooks.list_playbooks(control))
+        raise SeedError(f"unknown playbook {name!r}; available: {available}")
+    seed = playbooks.render_playbook(pb, args_text or "")
+    if findings_only:
+        seed += playbooks.FINDINGS_ONLY_DIRECTIVE
+    return seed
 
 
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
@@ -957,8 +970,19 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
     try:
+        playbook_name = getattr(args, "playbook", None)
+        if playbook_name and getattr(args, "spec_file", None):
+            raise SeedError("--playbook and --spec-file are mutually exclusive")
+        if getattr(args, "findings_only", False) and not playbook_name:
+            raise SeedError("--findings-only requires --playbook")
         seed = resolve_spec_seed(args)
-    except SeedError as e:
+        if playbook_name:
+            seed = SeedResolution(
+                seed.title,
+                resolve_playbook_seed(
+                    control, playbook_name, getattr(args, "opening", None),
+                    findings_only=getattr(args, "findings_only", False)))
+    except (SeedError, ValueError) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
 
@@ -1068,6 +1092,35 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
 def _cmd_new(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_new, args)
+
+
+async def _async_cmd_run(args: argparse.Namespace) -> int:
+    control = _control_root()
+    name = args.name
+    if name is None:
+        picked = await _pick_playbook(
+            control,
+            non_interactive=args.non_interactive)
+        if isinstance(picked, int):
+            return picked
+        name = picked
+    try:
+        if playbooks.find_playbook(control, name) is None:
+            available = ", ".join(p.name for p in playbooks.list_playbooks(control))
+            print(f"imp: unknown playbook {name!r}; available: {available}",
+                  file=sys.stderr)
+            return 2
+    except ValueError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    args.playbook = name
+    args.opening = args.playbook_args
+    args.spec_file = None
+    return await _async_cmd_new(args)
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    return anyio.run(_async_cmd_run, args)
 
 
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
@@ -1860,6 +1913,30 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
     )
 
 
+async def _pick_playbook(control: Path, *, non_interactive: bool) -> str | int:
+    try:
+        pbs = playbooks.list_playbooks(control)
+    except ValueError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    if not pbs:
+        print("No playbooks found.", file=sys.stderr)
+        return 2
+    if len(pbs) == 1:
+        return pbs[0].name
+    if non_interactive or not _interactive():
+        print("Multiple playbooks — pass a name:", file=sys.stderr)
+        for pb in pbs:
+            print(f"  {pb.name} — {pb.description}", file=sys.stderr)
+        return 2
+    chosen = await resume_select.run_item_picker(
+        pbs,
+        render_item=lambda pb: f"{pb.name} — {pb.description}",
+        header="Run which playbook?  (↑/↓ to move · enter to run · q to cancel)",
+        color=should_use_color(sys.stdout))
+    return chosen.name if chosen is not None else 2
+
+
 def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
              interactive: bool | None = None,
              input_fn: Callable[[str], str] = input) -> int:
@@ -2117,10 +2194,40 @@ def _build_parser() -> argparse.ArgumentParser:
                             "becomes the spec-writer's opening intent. A missing or "
                             "unreadable PATH is a hard error (rc 2). Mutually "
                             "exclusive with a positional MESSAGE and with --message.")
+    p_new.add_argument("--playbook", metavar="NAME", default=None,
+                       help="Seed the change from imp/playbooks/<NAME>.md, "
+                            "rendering {{ args }} from the positional MESSAGE.")
+    p_new.add_argument("--findings-only", action="store_true",
+                       help="With --playbook, stop at a committed findings doc "
+                            "instead of implementing.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
+
+    p_run = sub.add_parser(
+        "run", help="Run a playbook by name (or pick one interactively).")
+    p_run.add_argument(
+        "name", nargs="?",
+        help="Playbook name (resolves imp/playbooks/<name>.md); omit to pick "
+             "from a list.")
+    p_run.add_argument(
+        "playbook_args", nargs="?", metavar="ARGS",
+        help="Trailing argument exposed to the playbook body as {{ args }}.")
+    p_run.add_argument("--findings-only", action="store_true",
+                       help="Stop at a committed findings doc instead of "
+                            "implementing.")
+    p_run.add_argument("--title", metavar="TEXT", default=None,
+                       help="Set the Change title explicitly.")
+    p_run.add_argument("--non-interactive", action="store_true",
+                       help="Headless: no live prompt; supply the reply via --message.")
+    p_run.add_argument("--message", metavar="TEXT", default=None,
+                       help="Headless reply consumed by the first wait_for_user; "
+                            "requires --non-interactive.")
+    p_run.add_argument("--tui", action="store_true",
+                       help="Render the run in a full-screen, scrollable viewer; "
+                            "falls back to streaming on a non-tty.")
+    p_run.set_defaults(func=_cmd_run)
 
     p_resume = sub.add_parser(
         "resume", help="Resume a paused or interrupted Change by id or token.")

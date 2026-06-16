@@ -1,6 +1,7 @@
 ---
 name: finalize
 description: Final gate — review the base-merge resolution (when one occurred), summarize the whole change for `imp log`, and decide merge / rework / pause.
+drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework, pause]}
@@ -59,6 +60,36 @@ only if cheap; do NOT make code changes). Populate:
   `silent-fixed` items entirely.** Fold any flagged-uncertain merge resolutions or
   semantic concerns here too.
 - `next_steps`: suggested follow-on work.
+
+## Before/after UX capture — only when this change touched a UI surface
+
+This runs for ANY change (no playbook required) — the trigger is what the change
+touched, not how the run started. Run `git diff --name-only <base>..HEAD` (the
+name-only form of the `git diff <base>..HEAD` already in §2) and decide whether
+the change touched a **UI-relevant surface**:
+any path under `src/imp/cli/` (the streaming CLI and the `--tui` viewer) or
+`src/impty/` (the terminal renderer). If it touched none of those, skip this
+section silently — no note, no error.
+
+If it did AND you hold the impty driver (the `mcp__impty__*` tools are
+available), capture a rendered before/after so the human can SEE the change at
+the merge gate. The driver is already pointed at the worktree build, so:
+
+- **after** — drive the worktree's imp through impty
+  (`mcp__impty__start(argv=["imp", …])`), reach the affected screen, and
+  `mcp__impty__snapshot()` it.
+- **before** — clone the base into a throwaway dir under `/tmp`, check out the
+  base branch there, and drive that copy with the base's own `src/` on
+  PYTHONPATH. `mcp__impty__start(env=…)` REPLACES the child's environment rather
+  than extending it, so build the env by merging the `PYTHONPATH` override onto a
+  copy of the parent env (keep `PATH`/`HOME`/API-key vars) and pass that whole
+  map; then reach the same screen and `mcp__impty__snapshot()` it.
+
+Drive read-only: do NOT change code, write files in the worktree, or commit.
+Carry both PNG paths into the merge-gate `wait_for_user` prompt (below), labelled
+**before** and **after**, so the reviewer can open them before deciding. If the
+driver is unavailable or a capture fails, say so in one line and proceed — a
+missing capture never blocks the merge.
 
 ## 3. Decide — present, then route
 

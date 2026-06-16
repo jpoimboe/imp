@@ -2,6 +2,7 @@
 name: spec-writer
 description: Interactively brainstorm with the user, name the change once intent is clear, then write and commit the spec.
 subagents: [explorer, researcher]
+drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
   phase: {type: enum, values: [written]}
