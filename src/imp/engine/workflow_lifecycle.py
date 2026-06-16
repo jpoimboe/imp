@@ -76,8 +76,8 @@ def perform_workflow_update(name: str, mirror_dir: Path, *, write_stamp: bool = 
 
 def workflow_update_notice(project_root: Path) -> str | None:
     """Return an update-available notice string for imp new/status, or None."""
-    from imp.providers.config import parse_default_workflow
     from imp.engine.errors import LoadError, LoadErrors
+    from imp.providers.config import parse_default_workflow
 
     try:
         name = parse_default_workflow(project_root / "imp" / "project.yaml")

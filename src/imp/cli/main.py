@@ -52,7 +52,6 @@ from imp.engine.workflow_lifecycle import (
     classify_drift,
     perform_workflow_update,
     workflow_update_notice,
-    write_pristine,
 )
 from imp.providers.config import parse_default_workflow
 
