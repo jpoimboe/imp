@@ -50,7 +50,6 @@ class DriverConfig:
     command: tuple[str, ...]
     events: tuple[str, ...]          # ("all",) or an explicit type allowlist
     startup_timeout: float           # seconds; crash-probe ceiling at spawn
-    reply_timeout: float | None      # None = wait forever (like a local prompt)
 
 
 def driver_config_from(config: Any) -> DriverConfig | None:
@@ -66,7 +65,6 @@ def driver_config_from(config: Any) -> DriverConfig | None:
         command=(sys.executable, "-m", entry.module),
         events=tuple(raw.get("events", entry.default_events)),
         startup_timeout=float(raw.get("startup_timeout", 10.0)),
-        reply_timeout=raw.get("reply_timeout", None),
     )
 
 
@@ -102,7 +100,6 @@ def select_driver_config(
         command=(sys.executable, "-m", entry.module),
         events=dc.events,
         startup_timeout=dc.startup_timeout,
-        reply_timeout=dc.reply_timeout,
     )
 
 
@@ -129,14 +126,13 @@ class RemoteChannel:
 
     def __init__(
         self, *, command: tuple[str, ...], events: tuple[str, ...],
-        startup_timeout: float, reply_timeout: float | None,
+        startup_timeout: float,
         id: str, title: str,
         on_error: Callable[[str], None] = _default_on_error,
     ) -> None:
         self._command = command
         self._events = events
         self._startup_timeout = startup_timeout
-        self.reply_timeout = reply_timeout
         self._id = id
         self._title = title
         self._on_error = on_error
@@ -151,7 +147,7 @@ class RemoteChannel:
     ) -> RemoteChannel:
         return cls(
             command=dc.command, events=dc.events,
-            startup_timeout=dc.startup_timeout, reply_timeout=dc.reply_timeout,
+            startup_timeout=dc.startup_timeout,
             id=id, title=title, on_error=on_error)
 
     # -- event tap (engine on_event port) ------------------------------------

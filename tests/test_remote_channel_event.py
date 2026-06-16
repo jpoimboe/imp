@@ -31,7 +31,7 @@ class _FakeStdin:
 
 def _channel(write_fd: int, *, events: tuple[str, ...]) -> RemoteChannel:
     ch = RemoteChannel(
-        command=("x",), events=events, startup_timeout=1.0, reply_timeout=None,
+        command=("x",), events=events, startup_timeout=1.0,
         id="2026-06-11-abc", title="My Change")
     ch._proc = _FakeProc(write_fd)  # inject a live fake process; _write_nonblocking sets O_NONBLOCK
     return ch
