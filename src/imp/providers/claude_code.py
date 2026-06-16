@@ -102,6 +102,11 @@ _QUOTA_PATTERNS = (
 # were treated as agent text → wrong nudge loop).
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
+_TRANSIENT_PHRASES = (
+    "Internal server error",
+    "Overloaded",
+)
+
 
 def _classify_agent_text(text: str) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
@@ -140,6 +145,8 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
             # SDK providers use for an InternalServerError). Previously fell through
             # to `return None` → treated as agent text → wrong nudge loop.
             return perr.NetworkError(f"claude CLI: {text[:200]}")
+    if "API Error:" in text and any(p in text for p in _TRANSIENT_PHRASES):
+        return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
 
 

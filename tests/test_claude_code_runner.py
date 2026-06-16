@@ -1461,3 +1461,15 @@ def test_termination_text_label_wins_over_api_error_status() -> None:
         result(is_error=True, api_error_status=500), "API Error: 429 rate limited", {})
     assert isinstance(term, perr.RateLimitError)
     assert term.category == "rate_limit"
+
+
+def test_termination_codeless_phrase_null_status_is_network() -> None:
+    """A code-less `API Error: Internal server error` with null status survives
+    as NetworkError through _termination_from_result."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True), "API Error: Internal server error", {})
+    assert isinstance(term, perr.NetworkError)
+    assert term.category == "network"
