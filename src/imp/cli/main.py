@@ -2151,8 +2151,7 @@ def _cmd_update_workflow(args: argparse.Namespace) -> int:
         print(f"imp: {name} workflow is already up-to-date.")
         return 0
     # UPDATE_AVAILABLE: copy files, stamp, commit scoped to mirror
-    perform_workflow_update(name, mirror, write_stamp=False)
-    write_pristine(mirror)
+    perform_workflow_update(name, mirror)
     try:
         subprocess.run(["git", "add", str(mirror)], cwd=control, check=True)
         subprocess.run(
