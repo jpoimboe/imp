@@ -2135,10 +2135,18 @@ def _cmd_update_workflow(args: argparse.Namespace) -> int:
     mirror = control / "imp" / "workflows" / name
     drift = classify_drift(name, mirror)
     if drift is None:
-        print(f"imp: '{name}' is not a managed workflow — use your version control to update it.", file=sys.stderr)
+        print(
+            f"imp: '{name}' is not a managed workflow"
+            " — use your version control to update it.",
+            file=sys.stderr,
+        )
         return 1
     if drift is DriftState.LOCALLY_MODIFIED:
-        print(f"imp: the {name} workflow is locally modified — update manually or restore from the bundled source.", file=sys.stderr)
+        print(
+            f"imp: the {name} workflow is locally modified"
+            " — update manually or restore from the bundled source.",
+            file=sys.stderr,
+        )
         return 1
     if drift is DriftState.UP_TO_DATE:
         print(f"imp: {name} workflow is already up-to-date.")

@@ -47,11 +47,16 @@ def test_new_cmd_prints_update_notice(tmp_path: Path, monkeypatch, capsys) -> No
     monkeypatch.chdir(tmp_path)
 
     # Stub Change.create so we don't need a full worktree but do get the notice.
-    monkeypatch.setattr(Change, "create", staticmethod(lambda *a, **kw: (_ for _ in ()).throw(LoadError("stub"))))
+    monkeypatch.setattr(
+        Change, "create",
+        staticmethod(lambda *a, **kw: (_ for _ in ()).throw(LoadError("stub"))),
+    )
 
     from imp.cli.main import _async_cmd_new
 
-    rc = asyncio.run(_async_cmd_new(argparse.Namespace(title=None, seed=None, message=None, tui=False, non_interactive=True)))
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(
+        title=None, seed=None, message=None, tui=False, non_interactive=True,
+    )))
     # rc is 2 because Change.create raises LoadError, but the notice was already printed.
     assert rc == 2
     out = capsys.readouterr().out

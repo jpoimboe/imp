@@ -5,13 +5,10 @@ import argparse
 import shutil
 from pathlib import Path
 
-import pytest
-
 from imp.assets import bundled_workflow_dir
 from imp.engine.workflow_lifecycle import (
     DriftState,
     classify_drift,
-    read_pristine,
     write_pristine,
 )
 from tests.conftest import _git, _seed_control

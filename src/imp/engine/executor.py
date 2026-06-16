@@ -186,14 +186,19 @@ async def run_change(
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
         ).config
+        state = State.load(change.state_dir)
+        # Freeze once per Change: resume reuses the facts/guidance the first run saw.
+        if state.project_facts is None:
+            state.project_facts = config.project_facts
+            state.guidance = config.guidance
+            state.save(change.state_dir)
         workflow = load_workflow(
             change.workflow_dir,
-            project_keys=frozenset(config.project_facts),
+            project_keys=frozenset(state.project_facts),
         )
         log: EventLog = JsonlEventLog(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
         sandbox_policy = _build_sandbox_policy(change, config, log)
-        state = State.load(change.state_dir)
 
         # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_change re-executes on every
@@ -246,8 +251,8 @@ async def run_change(
                 non_interactive=non_interactive,
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
-                project_facts=config.project_facts,
-                guidance=config.guidance)
+                project_facts=state.project_facts or {},
+                guidance=state.guidance or "")
             if seed_for_step is not None:
                 pending_seed = None
 

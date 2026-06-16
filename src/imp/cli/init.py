@@ -30,6 +30,7 @@ from imp.cli.verify_detect import (
     resolve_verify_choice,
 )
 from imp.engine.sandbox import sandbox_available
+from imp.engine.workflow_lifecycle import write_pristine
 from imp.remote.drivers import REGISTRY
 
 # The order providers are presented in the picker. Bindings (tier→model) are
