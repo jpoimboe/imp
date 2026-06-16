@@ -453,3 +453,70 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     assert seen["status"] == "paused"           # untouched: no resume prep ran
     assert not change.events_path.exists() or (
         "workflow_resumed" not in change.events_path.read_text())
+
+
+def test_main_forwards_resume_flag_via_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:   # partial form takes a single positional
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--resume",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.args == (loaded,)
+    assert fn.keywords == {"resume": True}
+
+
+def test_main_forwards_both_seed_and_resume_via_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--seed-opening", "hello seed",
+        "--resume",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.args == (loaded,)
+    assert fn.keywords == {"seed_opening": "hello seed", "resume": True}

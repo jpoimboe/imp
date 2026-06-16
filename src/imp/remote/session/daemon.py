@@ -100,13 +100,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--change-id", required=True)
     parser.add_argument("--seed-opening", default=None)
+    parser.add_argument("--resume", action="store_true")
     ns = parser.parse_args(argv)
     change = Change.load(Path(ns.control_root), ns.change_id)
-    if ns.seed_opening is None:
-        anyio.run(serve_change_session, change)
+    kwargs: dict[str, Any] = {}
+    if ns.seed_opening is not None:
+        kwargs["seed_opening"] = ns.seed_opening
+    if ns.resume:
+        kwargs["resume"] = True
+    if kwargs:
+        anyio.run(functools.partial(serve_change_session, change, **kwargs))
     else:
-        anyio.run(functools.partial(
-            serve_change_session, change, seed_opening=ns.seed_opening))
+        anyio.run(serve_change_session, change)
     return 0
 
 
