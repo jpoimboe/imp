@@ -77,3 +77,12 @@ def test_find_playbook_strips_md_suffix(tmp_path: Path) -> None:
     pb_without = playbooks.find_playbook(tmp_path, "dead-code")
     assert pb_with is not None
     assert pb_with.name == pb_without.name
+
+
+def test_load_raises_on_malformed_yaml_frontmatter(tmp_path: Path) -> None:
+    d = tmp_path / "imp" / "playbooks"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "bad.md"
+    path.write_text("---\nfoo: [unclosed\n---\nbody\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="malformed"):
+        playbooks._load(path)

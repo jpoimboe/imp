@@ -50,7 +50,10 @@ def _load(path: Path) -> Playbook:
     m = _FRONTMATTER_RE.match(text)
     if m is None:
         return Playbook(name=path.stem, description="", body=text)
-    fm = yaml.safe_load(m.group(1)) or {}
+    try:
+        fm = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"malformed YAML frontmatter in {path.name}: {e}") from e
     description = fm.get("description", "") if isinstance(fm, dict) else ""
     return Playbook(name=path.stem, description=str(description), body=m.group(2))
 

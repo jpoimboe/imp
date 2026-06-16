@@ -982,7 +982,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 resolve_playbook_seed(
                     control, playbook_name, getattr(args, "opening", None),
                     findings_only=getattr(args, "findings_only", False)))
-    except SeedError as e:
+    except (SeedError, ValueError) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
 
@@ -1104,10 +1104,14 @@ async def _async_cmd_run(args: argparse.Namespace) -> int:
         if isinstance(picked, int):
             return picked
         name = picked
-    if playbooks.find_playbook(control, name) is None:
-        available = ", ".join(p.name for p in playbooks.list_playbooks(control))
-        print(f"imp: unknown playbook {name!r}; available: {available}",
-              file=sys.stderr)
+    try:
+        if playbooks.find_playbook(control, name) is None:
+            available = ", ".join(p.name for p in playbooks.list_playbooks(control))
+            print(f"imp: unknown playbook {name!r}; available: {available}",
+                  file=sys.stderr)
+            return 2
+    except ValueError as e:
+        print(f"imp: {e}", file=sys.stderr)
         return 2
     args.playbook = name
     args.opening = args.playbook_args
@@ -1910,7 +1914,11 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
 
 
 async def _pick_playbook(control: Path, *, non_interactive: bool) -> str | int:
-    pbs = playbooks.list_playbooks(control)
+    try:
+        pbs = playbooks.list_playbooks(control)
+    except ValueError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     if not pbs:
         print("No playbooks found.", file=sys.stderr)
         return 2
