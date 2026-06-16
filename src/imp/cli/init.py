@@ -284,7 +284,8 @@ def run_init(
         (imp_dir / "workflows").mkdir(parents=True, exist_ok=True)
         shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
 
-    if not (imp_dir / "playbooks").is_dir():
+    backfilled_playbooks = not (imp_dir / "playbooks").is_dir()
+    if backfilled_playbooks:
         shutil.copytree(playbooks_dir(), imp_dir / "playbooks")
 
     # --- bootstrap user config (only if the machine has none) ---
@@ -309,6 +310,8 @@ def run_init(
     output_fn("")
     if already_initialized:
         output_fn("Project already initialized (imp/project.yaml is committed).")
+        if backfilled_playbooks:
+            output_fn("Added playbook library (imp/playbooks/ — track in git).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
         else:
