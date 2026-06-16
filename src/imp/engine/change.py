@@ -70,6 +70,7 @@ class Change:
     @classmethod
     def create(
         cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
+        depends_on: list[str] | None = None,
     ) -> Change:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
         internal state inside the worktree. Raises worktree.BranchExists on the
@@ -82,6 +83,7 @@ class Change:
         (change_dir / "change.json").write_text(json.dumps({
             "id": change_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
+            "depends_on": list(depends_on or []),
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
