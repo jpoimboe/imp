@@ -175,7 +175,7 @@ def _seed_blocking_agent(root: Path) -> Change:
         "      - {name: s, file: agents/blocker.md, tier: medium}\n"
     )
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\n"

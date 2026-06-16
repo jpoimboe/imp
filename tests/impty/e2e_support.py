@@ -71,7 +71,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
         "        fs_permissions:\n"
         "          - {operations: [read],  paths: [\"**\"], mode: allow}\n"
         "          - {operations: [write], paths: [\"**\"], mode: allow}\n")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
@@ -155,7 +155,7 @@ def seed_default_repo(root: Path, *, script: dict[str, Any]) -> Path:
     (root / "imp" / "workflows").mkdir(parents=True)
     shutil.copytree(bundled_workflow_dir("imp"),
                     root / "imp" / "workflows" / "imp")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"

@@ -17,7 +17,7 @@ def _seed_control_default(root: Path) -> None:
     deferred-sweep, gates, a merge phase) into the worktree."""
     _init_repo(root)
     shutil.copytree(bundled_workflow_dir("imp"), root / "imp" / "workflows" / "imp")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"

@@ -33,7 +33,7 @@ def test_change_create_uses_floor_tiers_without_a_tiers_block(
     _git(root, "config", "user.name", "t")
     (root / "imp").mkdir()
     # project.yaml carries NO tiers — the floor must supply them.
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     # user config supplies the providers list (user-homed).
     xdg = tmp_path / "xdg" / "imp"
     xdg.mkdir(parents=True)

@@ -125,7 +125,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  medium: {anthropic: claude-sonnet-4-6}\n"
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 

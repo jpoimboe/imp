@@ -9,13 +9,13 @@ from imp.engine.project_root import find_project_root
 
 def test_finds_imp_dir_in_cwd(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     assert find_project_root(start=tmp_path) == tmp_path
 
 
 def test_walks_up_from_subdir(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     deep = tmp_path / "a" / "b" / "c"
     deep.mkdir(parents=True)
     assert find_project_root(start=deep) == tmp_path

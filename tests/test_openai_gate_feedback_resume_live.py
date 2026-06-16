@@ -117,7 +117,7 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
         "          - {else: true, resume: w}\n"
     )
     (tmp_path / "imp" / "project.yaml").write_text(
-        "workflow: default\n"
+        "default-workflow: imp\n"
         "providers: [openai]\n"
         "tiers:\n"
         "  low:    {openai: gpt-4o-mini}\n"

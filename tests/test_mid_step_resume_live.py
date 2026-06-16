@@ -80,7 +80,7 @@ def _seed_project(tmp_path: Path) -> None:
               - {name: w, file: agents/writer.md, tier: medium}
     """))
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
-        workflow: default
+        default-workflow: imp
         providers: [anthropic]
         tiers:
           low: {anthropic: claude-haiku-4-5-20251001}
@@ -226,7 +226,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the openai pin.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
-        workflow: default
+        default-workflow: imp
         providers: [openai]
         tiers:
           low: {openai: gpt-4o-mini}
@@ -300,7 +300,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the claude_code pin.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
-        workflow: default
+        default-workflow: imp
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}

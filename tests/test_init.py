@@ -100,14 +100,14 @@ def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
     # A clone that already carries the committed project file must NOT raise —
     # init just bootstraps the machine's user config.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
     # Project file untouched; user config bootstrapped.
-    assert (tmp_path / "imp" / "project.yaml").read_text() == "workflow: default\n"
+    assert (tmp_path / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
     assert (tmp_path / "xdg" / "imp" / "config.yaml").exists()
 
 
@@ -275,7 +275,7 @@ def test_already_initialized_with_existing_user_config_claims_no_write(
 ) -> None:
     # Both the committed project file AND the machine user config already exist.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     imp_config_dir = tmp_path / "xdg" / "imp"
     imp_config_dir.mkdir(parents=True)
     (imp_config_dir / "config.yaml").write_text("providers: [anthropic]\n")

@@ -73,7 +73,7 @@ def _seed_run_repo(root: Path, script_path: Path) -> None:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n"
         "      - {name: s, file: agents/coder.md}\n")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [scripted]\n"

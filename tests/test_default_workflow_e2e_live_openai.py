@@ -78,7 +78,7 @@ async def test_one_step_walk_against_openai(
         "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
     (tmp_path / "imp" / "project.yaml").write_text(
-        "workflow: default\n"
+        "default-workflow: imp\n"
         "providers: [openai]\n"
         "tiers:\n"
         "  low:    {openai: gpt-4o-mini}\n"
