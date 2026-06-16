@@ -177,6 +177,14 @@ def test_task_lead_defers_to_empowered_sweep() -> None:
 
 
 FINALIZE = AGENTS_DIR / "finalize.md"
+SWEEP = AGENTS_DIR / "deferred-sweep.md"
+
+
+def test_deferred_sweep_crossrefs_terminal_gate_dispositions() -> None:
+    low = SWEEP.read_text().lower()
+    # The two terminal markers finalize writes are inert to the sweep (like dismissed).
+    assert "seeded" in low
+    assert "ignored-at-gate" in low
 
 
 def test_finalize_reads_sweep_dispositions() -> None:
