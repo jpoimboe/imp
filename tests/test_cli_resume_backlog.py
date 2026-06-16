@@ -20,6 +20,14 @@ def _resume_args(token: str) -> argparse.Namespace:
                               from_target=None, tui=False)
 
 
+def test_title_for_id_returns_backlog_title(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    backlog.write_record(tmp_path, change_id="2026-06-16-bkg444", title="My Title",
+                         brief="b", depends_on=[], created_by="human")
+    title = main._title_for_id(tmp_path, "2026-06-16-bkg444")
+    assert title == "My Title"
+
+
 def test_iter_change_ids_includes_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="2026-06-16-bkg111", title="",

@@ -1012,6 +1012,7 @@ async def _run_fresh_session(
                         if not non_interactive:
                             tg.start_soon(status.tick)
                             assert esc_reader is not None
+                            # blocks until armed: avoids /dev/tty race if first step is interactive
                             await tg.start(esc_reader.run)
                         rc = await _run_change_session(
                             change, coord=coord, driver=driver, status=status,
@@ -1149,10 +1150,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 async def _maybe_resume_backlog(
     args: argparse.Namespace, control: Path, change_id: str,
 ) -> int | None:
-    """If `change_id` names a backlog record, materialize it off the current
-    target branch (warning on unmerged deps but starting anyway) and run it as a
-    fresh session seeded with the brief. Returns the rc, or None if not a backlog
-    record (the caller continues with the normal resume path)."""
+    """Materialize and run a backlog record; returns None if change_id is not a backlog id."""
     rec = backlog.read_record(control, change_id)
     if rec is None:
         return None
@@ -1403,7 +1401,7 @@ def _iter_change_ids(control: Path) -> list[str]:
 
 
 def _title_for_id(control: Path, change_id: str) -> str | None:
-    """Read a Change's current title (worktree first, journal second, backlog third)."""
+    """Read a Change's current title (worktree first, backlog second, journal third)."""
     cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
     cj = cdir / "change.json"
     if cj.exists():
