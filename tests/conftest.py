@@ -203,6 +203,12 @@ def _seed_control(root: Path) -> None:
     _git(root, "commit", "-qm", "imp setup")
 
 
+def _make_imp_checkout(root: Path) -> None:
+    pkg = root / "src" / "imp"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+
+
 def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\n{frontmatter}\n---\n{body}\n")

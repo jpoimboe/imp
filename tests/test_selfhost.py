@@ -10,11 +10,7 @@ from imp.engine.selfhost import (
     selfhost_launch,
 )
 
-
-def _make_imp_checkout(root: Path) -> None:
-    pkg = root / "src" / "imp"
-    pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("")
+from tests.conftest import _make_imp_checkout
 
 
 def test_launch_is_none_for_a_non_imp_project(tmp_path: Path) -> None:

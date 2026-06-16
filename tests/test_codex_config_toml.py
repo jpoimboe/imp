@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from imp.providers.codex_config import render_config_toml
+from tests.conftest import _make_imp_checkout
 
 
 def test_config_toml_emits_required_sections_and_disables_web_search() -> None:
@@ -52,12 +53,6 @@ def test_config_toml_no_driver_block_when_none() -> None:
     txt = render_config_toml(host="127.0.0.1", port=1,
                              bearer_env_var="X", web_search_enabled=False)
     assert "[mcp_servers.impty]" not in txt
-
-
-def _make_imp_checkout(root: Path) -> None:
-    pkg = root / "src" / "imp"
-    pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("")
 
 
 def test_driver_block_gains_self_host_env_on_an_imp_checkout(tmp_path) -> None:

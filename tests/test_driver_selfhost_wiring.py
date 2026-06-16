@@ -3,12 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.engine.drivers import driver_stdio_servers
-
-
-def _make_imp_checkout(root: Path) -> None:
-    pkg = root / "src" / "imp"
-    pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("")
+from tests.conftest import _make_imp_checkout
 
 
 def test_no_project_root_keeps_the_plain_stdio_config() -> None:
