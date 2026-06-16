@@ -2146,7 +2146,6 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
 
 
 def _backlog_status_lines(control: Path, *, now: datetime) -> list[str]:
-    """One line per backlog Change: id, ready/blocked, age, created_by, title."""
     recs = sorted(backlog.list_records(control),
                   key=lambda r: r.get("created_at", ""), reverse=True)
     lines: list[str] = []
@@ -2160,9 +2159,9 @@ def _backlog_status_lines(control: Path, *, now: datetime) -> list[str]:
     return lines
 
 
-def _cmd_status(args: argparse.Namespace) -> int:
+def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     try:
-        control = _control_root()
+        control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
         print(_NO_CHANGES_MESSAGE)
         return 0
