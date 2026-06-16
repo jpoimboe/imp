@@ -183,7 +183,7 @@ SWEEP = AGENTS_DIR / "deferred-sweep.md"
 def test_deferred_sweep_crossrefs_terminal_gate_dispositions() -> None:
     low = SWEEP.read_text().lower()
     # The two terminal markers finalize writes are inert to the sweep (like dismissed).
-    assert "seeded" in low
+    assert "seeded <change" in low
     assert "ignored-at-gate" in low
 
 
