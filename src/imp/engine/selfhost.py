@@ -41,7 +41,9 @@ def _prefixed(value: str | None, prefix: str) -> str:
 def selfhost_full_env(
     launch: SelfHostLaunch, environ: Mapping[str, str],
 ) -> dict[str, str]:
-    """Complete replacement env for a driver's MCP server: IMP_* stripped, PATH/PYTHONPATH prefixed."""
+    """Complete replacement env for a driver's MCP server:
+    IMP_* stripped, PATH/PYTHONPATH prefixed.
+    """
     env = {k: v for k, v in environ.items() if not k.startswith("IMP_")}
     env["PATH"] = _prefixed(env.get("PATH"), launch.shim_dir)
     env["PYTHONPATH"] = _prefixed(env.get("PYTHONPATH"), launch.src_dir)
