@@ -243,40 +243,88 @@ def test_crash_recovery_sets_resume_pending_to_current_step(tmp_path, monkeypatc
     assert captured["resume_pending"] == "review"
 
 
-def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
+def test_resume_non_interactive_routes_through_session_client(
+    tmp_path, monkeypatch,
+) -> None:
+    """Headless resume routes through run_session_client, not running the agent loop in-process."""
     import argparse
-    import contextlib
 
     import anyio
 
     import imp.cli.main as m
-    from imp.engine.change import Change
-    from imp.engine.state import State
 
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
-
-    entered = {"n": 0}
-
-    @contextlib.contextmanager
-    def fake_handler(coord):
-        entered["n"] += 1
-        yield
-
-    async def fake_session(change, *, tg, **kwargs):
-        tg.cancel_scope.cancel()
-        return 0
-
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_run_change_session", fake_session)
-    monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
 
-    args = argparse.Namespace(
-        token="feat", from_target=None, tui=False,
-        non_interactive=True, message="go")
-    rc = anyio.run(m._async_cmd_resume, args)
-    assert rc == 0
-    assert entered["n"] == 1
+    async def _fail_run_change(*_a, **_k):
+        raise AssertionError("run_change must not run in-process for headless resume")
+
+    monkeypatch.setattr(m, "run_change", _fail_run_change)
+
+    made: dict[str, str | None] = {}
+
+    def _fake_make_headless_solicit(message, _coord):
+        made["message"] = message
+
+        async def _solicit(_prompt):
+            return message or ""
+
+        return _solicit
+
+    monkeypatch.setattr(
+        m, "make_headless_solicit", _fake_make_headless_solicit, raising=False)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_session_client(
+        change, *, driver, coord, solicit, seed_opening=None, status=None,
+        resume=False, from_target=None,
+    ) -> int:
+        captured["change_id"] = change.id
+        captured["resume"] = resume
+        captured["from_target"] = from_target
+        return 7
+
+    monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
+
+    rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+        token="feat", from_target=None, non_interactive=True, message="go"))
+
+    assert rc == 7
+    assert made["message"] == "go"
+    assert captured["change_id"] == ch.id
+    assert captured["resume"] is True
+    assert captured["from_target"] is None
+
+
+def test_resume_non_interactive_bad_from_returns_2_without_spawning(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    """Bad --from returns rc 2 without reaching run_session_client."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    async def _fail_client(*_a, **_k) -> int:
+        raise AssertionError("run_session_client must not run on a bad --from")
+
+    monkeypatch.setattr(m, "run_session_client", _fail_client)
+
+    rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+        token="feat", from_target="no-such-step", non_interactive=True, message="go"))
+
+    assert rc == 2
+    assert "no-such-step" in capsys.readouterr().err

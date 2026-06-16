@@ -1223,6 +1223,29 @@ async def _maybe_resume_backlog(
     return await _run_fresh_session(change, args=args, seed_opening=rec["brief"])
 
 
+def _validate_from_target(
+    change: Change, state: State, from_target: str,
+) -> int | None:
+    """Validates --from without mutating state; returns rc 2 on a bad target, else None."""
+    from imp.engine.loader import load_workflow
+    from imp.providers.effective import load_effective_config
+    try:
+        cfg = load_effective_config(
+            project_root=change.project_root,
+            control_root=change.control_root).config
+        workflow = load_workflow(
+            change.workflow_dir, configured_tiers=cfg.tier_names())
+    except (LoadError, LoadErrors) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    try:
+        recovery.plan_rewind(workflow, state, from_target)
+    except (recovery.RewindError, recovery.GateBypassRequired) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    return None
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1258,6 +1281,26 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+
+    non_interactive = bool(getattr(args, "non_interactive", False))
+    from_target = getattr(args, "from_target", None)
+    if non_interactive:
+        # Headless: validate --from locally so rc 2 returns before the daemon spawns.
+        if from_target is not None:
+            rc = _validate_from_target(change, state, from_target)
+            if rc is not None:
+                return rc
+        print(_run_header_line(
+            change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_headless_solicit(args.message, coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            resume=True, from_target=from_target, status=status)
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             # Re-read status under the lock: the precondition above is an
