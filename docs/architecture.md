@@ -1,14 +1,5 @@
 # imp architecture
 
-Two views, each layered: a small **overview** you can read at a glance, then **zoom-in** diagrams that stay legible when printed.
-
-- [Engine architecture](#engine-architecture) — overview + 5 lane zoom-ins
-- [Default workflow](#default-workflow) — overview + 5 phase zoom-ins
-
-> Diagrams are [Mermaid](https://mermaid.js.org/). GitHub renders them inline; in an editor use a Mermaid preview extension. Each fenced block is sized to print on its own.
-
----
-
 ## Engine architecture
 
 A single **change** is one unit of work: an isolated git worktree on an `imp/<id>` branch, driven through a workflow by the executor. The executor runs a step loop — each step is an *agent*, *script*, *branch* (router), or *merge* — and every step appends to an append-only event log that is the source of truth for both crash recovery and rendering.
@@ -278,7 +269,7 @@ flowchart TD
 
 ### Data files
 
-All four live under `.imp/change/` (gitignored); spec/plan artifacts are committed to the change's `journal-wip` ref (see [Zoom 4](#zoom-4--worktree--git)).
+All four live under `.imp/change/` (gitignored); spec/plan artifacts are committed to the change's `journal-wip` ref (see *Zoom 4 — worktree & git*).
 
 | File | Written by | Read by |
 |---|---|---|
