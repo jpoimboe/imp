@@ -1,4 +1,4 @@
-"""End-to-end ESC test: drives `_async_cmd_new` against a real pty.openpty()
+"""End-to-end ESC test: drives `_async_cmd_resume` against a real pty.openpty()
 slave (substituted for /dev/tty) and asserts rc 130 on an ESC keystroke.
 In-process; stubs run_change to sleep-until-cancel."""
 
@@ -40,8 +40,16 @@ def test_esc_keystroke_mid_run_exits_with_rc_130(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import pty
+
+    from imp.engine.change import Change
+    from imp.engine.state import State
+
     _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="esc", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    monkeypatch.setattr(cli_main, "_control_root", lambda: tmp_path)
 
     master, slave = pty.openpty()
     real_open = os.open
@@ -70,8 +78,8 @@ def test_esc_keystroke_mid_run_exits_with_rc_130(
 
     threading.Thread(target=_writer, daemon=True).start()
     try:
-        args = argparse.Namespace(title="esc pty test")
-        rc = anyio.run(cli_main._async_cmd_new, args)
+        args = argparse.Namespace(token="feat", from_target=None, force=False)
+        rc = anyio.run(cli_main._async_cmd_resume, args)
     finally:
         with contextlib.suppress(OSError):
             os.close(master)

@@ -23,14 +23,21 @@ from tests.conftest import _seed_control
     ("exc", "reason"),
     [(KeyboardInterrupt, "ctrl-c"), (EOFError, "ctrl-d")],
 )
-def test_new_interrupt_at_prompt_pauses(
+def test_resume_interrupt_at_prompt_pauses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exc: type[BaseException],
     reason: str,
 ) -> None:
+    from imp.engine.change import Change
+    from imp.engine.state import State
+
     _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    monkeypatch.setattr(cli_main, "_control_root", lambda: tmp_path)
 
     async def _raise(*_a: object, **_k: object) -> object:
         raise exc
@@ -42,8 +49,8 @@ def test_new_interrupt_at_prompt_pauses(
         lambda _change, *, reason: reasons.append(reason),
     )
 
-    args = argparse.Namespace(title="interrupt at prompt")
-    rc = anyio.run(cli_main._async_cmd_new, args)
+    rc = anyio.run(cli_main._async_cmd_resume, argparse.Namespace(
+        token="feat", from_target=None, force=False))
 
     assert rc == 130
     assert reasons == [reason]

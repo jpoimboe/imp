@@ -103,31 +103,34 @@ def test_is_benign_interrupt_teardown_matches_exit_143_process_error() -> None:
         ProcessError("Command failed with exit code 1", exit_code=1))
 
 
-def test_new_tui_on_non_tty_warns_and_streams(tmp_path, monkeypatch, capsys) -> None:
-    from imp.engine.executor import RunResult
+def test_new_tui_on_non_tty_warns_and_routes_to_session_client(
+        tmp_path, monkeypatch, capsys) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-
-    async def fake_run_change(change, **kwargs):
-        on_event = kwargs["on_event"]
-        on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"slug": change.slug, "title": change.title}})
-        on_event({"id": "2", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "s", "kind": "agent", "phase": "design",
-                              "model": "x", "provider": "anthropic"}})
-        return RunResult.COMPLETED
-
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
 
-    # Under pytest's capture, sys.stdout.isatty() is False → the non-tty path.
+    async def _fail_run_change(*_a, **_k):
+        raise AssertionError("run_change must not run in-process for streaming new")
+
+    called = {"n": 0}
+
+    async def _fake_client(change, *, driver, coord, solicit,
+                           seed_opening=None, status=None) -> int:
+        called["n"] += 1
+        return 0
+
+    monkeypatch.setattr(m, "run_change", _fail_run_change)
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    # Under pytest's capture, sys.stdout.isatty() is False → --tui falls back to
+    # the streaming session-client path.
     args = argparse.Namespace(title="demo", tui=True)
     rc = anyio.run(m._async_cmd_new, args)
-    out, err = capsys.readouterr()
+    _out, err = capsys.readouterr()
     assert rc == 0
     assert "interactive terminal" in err     # warning surfaced on stderr
-    assert "design" in out                    # still streamed via LiveDriver
+    assert called["n"] == 1                   # routed to the session client
 
 
 @pytest.fixture
@@ -327,13 +330,19 @@ async def test_benign_loop_handler_swallows_paused_and_benign_then_restores() ->
     assert loop.get_exception_handler() is prior
 
 
-def test_async_cmd_new_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
+def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
     import contextlib
 
+    from imp.engine.change import Change
+    from imp.engine.state import State
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     entered = {"n": 0}
 
@@ -357,7 +366,8 @@ def test_async_cmd_new_installs_benign_loop_handler(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
     monkeypatch.setattr(m, "_run_change_session", fake_session)
 
-    rc = anyio.run(m._async_cmd_new, argparse.Namespace(title="demo", tui=False))
+    rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+        token="feat", from_target=None, force=False))
     assert rc == 0
     assert entered["n"] == 1
 

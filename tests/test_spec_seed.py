@@ -402,13 +402,13 @@ def test_opening_prompt_reply_wires_to_seed_opening(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object = None,
+                           status: object = None) -> int:
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, question: object = None,
                         width: object = None, prompt_text: object = None) -> str:
@@ -437,13 +437,13 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object = None,
+                           status: object = None) -> int:
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, question: object = None,
                         width: object = None, prompt_text: object = None) -> str:

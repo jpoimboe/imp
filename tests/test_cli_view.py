@@ -441,20 +441,26 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
     assert captured.err == ""
 
 
-def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
-    """imp new routes events through LiveDriver: a stubbed run_change that emits
+def test_resume_renders_through_live_driver(tmp_path, monkeypatch) -> None:
+    """imp resume routes events through LiveDriver: a stubbed run_change that emits
     a phase renders the phase name via the folded renderer (no raw JSON)."""
     import argparse
 
     import anyio
 
     import imp.cli.main as m
+    from imp.engine.change import Change
     from imp.engine.executor import RunResult
+    from imp.engine.state import State
     from tests.conftest import _seed_control
 
     # _seed_control initialises a git repo and commits imp/workflows/imp +
     # imp/config.yaml — the layout Change.create now expects.
     _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
 
     async def fake_run_change(change, **kwargs):
         on_event = kwargs["on_event"]
@@ -465,16 +471,15 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
                               "model": "x", "provider": "anthropic"}})
         return RunResult.COMPLETED
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(title="demo")
+    args = argparse.Namespace(token="feat", from_target=None, force=False)
     with redirect_stdout(buf):
-        rc = anyio.run(m._async_cmd_new, args)
+        rc = anyio.run(m._async_cmd_resume, args)
     out = buf.getvalue()
     assert rc == 0
-    assert "#" not in out          # no slug/title banner
     assert "design" in out         # the phase renders through the folded renderer
     assert "{" not in out          # narrative, not raw json
 
