@@ -38,7 +38,7 @@ def _make_change(root: Path) -> Change:
     return change
 
 
-def test_recover_phase_detects_truncated_autonomous(tmp_path: Path) -> None:
+def test_recover_phase_offers_from_for_kept_transcript(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     tdir = change.change_dir / "steps" / "spec" / "review"
     tdir.mkdir(parents=True)
@@ -52,12 +52,13 @@ def test_recover_phase_none_when_no_kept_transcript(tmp_path: Path) -> None:
     assert _recover_phase(change) is None
 
 
-def test_recover_phase_none_when_transcript_is_complete(tmp_path: Path) -> None:
+def test_recover_phase_offers_from_for_send_to_llm_transcript(tmp_path: Path) -> None:
+    # P1: a SEND_TO_LLM transcript (ends with a user turn) is now replayed-and-
+    # continued on a plain `imp resume`, so the `--from <phase>` force-fresh
+    # escape hatch is offered for it too.
     change = _make_change(tmp_path)
     tdir = change.change_dir / "steps" / "spec" / "review"
     tdir.mkdir(parents=True)
-    # A complete transcript ends with a user turn (SEND_TO_LLM state), so
-    # _resume_replays_transcript returns True → _recover_phase returns None.
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="user", content=(TextBlock(text="done"),)))
-    assert _recover_phase(change) is None
+    assert _recover_phase(change) == "spec"

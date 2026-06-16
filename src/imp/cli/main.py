@@ -337,7 +337,6 @@ def _pause_lines(
 
 
 def _recover_phase(change: Change) -> str | None:
-    from imp.engine.executor import _resume_replays_transcript
     try:
         state = State.load(change.state_dir)
     except FileNotFoundError:
@@ -349,12 +348,11 @@ def _recover_phase(change: Change) -> str | None:
         return None
     transcript_dir = change.change_dir / "steps" / phase / state.step
     from imp.agents.transcript import Transcript
-    # Never-ran step (empty/absent transcript): a plain `imp resume` re-runs it
-    # fresh, so no `--from <phase>` recovery hint is needed. Only a non-empty but
-    # unreplayable transcript (truncated/MISSING_COMPLETE_STEP) warrants --from.
+    # P1: a plain `imp resume` now replays-and-continues any kept transcript.
+    # Offer `--from <phase>` as the force-a-fresh-re-run escape hatch whenever
+    # such a transcript exists; a never-ran step (empty/absent transcript) still
+    # re-runs fresh on a plain resume, so it needs no hint.
     if not Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
-        return None
-    if _resume_replays_transcript(transcript_dir):
         return None
     return phase
 

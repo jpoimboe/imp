@@ -20,11 +20,12 @@ def _write(dir_: Path, *messages: Message) -> None:
         t.append(msg)
 
 
-def test_truncated_autonomous_transcript_is_not_replayed(tmp_path: Path) -> None:
-    # Last message is an assistant turn with NO tool_use → MISSING_COMPLETE_STEP.
+def test_truncated_autonomous_transcript_is_replayed(tmp_path: Path) -> None:
+    # P1: a bare assistant turn (MISSING_COMPLETE_STEP) is now KEPT and replayed;
+    # the provider injects a continue nudge so it proceeds instead of re-running.
     _write(tmp_path, Message(role="assistant",
                              content=(TextBlock(text="still working"),)))
-    assert _resume_replays_transcript(tmp_path) is False
+    assert _resume_replays_transcript(tmp_path) is True
 
 
 def test_pending_user_turn_is_replayed(tmp_path: Path) -> None:
@@ -99,11 +100,9 @@ def _seed_single_agent(root: Path) -> Change:
 
 
 @pytest.mark.anyio
-async def test_resume_truncated_autonomous_reruns_and_advances(
+async def test_resume_truncated_autonomous_replays_and_advances(
         tmp_path: Path, provider_registry) -> None:
     change = _seed_single_agent(tmp_path)
-    # Mark the step as resume-pending and drop a truncated autonomous transcript
-    # (ended without complete_step) at the step's transcript dir.
     state = State.load(change.state_dir)
     state.resume_pending = state.step
     state.save(change.state_dir)
@@ -111,13 +110,18 @@ async def test_resume_truncated_autonomous_reruns_and_advances(
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
+    # Seed the step_context event so _resume_system_prompt finds the stored
+    # prompt (in production this is always present when a transcript exists).
+    change.event_log().append(
+        agent_id="step:only/w", type="step_context",
+        payload={"system_prompt": "test"})
 
     seen_nonempty: list[bool] = []
 
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
-            # Record whether the transcript was kept (non-empty) at entry. With
-            # the fix the executor wiped it (fresh re-run), so this is False.
+            # P1: the executor KEEPS the transcript (replay-and-continue), so the
+            # runner sees a non-empty transcript at entry.
             seen_nonempty.append(
                 Transcript(tdir / "transcript.jsonl").exists_and_nonempty())
             yield {"type": "agent_output", "payload": {"status": "Success"}}
@@ -135,7 +139,7 @@ async def test_resume_truncated_autonomous_reruns_and_advances(
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED          # advanced, not wedged
-    assert seen_nonempty == [False]               # transcript re-run fresh
+    assert seen_nonempty == [True]                # transcript kept and replayed
     assert State.load(change.state_dir).status == "completed"
 
 

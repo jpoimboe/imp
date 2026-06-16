@@ -15,7 +15,7 @@ class ResumeState(Enum):
     FRESH = "fresh"                            # no history; yield initial_messages
     SEND_TO_LLM = "send_to_llm"                # last message is user; LLM responds next
     AWAITING_USER = "awaiting_user"            # last tool_use is wait_for_user; solicit + fill
-    MISSING_COMPLETE_STEP = "missing_complete" # autonomous agent stopped without complete_step
+    MISSING_COMPLETE_STEP = "missing_complete" # autonomous agent stopped without complete_step; P1: replay + inject a continue nudge (not restart fresh)
     DANGLING_TOOL_USE = "dangling_tool_use"    # other dangling tool_use; repaired with placeholder
 
 
