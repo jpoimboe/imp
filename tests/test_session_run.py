@@ -9,6 +9,7 @@ import pytest
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
+    make_interactive_solicit,
     run_session_client,
 )
 from imp.cli.signals import InterruptCoordinator
@@ -237,3 +238,47 @@ async def test_make_headless_solicit_with_no_message_signals_detach_immediately(
         await solicit("gate?")
     assert scope.cancelled_caught
     assert coord.escalation_event.is_set()
+
+
+@pytest.mark.anyio
+async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The interactive solicit reads one slash-aware line from the tty and returns
+    it as the gate reply, ignoring the daemon's prompt-text argument (the renderer
+    already showed that prompt). It threads the run's change, status, driver, and
+    coordinator through to ask_line_with_slash."""
+    change = _make_change(tmp_path, "2026-06-15-interactive")
+
+    class _DummyPrompt:
+        def __init__(self, **_kw: object) -> None: ...
+
+    monkeypatch.setattr("imp.cli.session_run.Prompt", _DummyPrompt)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_ask(
+        prompt: object, status: object, ch: object, *,
+        color: bool, width: int, coord: object, driver: object,
+    ) -> str:
+        captured["change"] = ch
+        captured["status"] = status
+        captured["driver"] = driver
+        captured["coord"] = coord
+        return "user typed this"
+
+    monkeypatch.setattr("imp.cli.session_run.ask_line_with_slash", _fake_ask)
+
+    coord = InterruptCoordinator()
+    status = object()
+    driver = object()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+
+    line = await solicit("daemon wait_for_user prompt text")
+
+    assert line == "user typed this"
+    assert captured["change"] is change
+    assert captured["status"] is status
+    assert captured["driver"] is driver
+    assert captured["coord"] is coord

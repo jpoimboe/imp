@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anyio
 
+from imp.cli.palette import should_use_color
+from imp.cli.prompt import Prompt
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.slash import ask_line_with_slash
 from imp.engine.change import Change
 from imp.engine.executor import RunResult
 from imp.engine.state import State
@@ -72,5 +76,31 @@ def make_headless_solicit(
         coord.escalation_event.set()
         await anyio.sleep_forever()
         raise AssertionError("unreachable")  # anyio 4.8: sleep_forever is -> None, not NoReturn
+
+    return _solicit
+
+
+def make_interactive_solicit(
+    change: Change,
+    *,
+    status: Any,
+    driver: Any,
+    coord: InterruptCoordinator,
+) -> Callable[[str], Awaitable[str]]:
+    """Return a solicit callback that reads one slash-aware line from the tty as the gate reply."""
+    # Lazy import: imp.cli.main imports this module (the CLI-flip plan), so a
+    # module-level import of these helpers would be circular.
+    from imp.cli.main import _editing_mode, _term_width
+
+    prompt = Prompt(
+        skills_dir=change.workflow_dir / "skills",
+        editing_mode=_editing_mode(change.control_root),
+        color=should_use_color(sys.stdout))
+
+    async def _solicit(_prompt: str) -> str:
+        return await ask_line_with_slash(
+            prompt, status, change,
+            color=should_use_color(sys.stdout), width=_term_width(),
+            coord=coord, driver=driver)
 
     return _solicit
