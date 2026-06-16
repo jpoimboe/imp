@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine import backlog
-from imp.engine import journal
+from imp.engine import backlog, journal
 
 
 def test_write_read_roundtrip(tmp_path: Path) -> None:
