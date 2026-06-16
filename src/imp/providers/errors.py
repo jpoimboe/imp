@@ -83,10 +83,8 @@ class LoopError(ProviderError):
 
 
 class TerminatedError(ProviderError):
-    """An agent terminated with an error whose specific cause could not be typed
-    (no recognized quota/auth signal). Reported at the headline with all available
-    structured fields in the detail; distinct from the benign agent_incomplete
-    nudge path. Maps to Pause."""
+    """Agent terminated with an error whose specific cause could not be typed
+    (no recognized quota/auth signal). Maps to Pause."""
     category: Category = "terminated"
 
 
