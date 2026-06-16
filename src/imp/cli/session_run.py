@@ -45,3 +45,24 @@ async def run_session_client(
     # module-level import of _handle_terminal_outcome would be circular.
     from imp.cli.main import _handle_terminal_outcome
     return _handle_terminal_outcome(change, infer_session_result(change), coord)
+
+
+def make_headless_solicit(
+    message: str | None, coord: InterruptCoordinator,
+) -> Callable[[str], Awaitable[str]]:
+    """Headless solicit: deliver `message` once, then signal a clean detach and block."""
+    delivered = False
+
+    async def _solicit(_prompt: str) -> str:
+        nonlocal delivered
+        if message is not None and not delivered:
+            delivered = True
+            return message
+        # Trip the escalation event so run_terminal_client tears the client down
+        # (run survives, the daemon hibernates at the gate); then block — never
+        # returning so no stray reply is sent as an input frame.
+        coord.escalation_event.set()
+        await anyio.sleep_forever()
+        raise AssertionError("unreachable")  # anyio 4.8: sleep_forever is -> None, not NoReturn
+
+    return _solicit

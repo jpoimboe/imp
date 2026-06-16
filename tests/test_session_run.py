@@ -6,7 +6,11 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.cli.session_run import infer_session_result, run_session_client
+from imp.cli.session_run import (
+    infer_session_result,
+    make_headless_solicit,
+    run_session_client,
+)
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.change import Change
 from imp.engine.executor import RunResult
@@ -171,3 +175,35 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
     assert tick_started.is_set()
     assert rc_holder["rc"] == 0
+
+
+@pytest.mark.anyio
+async def test_make_headless_solicit_delivers_message_once_then_signals_detach() -> None:
+    coord = InterruptCoordinator()
+    coord.escalation_event = anyio.Event()  # run_terminal_client sets this before any gate
+    solicit = make_headless_solicit("ship it", coord)
+
+    # First gate: the single --message is handed over; no detach yet.
+    assert await solicit("first gate?") == "ship it"
+    assert not coord.escalation_event.is_set()
+
+    # Second gate: no more input — the solicit must NOT return a (stray) reply; it
+    # signals a clean detach and blocks. move_on_after fires only because it blocked.
+    with anyio.move_on_after(0.2) as scope:
+        await solicit("second gate?")
+    assert scope.cancelled_caught
+    assert coord.escalation_event.is_set()
+
+
+@pytest.mark.anyio
+async def test_make_headless_solicit_with_no_message_signals_detach_immediately() -> None:
+    coord = InterruptCoordinator()
+    coord.escalation_event = anyio.Event()
+    solicit = make_headless_solicit(None, coord)
+
+    # No message at all (e.g. a resume parked at a gate with nothing to inject):
+    # the very first gate signals a detach and blocks.
+    with anyio.move_on_after(0.2) as scope:
+        await solicit("gate?")
+    assert scope.cancelled_caught
+    assert coord.escalation_event.is_set()
