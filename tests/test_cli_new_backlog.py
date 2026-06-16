@@ -39,3 +39,39 @@ def test_new_backlog_no_deps(tmp_path: Path, monkeypatch) -> None:
     rec = backlog.read_record(tmp_path, backlog.list_ids(tmp_path)[0])
     assert rec is not None
     assert rec["depends_on"] == []
+
+
+def test_new_backlog_with_title(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    main._record_backlog(argparse.Namespace(backlog="b", depends_on=None, title="My Title"), tmp_path)
+    rec = backlog.read_record(tmp_path, backlog.list_ids(tmp_path)[0])
+    assert rec is not None
+    assert rec["title"] == "My Title"
+
+
+def test_new_backlog_argparse_wiring(tmp_path: Path, monkeypatch) -> None:
+    parser = main._build_parser()
+    args = parser.parse_args(["new", "--backlog", "my brief", "--depends-on", "2026-06-16-dep001"])
+    assert args.backlog == "my brief"
+    assert args.depends_on == ["2026-06-16-dep001"]
+
+
+def test_async_cmd_new_routes_to_record_backlog(tmp_path: Path, monkeypatch) -> None:
+    import asyncio
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    captured: list[tuple] = []
+
+    def _fake_record(args, control):
+        captured.append((args, control))
+        return 0
+
+    monkeypatch.setattr(main, "_record_backlog", _fake_record)
+    rc = asyncio.run(main._async_cmd_new(
+        argparse.Namespace(backlog="b", depends_on=[], title=None,
+                           base_branch=None, from_target=None,
+                           non_interactive=False, message=None, tui=False,
+                           seed=None, seed_file=None)))
+    assert rc == 0
+    assert captured
