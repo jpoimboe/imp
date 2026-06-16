@@ -120,10 +120,14 @@ class _ItemPicker(Generic[T]):
         return self.items[self.index]
 
     def render(self) -> str:
+        from imp.cli import palette as pal
         out = []
         for i, item in enumerate(self.items):
             marker = "▸ " if i == self.index else "  "
-            out.append(marker + self.render_item(item))
+            row = marker + self.render_item(item)
+            if self.color and i != self.index:
+                row = pal.ansi(row, "dim", enabled=True)
+            out.append(row)
         return "\n".join(out)
 
 

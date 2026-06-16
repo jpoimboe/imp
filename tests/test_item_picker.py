@@ -15,6 +15,19 @@ def test_render_marks_selection_with_render_item() -> None:
     assert lines[1] == "  BETA"
 
 
+def test_render_dims_non_selected_rows_when_color_enabled() -> None:
+    p = _ItemPicker(["alpha", "beta", "gamma"], lambda s: s.upper(), color=True)
+    lines = p.render().splitlines()
+    # Selected row (index 0) must not be dimmed
+    assert "\x1b[2m" not in lines[0]
+    assert "▸ ALPHA" in lines[0]
+    # Non-selected rows must carry the dim SGR code
+    assert lines[1].startswith("\x1b[2m")
+    assert "BETA" in lines[1]
+    assert lines[2].startswith("\x1b[2m")
+    assert "GAMMA" in lines[2]
+
+
 def test_move_clamps_and_selects() -> None:
     p = _ItemPicker(["a", "b"], lambda s: s, color=False)
     p.move_up()                      # already top → clamp
