@@ -304,7 +304,8 @@ def test_inject_continue_nudge_turns_bare_assistant_into_send_to_llm(tmp_path: P
     assert [b.text for b in injected.content if isinstance(b, TextBlock)] == [RESUME_CONTINUE_NUDGE]
     # Now replayable as the ordinary SEND_TO_LLM case, on disk too.
     assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
-    assert classify_resume(Transcript(tmp_path / "transcript.jsonl").load()) is ResumeState.SEND_TO_LLM
+    on_disk = Transcript(tmp_path / "transcript.jsonl").load()
+    assert classify_resume(on_disk) is ResumeState.SEND_TO_LLM
     assert [e["type"] for e in elog.read()] == ["user_message"]
 
 

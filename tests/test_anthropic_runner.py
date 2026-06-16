@@ -833,3 +833,45 @@ async def test_request_carries_disable_parallel_tool_use_false(tmp_path: Path) -
     assert only_call["tool_choice"] == {
         "type": "auto", "disable_parallel_tool_use": False,
     }
+
+
+@pytest.mark.anyio
+async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+    (tmp_path / "art").mkdir()
+    inv_dir = tmp_path / "step"
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    # MISSING_COMPLETE_STEP shape: a bare assistant turn (no tool_use, e.g. quota).
+    transcript.append(Message(role="user", content=(TextBlock(text="begin"),)))
+    transcript.append(Message(role="assistant",
+                              content=(TextBlock(text="You've hit your monthly spend limit"),)))
+
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success", "note": "resumed"}),
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="anthropic",
+        model_name="claude-sonnet-4-6", system_prompt="be terse",
+        initial_messages=(),
+        change_context=ChangeContext(
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=inv_dir,
+        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log,
+        balance_on_resume=True,
+    )
+
+    yielded = [ev async for ev in runner.run(inv)]
+
+    # No missing_complete_step error; the agent continued and completed.
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
+    # The injected user turn carries the continue nudge.
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
+               for m in transcript.load() for b in m.content)

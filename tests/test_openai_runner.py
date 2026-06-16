@@ -736,3 +736,33 @@ async def test_request_carries_parallel_tool_calls_true(tmp_path: Path) -> None:
         pass
     only_call = fake.responses.calls[0]
     assert only_call["parallel_tool_calls"] is True
+
+
+@pytest.mark.anyio
+async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    # MISSING_COMPLETE_STEP shape: a bare assistant turn (no tool_use, e.g. quota).
+    t.append(Message(role="user", content=(TextBlock(text="begin"),)))
+    t.append(Message(role="assistant",
+                     content=(TextBlock(text="You've hit your monthly spend limit"),)))
+
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("resumed"),
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
+    ])
+    inv = replace(inv, balance_on_resume=True)
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
+
+    events = [ev async for ev in runner.run(inv)]
+
+    assert [e["type"] for e in control_events(events)] == ["agent_output"]
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
+               for m in t.load() for b in m.content)

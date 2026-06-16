@@ -46,6 +46,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
@@ -499,26 +500,13 @@ class AnthropicAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
+            inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             state = classify_resume(messages)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
                     "category": "config",
                     "kind": "transcript_invalid",
                     "message": "transcript ended with dangling tool_use",
-                }}
-                return
-            if state is ResumeState.MISSING_COMPLETE_STEP:
-                last_text = ""
-                if messages and messages[-1].role == "assistant":
-                    last_text = "".join(
-                        b.text for b in messages[-1].content
-                        if isinstance(b, TextBlock)
-                    )
-                yield {"type": "error", "payload": {
-                    "category": "agent_output_missing",
-                    "kind": "missing_complete_step",
-                    "message": "autonomous agent transcript ended without complete_step",
-                    "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
             if state is ResumeState.AWAITING_USER:

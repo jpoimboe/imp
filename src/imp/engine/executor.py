@@ -109,7 +109,7 @@ def _resume_system_prompt(
 
 
 def _resume_replays_transcript(transcript_dir: Any) -> bool:
-    """True when a resumed step's kept transcript should be replayed. P1: every
+    """True when a resumed step's kept transcript should be replayed. Every
     non-empty transcript is replayed and continued — a MISSING_COMPLETE_STEP
     transcript (autonomous turn ended without complete_step) is no longer wiped;
     the provider injects a synthetic `continue` user turn so it resumes as the
@@ -259,7 +259,7 @@ async def run_change(
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
                 if step.kind == "agent":
-                    # P1: any agent-step pause (quota, agent_incomplete, a fatal
+                    # Any agent-step pause (quota, agent_incomplete, a fatal
                     # provider error, OR a user interrupt) keeps the current
                     # step's transcript so resume replays and continues it, not
                     # re-runs fresh. The replay decision is driven by whether the
@@ -615,7 +615,7 @@ async def _route_agent(
     transcript_dir = change.change_dir / "steps" / step.phase / step.name
 
     # Keep (replay) the transcript on every `resume:` entry that has a non-empty
-    # one. P1: a transcript that ended before complete_step is replayed and
+    # one. A transcript that ended before complete_step is replayed and
     # continued (the provider injects a `continue` nudge), not re-run fresh; only
     # an empty/absent transcript starts fresh.
     keep = is_resume and _resume_replays_transcript(transcript_dir)

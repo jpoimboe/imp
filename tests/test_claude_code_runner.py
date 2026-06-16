@@ -1323,3 +1323,32 @@ async def test_clean_no_complete_step_still_nudges(tmp_path: Path) -> None:
     payload = errs[0]["payload"]
     assert payload["category"] == "agent_incomplete"
     assert payload["kind"] == "no_complete_step_after_nudges"
+
+
+@pytest.mark.anyio
+async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
+    inv = _inv(tmp_path)
+    # MISSING_COMPLETE_STEP shape on disk at the step's transcript dir.
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="begin"),)))
+    t.append(Message(role="assistant",
+                     content=(TextBlock(text="You've hit your monthly spend limit"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    inv = replace(inv, balance_on_resume=True)
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    events = [e async for e in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+    assert not any(e.get("type") == "error" for e in events)
+    msgs = t.load()
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
+               for m in msgs for b in m.content)

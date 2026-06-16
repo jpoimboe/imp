@@ -348,7 +348,7 @@ def _recover_phase(change: Change) -> str | None:
         return None
     transcript_dir = change.change_dir / "steps" / phase / state.step
     from imp.agents.transcript import Transcript
-    # P1: a plain `imp resume` now replays-and-continues any kept transcript.
+    # A plain `imp resume` now replays-and-continues any kept transcript.
     # Offer `--from <phase>` as the force-a-fresh-re-run escape hatch whenever
     # such a transcript exists; a never-ran step (empty/absent transcript) still
     # re-runs fresh on a plain resume, so it needs no hint.
