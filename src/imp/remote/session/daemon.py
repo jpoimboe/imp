@@ -56,6 +56,12 @@ async def serve_change_session(
             change.event_log().append(
                 agent_id=None, type="workflow_resumed", payload={})
             state = State.load(change.state_dir)
+            # P1 crash recovery: a crashed run (status still "running" on disk)
+            # never set resume_pending, so the executor would re-enter the current
+            # step fresh and re-burn its work. Keep and replay it. Skipped on a
+            # --from rewind, which manages resume_pending through apply_rewind.
+            if from_target is None and state.status == "running":
+                state.resume_pending = state.step
             state.status = "running"
             # Callers must validate from_target; a raise here orphans the workflow_resumed entry.
             if from_target is not None:
@@ -67,7 +73,8 @@ async def serve_change_session(
                     project_root=change.project_root,
                     control_root=change.control_root).config
                 workflow = load_workflow(
-                    change.workflow_dir, configured_tiers=cfg.tier_names())
+                    change.workflow_dir, configured_tiers=cfg.tier_names(),
+                    project_keys=frozenset(cfg.project_facts))
                 # step_rewound follows workflow_resumed in the append-only log.
                 plan = plan_rewind(workflow, state, from_target)
                 apply_rewind(plan, workflow, state, change.event_log())

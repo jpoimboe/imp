@@ -330,48 +330,6 @@ async def test_benign_loop_handler_swallows_paused_and_benign_then_restores() ->
     assert loop.get_exception_handler() is prior
 
 
-def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
-    import contextlib
-
-    from imp.engine.change import Change
-    from imp.engine.state import State
-    from tests.conftest import _seed_control
-
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.status = "paused"
-    st.save(ch.state_dir)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-
-    entered = {"n": 0}
-
-    @contextlib.contextmanager
-    def fake_handler(coord):
-        entered["n"] += 1
-        yield
-
-    real = m.EscKeyReader
-
-    class _RecordingReader(real):
-        async def run(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
-            task_status.started()
-            return
-
-    async def fake_session(change, *, tg, **kwargs):
-        tg.cancel_scope.cancel()
-        return 0
-
-    monkeypatch.setattr(m, "EscKeyReader", _RecordingReader)
-    monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
-    monkeypatch.setattr(m, "_run_change_session", fake_session)
-
-    rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
-        token="feat", from_target=None, force=False))
-    assert rc == 0
-    assert entered["n"] == 1
-
-
 def _seed_change(tmp_path: Path) -> Change:
     cd = tmp_path / ".imp" / "change"
     (cd / "state").mkdir(parents=True, exist_ok=True)

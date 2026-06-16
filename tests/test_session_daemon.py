@@ -426,6 +426,39 @@ async def test_resume_marks_running_and_journals_workflow_resumed(
 
 
 @pytest.mark.anyio
+async def test_resume_sets_resume_pending_for_a_crashed_run(tmp_path: Path) -> None:
+    """A hard-killed run leaves status='running' on disk and never set
+    resume_pending. P1: daemon resume prep must set resume_pending to the current
+    step so the executor replays its transcript instead of re-running it fresh."""
+    from imp.engine.state import State
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(change.state_dir)
+    st.step = "review"
+    st.status = "running"          # crashed: status on disk, lock freed by the OS
+    st.resume_pending = None
+    st.save(change.state_dir)
+
+    seen: dict[str, object] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        seen["resume_pending"] = State.load(change.state_dir).resume_pending
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert result is RunResult.COMPLETED
+    assert seen["resume_pending"] == "review"
+
+
+@pytest.mark.anyio
 async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     from imp.engine.state import State
     from tests.conftest import _seed_control

@@ -43,143 +43,62 @@ def _make_change_worktree(control: Path, change_id: str, title: str,
     return wt
 
 
-def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch) -> None:
-    """_async_cmd_resume routes events through LiveDriver (not _stream_sinks) and
-    does NOT replay events_for_current_step — the re-run emits fresh."""
-    import argparse
-
-    import anyio
-
-    import imp.cli.main as m
-    from imp.engine.executor import RunResult
-    from imp.engine.state import State
-
-    wt = _make_change_worktree(tmp_path, "resume-test", "resume-test", status="paused")
-    change_dir = wt / ".imp" / "change"
-
-    async def fake_run_change(change, **kwargs):
-        on_event = kwargs["on_event"]
-        on_event({"id": "r2", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "spec", "kind": "agent", "phase": "design",
-                              "model": "m", "provider": "anthropic"}})
-        return RunResult.COMPLETED
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
-
-    buf = io.StringIO()
-    args = argparse.Namespace(token="resume-test")
-    with redirect_stdout(buf):
-        rc = anyio.run(m._async_cmd_resume, args)
-    out = buf.getvalue()
-    assert rc == 0
-    # The step header is rendered exactly once — no replay duplicate. The header
-    # now carries the model on the same line ("  spec · m"); match its start,
-    # NOT the "Phase: design, step: spec" banner (which begins with "Phase:").
-    step_lines = [ln for ln in out.splitlines() if ln.strip().startswith("spec ·")]
-    assert len(step_lines) == 1
-
-    # Side-effect assertions: workflow_resumed was appended to events.jsonl.
-    events_path = change_dir / "events.jsonl"
-    event_types = [
-        json.loads(line)["type"]
-        for line in events_path.read_text().splitlines()
-        if line.strip()
-    ]
-    assert "workflow_resumed" in event_types, (
-        f"workflow_resumed not in events; found: {event_types}"
-    )
-
-    # Side-effect assertions: on-disk state status was flipped to "running".
-    state = State.load(change_dir / "state")
-    assert state.status == "running", (
-        f"expected status='running' after resume, got {state.status!r}"
-    )
-
-
 def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
-    """_async_cmd_resume must NOT early-return for status='merge_blocked'.
-
-    The status guard allows 'paused', 'errored', and 'merge_blocked'.  This
-    test verifies merge_blocked is treated as resumable: run_change is called
-    and the command exits 0 (not the status-rejection rc=2 path)."""
+    """The unlocked status precondition treats 'merge_blocked' as resumable."""
     import argparse
 
     import anyio
 
     import imp.cli.main as m
-    from imp.engine.executor import RunResult
 
     _make_change_worktree(tmp_path, "mb-test", "mb-test", status="merge_blocked")
 
-    stub_called = []
+    called: list[str] = []
 
-    async def fake_run_change(change, **kwargs):
-        stub_called.append(True)
-        on_event = kwargs["on_event"]
-        on_event({"id": "r1", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "merge", "kind": "agent", "phase": "ship",
-                              "model": "m", "provider": "anthropic"}})
-        return RunResult.COMPLETED
+    async def _fake_run_session_client(change, **kwargs) -> int:
+        called.append(change.id)
+        return 0
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
+    monkeypatch.setattr(
+        m, "make_interactive_solicit", lambda *a, **k: (lambda _p: None))
+    monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
 
-    buf = io.StringIO()
-    args = argparse.Namespace(token="mb-test")
-    with redirect_stdout(buf):
-        rc = anyio.run(m._async_cmd_resume, args)
+    args = argparse.Namespace(token="mb-test", from_target=None)
+    rc = anyio.run(m._async_cmd_resume, args)
 
-    # Must NOT hit the status-rejection path (rc=2 + "nothing to resume").
-    assert rc == 0, (
-        f"merge_blocked was rejected by the status guard (rc={rc}); "
-        "merge_blocked must be resumable"
-    )
-    assert stub_called, "run_change was never invoked — merge_blocked was rejected early"
+    assert rc == 0
+    assert called == ["mb-test"]    # passed to the thin client, not rejected early
 
 
 def test_resume_accepts_crashed_running_status(tmp_path, monkeypatch) -> None:
-    """A hard-killed run leaves status='running' on disk with its ProjectLock
-    freed by the OS. _async_cmd_resume must let 'running' through the status
-    guard to the lock acquire (which adjudicates: a FREE lock = crashed =
-    recoverable; a live holder still trips LockHeld). Before the fix the guard
-    refused any 'running' outright with rc=2 'nothing to resume', stranding the
-    crashed run — even though `imp status`/the picker now offer it as errored."""
+    """A hard-killed run leaves status='running' on disk; the thin client gets it."""
     import argparse
 
     import anyio
 
     import imp.cli.main as m
-    from imp.engine.executor import RunResult
 
-    # No lock file written → ProjectLock acquires freely, i.e. the crashed case.
     _make_change_worktree(tmp_path, "crashed", "crashed", status="running")
 
-    stub_called = []
+    called: list[str] = []
 
-    async def fake_run_change(change, **kwargs):
-        stub_called.append(True)
-        kwargs["on_event"]({"id": "r1", "agent_id": None, "type": "step_started",
-                            "payload": {"step": "spec", "kind": "agent", "phase": "spec",
-                                        "model": "m", "provider": "anthropic"}})
-        return RunResult.COMPLETED
+    async def _fake_run_session_client(change, **kwargs) -> int:
+        called.append(change.id)
+        return 0
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
+    monkeypatch.setattr(
+        m, "make_interactive_solicit", lambda *a, **k: (lambda _p: None))
+    monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
 
-    buf = io.StringIO()
-    args = argparse.Namespace(token="crashed")
-    with redirect_stdout(buf):
-        rc = anyio.run(m._async_cmd_resume, args)
+    args = argparse.Namespace(token="crashed", from_target=None)
+    rc = anyio.run(m._async_cmd_resume, args)
 
-    assert rc == 0, (
-        f"a crashed 'running' run was refused by the status guard (rc={rc}); "
-        "it must be resumable"
-    )
-    assert stub_called, "run_change was never invoked — the 'running' guard refused it"
+    assert rc == 0
+    assert called == ["crashed"]    # the 'running' guard did not refuse it
 
 
 # ── Task-18: CLI-integration tests migrated from test_cli_log_render.py ──────
@@ -439,49 +358,6 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
     captured = capsys.readouterr()
     assert "No changes" in captured.out
     assert captured.err == ""
-
-
-def test_resume_renders_through_live_driver(tmp_path, monkeypatch) -> None:
-    """imp resume routes events through LiveDriver: a stubbed run_change that emits
-    a phase renders the phase name via the folded renderer (no raw JSON)."""
-    import argparse
-
-    import anyio
-
-    import imp.cli.main as m
-    from imp.engine.change import Change
-    from imp.engine.executor import RunResult
-    from imp.engine.state import State
-    from tests.conftest import _seed_control
-
-    # _seed_control initialises a git repo and commits imp/workflows/imp +
-    # imp/config.yaml — the layout Change.create now expects.
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.status = "paused"
-    st.save(ch.state_dir)
-
-    async def fake_run_change(change, **kwargs):
-        on_event = kwargs["on_event"]
-        on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"slug": change.slug, "title": change.title}})
-        on_event({"id": "2", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "s", "kind": "agent", "phase": "design",
-                              "model": "x", "provider": "anthropic"}})
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
-
-    buf = io.StringIO()
-    args = argparse.Namespace(token="feat", from_target=None, force=False)
-    with redirect_stdout(buf):
-        rc = anyio.run(m._async_cmd_resume, args)
-    out = buf.getvalue()
-    assert rc == 0
-    assert "design" in out         # the phase renders through the folded renderer
-    assert "{" not in out          # narrative, not raw json
 
 
 def test_term_width_floors_to_80_when_columns_nonpositive(monkeypatch) -> None:

@@ -14,7 +14,6 @@ _CHILD = textwrap.dedent(
     from pathlib import Path
     import imp.cli.main as m
     from imp.engine.change import Change
-    from imp.engine.executor import RunResult
     from imp.engine.state import State
 
     ch = Change.create(Path("."), title="demo", change_id="feat", base_branch="main")
@@ -22,17 +21,12 @@ _CHILD = textwrap.dedent(
     st.status = "paused"
     st.save(ch.state_dir)
 
-    async def fake_run_change(change, **kw):
-        on_event = kw["on_event"]
-        on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"slug": change.slug, "title": change.title}})
-        on_event({"id": "2", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "s", "kind": "agent", "phase": "design",
-                              "model": "x", "provider": "anthropic"}})
-        return RunResult.COMPLETED
+    async def fake_client(change, **kw):
+        return 0
 
-    m.run_change = fake_run_change
-    args = argparse.Namespace(token="feat", from_target=None, force=False, tui=True)
+    m.run_session_client = fake_client
+    m.make_interactive_solicit = lambda *a, **k: (lambda _p: None)
+    args = argparse.Namespace(token="feat", from_target=None, tui=True)
     sys.exit(anyio.run(m._async_cmd_resume, args))
     """
 )
@@ -47,6 +41,7 @@ def test_subprocess_resume_tui_on_non_tty_warns_and_streams(tmp_path: Path) -> N
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=10,
     )
     assert proc.returncode == 0, proc.stderr
-    # stdout is a PIPE -> isatty() False -> the non-tty --tui fallback path.
-    assert "interactive terminal" in proc.stderr      # warning surfaced
-    assert "design" in proc.stdout                     # streamed via LiveDriver, not the TUI
+    # stdout is a PIPE -> isatty() False -> _tui_requested is False, so --tui falls
+    # back to the interactive thin session-client; the unavailable-tui warning still
+    # surfaces from _warn_if_tui_unavailable.
+    assert "interactive terminal" in proc.stderr

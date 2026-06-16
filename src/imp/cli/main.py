@@ -1301,144 +1301,91 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             resume=True, from_target=from_target, status=status)
-    try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            # Re-read status under the lock: the precondition above is an
-            # unlocked read, so a concurrent `imp abandon` (which sets
-            # status="abandoned", journals, then releases the lock before
-            # removing the worktree) could have landed in the gap. Re-checking
-            # here ensures resume never runs a Change abandon has finalized.
-            state = State.load(change.state_dir)
-            # We now HOLD the lock, so a `running` status here is a crashed run,
-            # not a live one (a live holder would have tripped LockHeld) — resume
-            # it. The re-read still catches a concurrent abandon (→ "abandoned").
-            if state.status not in RESUMABLE and state.status != "running":
-                print(
-                    f"imp: Change {change.id} status is {state.status!r}; "
-                    "nothing to resume",
-                    file=sys.stderr,
-                )
-                return 2
-            # Resume gets no `change_created` event, so the driver won't print the
-            # workflow header — emit a matching one here with a dim resuming marker,
-            # so a resumed run opens like a fresh one. A title-less change defers
-            # its header too (Option B), matching new.
-            print(_run_header_line(
-                change.slug, change.id, "resuming",
-                color=should_use_color(sys.stdout)))
-
-            # spec 2026-06-04: --from rewind preflight, before any run. Resolve
-            # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
-            # a refused --from leaves zero new events. The status precondition
-            # above still gates this — --from cannot bypass it.
-            from_target = getattr(args, "from_target", None)
-            rewind_plan = None
-            workflow = None
-            if from_target is not None:
-                from imp.engine.loader import load_workflow
-                from imp.providers.effective import load_effective_config
-                try:
-                    cfg = load_effective_config(
-                        project_root=change.project_root,
-                        control_root=change.control_root,
-                    ).config
-                    workflow = load_workflow(
-                        change.workflow_dir, configured_tiers=cfg.tier_names(),
-                        project_keys=frozenset(cfg.project_facts))
-                except (LoadError, LoadErrors) as e:
-                    print(f"imp: {e}", file=sys.stderr)
+    if _tui_requested(args):
+        # --tui resume stays in-process: it owns the tty exclusively and runs the
+        # agent loop in this process. Its session-daemon flip is deferred, so it
+        # keeps acquiring the ProjectLock and running resume prep here.
+        try:
+            with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+                # Re-read status under the lock: the precondition above is an
+                # unlocked read, so a concurrent `imp abandon` could have landed in
+                # the gap. We HOLD the lock now, so a `running` status here is a
+                # crashed run, not a live one.
+                state = State.load(change.state_dir)
+                if state.status not in RESUMABLE and state.status != "running":
+                    print(
+                        f"imp: Change {change.id} status is {state.status!r}; "
+                        "nothing to resume",
+                        file=sys.stderr,
+                    )
                     return 2
-                try:
-                    rewind_plan = recovery.plan_rewind(
-                        workflow, state, from_target)
-                except (recovery.RewindError, recovery.GateBypassRequired) as e:
-                    # str(e) bare (not the usual f"imp: {e}"): these messages
-                    # already embed the "imp:" prefix and are multi-line (they
-                    # list valid targets / skipped gates), so they are printed
-                    # verbatim rather than re-prefixed.
-                    print(str(e), file=sys.stderr)
-                    return 2
-
-            non_interactive = bool(getattr(args, "non_interactive", False))
-            _warn_if_tui_unavailable(args, sys.stdout)
-            # Append the resume marker exactly once (for the persisted log /
-            # imp log). NO replay: the engine picks up from the current step
-            # cursor, re-emitting step_started + the step body fresh
-            # (design "Resume — no replay").
-            change.event_log().append(
-                agent_id=None, type="workflow_resumed", payload={})
-            # P1 crash recovery: a crashed run (status still "running" on disk)
-            # never set resume_pending, so the executor would enter the current
-            # step fresh and re-burn its work/quota. Keep and replay the current
-            # step's transcript. A never-ran step (empty transcript) still starts
-            # fresh via _resume_replays_transcript. Skipped on a --from rewind,
-            # which manages resume_pending through apply_rewind.
-            if from_target is None and state.status == "running":
-                state.resume_pending = state.step
-            state.status = "running"
-            # Apply the rewind AFTER the resume marker so step_rewound follows
-            # workflow_resumed in the append-only log.
-            if rewind_plan is not None:
-                # workflow is set whenever rewind_plan is (both assigned only
-                # inside `if from_target is not None`); assert narrows for mypy.
-                assert workflow is not None
-                recovery.apply_rewind(
-                    rewind_plan, workflow, state, change.event_log())
-                print(_rewind_note_line(
-                    rewind_plan.from_step, rewind_plan.target,
+                print(_run_header_line(
+                    change.slug, change.id, "resuming",
                     color=should_use_color(sys.stdout)))
-            state.save(change.state_dir)
-
-            if _tui_requested(args) and not non_interactive:
+                rewind_plan = None
+                workflow = None
+                if from_target is not None:
+                    from imp.engine.loader import load_workflow
+                    from imp.providers.effective import load_effective_config
+                    try:
+                        cfg = load_effective_config(
+                            project_root=change.project_root,
+                            control_root=change.control_root,
+                        ).config
+                        workflow = load_workflow(
+                            change.workflow_dir, configured_tiers=cfg.tier_names(),
+                            project_keys=frozenset(cfg.project_facts))
+                    except (LoadError, LoadErrors) as e:
+                        print(f"imp: {e}", file=sys.stderr)
+                        return 2
+                    try:
+                        rewind_plan = recovery.plan_rewind(
+                            workflow, state, from_target)
+                    except (recovery.RewindError, recovery.GateBypassRequired) as e:
+                        print(str(e), file=sys.stderr)
+                        return 2
+                change.event_log().append(
+                    agent_id=None, type="workflow_resumed", payload={})
+                # P1 crash recovery: a crashed run (status still "running" on disk)
+                # never set resume_pending; keep and replay the current step's
+                # transcript. Skipped on a --from rewind (apply_rewind manages it).
+                if from_target is None and state.status == "running":
+                    state.resume_pending = state.step
+                state.status = "running"
+                if rewind_plan is not None:
+                    assert workflow is not None
+                    recovery.apply_rewind(
+                        rewind_plan, workflow, state, change.event_log())
+                    print(_rewind_note_line(
+                        rewind_plan.from_step, rewind_plan.target,
+                        color=should_use_color(sys.stdout)))
+                state.save(change.state_dir)
                 return await _run_tui_session(change, args=args)
+        except LockHeld as e:
+            print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
+                  file=sys.stderr)
+            return 2
 
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            channel = _maybe_build_channel(change)
-            rc = 0
-            esc_reader: EscKeyReader | None = None
-            if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
-                    args.message)
-            else:
-                esc_reader = EscKeyReader(coord)
-                # Task 11: ESC reader captures interjects; router-flagged prompt is
-                # the reply channel (see _build_interactive_input).
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-
-            try:
-                with _benign_interrupt_loop_handler(coord):
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        if not non_interactive:
-                            tg.start_soon(status.tick)
-                            assert esc_reader is not None
-                            # Block until the reader has armed (or given up): a
-                            # workflow whose first step is interactive must not start
-                            # its prompt before the ESC reader holds /dev/tty, or the
-                            # prompt and the reader race for the terminal's termios.
-                            await tg.start(esc_reader.run)
-                        rc = await _run_change_session(
-                            change, coord=coord, driver=driver, status=status,
-                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=None)
-            except* (LoadError, LoadErrors) as eg:
-                # A bad workflow/config raised on the FIRST run_change (it never
-                # reaches the loop). _run_change_session has already cleaned up
-                # (status.reset) in its finally; surface the error as rc 2.
-                driver.finish()
-                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
-                rc = 2
+    # Interactive resume: a thin session-client. Validate --from client-side
+    # (non-mutating) so a bad target returns rc 2 before the daemon spawns; the
+    # daemon owns the worktree + lock and runs resume prep + the agent loop.
+    if from_target is not None:
+        rc = _validate_from_target(change, state, from_target)
+        if rc is not None:
             return rc
-    except LockHeld as e:
-        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-              file=sys.stderr)
-        return 2
+    _warn_if_tui_unavailable(args, sys.stdout)
+    print(_run_header_line(
+        change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(stream=sys.stdout,
+                        color=should_use_color(sys.stdout),
+                        width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        resume=True, from_target=from_target, status=status)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:

@@ -104,98 +104,75 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
     assert any(e["type"] == "step_rewound" for e in ch.event_log().read())
 
 
-def test_resume_from_cli_seam_applies_rewind_before_run(
-    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+def test_resume_interactive_routes_through_session_client(
+    tmp_path, monkeypatch,
 ) -> None:
-    """End-to-end through _async_cmd_resume (with run_change faked): proves the
-    argparse flags -> preflight -> apply_rewind wiring, incl. the workflow_resumed
-    BEFORE step_rewound ordering and the persisted cursor/loop-count reset."""
-    import argparse
-
-    import anyio
-
-    import imp.cli.main as m
-    from imp.engine.executor import RunResult
-
-    _seed_control_default(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.step = "review"
-    st.status = "paused"
-    st.loop_counts = {"task-lead": 2, "review": 6}
-    st.save(ch.state_dir)
-
-    async def fake_run_change(change, **kwargs):
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
-
-    args = argparse.Namespace(token="feat", from_target="review")
-    rc = anyio.run(m._async_cmd_resume, args)
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "rewound from" in out
-    assert "review" in out
-
-    # Event ordering: workflow_resumed precedes step_rewound (no gates_bypassed,
-    # this is a backward/self rewind).
-    types = [e["type"] for e in ch.event_log().read()]
-    assert "workflow_resumed" in types and "step_rewound" in types
-    assert types.index("workflow_resumed") < types.index("step_rewound")
-    assert "gates_bypassed" not in types
-
-    # Persisted cursor + downstream-only loop-count reset.
-    final = State.load(ch.state_dir)
-    assert final.step == "review"
-    assert final.loop_counts == {"task-lead": 2}     # review reset, upstream kept
-
-
-
-def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> None:
-    """Guards the abandon/resume TOCTOU: the precondition read is unlocked, so a
-    concurrent `imp abandon` can flip status to 'abandoned' after it passes.
-    Resume re-reads status under the lock and refuses (rc 2) without running.
-    Modelled by flipping the on-disk status between the two State.load calls
-    (early check = call 1; under-lock recheck = call 2)."""
+    """Interactive `imp resume` routes through run_session_client with resume=True;
+    no in-process ESC reader is spawned; no run_change call is made in-process."""
     import argparse
 
     import anyio
 
     import imp.cli.main as m
 
-    _seed_control_default(tmp_path)
+    _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
-    st.step = "review"
     st.status = "paused"
     st.save(ch.state_dir)
-
-    real_load = State.load.__func__
-    calls = {"n": 0}
-
-    def fake_load(cls, state_dir):
-        calls["n"] += 1
-        s = real_load(cls, state_dir)
-        if calls["n"] >= 2:          # the under-lock recheck sees abandon's write
-            s.status = "abandoned"
-        return s
-
-    ran = {"called": False}
-
-    async def fake_run_change(change, **kwargs):
-        ran["called"] = True
-        from imp.engine.executor import RunResult
-        return RunResult.COMPLETED
-
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
-    monkeypatch.setattr(m.State, "load", classmethod(fake_load))
 
-    args = argparse.Namespace(token="feat", from_target=None)
-    rc = anyio.run(m._async_cmd_resume, args)
-    assert rc == 2
-    assert ran["called"] is False    # never ran a Change abandon finalized
+    seen: list[str] = []
+    real_reader = m.EscKeyReader
+
+    class _RecordingReader(real_reader):
+        async def run(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
+            seen.append("esc_reader.run")
+            task_status.started()
+            return
+
+    monkeypatch.setattr(m, "EscKeyReader", _RecordingReader)
+
+    async def _fail_run_change(*_a, **_k):
+        raise AssertionError(
+            "run_change must not run in-process for interactive resume")
+
+    monkeypatch.setattr(m, "run_change", _fail_run_change)
+
+    made: dict[str, object] = {}
+
+    def _fake_make_interactive_solicit(change, *, status, driver, coord):
+        made["change_id"] = change.id
+
+        async def _solicit(_prompt):
+            return ""
+
+        return _solicit
+
+    monkeypatch.setattr(
+        m, "make_interactive_solicit", _fake_make_interactive_solicit)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_session_client(
+        change, *, driver, coord, solicit, seed_opening=None, status=None,
+        resume=False, from_target=None,
+    ) -> int:
+        captured["change_id"] = change.id
+        captured["resume"] = resume
+        captured["from_target"] = from_target
+        return 5
+
+    monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
+
+    rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+        token="feat", from_target=None))
+
+    assert rc == 5
+    assert seen == []                                   # no in-process ESC reader
+    assert made["change_id"] == captured["change_id"]   # solicit bound to the same change
+    assert captured["resume"] is True
+    assert captured["from_target"] is None
 
 
 def test_rewind_note_line_states_from_and_to() -> None:
@@ -205,42 +182,6 @@ def test_rewind_note_line_states_from_and_to() -> None:
     # A None cursor (rewind to the very start) reads as 'start'.
     assert _rewind_note_line(None, "spec", color=False) == \
         "rewound from start to spec"
-
-
-def test_crash_recovery_sets_resume_pending_to_current_step(tmp_path, monkeypatch) -> None:
-    """A hard-killed run leaves status='running' on disk and never set
-    resume_pending. P1: crash recovery must keep and replay the CURRENT step's
-    transcript, so resume_pending is set to the cursor before run_change."""
-    import argparse
-
-    import anyio
-
-    import imp.cli.main as m
-    from imp.engine.change import Change
-    from imp.engine.executor import RunResult
-    from imp.engine.state import State
-
-    _seed_control_default(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.step = "review"
-    st.status = "running"          # crashed: status on disk, lock freed by the OS
-    st.resume_pending = None
-    st.save(ch.state_dir)
-
-    captured: dict[str, object] = {}
-
-    async def fake_run_change(change, **kwargs):
-        captured["resume_pending"] = State.load(change.state_dir).resume_pending
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
-
-    args = argparse.Namespace(token="feat", from_target=None)
-    rc = anyio.run(m._async_cmd_resume, args)
-    assert rc == 0
-    assert captured["resume_pending"] == "review"
 
 
 def test_resume_non_interactive_routes_through_session_client(
