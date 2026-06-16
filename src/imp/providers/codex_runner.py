@@ -326,6 +326,7 @@ class CodexAgentRunner:
                 port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
                 web_search_enabled=web_enabled,
                 drivers=invocation.agent_def.drivers,
+                project_root=cwd,
             )
             seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                       codex_home=codex_home, env=os.environ)

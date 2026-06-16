@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from imp.providers.codex_config import render_config_toml
 
 
@@ -50,3 +52,28 @@ def test_config_toml_no_driver_block_when_none() -> None:
     txt = render_config_toml(host="127.0.0.1", port=1,
                              bearer_env_var="X", web_search_enabled=False)
     assert "[mcp_servers.impty]" not in txt
+
+
+def _make_imp_checkout(root: Path) -> None:
+    pkg = root / "src" / "imp"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+
+
+def test_driver_block_gains_self_host_env_on_an_imp_checkout(tmp_path) -> None:
+    _make_imp_checkout(tmp_path)
+    txt = render_config_toml(host="127.0.0.1", port=1, bearer_env_var="X",
+                             web_search_enabled=False, drivers=["impty"],
+                             project_root=tmp_path)
+    block = txt[txt.index("[mcp_servers.impty]"):]
+    assert "env = {" in block
+    assert f'PYTHONPATH = "{tmp_path / "src"}' in block
+    assert f'PATH = "{tmp_path / ".imp" / "selfhost-bin"}' in block
+
+
+def test_driver_block_has_no_env_for_a_non_imp_project(tmp_path) -> None:
+    txt = render_config_toml(host="127.0.0.1", port=1, bearer_env_var="X",
+                             web_search_enabled=False, drivers=["impty"],
+                             project_root=tmp_path)
+    block = txt[txt.index("[mcp_servers.impty]"):]
+    assert "env = {" not in block
