@@ -44,7 +44,8 @@ def test_new_backlog_no_deps(tmp_path: Path, monkeypatch) -> None:
 def test_new_backlog_with_title(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    main._record_backlog(argparse.Namespace(backlog="b", depends_on=None, title="My Title"), tmp_path)
+    ns = argparse.Namespace(backlog="b", depends_on=None, title="My Title")
+    main._record_backlog(ns, tmp_path)
     rec = backlog.read_record(tmp_path, backlog.list_ids(tmp_path)[0])
     assert rec is not None
     assert rec["title"] == "My Title"
