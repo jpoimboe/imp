@@ -60,6 +60,7 @@ def list_playbooks(control: Path) -> list[Playbook]:
 
 
 def find_playbook(control: Path, name: str) -> Playbook | None:
+    name = name.removesuffix(".md")
     for pb in list_playbooks(control):
         if pb.name == name:
             return pb

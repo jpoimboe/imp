@@ -69,3 +69,11 @@ def test_render_raises_on_unknown_variable(tmp_path: Path) -> None:
     assert pb is not None
     with pytest.raises(jinja2.UndefinedError):
         playbooks.render_playbook(pb, "x")
+
+
+def test_find_playbook_strips_md_suffix(tmp_path: Path) -> None:
+    _write(tmp_path, "dead-code", "body\n")
+    pb_with = playbooks.find_playbook(tmp_path, "dead-code.md")
+    pb_without = playbooks.find_playbook(tmp_path, "dead-code")
+    assert pb_with is not None
+    assert pb_with.name == pb_without.name
