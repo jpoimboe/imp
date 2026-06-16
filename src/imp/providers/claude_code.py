@@ -168,6 +168,7 @@ def _termination_from_result(
         "last_agent_text": last_text[:500],
         "exit_code": exit_code,
         "stderr_tail": diag.get("stderr_tail"),
+        "errors": getattr(sdk_msg, "errors", None),
     }
     labeled = _classify_agent_text(last_text)
     if isinstance(labeled, (perr.QuotaError, perr.AuthError)):
