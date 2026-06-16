@@ -51,14 +51,18 @@ Read the spec, plans, and `.imp/change/progress.md`; inspect the change in `bash
 only if cheap; do NOT make code changes). Populate:
 - `built`: what was built, by plan/task, in prose. If base was integrated, say so
   (e.g. "Merged base (N commits); resolved X conflicts — Y flagged uncertain"); if
-  `integration-notes.md` is absent, "no base changes to integrate".
+  `integration-notes.md` is absent, "no base changes to integrate". Add one
+  informational rollup line counting the opportunistic improvements the
+  `deferred-sweep` made — count the `— fixed <sha>` lines in the Deferred Followups
+  list (e.g. "plus N opportunistic improvements (see commits)").
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
-  step recorded in `.imp/change/progress.md`, as TWO labelled subsections —
-  **Fixed (FYI/veto):** every `fyi-fixed <commit>` item with its commit, and
-  **Still deferred (needs decision):** every `still-deferred: <reason>` item. **Omit
-  `silent-fixed` items entirely.** Fold any flagged-uncertain merge resolutions or
-  semantic concerns here too.
+  step recorded in `.imp/change/progress.md`, and surface ONLY the
+  `— needs-decision: <why>` items — one per line with its reason. Do **not** list
+  `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in `built`)
+  and do **not** list `— dismissed: <why>` items (considered and judged not worth
+  doing; never surfaced). Fold any flagged-uncertain merge resolutions or semantic
+  concerns here too.
 - `next_steps`: suggested follow-on work.
 
 ## Before/after UX capture — only when this change touched a UI surface
@@ -95,10 +99,11 @@ missing capture never blocks the merge.
 
 Present the summary and call `wait_for_user` with a `prompt` that makes the
 merge-vs-rework affordance explicit: state this is the final **merge gate**; list
-the **Fixed (FYI/veto)** items (the human may veto any — a veto routes `rework`
-naming the commit(s) to undo; how the undo happens is left to the implementer) and
-the **Still deferred** items; tell the user to reply **merge** to merge into the
-base branch, or describe the **rework** to send the change back for re-planning.
+the **needs-decision** items (the ones the sweep left for a human call) and the
+one-line rollup of opportunistic fixes carried in `built`; tell the user to reply
+**merge** to merge into the base branch, or describe the **rework** to send the
+change back for re-planning. The sweep's fixes are trusted and re-reviewed — do not
+ask the human to bless them one by one.
 
 When a human asks for rework and the request is underspecified, use `wait_for_user`
 to clarify the desired outcome and scope before returning a rework decision — settle
