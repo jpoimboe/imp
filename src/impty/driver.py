@@ -90,7 +90,11 @@ class ImptyDriver:
             self._session.close()
             self._session = None
         session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
-        session.wait_idle()  # inherit the library settle policy
+        try:
+            session.wait_idle()  # inherit the library settle policy
+        except BaseException:
+            session.close()
+            raise
         self._session = session
         return self._render(session)
 
