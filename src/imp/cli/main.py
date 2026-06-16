@@ -2121,7 +2121,6 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_update_workflow(args: argparse.Namespace) -> int:
-    import subprocess
     try:
         control = _control_root()
     except worktree.PreconditionError as e:
