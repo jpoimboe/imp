@@ -90,3 +90,25 @@ def test_quota_still_wins_over_codeless_phrase() -> None:
     # code-less transient phrase co-occurs.
     err = _classify_agent_text("Credit balance is too low — API Error: Overloaded")
     assert isinstance(err, perr.QuotaError)
+
+
+def test_codeless_phrase_same_line_still_network() -> None:
+    # Boundary: phrase on the SAME line as the API Error: prefix still classifies.
+    assert isinstance(_classify_agent_text("API Error: Overloaded"), perr.NetworkError)
+    assert isinstance(
+        _classify_agent_text("API Error: Internal server error"), perr.NetworkError)
+
+
+def test_codeless_phrase_on_different_line_is_none() -> None:
+    # Regression: an API Error: line with an unrelated body, plus the transient
+    # word only in prose on a DIFFERENT line, must NOT classify — it pauses.
+    multiline = (
+        "API Error: the request did not complete\n"
+        "Earlier the build server was Overloaded with traffic."
+    )
+    assert _classify_agent_text(multiline) is None
+    multiline2 = (
+        "API Error: connection reset by peer\n"
+        "An Internal server error happened to a coworker last week."
+    )
+    assert _classify_agent_text(multiline2) is None

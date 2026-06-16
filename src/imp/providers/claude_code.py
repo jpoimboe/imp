@@ -145,8 +145,9 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
             # SDK providers use for an InternalServerError). Previously fell through
             # to `return None` → treated as agent text → wrong nudge loop.
             return perr.NetworkError(f"claude CLI: {text[:200]}")
-    if "API Error:" in text and any(p in text for p in _TRANSIENT_PHRASES):
-        return perr.NetworkError(f"claude CLI: {text[:200]}")
+    for line in text.splitlines():
+        if "API Error:" in line and any(p in line for p in _TRANSIENT_PHRASES):
+            return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
 
 
