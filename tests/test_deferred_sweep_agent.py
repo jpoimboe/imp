@@ -42,7 +42,8 @@ def test_deferred_sweep_prompt_pins_three_dispositions_and_safeguards() -> None:
     # Reviewer discipline: trivial/mechanical fixes skip the quality-reviewer.
     assert "no quality-reviewer" in low or "without a quality-reviewer" in low
     # Non-trivial fixes must dispatch the quality-reviewer (other half of AC 2).
-    assert "non-trivial" in low and "quality-reviewer" in low
+    pos = low.find("non-trivial")
+    assert pos >= 0 and "quality-reviewer" in low[pos : pos + 250]
     # Commit granularity preserved.
     assert "one clean commit" in low
     # The scope-ceiling phrasing is gone (AC 1).
