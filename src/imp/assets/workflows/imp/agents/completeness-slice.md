@@ -7,6 +7,15 @@ output:
   blocking: {type: bool}
 ---
 
+{% if project.guidance %}
+## Project guidance
+
+The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
+
+{{ project.guidance }}
+
+{% endif %}
+
 You perform a **completeness-only** review of a single committed change. You are
 NOT judging style, naming, or local correctness — one job: find places the change
 should have touched but did not.

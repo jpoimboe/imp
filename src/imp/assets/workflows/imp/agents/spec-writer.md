@@ -10,6 +10,15 @@ output:
   complexity: {type: enum, values: [trivial, standard]}
 ---
 
+{% if project.guidance %}
+## Project guidance
+
+The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
+
+{{ project.guidance }}
+
+{% endif %}
+
 You are writing the specification for a change the user wants to make.
 
 How you open depends on your **opening message**:

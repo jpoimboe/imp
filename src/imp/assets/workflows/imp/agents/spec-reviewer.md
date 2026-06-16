@@ -8,6 +8,15 @@ output:
   has_minor_findings: {type: bool}
 ---
 
+{% if project.guidance %}
+## Project guidance
+
+The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
+
+{{ project.guidance }}
+
+{% endif %}
+
 You are reviewing the spec for this change.
 
 Change title (user's starting intent): `{{ change.title }}`

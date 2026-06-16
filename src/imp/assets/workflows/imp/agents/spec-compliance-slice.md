@@ -7,6 +7,15 @@ output:
   blocking: {type: bool}
 ---
 
+{% if project.guidance %}
+## Project guidance
+
+The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
+
+{{ project.guidance }}
+
+{% endif %}
+
 You perform a **spec-compliance-only** review of a single committed change. You are
 NOT judging completeness, style, or edge cases — one job: find places where the code
 does something OTHER than what its task, spec, or own docstring/comment says it does.
