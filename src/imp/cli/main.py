@@ -47,6 +47,7 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
+from imp.engine.workflow_lifecycle import workflow_update_notice
 
 
 class ReplyInterjectRouter:
@@ -990,6 +991,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     if block is not None:
         print(f"imp: {block}", file=sys.stderr)
         return 2
+
+    _notice = workflow_update_notice(control)
+    if _notice is not None:
+        print(f"imp: {_notice}")
 
     _verify_command_nudge(
         project_root=control, control_root=control,
@@ -2083,6 +2088,9 @@ def _cmd_status(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print(_NO_CHANGES_MESSAGE)
         return 0
+    _notice = workflow_update_notice(control)
+    if _notice is not None:
+        print(f"imp: {_notice}")
     inflight = _sort_rows_newest_first(_status_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not past:

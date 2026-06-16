@@ -10,6 +10,7 @@ from imp.engine.workflow_lifecycle import (
     classify_drift,
     hash_workflow_dir,
     read_pristine,
+    workflow_update_notice,
     write_pristine,
 )
 
@@ -101,3 +102,22 @@ def test_classify_fork_with_no_bundled_twin_is_none(tmp_path: Path) -> None:
     mirror = _mirror_of_imp(tmp_path / "mine")
     write_pristine(mirror)
     assert classify_drift("mine", mirror) is None
+
+
+def test_notice_present_when_update_available(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    mirror = _mirror_of_imp(tmp_path / "imp" / "workflows" / "imp")
+    (mirror / "workflow.yaml").write_text("name: stale-mirror\n")
+    write_pristine(mirror)                       # clean mirror that lags bundled
+    notice = workflow_update_notice(tmp_path)
+    assert notice is not None
+    assert "update-workflow" in notice
+
+
+def test_notice_absent_when_up_to_date(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    mirror = _mirror_of_imp(tmp_path / "imp" / "workflows" / "imp")
+    write_pristine(mirror)
+    assert workflow_update_notice(tmp_path) is None

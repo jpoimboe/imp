@@ -68,3 +68,17 @@ def classify_drift(name: str, mirror_dir: Path) -> DriftState | None:
     if b != p:
         return DriftState.UPDATE_AVAILABLE
     return DriftState.UP_TO_DATE
+
+
+def workflow_update_notice(project_root: Path) -> str | None:
+    """One-line surface for `imp new`/`imp status`: the message to print when the
+    project's default-workflow mirror is update-available, else None."""
+    from imp.providers.config import parse_default_workflow
+
+    name = parse_default_workflow(project_root / "imp" / "project.yaml")
+    mirror = project_root / "imp" / "workflows" / name
+    if not mirror.is_dir():
+        return None
+    if classify_drift(name, mirror) is DriftState.UPDATE_AVAILABLE:
+        return f"the {name} workflow has updates — run `imp update-workflow`."
+    return None
