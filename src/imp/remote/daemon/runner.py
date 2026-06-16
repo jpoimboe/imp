@@ -9,6 +9,7 @@ import queue
 import signal
 import sys
 import threading
+import urllib.error
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -163,6 +164,16 @@ _WORKER_GAP = 1.0
 _SENDER_GAP = 0.05   # idle wait between outbound/response drains (latency ceiling)
 
 
+def _is_transient_net_error(exc: BaseException) -> bool:
+    """Connection resets, timeouts, and DNS blips on the Telegram long-poll are
+    routine and self-healing — worth a one-line note, not an alarming traceback.
+    A real API error (HTTPError: 401 bad token, 409 conflict) is persistent, so
+    it keeps the full traceback."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    return isinstance(exc, (urllib.error.URLError, ConnectionError, TimeoutError))
+
+
 class _WorkerGate:
     def __init__(self) -> None:
         self._failing = False
@@ -175,7 +186,10 @@ class _WorkerGate:
             _log.debug("adapter worker cycle failed: %r", exc)
             return
         self._failing = True
-        _log.warning("adapter worker cycle failed: %r", exc, exc_info=True)
+        if _is_transient_net_error(exc):
+            _log.warning("adapter worker cycle failed (transient network error): %r", exc)
+        else:
+            _log.warning("adapter worker cycle failed: %r", exc, exc_info=True)
 
 
 def _poll_worker(adapter: Any, stop: threading.Event) -> None:

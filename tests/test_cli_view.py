@@ -437,7 +437,7 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
     rc = main(["log"])
     assert rc == 0
     captured = capsys.readouterr()
-    assert "No Changes" in captured.out
+    assert "No changes" in captured.out
     assert captured.err == ""
 
 

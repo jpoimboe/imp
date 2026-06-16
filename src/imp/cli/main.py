@@ -1509,7 +1509,27 @@ def _resolve_default_id(control: Path) -> str | None:
     return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
-_NO_CHANGES_MESSAGE = "No Changes."
+_NO_CHANGES_MESSAGE = "No changes."
+
+
+def _log_picker_empty() -> int:
+    print("No changes.")
+    return 2
+
+
+async def _pick_log_target(control: Path) -> str | int:
+    rows = _sort_rows_newest_first(
+        _status_rows(control) + _completed_rows(control))
+    default_id = _resolve_default_id(control)
+    selected_index = next(
+        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
+
+    return await _pick_change_target(
+        rows=rows,
+        header="Show log for which change?  (↑/↓ to move · enter to select · q to cancel)",
+        on_empty=_log_picker_empty,
+        selected_index=selected_index,
+    )
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
@@ -1523,6 +1543,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
             change_id = _resolve_id(control, args.token)
         except SystemExit:
             return 2
+    elif _interactive():
+        target = anyio.run(_pick_log_target, control)
+        if isinstance(target, int):
+            return target
+        change_id = target
     else:
         change_id = _resolve_default_id(control)
     if change_id is None:
@@ -1776,35 +1801,63 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
-    rows = _resumable_rows(control)
-    if not rows:
-        print("Nothing to resume.")
-        past = _past_change_count(control)
-        if past:
-            plural = "s" if past != 1 else ""
-            print(pal.ansi(
-                f"({past} past change{plural} — see `imp status --all`)",
-                "dim", enabled=should_use_color(sys.stdout)))
-        return 0
+def _resume_picker_empty(control: Path) -> int:
+    print("Nothing to resume.")
+    past = _past_change_count(control)
+    if past:
+        plural = "s" if past != 1 else ""
+        print(pal.ansi(
+            f"({past} past change{plural} — see `imp status --all`)",
+            "dim", enabled=should_use_color(sys.stdout)))
+    return 0
+
+
+def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
+    print("Multiple resumable Changes — pass a token:", file=sys.stderr)
+    color = should_use_color(sys.stderr)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color), file=sys.stderr)
+    for r in rows:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color), file=sys.stderr)
+    return 2
+
+
+async def _pick_change_target(
+    *, rows: list[_Row], header: str,
+    on_empty: Callable[[], int],
+    on_non_tty: Callable[[list[_Row]], str | int] | None = None,
+    selected_index: int = 0,
+    non_interactive: bool = False,
+) -> str | int:
+    if not rows:
+        return on_empty()
     if non_interactive or not _interactive():
-        print("Multiple resumable Changes — pass a token:", file=sys.stderr)
-        color = should_use_color(sys.stderr)
-        now = datetime.now(UTC)
-        print(change_row.header_line(color=color), file=sys.stderr)
-        for r in rows:
-            print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2],
-                last_iso=r[3], now=now, color=color), file=sys.stderr)
-        return 2
+        assert on_non_tty is not None
+        return on_non_tty(rows)
+    if len(rows) == 1:
+        return rows[0][0]
     candidates = [resume_select.Candidate(
         change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3])
         for r in rows]
     chosen = await resume_select.run_picker(
-        candidates, now=datetime.now(UTC), color=should_use_color(sys.stdout))
+        candidates, now=datetime.now(UTC),
+        color=should_use_color(sys.stdout),
+        header=header, selected_index=selected_index)
     return chosen if chosen is not None else 2
+
+
+async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
+    return await _pick_change_target(
+        rows=_resumable_rows(control),
+        header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
+        on_empty=lambda: _resume_picker_empty(control),
+        on_non_tty=_resume_picker_non_tty,
+        non_interactive=non_interactive,
+    )
 
 
 def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
@@ -1880,8 +1933,33 @@ def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
     return stop_daemon(_control_root())
 
 
+def _abandon_picker_empty() -> int:
+    print("Nothing to abandon.")
+    return 2
+
+
+def _abandon_picker_non_tty(rows: list[_Row]) -> int:
+    print("imp: abandon needs a change token on a non-interactive terminal",
+          file=sys.stderr)
+    return 2
+
+
+async def _pick_abandon_target(control: Path) -> str | int:
+    return await _pick_change_target(
+        rows=_sort_rows_newest_first(_status_rows(control)),
+        header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
+        on_empty=_abandon_picker_empty,
+        on_non_tty=_abandon_picker_non_tty,
+    )
+
+
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
+    if args.token is None:
+        target = anyio.run(_pick_abandon_target, control)
+        if isinstance(target, int):
+            return target
+        return _abandon(control, target, assume_yes=args.yes)
     try:
         change_id = _resolve_id(control, args.token)
     except SystemExit:
@@ -2136,8 +2214,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
     p_abandon.add_argument(
-        "token",
-        help="Change id or short token identifying which Change to abandon.")
+        "token", nargs="?",
+        help="Change id or short token identifying which Change to abandon "
+             "(omit on a tty to pick from a list).")
     p_abandon.add_argument(
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
