@@ -7,7 +7,6 @@ from pathlib import Path
 
 import anyio
 import pytest
-from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.daemon.commands import HELP_TEXT, ROUTE_HINT
 from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
@@ -17,7 +16,6 @@ from tests.conftest import _seed_control
 from tests.playbooks.fake_telegram import FakeTelegram
 
 CHANGE = "2026-06-13-zzzzzz"
-_MAX = 1 << 20
 
 
 @pytest.fixture
@@ -51,6 +49,11 @@ async def test_e2e_chat_commands_round_trip(
     spath = socket_path(tmp_path)
     shutdown = anyio.Event()
 
+    delivered: list[tuple[str, str]] = []
+
+    async def _capture_deliver(cid: str, text: str) -> None:
+        delivered.append((cid, text))
+
     try:
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
@@ -59,7 +62,7 @@ async def test_e2e_chat_commands_round_trip(
                 create=created.append,
                 abandon=lambda cid: (abandoned.append(cid), 0)[1],
                 list_changes=lambda: listed,
-                resume=lambda cid, text: None,
+                deliver=_capture_deliver,
                 install_signals=False, shutdown=shutdown))
 
             with anyio.fail_after(5):
@@ -85,12 +88,9 @@ async def test_e2e_chat_commands_round_trip(
             fake.inject("/list")
             await _wait(lambda: _text_in_outbox(fake, "@q1w2e3  Listed — running · plan"))
 
-            # A threaded reply rides the live south connection back to the connector.
+            # A threaded reply is delivered into the change's session (attach + inject).
             fake.inject_reply("approved", reply_to_message_id=m1)
-            buf = BufferedByteReceiveStream(client)
-            with anyio.fail_after(10):
-                line = (await buf.receive_until(b"\n", _MAX)).decode("utf-8")
-            assert line == "approved"
+            await _wait(lambda: delivered == [(CHANGE, "approved")])
 
             # /abandon, addressed by replying to the Change's message.
             fake.inject_reply("/abandon", reply_to_message_id=m1)

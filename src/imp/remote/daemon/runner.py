@@ -10,7 +10,7 @@ import signal
 import sys
 import threading
 import urllib.error
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -350,7 +350,7 @@ async def run_daemon(
         [Mapping[str, str], Callable[[Command], None], Focus],
         Any,
     ] = _make_telegram_adapter,
-    resume: Callable[[str, str], None] | None = None,
+    deliver: Callable[[str, str], Awaitable[None]] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
@@ -360,7 +360,7 @@ async def run_daemon(
     """Run the daemon until shutdown: bind socket, own adapter, relay both directions."""
     env = os.environ if env is None else env
     shutdown = anyio.Event() if shutdown is None else shutdown
-    resume = resume or (lambda cid, text: spawn.resume_change(control_root, cid, text))
+    deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_change(control_root, prompt))
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
@@ -377,7 +377,7 @@ async def run_daemon(
         on_attach=lambda cid, autosubscribe: focus.focus_on(cid) if autosubscribe else None,
         on_detach=lambda cid: focus.clear_if(cid))
     control = ControlPlane(
-        hub=hub, resume=resume, create=create,
+        deliver=deliver, create=create,
         abandon=abandon, list_changes=list_changes,
         focus=focus,
         snapshot=lambda cid: discover.snapshot(control_root, cid),
