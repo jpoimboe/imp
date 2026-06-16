@@ -108,6 +108,10 @@ class ToolContext:
     _subagent_counter: int = 0
 
     def next_subagent_invocation_id(self) -> int:
+        """1, 2, 3, ... — per-invocation. subagents.py seeds _subagent_counter
+        from parent_transcript_dir/subagents on resume so a post-resume dispatch
+        never re-targets a persisted subagent dir (see
+        subagents._seed_subagent_counter)."""
         self._subagent_counter += 1
         return self._subagent_counter
 

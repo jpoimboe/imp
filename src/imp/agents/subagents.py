@@ -9,7 +9,10 @@ deadlock that would otherwise hit.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 from imp.agents.parallel import emit_parallelism_warning_once
@@ -17,6 +20,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.transcript import Transcript
 from imp.engine.agent_run import (
     SubagentSuspended as SubagentSuspended,
 )
@@ -105,6 +109,61 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
     )
 
 
+_SUBAGENT_ID_RE = re.compile(r"-(\d+)$")
+
+
+def _seed_subagent_counter(ctx: ToolContext) -> None:
+    """Seed counter past pre-pause dirs so a resumed dispatch never reuses an existing dir."""
+    if ctx._subagent_counter != 0:
+        return
+    assert ctx.parent_transcript_dir is not None
+    d = ctx.parent_transcript_dir / "subagents"
+    if not d.is_dir():
+        return
+    ids = [int(m.group(1)) for p in d.iterdir()
+           if (m := _SUBAGENT_ID_RE.search(p.name))]
+    ctx._subagent_counter = max(ids, default=0)
+
+
+def _allocate_subagent_dir(ctx: ToolContext, subagent_name: str) -> tuple[int, Path]:
+    """Allocate next invocation dir, bumping past dirs with non-empty transcripts."""
+    _seed_subagent_counter(ctx)
+    assert ctx.parent_transcript_dir is not None  # re-narrow (see helper above)
+    base = ctx.parent_transcript_dir / "subagents"
+    invocation_id = ctx.next_subagent_invocation_id()
+    target = base / f"{subagent_name}-{invocation_id}"
+    attempted_id = invocation_id
+    collided: Path | None = None
+    while Transcript(target / "transcript.jsonl").load():
+        if collided is None:
+            collided = target
+        invocation_id = ctx.next_subagent_invocation_id()
+        target = base / f"{subagent_name}-{invocation_id}"
+    if collided is not None:
+        _emit_collision_warning(ctx, collided, attempted_id, invocation_id)
+    return invocation_id, target
+
+
+def _emit_collision_warning(
+    ctx: ToolContext, colliding: Path, attempted_id: int, reallocated_id: int,
+) -> None:
+    """Warn on dir re-allocation; message key is REQUIRED (UI renders payload["message"])."""
+    if ctx.event_log is None:
+        return
+    with contextlib.suppress(Exception):
+        ctx.event_log.append(
+            agent_id=ctx.agent_id, type="runner_warning",
+            payload={
+                "message": (
+                    f"subagent transcript dir collision: id {attempted_id} would "
+                    f"resume the stale transcript at {colliding}; re-allocated to "
+                    f"id {reallocated_id}"),
+                "colliding_path": str(colliding),
+                "attempted_id": attempted_id,
+                "reallocated_id": reallocated_id,
+            })
+
+
 async def dispatch_task(
     ctx: ToolContext, subagent_name: str, task_description: str,
     *, tool_call_event_id: str = "", tier: str | None = None,
@@ -128,7 +187,7 @@ async def dispatch_task(
         )
 
     subagent_def = ctx.subagent_defs[subagent_name]
-    invocation_id = ctx.next_subagent_invocation_id()
+    _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
 
     from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
 
@@ -193,8 +252,7 @@ async def dispatch_task(
             role="user", content=(TextBlock(text=task_description),)),),
         change_context=cc,
         user_chat_input_fn=None,
-        transcript_dir=ctx.parent_transcript_dir / "subagents"
-        / f"{subagent_name}-{invocation_id}",
+        transcript_dir=target_dir,
         fs_permissions=ctx.fs_permissions,
         events_path=ctx.events_path,
         subagent_defs=child_subagent_defs,
