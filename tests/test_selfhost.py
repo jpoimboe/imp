@@ -9,7 +9,6 @@ from imp.engine.selfhost import (
     selfhost_full_env,
     selfhost_launch,
 )
-
 from tests.conftest import _make_imp_checkout
 
 

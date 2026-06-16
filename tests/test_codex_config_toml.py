@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from imp.providers.codex_config import render_config_toml
 from tests.conftest import _make_imp_checkout
