@@ -17,6 +17,13 @@ BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))[
 FORK=$(git merge-base "$BASE" HEAD)
 STATE=".imp/change/state"
 
+# grep -q in a pipeline with pipefail is unreliable: grep exits on first match, git log
+# gets SIGPIPE and exits non-zero, making the pipeline fail even when matches exist.
+# Capture subjects first so grep reads from a here-string with no pipe partner.
+_has_directives() {
+  grep -qE '^(fixup|squash|amend)!' <<< "$(git log --format='%s' "$FORK"..HEAD)"
+}
+
 # ── VERIFY MODE ──────────────────────────────────────────────────────────────
 # A before-tree sentinel means a fold conflict was handed off and autosquash-resolve
 # has now run; this re-entry VERIFIES the agent's resolution instead of starting a
@@ -40,7 +47,7 @@ if [ -f "$STATE/autosquash-before-tree" ]; then
   if [ -d "$(git rev-parse --git-path rebase-merge)" ] \
      || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
     REASON="a rebase is still in progress (the fold was not driven to completion)"
-  elif git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
+  elif _has_directives; then
     REASON="a fixup!/squash!/amend! subject still remains in $FORK..HEAD"
   elif [ "$(git rev-parse 'HEAD^{tree}')" != "$BEFORE_TREE" ]; then
     REASON="HEAD tree does not match the pre-autosquash tree (the fold changed content)"
@@ -80,7 +87,7 @@ set -e
 
 # Fast path: nothing to fold. Match every directive `git rebase --autosquash`
 # reorders (fixup!/squash!/amend!).
-if ! git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
+if ! _has_directives; then
   echo "no fixup!/squash!/amend! commits to autosquash"
   exit 0
 fi
@@ -95,7 +102,7 @@ BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
 # accepts the concatenated message a squash! fold opens the editor for (else
 # editor-less envs wedge).
 if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$FORK"; then
-  if git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
+  if _has_directives; then
     echo "fixup! commits remain after autosquash (unmatched target subject?)" >&2
     exit 1
   fi
