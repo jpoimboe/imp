@@ -1,14 +1,8 @@
-from imp.engine.drivers import (
-    DRIVER_COMMANDS,
-    KNOWN_DRIVERS,
-    driver_allowed_tools,
-    driver_stdio_servers,
-)
+from imp.engine.drivers import KNOWN_DRIVERS, driver_allowed_tools
 
 
-def test_impty_is_a_known_stdio_driver() -> None:
-    assert frozenset({"impty"}) == KNOWN_DRIVERS
-    assert DRIVER_COMMANDS["impty"] == ["python", "-m", "impty.mcp"]
+def test_impty_is_the_known_driver() -> None:
+    assert KNOWN_DRIVERS == frozenset({"impty"})
 
 
 def test_allowed_tools_emits_sorted_wildcards() -> None:
@@ -17,8 +11,8 @@ def test_allowed_tools_emits_sorted_wildcards() -> None:
     assert driver_allowed_tools(["zebra", "alpha"]) == ["mcp__alpha__*", "mcp__zebra__*"]
 
 
-def test_stdio_servers_emit_sdk_stdio_config() -> None:
-    assert driver_stdio_servers({"impty"}) == {
-        "impty": {"type": "stdio", "command": "python", "args": ["-m", "impty.mcp"]}
-    }
-    assert driver_stdio_servers(frozenset()) == {}
+def test_stdio_driver_wiring_is_gone() -> None:
+    import imp.engine.drivers as drivers
+
+    assert not hasattr(drivers, "DRIVER_COMMANDS")
+    assert not hasattr(drivers, "driver_stdio_servers")
