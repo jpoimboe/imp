@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from imp.engine import journal
+
 
 def _dir(control_root: Path) -> Path:
     return control_root / ".imp" / "backlog"
@@ -54,3 +56,10 @@ def list_records(control_root: Path) -> list[dict[str, Any]]:
 
 def remove_record(control_root: Path, change_id: str) -> None:
     record_path(control_root, change_id).unlink(missing_ok=True)
+
+
+def readiness(control_root: Path, depends_on: list[str]) -> tuple[bool, list[str]]:
+    """Returns (ready, unmerged_ids). Ready iff every dep id appears in refs/imp/journal."""
+    journaled = set(journal.journal_ids(control_root))
+    unmerged = [d for d in depends_on if d not in journaled]
+    return (not unmerged, unmerged)

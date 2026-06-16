@@ -46,3 +46,29 @@ def test_remove_record(tmp_path: Path) -> None:
 
 def test_remove_record_nonexistent_is_safe(tmp_path: Path) -> None:
     backlog.remove_record(tmp_path, "2026-06-16-nope00")  # must not raise
+
+
+from imp.engine import journal
+
+
+def test_readiness_all_deps_merged(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        journal, "journal_ids",
+        lambda cr: ["2026-06-16-dep001", "2026-06-16-dep002"])
+    ready, unmerged = backlog.readiness(
+        tmp_path, ["2026-06-16-dep001", "2026-06-16-dep002"])
+    assert ready is True
+    assert unmerged == []
+
+
+def test_readiness_blocked_names_absent_deps(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(journal, "journal_ids", lambda cr: ["2026-06-16-dep001"])
+    ready, unmerged = backlog.readiness(
+        tmp_path, ["2026-06-16-dep001", "2026-06-16-missing"])
+    assert ready is False
+    assert unmerged == ["2026-06-16-missing"]
+
+
+def test_readiness_no_deps_is_ready(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(journal, "journal_ids", lambda cr: [])
+    assert backlog.readiness(tmp_path, []) == (True, [])
