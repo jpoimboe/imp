@@ -33,13 +33,25 @@ def test_deferred_sweep_loads_as_part_of_the_workflow() -> None:
 
 def test_deferred_sweep_prompt_pins_three_dispositions_and_safeguards() -> None:
     low = SWEEP.read_text().lower()
-    assert "silent" in low and "fyi" in low and "veto" in low
-    assert "surface-for-decision" in low or "surface for decision" in low
+    # The three dispositions of the new risk-gated model.
+    assert "record it `fixed`" in low and "needs-decision" in low and "dismissed" in low
+    # Risk, not scope, is the gate.
+    assert "low-risk" in low and "high-risk" in low
+    # The pinned input line the sweep parses.
     assert "- [ ] deferred" in low
-    assert "silent-fixed" in low and "fyi-fixed" in low and "still-deferred" in low
+    # Reviewer discipline: trivial/mechanical fixes skip the quality-reviewer.
     assert "no quality-reviewer" in low or "without a quality-reviewer" in low
+    # Non-trivial fixes must dispatch the quality-reviewer (other half of AC 2).
+    pos = low.find("non-trivial")
+    assert pos >= 0 and "quality-reviewer" in low[pos : pos + 250]
+    # Commit granularity preserved.
     assert "one clean commit" in low
-    assert "plan-writer" in low and "never" in low
+    # The scope-ceiling phrasing is gone (AC 1).
+    assert "never grow the change" not in low
+    # Regression guard: plan-writer routing vocabulary must not reappear.
+    assert "auto-route" not in low
+    # Polish never marks the run degraded; fail-safe retained.
     assert "degraded" in low
     assert "malformed" in low
-    assert "fixability bar" in low and "scope" in low
+    # The three output formats that finalize reads must be pinned.
+    assert "— fixed" in low and "— needs-decision:" in low and "— dismissed:" in low

@@ -107,7 +107,10 @@ progress.md. Two feedback sources resume you here:
      design question).
    - **Defer** when the change **needs judgment or design**, is **out of scope**
      for this task, or is **non-local** (ripples into unrelated code). Deferred
-     findings go to progress.md's Deferred Followups list (step 5).
+     findings go to progress.md's Deferred Followups list (step 5), where the
+     **empowered** `deferred-sweep` picks them up: it is risk-gated, not
+     scope-gated, so it **may fix** an out-of-scope or non-local improvement that
+     the human never needs to see. You defer to that sweep, not to the human.
 
    For every agreed fix — blocking fixes **and** qualifying nits together —
    **re-dispatch the implementer telling it to fix the tree to its final state and

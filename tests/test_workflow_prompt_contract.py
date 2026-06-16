@@ -165,26 +165,36 @@ def test_task_lead_pins_deferred_followups_line_format() -> None:
     assert "deferred-sweep" in low      # the sweep, not the human, is the consumer
 
 
+def test_task_lead_defers_to_empowered_sweep() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # The defer rationale routes to the empowered sweep, not the human (AC 5).
+    assert "empowered" in low, "missing 'empowered' in task-lead defer bullet"
+    assert "may fix" in low, "missing 'may fix' in task-lead defer bullet"
+    # The existing defer properties stay — the sweep is the consumer that takes
+    # them up.
+    for defer in ("out of scope", "non-local"):
+        assert defer in low, f"missing defer property: {defer}"
+
+
 FINALIZE = AGENTS_DIR / "finalize.md"
 
 
 def test_finalize_reads_sweep_dispositions() -> None:
     low = FINALIZE.read_text().lower()
-    assert "fyi-fixed" in low
-    assert "still-deferred" in low
-    assert "silent-fixed" in low      # named only to exclude it
-    assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
-    assert "still deferred" in low
+    # Reads the new dispositions: surfaces needs-decision, rolls up fixed,
+    # ignores dismissed.
+    assert "needs-decision" in low
+    assert "— fixed" in low        # the sweep's output format, counted into built rollup
+    assert "dismissed" in low      # named only to exclude it
+    # The old per-fix surfacing/veto vocabulary is gone (AC 4).
+    for stale in ("fyi-fixed", "still-deferred", "silent-fixed", "veto"):
+        assert stale not in low, f"stale finalize vocabulary: {stale!r}"
 
 
-def test_finalize_presents_two_lists_without_dictating_veto() -> None:
+def test_finalize_surfaces_only_needs_decision_and_rolls_up_fixes() -> None:
     low = FINALIZE.read_text().lower()
-    assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
-    assert "still deferred" in low
-    assert "veto" in low
-    # The veto MECHANISM is intentionally left to the implementer — not prescribed here.
-    assert ("not prescribe" in low or "left to the agents" in low
-            or "do not prescribe" in low or "left to the implementer" in low)
+    # built carries a one-line rollup counting the opportunistic fixes.
+    assert "opportunistic improvement" in low
 
 
 def test_finalize_prompt_states_merge_gate_affordance() -> None:
