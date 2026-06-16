@@ -189,6 +189,28 @@ async def test_build_session_attach_threads_seed_into_spawn(
         tg.cancel_scope.cancel()
 
 
+def test_spawn_session_daemon_includes_resume_flag_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> object:
+        captured["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(change, resume=True)
+
+    assert captured["argv"] == [
+        sys.executable, "-m", "imp.remote.session.daemon",
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--resume",
+    ]
+
+
 @pytest.mark.anyio
 async def test_build_session_attach_uses_resident_daemon_without_spawning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -225,3 +247,26 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
         await client.aclose()
         await server.close()
         tg.cancel_scope.cancel()
+
+
+def test_spawn_session_daemon_seed_before_resume_when_both_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> object:
+        captured["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(change, seed_opening="hello", resume=True)
+
+    assert captured["argv"] == [
+        sys.executable, "-m", "imp.remote.session.daemon",
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--seed-opening=hello",
+        "--resume",
+    ]
