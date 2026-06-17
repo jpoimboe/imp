@@ -9,7 +9,6 @@ import pytest
 
 import imp.cli.prompt as prompt_mod
 from imp.cli import main as cli_main
-from imp.engine.executor import RunResult
 from tests.conftest import _seed_control
 
 
@@ -211,20 +210,12 @@ def test_new_positional_and_spec_file_rc2(
     monkeypatch.chdir(tmp_path)
     draft = tmp_path / "draft.md"
     draft.write_text("Goal: x\n")
-    ran = {"called": False}
-
-    async def _fake_run(*_a: object, **_k: object) -> RunResult:
-        ran["called"] = True
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
 
     args = _new_args(opening="add dark mode", spec_file=str(draft),
                      non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 2
-    assert ran["called"] is False
     assert "mutually exclusive" in capsys.readouterr().err
 
 
@@ -233,19 +224,11 @@ def test_new_missing_spec_file_rc2_no_change(
         capsys: pytest.CaptureFixture[str]) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ran = {"called": False}
-
-    async def _fake_run(*_a: object, **_k: object) -> RunResult:
-        ran["called"] = True
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
 
     args = _new_args(spec_file=str(tmp_path / "nope.md"), non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 2
-    assert ran["called"] is False
     assert "nope.md" in capsys.readouterr().err
     worktrees = tmp_path / ".imp" / "worktrees"
     assert not worktrees.exists() or not any(worktrees.iterdir())
@@ -258,19 +241,11 @@ def test_new_spec_file_and_message_rc2(
     monkeypatch.chdir(tmp_path)
     draft = tmp_path / "draft.md"
     draft.write_text("Goal: x\n")
-    ran = {"called": False}
-
-    async def _fake_run(*_a: object, **_k: object) -> RunResult:
-        ran["called"] = True
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
 
     args = _new_args(spec_file=str(draft), message="hi", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 2
-    assert ran["called"] is False
     assert "mutually exclusive" in capsys.readouterr().err
 
 
@@ -308,8 +283,8 @@ def test_new_tui_delivers_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_tui(change: object, *, args: object,
-                        seed_opening: str | None = None) -> int:
+    async def _fake_tui(change: object, *, seed_opening: str | None = None,
+                        resume: bool = False, from_target: str | None = None) -> int:
         captured["seed_opening"] = seed_opening
         return 0
 

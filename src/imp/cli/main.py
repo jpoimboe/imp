@@ -39,10 +39,12 @@ from imp.cli.remote_channel import (
     select_driver_config,
 )
 from imp.cli.session_run import (
+    infer_session_result,
     make_headless_solicit,
     make_interactive_solicit,
     run_session_client,
 )
+from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.tui_app import TuiApp
@@ -921,51 +923,38 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 
 
 async def _run_tui_session(
-        change: Change, *, args: argparse.Namespace, seed_opening: str | None = None) -> int:
+        change: Change, *, seed_opening: str | None = None,
+        resume: bool = False, from_target: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
-    channel = _maybe_build_channel(change)
+    attach = build_session_attach(
+        change, seed_opening=seed_opening, resume=resume, from_target=from_target)
 
-    async def _solicit(*_a: object, **_k: object) -> str:
+    async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)
 
-    holder: dict[str, Any] = {}
-    load_err: Exception | None = None
     with _benign_interrupt_loop_handler(coord):
-        try:
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(coord.run_signal_receiver)
-                if channel is not None and not await channel.start(tg):
-                    channel = None
-                run_on_event = (
-                    compose_on_event(app.on_event, channel.on_event)
-                    if channel is not None else app.on_event)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(coord.run_signal_receiver)
 
-                async def _run() -> None:
-                    try:
-                        holder["result"] = await run_change(
-                            change, on_event=run_on_event, user_chat_input_fn=_solicit,
-                            coordinator=coord, non_interactive=False,
-                            seed_opening=seed_opening)
-                    finally:
-                        app.exit()
+            async def _run() -> None:
+                try:
+                    with contextlib.suppress(TimeoutError):
+                        await run_terminal_client(
+                            attach=attach, driver=app, coord=coord, solicit=_solicit)
+                finally:
+                    app.exit()
 
-                tg.start_soon(_run)
-                await app.run_async()
-                tg.cancel_scope.cancel()
-        except* (LoadError, LoadErrors) as eg:
-            load_err = eg.exceptions[0]
+            tg.start_soon(_run)
+            await app.run_async()
+            tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
-    if load_err is not None:
-        print(f"imp: {load_err}", file=sys.stderr)
-        return 2
-    result = holder.get("result")
-    if result is None or (result is RunResult.PAUSED and coord.should_pause):
-        return _finalize_paused_exit(
-            change, app, coord, coord.pause_reason or "ctrl-c")
+    result = infer_session_result(change)
+    if result is RunResult.PAUSED and coord.should_pause:
+        return 130
     return _handle_terminal_outcome(change, result, coord)
 
 
@@ -995,7 +984,7 @@ async def _run_fresh_session(
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
                 return await _run_tui_session(
-                    change, args=args, seed_opening=seed_opening)
+                    change, seed_opening=seed_opening)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -1137,18 +1126,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             seed_opening=opening_text, status=status)
 
     if _tui_requested(args):
-        # TUI owns the tty exclusively; its session-daemon flip is deferred.
-        try:
-            with ProjectLock(change.change_dir / "lock").acquire():
-                print(_run_header_line(
-                    change.slug, change.id, "new",
-                    color=should_use_color(sys.stdout)))
-                return await _run_tui_session(
-                    change, args=args, seed_opening=opening_text)
-        except LockHeld as e:
-            print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-                  file=sys.stderr)
-            return 2
+        print(_run_header_line(
+            change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+        return await _run_tui_session(change, seed_opening=opening_text)
 
     print(_run_header_line(
         change.slug, change.id, "new", color=should_use_color(sys.stdout)))
@@ -1269,10 +1249,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     except (LoadError, LoadErrors):
         return _resume_gone(control, change_id)
     state = State.load(change.state_dir)
-    # `running` is allowed THROUGH: it may be a crashed run (the OS dropped its
-    # lock, but the status.json still says running). The ProjectLock acquire below
-    # adjudicates — a genuinely-live run still holds the lock and trips LockHeld
-    # ("already running"); a crashed one's lock is free, so we recover it.
+    # `running` is allowed through: the status may be stale if a previous run
+    # crashed without updating it. The daemon resolves the ambiguity at connect time.
     if state.status not in RESUMABLE and state.status != "running":
         print(
             f"imp: Change {change.id} status is {state.status!r}; "
@@ -1301,69 +1279,13 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change, driver=driver, coord=coord, solicit=solicit,
             resume=True, from_target=from_target, status=status)
     if _tui_requested(args):
-        # --tui resume stays in-process: it owns the tty exclusively and runs the
-        # agent loop in this process. Its session-daemon flip is deferred, so it
-        # keeps acquiring the ProjectLock and running resume prep here.
-        try:
-            with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-                # Re-read status under the lock: the precondition above is an
-                # unlocked read, so a concurrent `imp abandon` could have landed in
-                # the gap. We HOLD the lock now, so a `running` status here is a
-                # crashed run, not a live one.
-                state = State.load(change.state_dir)
-                if state.status not in RESUMABLE and state.status != "running":
-                    print(
-                        f"imp: Change {change.id} status is {state.status!r}; "
-                        "nothing to resume",
-                        file=sys.stderr,
-                    )
-                    return 2
-                print(_run_header_line(
-                    change.slug, change.id, "resuming",
-                    color=should_use_color(sys.stdout)))
-                rewind_plan = None
-                workflow = None
-                if from_target is not None:
-                    from imp.engine.loader import load_workflow
-                    from imp.providers.effective import load_effective_config
-                    try:
-                        cfg = load_effective_config(
-                            project_root=change.project_root,
-                            control_root=change.control_root,
-                        ).config
-                        workflow = load_workflow(
-                            change.workflow_dir, configured_tiers=cfg.tier_names(),
-                            project_keys=frozenset(cfg.project_facts))
-                    except (LoadError, LoadErrors) as e:
-                        print(f"imp: {e}", file=sys.stderr)
-                        return 2
-                    try:
-                        rewind_plan = recovery.plan_rewind(
-                            workflow, state, from_target)
-                    except (recovery.RewindError, recovery.GateBypassRequired) as e:
-                        print(str(e), file=sys.stderr)
-                        return 2
-                change.event_log().append(
-                    agent_id=None, type="workflow_resumed", payload={})
-                # P1 crash recovery: a crashed run (status still "running" on disk)
-                # never set resume_pending; keep and replay the current step's
-                # transcript. Skipped on a --from rewind (apply_rewind manages it).
-                if from_target is None and state.status == "running":
-                    state.resume_pending = state.step
-                state.status = "running"
-                if rewind_plan is not None:
-                    assert workflow is not None
-                    recovery.apply_rewind(
-                        rewind_plan, workflow, state, change.event_log())
-                    print(_rewind_note_line(
-                        rewind_plan.from_step, rewind_plan.target,
-                        color=should_use_color(sys.stdout)))
-                state.save(change.state_dir)
-                return await _run_tui_session(change, args=args)
-        except LockHeld as e:
-            print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-                  file=sys.stderr)
-            return 2
+        if from_target is not None:
+            rc = _validate_from_target(change, state, from_target)
+            if rc is not None:
+                return rc
+        print(_run_header_line(
+            change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+        return await _run_tui_session(change, resume=True, from_target=from_target)
 
     # Interactive resume: a thin session-client. Validate --from client-side
     # (non-mutating) so a bad target returns rc 2 before the daemon spawns; the

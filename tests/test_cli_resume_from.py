@@ -122,12 +122,6 @@ def test_resume_interactive_routes_through_session_client(
     st.save(ch.state_dir)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    async def _fail_run_change(*_a, **_k):
-        raise AssertionError(
-            "run_change must not run in-process for interactive resume")
-
-    monkeypatch.setattr(m, "run_change", _fail_run_change)
-
     made: dict[str, object] = {}
 
     def _fake_make_interactive_solicit(change, *, status, driver, coord):
@@ -188,11 +182,6 @@ def test_resume_non_interactive_routes_through_session_client(
     st.status = "paused"
     st.save(ch.state_dir)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-
-    async def _fail_run_change(*_a, **_k):
-        raise AssertionError("run_change must not run in-process for headless resume")
-
-    monkeypatch.setattr(m, "run_change", _fail_run_change)
 
     made: dict[str, str | None] = {}
 

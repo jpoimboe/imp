@@ -27,11 +27,6 @@ def test_new_non_interactive_routes_through_session_client(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    async def _fail_run_change(*_a: object, **_k: object) -> object:
-        raise AssertionError("run_change must not run in-process for headless new")
-
-    monkeypatch.setattr(cli_main, "run_change", _fail_run_change)
-
     made: dict[str, str | None] = {}
 
     def _fake_make_headless_solicit(message: str | None, _coord: object) -> Any:
@@ -74,11 +69,6 @@ def test_new_interactive_routes_through_session_client(
     """Interactive imp new routes through run_session_client, not run_change."""
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-
-    async def _fail_run_change(*_a: object, **_k: object) -> object:
-        raise AssertionError("run_change must not run in-process for interactive new")
-
-    monkeypatch.setattr(cli_main, "run_change", _fail_run_change)
 
     made: dict[str, object] = {}
 
