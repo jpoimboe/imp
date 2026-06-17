@@ -230,3 +230,26 @@ def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
     low = FINALIZE.read_text().lower()
     for stale in ("fyi", "veto", "fyi-fixed", "silent-fixed", "still-deferred"):
         assert stale not in low, f"reintroduced stale finalize vocabulary: {stale!r}"
+
+
+PLAN_CYCLE_CHECK = AGENTS_DIR / "plan-cycle-check.md"
+
+
+def test_plan_cycle_check_counts_tasks_from_plan_file() -> None:
+    low = PLAN_CYCLE_CHECK.read_text().lower()
+    # Counts the just-implemented plan's tasks from the PLAN FILE, not progress.md.
+    assert "running_tasks" in low
+    assert "{{ vars.tasks_since_review }}".lower() in low
+    assert "plan file" in low
+    assert "## task" in low
+    # Emits the running total so the workflow counter advances.
+
+
+
+def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
+    text = PLAN_CYCLE_CHECK.read_text()
+    # The review can no longer re-open the cycle via plan_gap; that sentence is gone.
+    assert "plan_gap" not in text
+    assert "re-open the cycle" not in text
+    # It is the SOLE completeness guard now.
+    assert "sole" in text.lower() and "completeness" in text.lower()
