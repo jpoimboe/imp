@@ -14,7 +14,6 @@ and the solicit callback, and replaces the in-process run_change call in
 from __future__ import annotations
 
 import contextlib
-import math
 import signal
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -37,7 +36,7 @@ async def run_terminal_client(
     change_id: str = "",
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
-        max_buffer_size=math.inf)
+        max_buffer_size=1)
 
     def _on_event(event: dict[str, Any]) -> None:
         driver.on_event(event)

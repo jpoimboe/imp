@@ -1,7 +1,6 @@
 """Deliver one reply into a change's session daemon (attach + inject + detach)."""
 from __future__ import annotations
 
-import math
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -24,7 +23,7 @@ async def deliver_session_reply(
     """Deliver one reply into change's session daemon, then detach."""
     attach = attach or build_session_attach(change, resume=True)
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
-        max_buffer_size=math.inf)
+        max_buffer_size=1)
 
     def _on_event(event: dict[str, Any]) -> None:
         if event.get("type") == "awaiting_user_input":
