@@ -32,12 +32,6 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
-from imp.cli.remote_channel import (
-    RemoteChannel,
-    compose_on_event,
-    effective_reply_fn,
-    select_driver_config,
-)
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
@@ -45,17 +39,16 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.session_terminal import run_terminal_client
-from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
-from imp.cli.slash import ask_line_with_slash
+from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id, slugify
-from imp.engine.state import LockHeld, ProjectLock, State
+from imp.engine.state import LockHeld, State
 from imp.engine.workflow_lifecycle import (
     DriftState,
     classify_drift,
@@ -231,79 +224,6 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
-def _maybe_build_channel(change: Change) -> RemoteChannel | None:
-    """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
-    behaves exactly as today). Title is captured at run start. A bad config is
-    surfaced elsewhere (run_change reloads it) — never fail channel construction
-    over config here; return None on any config error."""
-    from imp.providers.effective import load_effective_config
-    try:
-        config = load_effective_config(
-            project_root=change.project_root,
-            control_root=change.control_root).config
-    except (LoadError, LoadErrors):
-        return None
-    dc = select_driver_config(
-        config, control_root=change.control_root,
-        change_id=change.id, title=change.title, env=os.environ)
-    if dc is None:
-        return None
-    return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
-
-
-def _build_interactive_input(
-    change: Change, status: LiveStatus, coord: Any, esc_reader: Any, driver: Any,
-) -> tuple[ReplyInterjectRouter, Callable[[], Awaitable[str]]]:
-    """Build the interactive input plumbing shared by `new` and `resume` (Task 11).
-
-    Returns `(router, solicit_fn)`:
-      - `router` is the testable routing core (reply-vs-interject by submit-time
-        state, see ReplyInterjectRouter);
-      - `solicit_fn` is what the engine calls to SOLICIT a reply (wait_for_user):
-        it marks the router's solicit flag active for the duration
-        of the prompt_toolkit read and returns the typed line. Same behavior as
-        the legacy `_ask_line` — the prompt owns the tty (ESC quiesced) and the
-        line is the REPLY.
-
-    Where do interject lines come from? NOT a competing prompt — that would steal
-    /dev/tty from the ESC reader during agent-thinking and break ESC-to-pause (the
-    landed invariant). Instead the ESC reader — the sole /dev/tty owner during
-    thinking — gets an `on_interject` sink: a line typed while the agent runs is
-    captured raw and handed to `router.route`, which (solicit inactive) enqueues
-    it as an interject. During a solicit the ESC reader is quiesced and silent, so
-    its sink never fires then; the prompt owns input and the line is a reply.
-
-    The solicit-active flag is thus realized two ways that agree: the router's
-    boolean (set around the prompt read) and, physically, the ESC reader's
-    quiesce state. `router.route` is the pure, unit-tested decision; this wiring
-    is the thin, TTY-fragile shell around it (the interject read path is the one
-    documented to CPR-degrade under impty — L4).
-    """
-    prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                    editing_mode=_editing_mode(change.control_root),
-                    color=should_use_color(sys.stdout))
-    router = ReplyInterjectRouter(coord)
-
-    # The ESC reader funnels a mid-run typed line here; route() enqueues it as an
-    # interject (no solicit active) — delivered at the next agent turn boundary.
-    esc_reader.set_interject_sink(router.route)
-
-    async def _solicit() -> str:
-        # Reply path: identical to the legacy _ask_line, but flag the router
-        # active for the prompt's duration so the reply-vs-interject model is
-        # explicit (and a stray sink call during a prompt would route as reply).
-        router.begin_solicit()
-        try:
-            return await ask_line_with_slash(
-                prompt, status, change,
-                color=should_use_color(sys.stdout), width=_term_width(),
-                coord=coord, driver=driver)
-        finally:
-            router.end_solicit()
-
-    return router, _solicit
-
-
 # -- end-of-run status lines ------------------------------------------------
 # Semantic color + a leading glyph tell you at a glance how a run ended. The
 # decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
@@ -374,15 +294,6 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str]:
     name = _slug_descriptor(change.slug) or resume_token(change.id)
     phase = _phase_from_events(list(change.event_log().read()))
     return name, phase, resume_token(change.id)
-
-
-def _emit_paused(change: Change, reason: str | None = None) -> None:
-    """Interactive exit — print the dimmed pause headline (with trigger reason if given)."""
-    color = should_use_color(sys.stdout)
-    name, phase, token = _pause_facts(change)
-    print("\n" + "\n".join(
-        _pause_lines(name, phase, token, reason=reason, color=color,
-                     recover_phase=_recover_phase(change))))
 
 
 def _emit_paused_summary(change: Change) -> None:
@@ -460,18 +371,6 @@ def _should_respawn_reader(*, reader_exited: bool) -> bool:
     return reader_exited
 
 
-def _interactive_loop_predicate(
-    *, non_interactive: bool, reader_armed: bool,
-    stdin_tty: bool, stdout_tty: bool,
-) -> bool:
-    """The §2 loop runs only for an attended session: not --non-interactive, the
-    ESC reader armed at startup (LATCHED — not a live is_running(), which reads
-    false right after an ESC interrupt), and both stdin/stdout are ttys (the
-    reader opens /dev/tty, so a piped stdin must not park a run at a prompt
-    consuming pipe content as replies)."""
-    return (not non_interactive) and reader_armed and stdin_tty and stdout_tty
-
-
 def _handle_terminal_outcome(
     change: Change, result: RunResult, coord: Any,
 ) -> int:
@@ -507,258 +406,6 @@ def _handle_terminal_outcome(
             )
     _emit_paused_summary(change)
     return 1
-
-
-async def _run_actuator(
-    coord: Any, exit_event: Any, run_scope_holder: dict[str, Any],
-) -> None:
-    """Watch the escalation + exit events; on either, cancel ONLY the current
-    round's run scope (held in run_scope_holder) — never the task group, which
-    owns the signal receiver + status ticker the exit path still needs. On
-    escalation, also set coord.escalated so the loop routes to force-quit."""
-
-    async def _on_esc() -> None:
-        await coord.escalation_event.wait()
-        coord.escalated = True
-        sc = run_scope_holder["scope"]
-        if sc is not None:
-            sc.cancel()
-
-    async def _on_exit() -> None:
-        await exit_event.wait()
-        sc = run_scope_holder["scope"]
-        if sc is not None:
-            sc.cancel()
-
-    async with anyio.create_task_group() as wtg:
-        wtg.start_soon(_on_esc)
-        wtg.start_soon(_on_exit)
-
-
-async def _run_change_session(
-    change: Change,
-    *,
-    coord: Any,
-    driver: Any,
-    status: Any,
-    esc_reader: EscKeyReader | None,
-    reply_input_fn: Callable[[], Awaitable[str]],
-    non_interactive: bool,
-    tg: Any,
-    channel: Any = None,
-    seed_opening: str | None = None,
-) -> int:
-    """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
-    loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
-    exiting. Runs INSIDE the caller's task group (`tg`).
-
-    Each round runs `run_change` under a FRESH single-use CancelScope (published
-    to `run_scope_holder` so the C4 actuator can cancel the live run on escalation
-    / exit-event). On a loopable interrupt pause the coordinator is reset, the ESC
-    reader respawned if it exited, and a prompt collects the next message before
-    the next round; a bare Enter with an empty queue re-prompts. Out-of-band stops
-    (Ctrl-D, force-quit, SIGTERM/exit-event) finalize a paused exit (rc 130). On
-    every exit path the live status is reset and the task group cancelled."""
-    # C4 actuator scaffolding + ack hook (in scope for the whole session).
-    coord.escalation_event = anyio.Event()
-    exit_event = anyio.Event()
-    coord._exit_event = exit_event   # the D3 prompt-teardown race reads this
-    coord.set_escalation_hook(coord.escalation_event.set)
-    coord.set_exit_hook(lambda _r: exit_event.set())  # only signals; pause
-    # state is set on the signal paths themselves (review B2)
-    if not non_interactive:
-        coord.set_ack_hook(status.show_stop_ack)
-    run_scope_holder: dict[str, Any] = {"scope": None}
-
-    tg.start_soon(_run_actuator, coord, exit_event, run_scope_holder)
-
-    try:
-        if channel is not None and not await channel.start(tg):
-            channel = None
-        run_on_event = (
-            compose_on_event(driver.on_event, channel.on_event)
-            if channel is not None else driver.on_event)
-        reader_armed = (
-            bool(esc_reader and esc_reader._armed) if not non_interactive else False)
-        result: RunResult | None = None
-        seed_opening_pending = seed_opening
-        while True:
-            run_scope_holder["scope"] = anyio.CancelScope()
-            try:
-                with run_scope_holder["scope"]:
-                    # Bind the CURRENT reply_input_fn (it is rebound on reader
-                    # respawn each round) so the wait_for_user channel always
-                    # calls the live one.
-                    _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
-                        reply_input_fn, channel, non_interactive=non_interactive)
-
-                    def _chat(
-                        _q: object,
-                        _fn: Callable[[], Awaitable[str]] = _reply,
-                    ) -> Awaitable[str]:
-                        return _fn()
-
-                    result = await run_change(
-                        change, on_event=run_on_event,
-                        user_chat_input_fn=_chat,
-                        coordinator=coord, non_interactive=non_interactive,
-                        seed_opening=seed_opening_pending)
-                    seed_opening_pending = None
-            except EOFError:
-                return _finalize_paused_exit(
-                    change, driver, coord,
-                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
-            except KeyboardInterrupt:
-                return _finalize_paused_exit(
-                    change, driver, coord,
-                    _exit_pause_reason(coord.pause_reason, "ctrl-c"))
-
-            if coord.escalated:
-                return _finalize_paused_exit(change, driver, coord, "force-quit")
-            if exit_event.is_set():
-                return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "sigterm")
-            assert result is not None
-
-            interrupt_paused = (
-                result is RunResult.PAUSED
-                and coord.should_pause
-                and not coord.escalated)
-            if not interrupt_paused:
-                # Terminal outcome (COMPLETED, or a non-interrupt PAUSE such as
-                # merge_blocked). Do NOT reload State here: a merge-completing run
-                # has already finalized in _complete by removing the worktree —
-                # the change state dir, and its state.json, went with it — so
-                # State.load(change.state_dir) would crash with FileNotFoundError.
-                # final_state is only ever consulted on the interrupt-paused
-                # loopable path below, so it is never needed here. The terminal
-                # handler reads the outcome from `result`, not from disk.
-                break
-            final_state = State.load(change.state_dir)
-            interactive = _interactive_loop_predicate(
-                non_interactive=non_interactive, reader_armed=reader_armed,
-                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
-            loopable = (
-                coord.pause_reason in ("esc", "ctrl-c")
-                and final_state.status == "paused"
-                and interactive)
-            if not loopable:
-                # An interrupt paused the run but the session is not loopable
-                # (--non-interactive, or no controlling tty): exit paused,
-                # mirroring the legacy `coord.should_pause` arm (rc 130).
-                return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "ctrl-c")
-
-            coord.reset()
-            if not non_interactive and _should_respawn_reader(
-                    reader_exited=(coord._esc_reader is None)):
-                esc_reader = EscKeyReader(coord)
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-                await tg.start(esc_reader.run)
-                reader_armed = bool(esc_reader._armed)
-
-            at_completion = final_state.completion_pending
-            try:
-                line, slash = await _collect_resume_input(
-                    reply_input_fn, coord, at_completion=at_completion)
-            except EOFError:
-                # Ctrl-D at the resume prompt → pause-and-exit (rc 130), the same
-                # finalize as a Ctrl-D during the run (plan §2: the interrupted
-                # prompt's Ctrl-D pauses, it does not crash).
-                return _finalize_paused_exit(
-                    change, driver, coord,
-                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
-            except KeyboardInterrupt:
-                # Second Ctrl-C or SIGTERM at the resume prompt: pause-and-exit,
-                # mirroring the run loop's exit arm.
-                return _finalize_paused_exit(
-                    change, driver, coord, _exit_pause_reason(coord.pause_reason, "ctrl-c"))
-            if slash != "continue" and line.strip():
-                coord.enqueue_interject(line)
-            change.event_log().append(
-                agent_id=None, type="workflow_resumed", payload={})
-            running_state = State.load(change.state_dir)
-            running_state.status = "running"
-            running_state.save(change.state_dir)
-        driver.finish()
-        return _handle_terminal_outcome(change, result, coord)
-    finally:
-        if channel is not None:
-            with anyio.CancelScope(shield=True):
-                await channel.stop()
-        status.reset()
-        tg.cancel_scope.cancel()
-
-
-def _exit_pause_reason(engine_reason: str | None, gesture: str) -> str:
-    return engine_reason or gesture
-
-
-def _finalize_paused_exit(
-    change: Change, driver: Any, coord: Any, reason: str,
-) -> int:
-    """Finish the driver, persist the paused state, journal the pause (guarded
-    by the journal-tail idempotency check in pause_and_exit), and return rc 130.
-    The single exit sequence shared by every interrupt/EOF/SIGTERM/escalation
-    path out of the session loop."""
-    driver.finish()
-    pause_and_exit(change, reason=reason)
-    _emit_paused(change, reason)
-    return 130
-
-
-async def _collect_resume_input(
-    reply_input_fn: Callable[[], Awaitable[str]],
-    coord: Any,
-    *,
-    at_completion: bool,
-) -> tuple[str, str | None]:
-    """Inner prompt loop for a paused interrupt round: re-prompt WITHOUT
-    re-entering run_change until the user submits something that resumes. Returns
-    (line, slash) at the resume decision. A bare Enter / empty-queue re-prompts;
-    at completion only /continue (or Ctrl-D) finishes. Ctrl-D raises EOFError out
-    of reply_input_fn; the caller wraps this call in `except EOFError` to
-    pause-and-exit (rc 130) — EOFError is propagated, never swallowed here."""
-    if not at_completion and sys.stdout.isatty():
-        print("paused — type a message to redirect, "
-              "or ctrl-d to leave it paused")
-    reminder_shown = False
-    while True:
-        line = await reply_input_fn()  # Ctrl-D → EOFError (propagated to caller)
-        slash = "continue" if line.strip() == "/continue" else None
-        if at_completion:
-            if slash == "continue":
-                return line, slash
-            if sys.stdout.isatty():
-                print("no step left to take input — "
-                      "/continue to finish or ctrl-d to exit"
-                      if line.strip()
-                      else "/continue to finish or ctrl-d to exit")
-            continue
-        queued = coord.has_queued_interject()
-        if _decide_resume_action(line=line, queued=queued, slash=slash) == "reprompt":
-            if not reminder_shown and sys.stdout.isatty():
-                reminder_shown = True
-                print("enter a message, /continue to resume, "
-                      "ctrl-d to exit")
-            continue
-        return line, slash
-
-
-def _decide_resume_action(*, line: str, queued: bool, slash: str | None) -> str:
-    """Pure §2 resume-vs-re-prompt decision. Returns 'resume' or 'reprompt'.
-
-    Resume whenever there is text to deliver: a non-empty line, a queued
-    interject, or explicit /continue. A bare Enter with an empty queue
-    re-prompts (an accidental Enter must not relaunch a billable turn)."""
-    if slash == "continue":
-        return "resume"
-    if line.strip():
-        return "resume"
-    if queued:
-        return "resume"
-    return "reprompt"
 
 
 def _project_root() -> Path:
@@ -974,60 +621,41 @@ def _record_backlog(args: argparse.Namespace, control: Path) -> int:
 async def _run_fresh_session(
     change: Change, *, args: argparse.Namespace, seed_opening: str | None,
 ) -> int:
+    """Run a freshly-created change (new / playbook / materialized backlog) through
+    the per-change session daemon, dispatching on headless / --tui / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
-    try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            print(_run_header_line(
-                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
-            non_interactive = bool(getattr(args, "non_interactive", False))
-            _warn_if_tui_unavailable(args, sys.stdout)
-            if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(
-                    change, seed_opening=seed_opening)
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            channel = _maybe_build_channel(change)
-            rc = 0
-            esc_reader: EscKeyReader | None = None
-            if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
-                    args.message)
-            else:
-                esc_reader = EscKeyReader(coord)
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-
-            try:
-                with _benign_interrupt_loop_handler(coord):
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        if not non_interactive:
-                            tg.start_soon(status.tick)
-                            assert esc_reader is not None
-                            # blocks until armed: avoids /dev/tty race if first step is interactive
-                            await tg.start(esc_reader.run)
-                        rc = await _run_change_session(
-                            change, coord=coord, driver=driver, status=status,
-                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=seed_opening)
-            except* (LoadError, LoadErrors) as eg:
-                driver.finish()
-                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
-                rc = 2
-            return rc
-    except LockHeld as e:
-        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-              file=sys.stderr)
-        return 2
+    non_interactive = bool(getattr(args, "non_interactive", False))
+    _warn_if_tui_unavailable(args, sys.stdout)
+    print(_run_header_line(
+        change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+    if non_interactive:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_headless_solicit(args.message, coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=seed_opening, status=status)
+    if _tui_requested(args):
+        return await _run_tui_session(change, seed_opening=seed_opening)
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(stream=sys.stdout,
+                        color=should_use_color(sys.stdout),
+                        width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        seed_opening=seed_opening, status=status)
 
 
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
+    from imp.cli.signals import InterruptCoordinator
 
     try:
         control = _control_root()

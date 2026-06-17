@@ -623,12 +623,12 @@ def test_main_forwards_from_target_without_resume(
 def _seed_control_default(root: Path) -> None:
     import shutil
 
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
     from tests.conftest import _git, _init_repo
 
     _init_repo(root)
-    shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    shutil.copytree(bundled_workflow_dir("imp"), root / "imp" / "workflows" / "imp")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
