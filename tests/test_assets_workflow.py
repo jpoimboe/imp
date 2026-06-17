@@ -550,14 +550,14 @@ def test_autosquash_non_fast_path_goes_to_review_base_init() -> None:
     assert m.action.target == "review-base-init" and m.action.resume is False
 
 
-def test_autosquash_fast_path_skips_to_plan_cycle_check() -> None:
+def test_autosquash_fast_path_goes_to_review_base_init() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["autosquash"].rules
     m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                        output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-cycle-check" and m.action.resume is False
+    assert m.action.target == "review-base-init" and m.action.resume is False
 
 
 def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:

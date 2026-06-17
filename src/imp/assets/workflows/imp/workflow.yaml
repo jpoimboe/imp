@@ -128,13 +128,11 @@ phases:
           - {else: true, resume: task-lead}
 
       # autosquash folds this plan's fixup chain into one-commit-per-task BEFORE any
-      # review reads the diff. Clean fold -> pin the per-batch diff base; trivial
-      # fast-path -> skip review entirely and let plan-cycle-check route to integration.
+      # review reads the diff. Clean fold -> pin the per-batch diff base.
       - name: autosquash
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: plan-cycle-check}   # trivial: no per-batch diff base needed
           - {if: {exit: 0}, goto: review-base-init}                    # clean fold / verified resolution -> pin diff base
           - {if: {exit: 2}, continue: true}                            # resolvable fold conflict -> autosquash-resolve
           - {else: true, pause: true}                                  # hard failure / verify bound exhausted
