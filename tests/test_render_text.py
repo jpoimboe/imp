@@ -452,7 +452,7 @@ def test_breadcrumb_and_fallback_recede_to_gray() -> None:
         depth=0, full=False, color=True, width=80)))
     assert pal._ANSI["step"] in crumb           # step color, not the goto accent
     fallback = next(iter(rt._render(
-        nv.FallbackLine(event_type="change_merged", payload={"slug": "s"}),
+        nv.FallbackLine(event_type="change_merged", payload={"id": "s"}),
         depth=0, full=False, color=True, width=80)))
     assert pal._ANSI["gray"] in fallback
 
