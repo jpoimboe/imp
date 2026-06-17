@@ -158,8 +158,11 @@ async def run_change(
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
     seed_opening: str | None = None,
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
+    if wait_for_turn_fn is None:
+        wait_for_turn_fn = _headless_wait_for_turn
     if coordinator is None:
         # Lazy import to avoid circular dep at module-load time.
         from imp.cli.signals import InterruptCoordinator
@@ -249,7 +252,8 @@ async def run_change(
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
                 project_facts=state.project_facts or {},
-                guidance=state.guidance or "")
+                guidance=state.guidance or "",
+                wait_for_turn_fn=wait_for_turn_fn)
             if seed_for_step is not None:
                 pending_seed = None
 
@@ -404,6 +408,7 @@ async def _dispatch_step(
     seed_opening: str | None = None,
     project_facts: dict[str, str] | None = None,
     guidance: str = "",
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -413,6 +418,9 @@ async def _dispatch_step(
         state.retry_feedback = None
         state.save(change.state_dir)
 
+    if step.kind == "wait_for_head":
+        assert wait_for_turn_fn is not None
+        return await _route_wait_for_head(step, change, state, log, wait_for_turn_fn)
     if step.kind == "branch":
         return _route_branch(step, state, log)
     if step.kind == "merge":
@@ -522,6 +530,48 @@ def _decisions_body(spec_path: Path) -> str | None:
             out.append(line)
     text = "\n".join(out).strip()
     return text or None
+
+
+async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
+    """Default wait_for_turn used when run_change runs without a session server
+    (tests, or a non-daemon caller): proceed iff already head, else hibernate."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    if predicate():
+        return
+    raise AwaitingUserInput()
+
+
+async def _route_wait_for_head(
+    step: Step, change: Change, state: State, log: EventLog,
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]],
+) -> tuple[Action, str | None, dict[str, object]]:
+    """Enqueue-if-absent, then proceed when head; otherwise wait. A non-head
+    change with a client attached stays resident (wait_for_turn_fn polls the
+    queue and watches detach); with no client it hibernates (AwaitingUserInput ->
+    a clean paused exit, rehydrated later by the popping head's `imp resume`)."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine import merge_queue
+    _emit_started(log, step)
+    merge_queue.enqueue_if_absent(change.control_root, change.id, change.base_branch)
+
+    def _is_head() -> bool:
+        return merge_queue.is_head(change.control_root, change.id, change.base_branch)
+
+    if not _is_head():
+        ahead = merge_queue.position(change.control_root, change.id, change.base_branch)
+        _emit(log, "waiting_for_head", {"base": change.base_branch, "ahead": ahead})
+        try:
+            await wait_for_turn_fn(_is_head)
+        except AwaitingUserInput:
+            pause = Pause(reason="awaiting_turn")
+            _emit(log, "step_completed", {
+                "step": step.name, "kind": step.kind,
+                "action": _action_payload(pause), "var_mutations": {}})
+            return pause, None, {}
+
+    match = evaluate_rules(step.rules, vars=state.vars, output=None)
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
 
 
 async def _route_merge(

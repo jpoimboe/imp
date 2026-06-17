@@ -86,6 +86,7 @@ async def serve_change_session(
             on_event=on_event,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
+            wait_for_turn_fn=server.wait_for_turn,
             **first_kwargs,
         )
         while _is_interrupt_pause(result, coordinator):
@@ -107,6 +108,7 @@ async def serve_change_session(
                 on_event=on_event,
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
+                wait_for_turn_fn=server.wait_for_turn,
             )
         return result
 
