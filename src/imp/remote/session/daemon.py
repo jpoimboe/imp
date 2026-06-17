@@ -12,7 +12,7 @@ import anyio
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
-from imp.engine.state import ProjectLock, State
+from imp.engine.state import LockHeld, ProjectLock, State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
@@ -43,10 +43,9 @@ async def serve_change_session(
     server = SessionServer(
         socket_path,
         coordinator=coordinator,
-        lock=ProjectLock(change.change_dir / "lock"),
+        lock=None,
         hibernate=hibernate,
     )
-    await server.open()
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -112,7 +111,13 @@ async def serve_change_session(
             )
         return result
 
-    result = await server.serve(_bound)
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():
+            await server.open()
+            result = await server.serve(_bound)
+    except LockHeld:
+        # A wake-spawn raced a resident change: exit harmlessly without binding socket.
+        return None
     if server.abandoned:
         # cwd is control_root, not the worktree, so worktree removal is safe
         await anyio.to_thread.run_sync(tear_down, change)
