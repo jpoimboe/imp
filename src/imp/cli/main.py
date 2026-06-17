@@ -1067,13 +1067,14 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     if _notice is not None:
         print(f"imp: {_notice}")
 
+    non_interactive = bool(getattr(args, "non_interactive", False))
     _verify_command_nudge(
         project_root=control, control_root=control,
-        non_interactive=bool(getattr(args, "non_interactive", False)),
+        non_interactive=non_interactive,
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
-    interactive = (not bool(getattr(args, "non_interactive", False))
+    interactive = (not non_interactive
                    and sys.stdin.isatty() and sys.stdout.isatty())
     opening_text = seed.seed_text
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
@@ -1107,7 +1108,6 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    non_interactive = bool(getattr(args, "non_interactive", False))
     _warn_if_tui_unavailable(args, sys.stdout)
     if non_interactive:
         # Headless: the per-change session daemon owns the worktree + lock and
