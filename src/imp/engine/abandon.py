@@ -1,15 +1,17 @@
-"""Destroy a Change: status -> abandoned, journal it, remove worktree + branch."""
+"""Destroy a Change: status -> abandoned, remove from merge queue, journal it, remove worktree + branch."""
 from __future__ import annotations
 
-from imp.engine import worktree
+from imp.engine import merge_queue, worktree
 from imp.engine.change import Change
 from imp.engine.state import ProjectLock, State
 
 
 def tear_down_change(change: Change) -> None:
-    """Destroy a change: mark abandoned, journal, remove worktree and branch."""
+    """Destroy a change: mark abandoned, journal, remove from the merge queue
+    (waking the next head if this change was the head), remove worktree + branch."""
     control = change.control_root
     change_id = change.id
+    base_branch = change.base_branch
     with ProjectLock(change.change_dir / "lock").acquire():  # raises LockHeld if runner is live
         state = State.load(change.state_dir)
         state.status = "abandoned"
@@ -22,6 +24,8 @@ def tear_down_change(change: Change) -> None:
             "change.json": change.change_dir / "change.json",
             "state.json": change.state_dir / "state.json",
         })
+    # Uses RepoGitLock, independent of the per-change ProjectLock held above.
+    merge_queue.pop_and_wake(control, change_id, base_branch)
     # branch delete must happen after worktree removal (git forbids deleting a checked-out branch)
     worktree.remove_worktree(control, change_id, force=True)
     worktree.delete_branch(control, change_id)
