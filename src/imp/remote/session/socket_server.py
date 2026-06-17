@@ -41,7 +41,7 @@ class SessionSocket:
         self,
         path: str,
         *,
-        on_attach: Callable[[Attach], None] | None = None,
+        on_attach: Callable[[Attach, Callable[[dict[str, Any]], None]], None] | None = None,
         on_detach: Callable[[], None] | None = None,
         on_control: Callable[[str], None] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
@@ -82,12 +82,15 @@ class SessionSocket:
 
     def broadcast(self, event: dict[str, Any]) -> None:
         for client in list(self._clients):
-            try:
-                client.send.send_nowait(event)
-            except anyio.WouldBlock:
-                self._drop(client)
-            except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-                self._clients.discard(client)
+            self._send_one(client, event)
+
+    def _send_one(self, client: _Client, event: dict[str, Any]) -> None:
+        try:
+            client.send.send_nowait(event)
+        except anyio.WouldBlock:
+            self._drop(client)
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            self._clients.discard(client)
 
     def _drop(self, client: _Client) -> None:
         self._clients.discard(client)
@@ -141,7 +144,7 @@ class SessionSocket:
                 client = _Client(stream=stream, send=send, scope=ctg.cancel_scope)
                 self._clients.add(client)
                 if self._on_attach is not None:
-                    self._on_attach(hello)
+                    self._on_attach(hello, lambda ev: self._send_one(client, ev))
                 ctg.start_soon(self._pump_client, client, recv)
                 try:
                     while True:

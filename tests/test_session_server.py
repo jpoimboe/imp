@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -411,6 +412,61 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
         with anyio.fail_after(5):
             line = (await buf2.receive_until(b"\n", 1 << 20)).decode()
         assert parse_event(line) == prompt_event
+        await client1.aclose()
+        await client2.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    gate_reached = anyio.Event()
+    prompt_event = {"type": "awaiting_user_input", "payload": {"prompt": "paused"}}
+    server = SessionServer(sock, hibernate=True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        on_event(prompt_event)
+        gate_reached.set()
+        try:
+            return await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+
+    seen1: list[dict[str, Any]] = []
+
+    async def _read(buf: BufferedByteReceiveStream, sink: list) -> None:
+        with contextlib.suppress(anyio.EndOfStream, anyio.IncompleteRead,
+                                 anyio.ClosedResourceError):
+            while True:
+                line = (await buf.receive_until(b"\n", 1 << 20)).decode()
+                sink.append(parse_event(line))
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve, run_fn)
+        client1 = await _attach(sock, "c1")
+        tg.start_soon(_read, BufferedByteReceiveStream(client1), seen1)
+        await gate_reached.wait()
+        with anyio.fail_after(5):
+            while seen1.count(prompt_event) < 1:
+                await anyio.sleep(0.02)
+        # A second client attaches AFTER the prompt already fired.
+        client2 = await _attach(sock, "c2")
+        seen2: list[dict[str, Any]] = []
+        tg.start_soon(_read, BufferedByteReceiveStream(client2), seen2)
+        with anyio.fail_after(5):
+            while seen2.count(prompt_event) < 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.1)  # give any buggy re-broadcast time to land on c1
+        assert seen1.count(prompt_event) == 1  # NOT re-delivered to the first client
+        assert seen2.count(prompt_event) == 1  # delivered once to the late client
         await client1.aclose()
         await client2.aclose()
         tg.cancel_scope.cancel()

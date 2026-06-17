@@ -35,7 +35,7 @@ async def test_attach_handshake_registers_client_and_reports_attach(
 ) -> None:
     sock = str(tmp_path / "s.sock")
     attached: list[Attach] = []
-    session = SessionSocket(sock, on_attach=attached.append)
+    session = SessionSocket(sock, on_attach=lambda hello, _send: attached.append(hello))
     async with anyio.create_task_group() as tg:
         await session.open()
         tg.start_soon(session.serve)

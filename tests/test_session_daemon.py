@@ -230,6 +230,60 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
         tg.cancel_scope.cancel()
 
 
+@pytest.mark.anyio
+async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-dup")
+    sock = str(session_socket_path(change.control_root, change.id))
+    calls = {"n": 0}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        seen1: list[dict[str, Any]] = []
+        c1 = SessionClient(sock, change.id, change.title, on_event=seen1.append)
+        await c1.connect()
+        tg.start_soon(c1.receive_events)
+        with anyio.fail_after(5):
+            while sum(e.get("type") == "awaiting_user_input" for e in seen1) < 1:
+                await anyio.sleep(0.02)
+        # Late client attaches at the resume gate.
+        seen2: list[dict[str, Any]] = []
+        c2 = SessionClient(sock, change.id, change.title, on_event=seen2.append)
+        await c2.connect()
+        tg.start_soon(c2.receive_events)
+        with anyio.fail_after(5):
+            while sum(e.get("type") == "awaiting_user_input" for e in seen2) < 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.1)
+        assert sum(e.get("type") == "awaiting_user_input" for e in seen1) == 1
+        await c2.send_input("go")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        await c1.aclose()
+        await c2.aclose()
+        tg.cancel_scope.cancel()
+
+
 def test_is_interrupt_pause_true_only_for_paused_with_should_pause() -> None:
     paused_interrupt = SimpleNamespace(should_pause=True)
     paused_workflow = SimpleNamespace(should_pause=False)

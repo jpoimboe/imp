@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import contextlib
-import math
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anyio
-from anyio.streams.memory import (
-    MemoryObjectReceiveStream,
-    MemoryObjectSendStream,
-)
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_INTERRUPT
 from imp.remote.session.socket_server import SessionSocket
@@ -44,10 +40,6 @@ class SessionServer:
             on_detach=self._on_detach_pulse,
             on_control=self._enqueue_control,
         )
-        ev_send, ev_recv = anyio.create_memory_object_stream[dict[str, Any]](
-            max_buffer_size=math.inf)
-        self._event_send: MemoryObjectSendStream[dict[str, Any]] = ev_send
-        self._event_recv: MemoryObjectReceiveStream[dict[str, Any]] = ev_recv
         ctl_send, ctl_recv = anyio.create_memory_object_stream[str](
             max_buffer_size=_CONTROL_QUEUE_DEPTH)
         self._control_send: MemoryObjectSendStream[str] = ctl_send
@@ -75,13 +67,11 @@ class SessionServer:
                 self._serve_scope = tg.cancel_scope
                 tg.start_soon(self._socket.serve)
                 async with anyio.create_task_group() as pump_tg:
-                    pump_tg.start_soon(self._pump)
                     pump_tg.start_soon(self._control_loop)
                     try:
                         result = await run_fn(
                             on_event=self._emit, user_chat_input_fn=self._chat)
                     finally:
-                        await self._event_send.aclose()
                         await self._control_send.aclose()
                 tg.cancel_scope.cancel()
         finally:
@@ -91,11 +81,7 @@ class SessionServer:
     def _emit(self, event: dict[str, Any]) -> None:
         if event.get("type") == "awaiting_user_input":
             self.set_pending_prompt(event)
-        self._event_send.send_nowait(event)
-
-    async def _pump(self) -> None:
-        async for event in self._event_recv:
-            self._socket.broadcast(event)
+        self._socket.broadcast(event)
 
     async def _chat(self, _query: str) -> str:
         try:
@@ -150,10 +136,12 @@ class SessionServer:
         """Track a prompt event to re-emit to clients that connect after it fires."""
         self._pending_prompt = event
 
-    def _on_attach_pulse(self, _attach: Any) -> None:
+    def _on_attach_pulse(
+        self, _attach: Any, send_one: Callable[[dict[str, Any]], None],
+    ) -> None:
         self._pulse_attach_change()
         if self._pending_prompt is not None:
-            self._emit(self._pending_prompt)
+            send_one(self._pending_prompt)
 
     def _on_detach_pulse(self) -> None:
         self._pulse_attach_change()
