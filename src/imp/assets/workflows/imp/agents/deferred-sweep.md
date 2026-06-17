@@ -71,9 +71,10 @@ scope. Decide one of:
 
 The line between **fixed** and **needs-decision** is risk: if the existing gate can
 prove the change safe and it preserves observable behavior, it is **fixed**; if it
-needs human judgment or can change what users/callers observe, it is
-**needs-decision**. If an item you started to fix turns out high-risk once you touch
-it, re-classify it as **needs-decision** — never force it through.
+needs a design or spec choice, or is genuinely high-risk (alters observable behavior,
+a public contract, or cannot be verified by the suite), it is **needs-decision**. If
+an item you started to fix turns out high-risk once you touch it, re-classify it as
+**needs-decision** — never force it through.
 
 ## Dispatch — preserve the reviewer discipline
 
