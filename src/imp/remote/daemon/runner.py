@@ -17,6 +17,7 @@ from typing import Any
 import anyio
 
 from imp.engine.change import Change
+from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.commands import (
     HELP_TEXT,
@@ -254,7 +255,12 @@ async def _handle_command(
     command: Command, control: ControlPlane, responses: queue.Queue[Response],
 ) -> None:
     if isinstance(command, Reply):
-        await control.reply(command.change_id, command.text)
+        try:
+            await control.reply(command.change_id, command.text)
+        except LoadError:
+            responses.put(Notice(
+                f"no such change `{command.change_id}` — unknown or pruned"))
+            return
         control.focus.focus_on(command.change_id)
     elif isinstance(command, Subscribe):
         control.focus.focus_on(command.change_id)
