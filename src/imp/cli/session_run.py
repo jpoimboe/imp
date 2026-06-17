@@ -48,7 +48,8 @@ async def run_session_client(
             tg.start_soon(status.tick)
         with contextlib.suppress(TimeoutError):
             await run_terminal_client(
-                attach=attach, driver=driver, coord=coord, solicit=solicit)
+                attach=attach, driver=driver, coord=coord, solicit=solicit,
+                change_id=change.id)
         tg.cancel_scope.cancel()
     # Lazy import: imp.cli.main imports this module, so a
     # module-level import of _handle_terminal_outcome would be circular.

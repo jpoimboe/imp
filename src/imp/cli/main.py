@@ -589,7 +589,8 @@ async def _run_tui_session(
                 try:
                     with contextlib.suppress(TimeoutError):
                         await run_terminal_client(
-                            attach=attach, driver=app, coord=coord, solicit=_solicit)
+                            attach=attach, driver=app, coord=coord, solicit=_solicit,
+                            change_id=change.id)
                 finally:
                     app.exit()
 
