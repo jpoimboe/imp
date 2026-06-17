@@ -1,8 +1,9 @@
-"""Per-plan review wiring: autosquash + a single merged `review` step
-(review-panel.md) run INSIDE the per-plan implement loop, followed by
-deferred-sweep + sweep-verify + stamp-trailers; plan-cycle-check routes to the
-whole-change review pass (review_scope=change) when multi_plan, then to
-integrate-rebase. The integration-* steps and fast-path router gates are gone."""
+"""Per-batch review cadence: autosquash + review-base-init runs INSIDE the
+per-plan implement loop; plan-cycle-check decides coverage AND cadence —
+single `code-reviewer` per batch (review_base..HEAD), full 4-member opus
+panel at change end (review_scope=change, merge-base..HEAD). deferred-sweep
++ sweep-verify + review-base-repin trail each review batch. stamp-trailers
+is the first step of the review phase."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,9 +24,9 @@ _TIERS = frozenset({"low", "medium", "high"})
 
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False, "panel_done": False,
-    "multi_plan": False,
+    "plan_minors_integrated": False, "plan_panel_done": False,
     "review_scope": "plan",
+    "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
 }
 
 
@@ -37,23 +38,26 @@ def _steps(wf):
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_implement_phase_is_the_per_plan_loop() -> None:
+def test_implement_phase_is_the_per_batch_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
         "task-lead", "commit-check", "verify",
         "autosquash", "autosquash-resolve",
-        "review", "deferred-sweep", "sweep-verify", "stamp-trailers",
-        "plan-cycle-check",
+        "review-base-init", "plan-cycle-check",
+        "review", "deferred-sweep", "sweep-verify", "review-base-repin",
     ]
 
 
-def test_review_phase_starts_at_integrate_rebase() -> None:
+def test_review_phase_starts_at_stamp_trailers_then_repins() -> None:
     review = next(p for p in _wf().phases if p.name == "review")
-    assert next(s.name for s in review.steps) == "integrate-rebase"
-    names = {s.name for s in _wf().flat_steps()}
-    for gone in ("integration-gate", "integration-pass", "integration-sweep",
-                 "integration-sweep-verify", "stamp-sweep-trailers"):
-        assert gone not in names, gone
+    names = [s.name for s in review.steps]
+    assert names[0] == "stamp-trailers"
+    assert names.index("integrate-verify") < names.index("repin-after-rebase")
+    assert names.index("repin-after-rebase") < names.index("finalize")
+    gone = {s.name for s in _wf().flat_steps()}
+    for missing in ("integration-gate", "integration-pass", "integration-sweep",
+                    "integration-sweep-verify", "stamp-sweep-trailers"):
+        assert missing not in gone, missing
 
 
 def test_standalone_panel_gate_and_recheck_are_gone() -> None:
@@ -68,43 +72,37 @@ def test_review_step_uses_review_panel_at_medium_tier() -> None:
     assert review.differ_from is None
 
 
-def test_review_step_routes_three_way_and_sets_panel_done() -> None:
+def test_review_step_routes_two_way_no_plan_gap() -> None:
     rules = _steps(_wf())["review"].rules
     m_task = evaluate_rules(rules, vars=_BASE_VARS,
                             output={"status": "Success", "verdict": "task_gap", "findings": "x"})
     assert isinstance(m_task.action, Goto) and m_task.action.target == "task-lead"
-    assert m_task.action.resume is False                  # cross-phase plain goto
-    assert m_task.action.feedback                          # findings forwarded as a preamble
-    assert m_task.var_mutations["panel_done"] is True
-    m_plan = evaluate_rules(rules, vars=_BASE_VARS,
-                            output={"status": "Success", "verdict": "plan_gap", "findings": "x"})
-    assert isinstance(m_plan.action, Goto) and m_plan.action.target == "plan-writer"
-    assert m_plan.action.resume is False
-    assert m_plan.action.feedback
-    assert m_plan.var_mutations["panel_done"] is True
+    assert m_task.action.resume is False
+    assert m_task.action.feedback
+    assert "panel_done" not in m_task.var_mutations
     m_ok = evaluate_rules(rules, vars=_BASE_VARS,
                           output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)              # approve -> deferred-sweep
-    assert m_ok.var_mutations["panel_done"] is True
+    assert isinstance(m_ok.action, Continue)
+    assert m_ok.var_mutations == {}
 
 
 def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["review-panel"].output_schema
     rules = _steps(wf)["review"].rules
-    for verdict in ("approve", "task_gap", "plan_gap"):
+    for verdict in ("approve", "task_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
-        validate_agent_output(payload, schema)           # must not raise
+        validate_agent_output(payload, schema)
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
 
 
-def test_review_panel_verdict_enum_is_three_way() -> None:
+def test_review_panel_verdict_enum_is_two_way() -> None:
     schema = _wf().agents["review-panel"].output_schema
     verdict_field = next(f for f in schema.fields if f.name == "verdict")
-    assert set(verdict_field.values) == {"approve", "task_gap", "plan_gap"}
+    assert set(verdict_field.values) == {"approve", "task_gap"}
     with pytest.raises(LoadError):
         validate_agent_output(
-            {"status": "Success", "verdict": "rework", "findings": "x"}, schema)
+            {"status": "Success", "verdict": "plan_gap", "findings": "x"}, schema)
 
 
 def test_review_panel_adjudicates_not_tallies() -> None:
@@ -118,13 +116,14 @@ def test_review_panel_adjudicates_not_tallies() -> None:
     assert "downward" in low
     # §3 routing taxonomy + tie-breaker
     assert "default to defer" in low
-    assert "task_gap" in text and "plan_gap" in text
+    assert "task_gap" in text          # plan_gap is removed: review no longer judges coverage
+    assert "plan_gap" not in text
 
 
 def test_gap_verdicts_route_in_workflow_yaml() -> None:
     text = (AGENTS.parent / "workflow.yaml").read_text()
     assert "task_gap" in text
-    assert "plan_gap" in text
+    assert "plan_gap" not in text       # the plan_gap coverage route is gone
     assert "verdict: rework" not in text
 
 
@@ -162,32 +161,49 @@ def test_deferred_sweep_step_then_sweep_verify() -> None:
     assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 
 
-def test_plan_cycle_check_routes_supercycle_wholechange_and_merge() -> None:
+def test_plan_cycle_check_routes_cadence_and_coverage() -> None:
     rules = _steps(_wf())["plan-cycle-check"].rules
-    # more_plans -> supercycle back to plan-writer
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"status": "Success", "more_plans": True, "rationale": "x"})
-    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.var_mutations["panel_done"] is False and m.var_mutations["multi_plan"] is True
-    # no more plans, multi-plan, per-plan scope just finished -> whole-change pass
-    m2 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True, "review_scope": "plan"},
-                        output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m2.action, Goto) and m2.action.target == "review"
-    assert m2.var_mutations["review_scope"] == "change"
-    # whole-change pass already ran (review_scope==change) -> integrate-rebase
-    m3 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True, "review_scope": "change"},
-                        output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m3.action, Goto) and m3.action.target == "integrate-rebase"
-    # single-plan change -> straight to integrate-rebase
-    m4 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": False},
-                        output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m4.action, Goto) and m4.action.target == "integrate-rebase"
+    # batch full (more scope remains AND counter crossed N) -> per-batch review
+    m_batch = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={"status": "Success", "more_plans": True,
+                                     "running_tasks": 7, "rationale": "x"})
+    assert isinstance(m_batch.action, Goto) and m_batch.action.target == "review"
+    assert m_batch.var_mutations["tasks_since_review"] == 7
+    assert m_batch.var_mutations["review_scope"] == "plan"  # forced: per-batch review
+    # supercycle: more scope, batch NOT full -> plan-writer
+    m_super = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={"status": "Success", "more_plans": True,
+                                     "running_tasks": 4, "rationale": "x"})
+    assert isinstance(m_super.action, Goto) and m_super.action.target == "plan-writer"
+    assert m_super.action.feedback
+    assert m_super.var_mutations["tasks_since_review"] == 4
+    assert m_super.var_mutations["review_scope"] == "plan"  # all more-plans paths reset scope
+    # trivial fast path: no panel -> straight to stamp-trailers (review phase head)
+    m_fast = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
+                            output={"status": "Success", "more_plans": False,
+                                    "running_tasks": 1, "rationale": "x"})
+    assert isinstance(m_fast.action, Goto) and m_fast.action.target == "stamp-trailers"
+    # coverage complete (else) -> end-of-change full panel
+    m_cov = evaluate_rules(rules, vars=_BASE_VARS,
+                           output={"status": "Success", "more_plans": False,
+                                   "running_tasks": 3, "rationale": "x"})
+    assert isinstance(m_cov.action, Goto) and m_cov.action.target == "review"
+    assert m_cov.var_mutations["review_scope"] == "change"
+    # more_plans:false wins over a full counter (a full final batch goes to the panel,
+    # never to a redundant per-batch review then the panel)
+    m_final = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={"status": "Success", "more_plans": False,
+                                     "running_tasks": 99, "rationale": "x"})
+    assert isinstance(m_final.action, Goto) and m_final.action.target == "review"
+    assert m_final.var_mutations["review_scope"] == "change"
 
 
 def test_review_panel_reads_review_scope_not_integration_pass() -> None:
     text = (AGENTS / "review-panel.md").read_text()
     assert "integration_pass" not in text
     assert "review_scope" in text
+    assert "panel_done" not in text                 # the re-verify dial is gone
+    assert "review_base" in text                     # per-batch diff base is pinned
 
 
 def test_integrator_is_a_rebase_conflict_resolver() -> None:
@@ -200,43 +216,76 @@ def test_integrator_is_a_rebase_conflict_resolver() -> None:
     assert "wait_for_user" in text
 
 
-def _render_panel(tmp_path, *, panel_done: bool, fast_path: bool,
-                  review_scope: str = "plan") -> str:
+def _render_panel(tmp_path, *, review_scope: str, review_base: str = "abc123") -> str:
     wf = _wf()
     body = wf.agents["review-panel"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_handle="t", change_title="t", event_log=log,
-                        vars={"panel_done": panel_done, "fast_path": fast_path,
-                              "review_scope": review_scope})
+                        vars={"review_scope": review_scope, "review_base": review_base,
+                              "fast_path": False})
     return render_prompt(body, ctx)
 
 
-def test_panel_done_reverify_dispatches_high_tier(tmp_path) -> None:
-    out = _render_panel(tmp_path, panel_done=True, fast_path=False)
-    assert 'task(subagent_name="code-reviewer", tier="high"' in out
-    assert "spec-compliance-slice" not in out      # single reviewer, not the 4-member panel
-
-
-def test_fast_path_reverify_stays_medium_tier(tmp_path) -> None:
-    out = _render_panel(tmp_path, panel_done=False, fast_path=True)
-    assert 'task(subagent_name="code-reviewer", tier="medium"' in out
-    assert 'tier="high"' not in out
-
-
-def test_first_pass_dispatches_full_four_member_panel_at_high(tmp_path) -> None:
-    out = _render_panel(tmp_path, panel_done=False, fast_path=False)
+def test_end_of_change_dispatches_full_four_member_panel(tmp_path) -> None:
+    out = _render_panel(tmp_path, review_scope="change")
     for member in ("code-reviewer", "completeness-slice",
                    "spec-compliance-slice", "boundaries-slice"):
         assert f'task(subagent_name="{member}", tier="high"' in out
+    assert "git merge-base" in out                 # whole-change diff, never review_base
+    assert "vars.review_base" not in out and "abc123" not in out
+
+
+def test_per_batch_dispatches_single_code_reviewer_over_review_base(tmp_path) -> None:
+    out = _render_panel(tmp_path, review_scope="plan")
+    assert 'task(subagent_name="code-reviewer", tier="high"' in out
+    assert "spec-compliance-slice" not in out      # single reviewer, not the panel
+    assert "abc123..HEAD" in out                    # diff range pins review_base
+
+
+def test_review_base_init_pins_once_then_idempotent() -> None:
+    rules = _steps(_wf())["review-base-init"].rules
+    m_first = evaluate_rules(rules, vars={**_BASE_VARS, "review_base": ""},
+                             output={"exit": 0, "stdout": "fork123", "stderr": ""})
+    assert isinstance(m_first.action, Continue)
+    assert m_first.var_mutations["review_base"] == "fork123"
+    m_later = evaluate_rules(rules, vars={**_BASE_VARS, "review_base": "head999"},
+                             output={"exit": 0, "stdout": "fork123", "stderr": ""})
+    assert isinstance(m_later.action, Continue)
+    assert "review_base" not in m_later.var_mutations      # already pinned -> untouched
+
+
+def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
+    rules = _steps(_wf())["review-base-repin"].rules
+    # end-of-change pass -> review phase head (stamp-trailers); counter reset; base advanced
+    m_change = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "change",
+                                           "tasks_since_review": 9},
+                              output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
+    assert isinstance(m_change.action, Goto) and m_change.action.target == "stamp-trailers"
+    assert m_change.var_mutations["tasks_since_review"] == 0
+    assert m_change.var_mutations["review_base"] == "deadbeef"
+    # per-batch pass -> plan-writer for the next plan; counter reset; base advanced
+    m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan",
+                                          "tasks_since_review": 9},
+                             output={"exit": 0, "stdout": "cafef00d", "stderr": ""})
+    assert isinstance(m_batch.action, Goto) and m_batch.action.target == "plan-writer"
+    assert m_batch.var_mutations["tasks_since_review"] == 0
+    assert m_batch.var_mutations["review_base"] == "cafef00d"
+
+
+def test_repin_after_rebase_advances_review_base() -> None:
+    rules = _steps(_wf())["repin-after-rebase"].rules
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"exit": 0, "stdout": "rebased1", "stderr": ""})
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["review_base"] == "rebased1"
 
 
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
-    review_fb = by["review"].rules[1].action.feedback        # plan_gap -> plan-writer
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
-    assert review_fb and finalize_fb
+    review_fb = by["review"].rules[0].action.feedback        # task_gap -> task-lead
+    assert finalize_fb and review_fb
     text = (AGENTS / "plan-writer.md").read_text()
-    assert review_fb in text
     assert finalize_fb in text
 
 

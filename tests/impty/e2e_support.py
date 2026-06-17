@@ -132,7 +132,8 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 done(summary="no deferred items"),
             ]}],
             "plan-cycle-check": [{"text": "check", "tools": [
-                done(more_plans=False, rationale="single plan covers the spec"),
+                done(more_plans=False, running_tasks=0,
+                     rationale="single plan covers the spec"),
             ]}],
             "finalize": [{"text": "finalize", "tools": [
                 done(decision="merge", comments="", built="sentinel",

@@ -4,6 +4,7 @@ description: Decide whether the spec needs another plan (supercycle) or is fully
 output:
   status: {type: enum, values: [Success, Error]}
   more_plans: {type: bool}
+  running_tasks: {type: int}
   rationale: {type: string}
 ---
 
