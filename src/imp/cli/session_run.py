@@ -59,16 +59,8 @@ async def run_session_client(
             f"it may have crashed (see {change.control_root}/.imp/remote-control.log)",
             file=sys.stderr)
         return 3
-    # Lazy import: imp.cli.main imports this module, so a
-    # module-level import of _handle_terminal_outcome would be circular.
-    from imp.cli.main import _handle_terminal_outcome
-    result = infer_session_result(change)
-    outcome = _handle_terminal_outcome(change, result, coord)
-    # Ctrl-C/ESC forwarded to the daemon sets should_pause on the client coordinator;
-    # map the result to the conventional interrupt exit code.
-    if result is RunResult.PAUSED and coord.should_pause:
-        return 130
-    return outcome
+    from imp.cli.main import _session_exit_code  # lazy: main imports this module
+    return _session_exit_code(change, coord)
 
 
 def make_headless_solicit(

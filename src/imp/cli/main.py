@@ -406,6 +406,14 @@ def _handle_terminal_outcome(
     return 1
 
 
+def _session_exit_code(change: Change, coord: Any) -> int:
+    result = infer_session_result(change)
+    outcome = _handle_terminal_outcome(change, result, coord)
+    if result is RunResult.PAUSED and coord.should_pause:
+        return 130
+    return outcome
+
+
 def _project_root() -> Path:
     return find_project_root()
 
@@ -599,10 +607,7 @@ async def _run_tui_session(
             tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
-    result = infer_session_result(change)
-    if result is RunResult.PAUSED and coord.should_pause:
-        return 130
-    return _handle_terminal_outcome(change, result, coord)
+    return _session_exit_code(change, coord)
 
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
