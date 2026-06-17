@@ -7,6 +7,7 @@ control dispatch are added in Task 3."""
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,7 +59,14 @@ class SessionSocket:
         self._serve_done: anyio.Event | None = None
 
     async def open(self) -> None:
-        Path(self._path).parent.mkdir(parents=True, exist_ok=True)
+        parent = Path(self._path).parent
+        parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        owner = parent.stat().st_uid
+        my_uid = os.geteuid()
+        if owner != my_uid:
+            raise PermissionError(
+                f"refusing to use session-socket dir {parent}: owned by uid {owner}, "
+                f"not {my_uid}")
         self._listener = await anyio.create_unix_listener(self._path)
 
     async def serve(self) -> None:

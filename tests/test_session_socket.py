@@ -242,6 +242,23 @@ async def test_open_creates_missing_parent_directory(tmp_path: Path) -> None:
     await session.close()
 
 
+@pytest.mark.anyio
+async def test_open_refuses_a_socket_dir_owned_by_another_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os as _os
+
+    from imp.remote.session import socket_server
+
+    sockdir = tmp_path / "imp-sock"
+    sockdir.mkdir()
+    session = SessionSocket(str(sockdir / "s.sock"))
+    my_uid = _os.geteuid()
+    monkeypatch.setattr(socket_server.os, "geteuid", lambda: my_uid + 1)
+    with pytest.raises(PermissionError):
+        await session.open()
+
+
 def test_emit_drops_a_client_whose_bounded_buffer_overflows() -> None:
     session = SessionSocket("/unused.sock")
     send, _recv = anyio.create_memory_object_stream[dict](max_buffer_size=1)
