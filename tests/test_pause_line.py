@@ -53,7 +53,7 @@ def test_pause_facts_unnamed_change_labels_with_resume_token(tmp_path: Path) -> 
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    change = Change(id="2026-06-14-qzbscf", title="", base_branch="main",
+    change = Change(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
     name, _phase, token = _pause_facts(change)
@@ -65,9 +65,9 @@ def test_pause_facts_named_change_labels_with_slug_descriptor(tmp_path: Path) ->
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    change = Change(id="2026-06-14-qzbscf", title="Add version flag",
+    change = Change(id="qzbscf", title="Add version flag",
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
     name, _phase, _token = _pause_facts(change)
-    assert name == "add-version-flag"
+    assert name == "add-version-flag-qzbscf"

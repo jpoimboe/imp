@@ -37,7 +37,7 @@ def _inv(tmp_path: Path, drivers: frozenset[str]) -> AgentInvocation:
         agent_def=_agent(drivers), provider_name="claude_code",
         model_name="claude-sonnet-4-6", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
+        change_context=ChangeContext(handle="s", title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "step",
         fs_permissions=(), events_path=tmp_path / "events.jsonl")

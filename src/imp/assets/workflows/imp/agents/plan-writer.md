@@ -1,6 +1,6 @@
 ---
 name: plan-writer
-description: Write the next bite-sized plan (.imp/change/artifacts/plans/<slug>-plan-N.md) from the spec and progress, then commit it.
+description: Write the next bite-sized plan (.imp/change/artifacts/plans/<handle>-plan-N.md) from the spec and progress, then commit it.
 subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -19,7 +19,7 @@ The project maintainer set this guidance for this codebase — follow it unless 
 
 You are writing an implementation plan for this change.
 
-Current slug: `{{ change.slug }}`
+Current handle: `{{ change.handle }}`
 
 ## Which Plan to Write
 
@@ -28,7 +28,7 @@ Before writing anything, determine which plan number N to write and whether you 
 **Step 1 — glob existing plan files:**
 
 ```
-glob(".imp/change/artifacts/plans/{{ change.slug }}-plan-*.md")
+glob(".imp/change/artifacts/plans/{{ change.handle }}-plan-*.md")
 ```
 
 Sort the results numerically. The highest N found is the "current plan".
@@ -128,12 +128,12 @@ non-soliciting minors pass is unchanged.
 
 ## Explore the Codebase First
 
-Read the spec at `.imp/change/artifacts/spec/{{ change.slug }}.md`.
+Read the spec at `.imp/change/artifacts/spec/{{ change.handle }}.md`.
 
 Glob and read existing plan files to understand what has already been planned or implemented:
 
 ```
-glob(".imp/change/artifacts/plans/{{ change.slug }}-plan-*.md")
+glob(".imp/change/artifacts/plans/{{ change.handle }}-plan-*.md")
 ```
 
 Read relevant source files to understand current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
@@ -335,7 +335,7 @@ If you find issues, fix them inline. If you find a spec requirement with no task
 
 ## Writing the File
 
-Write to `.imp/change/artifacts/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
+Write to `.imp/change/artifacts/plans/{{ change.handle }}-plan-N.md` (substitute the actual integer for N).
 
 Do NOT write code. Only write the plan document.
 
@@ -354,7 +354,7 @@ imp artifact-commit plan
 
 This is identical for a fresh plan N and a revision of an existing plan N (a
 rework bounce, a deviation, or a minors-integration pass): re-write
-`.imp/change/artifacts/plans/{{ change.slug }}-plan-N.md`, then run the command.
+`.imp/change/artifacts/plans/{{ change.handle }}-plan-N.md`, then run the command.
 
 ## Minors-integration pass (a review follows)
 
@@ -376,17 +376,17 @@ newest plan exists and `progress.md` does not mark it complete, so you revise N 
 place). On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
-   `findings:` to plan N, re-write `.imp/change/artifacts/plans/{{ change.slug }}-plan-N.md`,
+   `findings:` to plan N, re-write `.imp/change/artifacts/plans/{{ change.handle }}-plan-N.md`,
    then run `imp artifact-commit plan` and finish tool-terminal:
 
    ```
    imp artifact-commit plan
-   complete_step(plan_path=".imp/change/artifacts/plans/{{ change.slug }}-plan-N.md", plan_number=N)
+   complete_step(plan_path=".imp/change/artifacts/plans/{{ change.handle }}-plan-N.md", plan_number=N)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(plan_path=".imp/change/artifacts/plans/{{ change.slug }}-plan-N.md", plan_number=N)`.
+   `complete_step(plan_path=".imp/change/artifacts/plans/{{ change.handle }}-plan-N.md", plan_number=N)`.
    Do NOT run `imp artifact-commit plan` when nothing changed. The verification
    review still runs on the unchanged plan and will pass it through.
 
@@ -397,7 +397,7 @@ reviewer's advice. (Substitute the actual integer for N.)
 ## Finish
 
 ```
-complete_step(plan_path=".imp/change/artifacts/plans/{{ change.slug }}-plan-N.md", plan_number=N)
+complete_step(plan_path=".imp/change/artifacts/plans/{{ change.handle }}-plan-N.md", plan_number=N)
 ```
 
 (Substitute the actual integer for N.)

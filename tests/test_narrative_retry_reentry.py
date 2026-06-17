@@ -12,7 +12,7 @@ def _retry_sequence() -> list[dict[str, object]]:
     """Two rate_limit retries then success — the exact failure pattern from the
     spec's acceptance criterion 1."""
     return [
-        ev("1", "change_created", slug="x", title="x"),
+        ev("1", "change_created", handle="x", title="x"),
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
            model="m", provider="anthropic"),
         ev("3", "error", agent_id="step:implement/coder",
@@ -75,7 +75,7 @@ def test_retry_reentry_preserves_first_attempt_start_ts() -> None:
     """Elapsed time must reflect the operator's wait — keep the FIRST
     step_started's timestamp, not the most recent attempt's (spec decision)."""
     events: list[dict[str, object]] = [
-        ev("1", "change_created", slug="x", title="x"),
+        ev("1", "change_created", handle="x", title="x"),
         {"id": "2", "agent_id": None, "type": "step_started",
          "timestamp": "2026-06-04T00:00:00+00:00",
          "payload": {"step": "coder", "kind": "agent", "phase": "implement",

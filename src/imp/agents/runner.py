@@ -67,7 +67,7 @@ class Diagnostics:
 # Engine → runner boundary value. Frozen to make it safe to pass to subagents.
 @dataclass(frozen=True, slots=True)
 class ChangeContext:
-    slug: str
+    handle: str
     title: str
     project_root: Path
     workflow_dir: Path

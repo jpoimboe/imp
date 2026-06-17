@@ -5,7 +5,7 @@ def test_imp_new_without_title_is_unnamed(tmp_path: Path) -> None:
     from imp.engine.change import Change
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="", change_id="2026-06-05-aaa000",
+    ch = Change.create(tmp_path, title="", change_id="aaa000",
                        base_branch="main")
     assert ch.title == ""
-    assert ch.slug == ""          # derived: dated_slug("", ...) == ""
+    assert ch.handle == "aaa000"

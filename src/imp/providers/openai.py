@@ -592,7 +592,7 @@ class OpenAIAgentRunner:
         # change) so the prefix stays cache-resident turn-over-turn. id
         # is required: agent_id alone is change-agnostic, so concurrent changes
         # running the same step would collide on one routing slot.
-        # Keyed to the IMMUTABLE id, not the slug: a slug rotates at the
+        # Keyed to the IMMUTABLE id, not the handle: a handle rotates at the
         # spec->plan title rename and would bust the cache mid-conversation
         # (spec §9). [AC 10]
         prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)

@@ -116,7 +116,7 @@ def _inv(tmp_path: Path, *, event_log, coordinator, tools=None,
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
@@ -211,7 +211,7 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=_CC(
-            id="test", slug="test", title="Test", project_root=tmp_path,
+            id="test", handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
@@ -290,7 +290,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=_CC(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
@@ -383,7 +383,7 @@ async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None
     inv = AgentInvocation(
         agent_def=adef, provider_name="codex", model_name="gpt-5.5",
         system_prompt="sp", initial_messages=(),
-        change_context=_CC(slug="s", title="t", project_root=tmp_path,
+        change_context=_CC(handle="s", title="t", project_root=tmp_path,
                            workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
@@ -490,7 +490,7 @@ async def test_openai_delivers_interject_on_nudge_branch(tmp_path: Path) -> None
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=_CC(
-            id="test", slug="test", title="Test", project_root=tmp_path,
+            id="test", handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),

@@ -56,7 +56,7 @@ def _inv(tmp_path: Path, tools, *, event_log=None, max_tool_calls=None,
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / transcript_dir,
         fs_permissions=(FsRule(operations=("read",), paths=("**",), mode="allow",

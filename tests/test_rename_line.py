@@ -16,7 +16,7 @@ def test_change_renamed_appends_a_rename_node_with_the_descriptor() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title=""),
         ev("2", "change_renamed", agent_id="a", id=1, old_title="",
-           new_title="Add version flag", new_slug="2026-06-11-add-version-flag"),
+           new_title="Add version flag", handle="2026-06-11-add-version-flag"),
     ])
     renames = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]
     assert len(renames) == 1
@@ -27,7 +27,7 @@ def test_change_renamed_appends_a_rename_node_with_the_descriptor() -> None:
 
 
 def test_partial_rename_event_appends_no_node() -> None:
-    # A legacy/partial event missing new_slug leaves the transcript untouched.
+    # A legacy/partial event missing handle leaves the transcript untouched.
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "change_renamed", agent_id="a", id=1, new_title="Y"),
@@ -39,7 +39,7 @@ def test_rename_line_renders_arrow_named_descriptor() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title=""),
         ev("2", "change_renamed", agent_id="a", id=1, old_title="",
-           new_title="Add version flag", new_slug="2026-06-11-add-version-flag"),
+           new_title="Add version flag", handle="2026-06-11-add-version-flag"),
     ])
     body = list(render_tree(tree, full=False, color=False, width=80))
     assert any(ln.strip() == "→ named add-version-flag" for ln in body)
@@ -49,7 +49,7 @@ def test_rename_line_color_marker_dim_name_bold_magenta() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title=""),
         ev("2", "change_renamed", agent_id="a", id=1, old_title="",
-           new_title="Add version flag", new_slug="2026-06-11-add-version-flag"),
+           new_title="Add version flag", handle="2026-06-11-add-version-flag"),
     ])
     body = list(render_tree(tree, full=False, color=True, width=80))
     row = next(ln for ln in body if "named" in ln)

@@ -16,8 +16,8 @@ never touched — and you log what you do rather than asking the human to bless 
 
 Read first:
 - `.imp/change/progress.md` — the **Deferred Followups** list (the work source).
-- The spec at `.imp/change/artifacts/spec/{{ change.slug }}.md` and the newest plan
-  `.imp/change/artifacts/plans/{{ change.slug }}-plan-*.md` for grounding.
+- The spec at `.imp/change/artifacts/spec/{{ change.handle }}.md` and the newest plan
+  `.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md` for grounding.
 
 ## The pinned line format
 

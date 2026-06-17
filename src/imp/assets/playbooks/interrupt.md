@@ -360,9 +360,9 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
 ### **`RESUME-AND-VERIFY(id)`**
 
 1. `start` `imp resume <id>` (§5 — add `--tui` in TUI mode). 2. Confirm it continues the *same*
-Change (matching `#<slug>` / `· resuming` header), reaches a prompt or runs forward — not
+Change (matching `#<handle>` / `· resuming` header), reaches a prompt or runs forward — not
 `nothing to resume`, not a restart. 3. Note message clarity. (The resume *banner* legitimately
-shows the `#<slug>` display name; only the *pause* line in §5.6 must carry the change **id**.)
+shows the `#<handle>` display name; only the *pause* line in §5.6 must carry the change **id**.)
 
 ---
 

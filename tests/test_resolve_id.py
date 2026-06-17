@@ -18,76 +18,73 @@ def _mk(tmp_path: Path, change_id: str, title: str) -> Change:
 
 def test_exact_id(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-aaaaaa", "One")
-    assert _resolve_id(tmp_path, "2026-06-04-aaaaaa") == "2026-06-04-aaaaaa"
+    _mk(tmp_path, "aaa111", "One")
+    assert _resolve_id(tmp_path, "aaa111") == "aaa111"
 
 
 def test_unique_suffix(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-aaaaaa", "One")
-    _mk(tmp_path, "2026-06-04-bbbbbb", "Two")
-    assert _resolve_id(tmp_path, "bbbbbb") == "2026-06-04-bbbbbb"
+    _mk(tmp_path, "aaa111", "One")
+    _mk(tmp_path, "bbb222", "Two")
+    assert _resolve_id(tmp_path, "222") == "bbb222"
 
 
-def test_shared_date_prefix_is_ambiguous(tmp_path: Path, capsys) -> None:
+def test_shared_prefix_is_ambiguous(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-aaaaaa", "One")
-    _mk(tmp_path, "2026-06-04-bbbbbb", "Two")
+    _mk(tmp_path, "aaa111", "One")
+    _mk(tmp_path, "aaa222", "Two")
     with pytest.raises(SystemExit):
-        _resolve_id(tmp_path, "2026-06-04")     # prefix shared -> ambiguous, not resolved
+        _resolve_id(tmp_path, "aaa")     # prefix shared -> ambiguous, not resolved
     err = capsys.readouterr().err
     # AC 5: rejected as ambiguous AND lists the candidates via the shared formatter
     # (TITLE header + each title + resume token), not a blank no-match.
     assert "ambiguous" in err
     assert "TITLE" in err
     assert "One" in err and "Two" in err
-    assert "aaaaaa" in err and "bbbbbb" in err
+    assert "aaa111" in err and "aaa222" in err
 
 
-def test_current_slug_resolves(tmp_path: Path) -> None:
+def test_current_handle_resolves(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = _mk(tmp_path, "2026-06-04-aaaaaa", "Add OAuth")
-    assert ch.slug == "2026-06-04-add-oauth"
-    assert _resolve_id(tmp_path, "2026-06-04-add-oauth") == "2026-06-04-aaaaaa"
+    ch = _mk(tmp_path, "aaa111", "Add OAuth")
+    assert ch.handle == "add-oauth-aaa111"
+    assert _resolve_id(tmp_path, "add-oauth") == "aaa111"
 
 
 def test_bare_name_resolves(tmp_path: Path) -> None:
-    # The bare name a user naturally types (no date prefix) resolves via the slug
-    # tier — previously it only matched the dated slug and fell through to "no
-    # Change matches".
+    # The bare name a user naturally types resolves via the slug tier.
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-aaaaaa", "Add version flag")
-    assert _resolve_id(tmp_path, "add-version-flag") == "2026-06-04-aaaaaa"
+    _mk(tmp_path, "aaa111", "Add version flag")
+    assert _resolve_id(tmp_path, "add-version-flag") == "aaa111"
 
 
 def test_bare_name_collision_is_ambiguous(tmp_path: Path, capsys) -> None:
-    # Two changes sharing a name (different days) -> the bare name is ambiguous
-    # and lists candidates, rather than a blank no-match.
+    # Two changes sharing a name -> the bare name is ambiguous and lists
+    # candidates, rather than a blank no-match.
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-aaaaaa", "Add version flag")
-    _mk(tmp_path, "2026-06-05-bbbbbb", "Add version flag")
+    _mk(tmp_path, "aaa111", "Add version flag")
+    _mk(tmp_path, "bbb222", "Add version flag")
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "add-version-flag")
     err = capsys.readouterr().err
     assert "ambiguous" in err
-    assert "aaaaaa" in err and "bbbbbb" in err
+    assert "aaa111" in err and "bbb222" in err
 
 
 def test_no_match_exits(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-aaaaaa", "One")
+    _mk(tmp_path, "aaa111", "One")
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "nonexistent")
 
 
-def test_cross_day_shared_suffix_is_ambiguous(tmp_path: Path, capsys) -> None:
+def test_shared_suffix_is_ambiguous(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "2026-06-04-zzzzzz", "One")
-    _mk(tmp_path, "2026-06-05-zzzzzz", "Two")
+    _mk(tmp_path, "aaa111", "One")
+    _mk(tmp_path, "bbb111", "Two")
     with pytest.raises(SystemExit):
-        _resolve_id(tmp_path, "zzzzzz")        # suffix shared across days -> ambiguous
+        _resolve_id(tmp_path, "111")        # suffix shared by both ids -> ambiguous
     err = capsys.readouterr().err
-    # Both share the resume token zzzzzz; the titles disambiguate the rows.
     assert "ambiguous" in err
     assert "One" in err and "Two" in err
-    assert "zzzzzz" in err
+    assert "aaa111" in err and "bbb111" in err

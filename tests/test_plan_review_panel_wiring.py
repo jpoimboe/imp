@@ -48,7 +48,7 @@ def _render(tmp_path, *, plan_panel_done: bool) -> str:
     wf = _wf()
     body = wf.agents["plan-review-panel"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_slug="t", change_title="t", event_log=log,
+    ctx = build_context(change_handle="t", change_title="t", event_log=log,
                         vars={"plan_panel_done": plan_panel_done})
     return render_prompt(body, ctx)
 

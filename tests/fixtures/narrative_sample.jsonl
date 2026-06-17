@@ -1,4 +1,4 @@
-{"id": "e1", "agent_id": null, "type": "change_created", "payload": {"slug": "add-auth", "title": "add auth"}}
+{"id": "e1", "agent_id": null, "type": "change_created", "payload": {"handle": "add-auth", "title": "add auth"}}
 {"id": "e2", "agent_id": null, "type": "tiers_resolved", "payload": {"tiers": {"low": {"provider": "anthropic", "model": "haiku", "differ_tier": null, "differ_from": null}, "medium": {"provider": "anthropic", "model": "sonnet", "differ_tier": null, "differ_from": null}, "high": {"provider": "openai", "model": "gpt-5.5", "differ_tier": 1, "differ_from": "medium"}}, "steps": {}}}
 {"id": "e3", "agent_id": null, "type": "step_started", "payload": {"step": "spec", "kind": "agent", "phase": "design", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash", "read_file"], "interactive": false}}
 {"id": "e4", "agent_id": "step:design/spec", "type": "step_context", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "system_prompt": "You are a spec writer. Draft a detailed specification.", "tools_schema": [{"name": "bash"}, {"name": "read_file"}], "params": {"max_tokens": 8192}, "max_tool_calls": 50}}

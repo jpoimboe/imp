@@ -23,7 +23,7 @@ def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
                       events_path=run_dir / "events.jsonl", agent_id=agent_id,
                       background_enabled=True)
     ctx.change_context = ChangeContext(
-        slug="t", title="T", project_root=tmp_path,
+        handle="t", title="T", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 

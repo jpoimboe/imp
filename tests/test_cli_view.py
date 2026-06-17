@@ -128,7 +128,7 @@ def test_cli_log_pipes_through_narrative(
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
-            "payload": {"slug": slug, "title": "smoke"},
+            "payload": {"handle": slug, "title": "smoke"},
         }) + "\n"
         + json.dumps({
             "id": "e2", "agent_id": None,
@@ -172,7 +172,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
-            "payload": {"slug": slug, "title": "smoke"},
+            "payload": {"handle": slug, "title": "smoke"},
         }) + "\n"
         + "this is not json\n"
         + json.dumps({
@@ -221,7 +221,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
-            "payload": {"slug": slug, "title": "sub"},
+            "payload": {"handle": slug, "title": "sub"},
         }) + "\n"
         + json.dumps({
             "id": "e2", "agent_id": None,
@@ -314,7 +314,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
                 "id": "e1", "agent_id": None,
                 "timestamp": "2026-05-27T10:00:00+00:00",
                 "type": "change_created",
-                "payload": {"slug": slug, "title": title},
+                "payload": {"handle": slug, "title": title},
             }) + "\n"
             # A step renders the phase name (the title banner is gone), so use a
             # per-change phase name to prove WHICH change's log was picked.

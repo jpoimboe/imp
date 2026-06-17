@@ -95,7 +95,7 @@ def _seed_single_agent(root: Path) -> Change:
     change = Change(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, change_dir=change_dir)
     change.event_log().append(agent_id=None, type="change_created",
-                              payload={"id": "c", "slug": change.slug, "title": "t"})
+                              payload={"id": "c", "handle": change.handle, "title": "t"})
     return change
 
 

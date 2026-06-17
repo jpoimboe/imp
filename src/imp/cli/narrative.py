@@ -565,7 +565,7 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     if p.get("kind") == "backlog":
         return
-    self._root.slug = p.get("slug")
+    self._root.slug = p.get("handle")
     self._root.title = p.get("title", "")
     self._root.change_id = p.get("id")
 
@@ -581,16 +581,16 @@ def _slug_descriptor(slug: str) -> str:
 
 
 def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # A rename carries the new title + slug as a unit (current schema). Apply them
+    # A rename carries the new title + handle as a unit (current schema). Apply them
     # together; ignore a legacy/partial event missing either, rather than leaving
-    # the header half-updated (e.g. new slug beside a stale title).
+    # the header half-updated (e.g. new handle beside a stale title).
     new_title = p.get("new_title")
-    new_slug = p.get("new_slug")
-    if new_title is None or new_slug is None:
+    new_handle = p.get("handle")
+    if new_title is None or new_handle is None:
         return
     self._root.title = new_title
-    self._root.slug = new_slug
-    self._append(RenameNode(name=_slug_descriptor(new_slug)))
+    self._root.slug = new_handle
+    self._append(RenameNode(name=_slug_descriptor(new_handle)))
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed

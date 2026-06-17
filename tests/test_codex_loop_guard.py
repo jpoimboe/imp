@@ -43,7 +43,7 @@ def _inv(tmp_path: Path, elog: object) -> AgentInvocation:
     return AgentInvocation(
         agent_def=adef, provider_name="codex", model_name="gpt-5.5",
         system_prompt="sp", initial_messages=(),
-        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
+        change_context=ChangeContext(handle="s", title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         # A non-self-limiting continuation_fn: the runner drives off
         # continuation_fn, so the run re-enters the turn loop on each

@@ -23,7 +23,7 @@ def test_invocation_subagent_depth_and_coordinator_default() -> None:
     inv = AgentInvocation(
         agent_def=_agent(), provider_name="p", model_name="m",
         system_prompt="s", initial_messages=(),
-        change_context=ChangeContext(slug="x", title="t",
+        change_context=ChangeContext(handle="x", title="t",
                                      project_root=Path("/tmp"),
                                      workflow_dir=Path("/tmp/wf")),
         transcript_dir=Path("/tmp/td"),

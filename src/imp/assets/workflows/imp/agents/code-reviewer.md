@@ -24,9 +24,9 @@ fix-path. Set `blocking: true` iff you find a Critical or Major issue.
 
 ## Context to Load
 
-- **Spec:** `.imp/change/artifacts/spec/{{ change.slug }}.md` — the requirements this
+- **Spec:** `.imp/change/artifacts/spec/{{ change.handle }}.md` — the requirements this
   change must satisfy.
-- **Plans:** `.imp/change/artifacts/plans/{{ change.slug }}-plan-*.md` — what was planned
+- **Plans:** `.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md` — what was planned
   and intended for each phase.
 - **Progress:** `.imp/change/progress.md` — what tasks were completed,
   any deferred followups, and deviation notes.

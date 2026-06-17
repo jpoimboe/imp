@@ -8,8 +8,8 @@ output:
 ---
 
 You judge whether the change needs another plan. Read the spec at
-`.imp/change/artifacts/spec/{{ change.slug }}.md`, every plan
-`.imp/change/artifacts/plans/{{ change.slug }}-plan-*.md`, `.imp/change/progress.md`,
+`.imp/change/artifacts/spec/{{ change.handle }}.md`, every plan
+`.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md`, `.imp/change/progress.md`,
 and the committed code (use glob/grep to spot-check).
 
 A spec may decompose into multiple plans, each written and implemented before the

@@ -27,7 +27,7 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
         json.dumps({
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
-            "payload": {"slug": slug, "title": title},
+            "payload": {"handle": slug, "title": title},
         }) + "\n"
         # A step renders the phase name; the slug/title banner no longer renders,
         # so the phase is what proves the narrative reached stdout.

@@ -47,7 +47,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": slug, "slug": change.slug, "title": title},
+        payload={"id": slug, "handle": change.handle, "title": title},
     )
     return change
 

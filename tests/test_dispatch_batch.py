@@ -46,7 +46,7 @@ def _ctx(tmp_path: Path, *, spawn, event_log=None) -> ToolContext:
     ctx.spawn_subagent = spawn
     ctx.event_log = event_log
     ctx.change_context = ChangeContext(
-        slug="change-42", title="Change 42", project_root=tmp_path,
+        handle="change-42", title="Change 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 

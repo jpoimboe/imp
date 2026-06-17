@@ -11,17 +11,18 @@ import pytest
 from imp.cli.main import main
 from imp.engine import worktree
 from imp.engine.change import Change
+from imp.engine.slug import dated_slug
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
-# A realistic id whose [:10] prefix is a real date, so Change.slug derives a
-# normal dated slug both live and (via the journaled title) after merge.
+# A realistic id whose [:10] prefix is a real date, so _show_slug derives the
+# same dated slug both live and (via the journaled title) after merge.
 _ID = "2026-06-15-feat01"
 
 
 def _seed_with_artifacts(control: Path, change_id: str, title: str) -> tuple[Change, str]:
     ch = Change.create(control, title=title, change_id=change_id, base_branch="main")
-    slug = ch.slug                                # the name artifacts are written under
+    slug = dated_slug(ch.title, ch.id[:10])       # matches _show_slug artifact naming
     spec = ch.change_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
     (spec / f"{slug}.md").write_text("# SPEC BODY\n")

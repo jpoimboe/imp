@@ -71,7 +71,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         system_prompt="you are a test agent",
         initial_messages=(),
         change_context=ChangeContext(
-            slug="s", title="t", project_root=tmp_path,
+            handle="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(

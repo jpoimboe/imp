@@ -44,7 +44,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     ctx.coordinator = InterruptCoordinator()
     ctx.event_log = None
     ctx.change_context = ChangeContext(
-        slug="c", title="C", project_root=tmp_path,
+        handle="c", title="C", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 

@@ -79,7 +79,7 @@ def _build_invocation(
         system_prompt="you are a test agent",
         initial_messages=(),
         change_context=ChangeContext(
-            slug="s", title="t", project_root=tmp_path,
+            handle="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(
@@ -288,7 +288,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
         system_prompt="you are a test agent",
         initial_messages=(),
         change_context=ChangeContext(
-            slug="s", title="t", project_root=tmp_path,
+            handle="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(

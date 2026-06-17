@@ -30,7 +30,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         system_prompt="be terse", initial_messages=(),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / "step",

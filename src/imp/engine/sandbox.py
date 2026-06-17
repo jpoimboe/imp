@@ -92,7 +92,7 @@ def build_sandbox_argv(
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
     prefixed key it carries is emitted via --setenv, authoritatively superseding
     whatever was baked into `policy.setenv` at run start. The policy is resolved
-    once per run (the stat-once design), but name-on-intent makes IMP_CHANGE_SLUG/
+    once per run (the stat-once design), but name-on-intent makes IMP_CHANGE_HANDLE/
     IMP_CHANGE_TITLE mutate mid-run on a rename — so a gate or tool spawned after
     the rename MUST see the live values, not the empty ones frozen at run start.
 
@@ -130,7 +130,7 @@ def build_sandbox_argv(
     # 12. chdir
     argv += ["--chdir", cwd]
     # 13. env allowlist. The IMP_* slice comes authoritatively from the live
-    # per-spawn engine_env (prefix allowlist) so a post-rename slug/title wins over
+    # per-spawn engine_env (prefix allowlist) so a post-rename handle/title wins over
     # the value frozen into policy.setenv at run start (name-on-intent). Dict
     # preserves first-seen order; reassigning a key updates in place, so no
     # duplicate --setenv is emitted.
