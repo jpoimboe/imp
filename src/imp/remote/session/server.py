@@ -95,7 +95,7 @@ class SessionServer:
 
     async def _pump(self) -> None:
         async for event in self._event_recv:
-            await self._socket.broadcast(event)
+            self._socket.broadcast(event)
 
     async def _chat(self, _query: str) -> str:
         try:

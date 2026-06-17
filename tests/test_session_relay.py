@@ -32,7 +32,7 @@ async def test_relay_forwards_curated_events_with_change_context(
         with anyio.fail_after(5):
             while socket.attached_count == 0:
                 await anyio.sleep(0.02)
-        await socket.broadcast(
+        socket.broadcast(
             {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not sink:
@@ -63,7 +63,7 @@ async def test_relay_detaches_at_gate_so_session_can_hibernate(
             with anyio.fail_after(5):
                 while socket.attached_count == 0:
                     await anyio.sleep(0.02)
-            await socket.broadcast(
+            socket.broadcast(
                 {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
 
         tg.start_soon(_emit_gate_once_attached)

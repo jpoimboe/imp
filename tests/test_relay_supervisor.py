@@ -39,7 +39,7 @@ async def test_supervisor_relays_a_resident_sessions_events(
         with anyio.fail_after(5):
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
-        await sock.broadcast(
+        sock.broadcast(
             {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not sink:
@@ -79,8 +79,8 @@ async def test_supervisor_multiplexes_two_resident_sessions(
         with anyio.fail_after(5):
             while sock_a.attached_count == 0 or sock_b.attached_count == 0:
                 await anyio.sleep(0.02)
-        await sock_a.broadcast({"id": "ea", "type": "agent_output", "payload": {}})
-        await sock_b.broadcast({"id": "eb", "type": "agent_output", "payload": {}})
+        sock_a.broadcast({"id": "ea", "type": "agent_output", "payload": {}})
+        sock_b.broadcast({"id": "eb", "type": "agent_output", "payload": {}})
         with anyio.fail_after(5):
             while len(sink) < 2:
                 await anyio.sleep(0.02)
@@ -153,7 +153,7 @@ async def test_supervisor_does_not_reattach_across_a_gate(
         with anyio.fail_after(5):
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
-        await sock.broadcast(
+        sock.broadcast(
             {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
         # Relay forwards the gate event then detaches → attached_count drops to 0.
         with anyio.fail_after(5):
@@ -196,7 +196,7 @@ async def test_supervisor_reattaches_after_rehydration(
         with anyio.fail_after(5):
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
-        await sock.broadcast(
+        sock.broadcast(
             {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
         with anyio.fail_after(5):
             while sock.attached_count != 0:
