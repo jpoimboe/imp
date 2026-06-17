@@ -23,7 +23,7 @@ log = args.get("--log")
 stderr_bytes = args.get("--stderr-bytes")
 if stderr_bytes:
     # Flood stderr BEFORE reading stdin: past a pipe buffer (~64KiB) this blocks
-    # unless imp captures *and* drains the driver\'s stderr.
+    # unless imp captures *and* drains the driver's stderr.
     sys.stderr.write("x" * int(stderr_bytes) + "\\n")
     sys.stderr.flush()
 for line in sys.stdin:
