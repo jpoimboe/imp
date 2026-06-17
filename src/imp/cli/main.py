@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -2565,7 +2566,44 @@ def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | No
     return None
 
 
+def _init_logging() -> None:
+    """Claim the root logger before any FastMCP instantiation can hijack it.
+
+    `FastMCP.__init__` calls `configure_logging()`, which runs
+    `logging.basicConfig(level=INFO, handlers=[RichHandler(stderr)])` — but only
+    when the root logger has no handlers yet. imp instantiates `FastMCP(...)` for
+    its in-process tool servers (impty at `impty/mcp.py`, codex at
+    `providers/codex_mcp.py`), so the first such instantiation would otherwise
+    install a stderr RichHandler at INFO and paint propagated third-party INFO
+    logs — notably the Claude Agent SDK's "Using bundled Claude Code CLI" — over
+    the live TUI. We pre-empt that by owning root logging here, before the
+    command path imports any of those modules.
+
+    `IMP_DEBUG=1` opts into stderr logging for development; otherwise records are
+    dropped via a NullHandler so nothing corrupts the terminal UI. Named-logger
+    handlers added elsewhere (e.g. the daemon's `imp.daemon`/`imp.remote` file
+    handlers) are untouched — they attach to their own loggers, not root.
+    """
+    root = logging.getLogger()
+    if root.handlers:
+        return  # already configured (e.g. by an embedding host) — don't clobber
+    if os.environ.get("IMP_DEBUG") == "1":
+        handler: logging.Handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        root.addHandler(handler)
+        root.setLevel(logging.DEBUG)
+    else:
+        root.addHandler(logging.NullHandler())
+        root.setLevel(logging.WARNING)
+        # Belt-and-suspenders: keep noisy third-party INFO chatter off any
+        # handler a dependency might still attach to its own logger.
+        for name in ("claude_agent_sdk", "mcp", "FastMCP"):
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _init_logging()
     args = sys.argv[1:] if argv is None else argv
     parser = _build_parser()
     try:
