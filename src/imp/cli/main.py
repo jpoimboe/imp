@@ -1572,7 +1572,8 @@ def _deliver_abandon_resident(control: Path, change_id: str) -> None:
         await client.connect()
         try:
             await client.send_control(CONTROL_ABANDON)
-            await client.receive_events()
+            with anyio.fail_after(10):
+                await client.receive_events()
         finally:
             await client.aclose()
 
@@ -1620,7 +1621,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         try:
             _deliver_abandon_resident(control, change_id)
         except OSError:
-            pass  # daemon exited between check and connect; fall through to direct teardown
+            pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
             print(f"Abandoned {token}.")
             return 0
