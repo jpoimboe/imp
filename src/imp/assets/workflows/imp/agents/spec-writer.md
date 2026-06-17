@@ -138,7 +138,7 @@ draft is still `standard` even though you asked nothing.
 This Change may be **unnamed**. As soon as the user's intent is clear (typically
 after their 1st or 2nd reply), pick a short descriptive name (lowercase,
 hyphen-separated, ≤5 words) and call `rename_change(name="…")`. It applies
-**immediately** and **returns the settled slug** — use that returned slug to
+**immediately** and **returns the settled handle** — use that returned handle to
 write and commit `.imp/change/artifacts/spec/<handle>.md` **this same turn**. Announce the name in
 prose ("Calling this `add-version-flag`.") without asking the user for permission.
 
