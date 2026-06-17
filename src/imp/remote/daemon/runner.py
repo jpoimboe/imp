@@ -37,6 +37,7 @@ from imp.remote.daemon.commands import (
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
 from imp.remote.session.reply import deliver_session_reply
@@ -372,10 +373,13 @@ async def run_daemon(
     stop = threading.Event()
     focus = Focus()
 
-    hub = SouthHub(
-        str(spath), on_event=lambda cid, line: outbound.put(line),
-        on_attach=lambda cid, autosubscribe: focus.focus_on(cid) if autosubscribe else None,
-        on_detach=lambda cid: focus.clear_if(cid))
+    # on_event is a no-op: events now arrive via the supervisor's directory pull.
+    hub = SouthHub(str(spath), on_event=lambda cid, line: None)
+    supervisor = RelaySupervisor(
+        control_root=control_root,
+        sink=lambda event: outbound.put(json.dumps(event)),
+        events=("all",),
+        title_for=lambda cid: (discover.snapshot(control_root, cid) or ("", "", ""))[2])
     control = ControlPlane(
         deliver=deliver, create=create,
         abandon=abandon, list_changes=list_changes,
@@ -395,6 +399,7 @@ async def run_daemon(
         await hub.open()
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
+            tg.start_soon(supervisor.run)
             tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
             tg.start_soon(anyio.to_thread.run_sync, _poll_worker, adapter, stop)
             tg.start_soon(anyio.to_thread.run_sync,

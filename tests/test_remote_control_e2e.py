@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -10,8 +9,9 @@ import pytest
 
 from imp.remote.daemon.commands import HELP_TEXT, ROUTE_HINT
 from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
-from imp.remote.daemon.protocol import make_hello
 from imp.remote.daemon.runner import run_daemon
+from imp.remote.session.discover import session_socket_path
+from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
 from tests.playbooks.fake_telegram import FakeTelegram
 
@@ -38,6 +38,13 @@ async def test_e2e_chat_commands_round_trip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
+    monkeypatch.setattr(
+        "imp.remote.daemon.directory.list_changes",
+        lambda _cr: [ChangeInfo(id=CHANGE, title="Dark mode",
+                                status="running", step="plan")])
+    monkeypatch.setattr(
+        "imp.remote.daemon.discover.snapshot",
+        lambda _cr, c: ("running", "plan", "Dark mode") if c == CHANGE else None)
     fake = FakeTelegram(chat_id=4242)
     fake.start()
     monkeypatch.setenv("IMP_TELEGRAM_API_BASE", fake.url)
@@ -69,12 +76,14 @@ async def test_e2e_chat_commands_round_trip(
                 while not socket_is_live(spath):
                     await anyio.sleep(0.02)
 
-            # A live south connection emits an event so the adapter records its handle/msg map.
-            client = await anyio.connect_unix(str(spath))
-            await client.send((make_hello(CHANGE, "Dark mode") + "\n").encode())
-            await client.send(json.dumps({
-                "type": "awaiting_user_input", "payload": {"prompt": "go?"},
-                "change": {"id": CHANGE, "title": "Dark mode"}}).encode() + b"\n")
+            # A resident session daemon serves its socket; the supervisor attaches
+            # a relay and pulls its events, so the adapter records the handle/msg map.
+            sess = SessionSocket(str(session_socket_path(tmp_path, CHANGE)))
+            await sess.open()
+            tg.start_soon(sess.serve)
+            await _wait(lambda: sess.attached_count > 0)
+            await sess.broadcast(
+                {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
             await _wait(lambda: _text_in_outbox(fake, "Dark mode"))
             m1 = next(m["message_id"] for m in fake.outbox() if "Dark mode" in m["text"])
 
@@ -101,7 +110,7 @@ async def test_e2e_chat_commands_round_trip(
             fake.inject("who is this even")
             await _wait(lambda: _text_in_outbox(fake, ROUTE_HINT))
 
-            await client.aclose()
+            await sess.close()
             shutdown.set()
     finally:
         fake.stop()

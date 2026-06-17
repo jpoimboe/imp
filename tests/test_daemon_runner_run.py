@@ -8,9 +8,10 @@ import anyio
 import pytest
 
 from imp.remote.daemon.commands import Help
-from imp.remote.daemon.discover import socket_is_live, socket_path
-from imp.remote.daemon.protocol import make_hello
+from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
 from imp.remote.daemon.runner import pid_path, run_daemon
+from imp.remote.session.discover import session_socket_path
+from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
 
 
@@ -36,37 +37,50 @@ class FakeAdapter:
 
 
 @pytest.mark.anyio
-async def test_run_daemon_binds_relays_a_south_event_and_cleans_up(tmp_path: Path) -> None:
+async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _seed_control(tmp_path)
+    cid = "2026-06-13-abc"
+    monkeypatch.setattr(
+        "imp.remote.daemon.directory.list_changes",
+        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    monkeypatch.setattr(
+        "imp.remote.daemon.discover.snapshot",
+        lambda _cr, c: ("running", "plan", "T") if c == cid else None)
     adapter = FakeAdapter()
     shutdown = anyio.Event()
     spath = socket_path(tmp_path)
+    sess = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    await sess.open()
 
     async with anyio.create_task_group() as tg:
+        tg.start_soon(sess.serve)
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
             make_adapter=lambda env, submit, focus: adapter,
             install_signals=False, shutdown=shutdown))
 
-        with anyio.fail_after(5):              # socket comes up
-            while not socket_is_live(spath):
+        with anyio.fail_after(5):              # daemon up + pidfile written
+            while not (socket_is_live(spath) and pid_path(tmp_path).exists()):
                 await anyio.sleep(0.02)
-        assert pid_path(tmp_path).exists()
 
-        # A connector dials, sends its hello, then one event — it must reach the adapter.
-        client = await anyio.connect_unix(str(spath))
-        await client.send((make_hello("2026-06-13-abc", "T") + "\n").encode())
-        await client.send(
-            b'{"type": "agent_output", "change": {"id": "2026-06-13-abc"}}\n')
+        # The supervisor polls the directory and attaches a relay to the session.
+        with anyio.fail_after(5):
+            while sess.attached_count == 0:
+                await anyio.sleep(0.02)
+        await sess.broadcast(
+            {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not adapter.events:
                 await anyio.sleep(0.02)
         assert adapter.events[0]["type"] == "agent_output"
-        await client.aclose()
+        assert adapter.events[0]["change"]["id"] == cid
 
+        await sess.close()
         shutdown.set()                          # clean drain
 
-    # After run_daemon returns the socket is unbound and the pidfile removed.
+    # After run_daemon returns the per-repo socket is unbound and the pidfile gone.
     assert not socket_is_live(spath)
     assert not pid_path(tmp_path).exists()
 
