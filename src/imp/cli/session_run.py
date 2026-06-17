@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import sys
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -42,15 +41,24 @@ async def run_session_client(
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume, from_target=from_target)
+    startup_failed = False
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if status is not None:
             tg.start_soon(status.tick)
-        with contextlib.suppress(TimeoutError):
+        try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 change_id=change.id)
+        except TimeoutError:
+            startup_failed = True
         tg.cancel_scope.cancel()
+    if startup_failed and infer_session_result(change) is not RunResult.COMPLETED:
+        print(
+            f"imp: session daemon for {change.id} did not come up; "
+            f"it may have crashed (see {change.control_root}/.imp/remote-control.log)",
+            file=sys.stderr)
+        return 3
     # Lazy import: imp.cli.main imports this module, so a
     # module-level import of _handle_terminal_outcome would be circular.
     from imp.cli.main import _handle_terminal_outcome
