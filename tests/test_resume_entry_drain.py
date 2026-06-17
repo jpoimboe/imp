@@ -116,7 +116,7 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=inv_dir,
@@ -254,7 +254,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=inv_dir,
@@ -413,7 +413,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=inv_dir,
@@ -592,7 +592,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
         system_prompt="be terse",
         initial_messages=(),
         change_context=ChangeContext(
-            slug="s", title="t", project_root=tmp_path,
+            handle="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tx,
         fs_permissions=(FsRule(
@@ -754,7 +754,7 @@ async def test_anthropic_dangling_wait_resume_joins_pending_interjects(
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=inv_dir,

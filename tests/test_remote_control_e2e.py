@@ -15,7 +15,7 @@ from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
 from tests.playbooks.fake_telegram import FakeTelegram
 
-CHANGE = "2026-06-13-zzzzzz"
+CHANGE = "zzzzzz"
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ async def test_e2e_chat_commands_round_trip(
 
     created: list[str] = []
     abandoned: list[str] = []
-    listed = [ChangeInfo(id="2026-06-13-q1w2e3", title="Listed",
+    listed = [ChangeInfo(id="q1w2e3", title="Listed",
                          status="running", step="plan")]
     spath = socket_path(tmp_path)
     shutdown = anyio.Event()

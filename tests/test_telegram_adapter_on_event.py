@@ -3,13 +3,13 @@ from __future__ import annotations
 from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.telegram_adapter import Inbound, TelegramNorthAdapter
 
-CHANGE_ID = "2026-06-13-aabbcc"
-OTHER_CHANGE_ID = "2026-06-13-zzxxww"
+CHANGE_ID = "aabbcc"
+OTHER_CHANGE_ID = "zzxxww"
 
 LOUD_EVENT = {
     "type": "awaiting_user_input",
     "payload": {"prompt": "Need your call"},
-    "change": {"id": "2026-06-13-k3f9qa", "title": "Dark mode"},
+    "change": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 SILENT_EVENT = {
@@ -63,23 +63,23 @@ def test_on_event_records_reply_to_mapping_so_a_reply_resolves_home() -> None:
     adapter = _adapter([])
     adapter.on_event(LOUD_EVENT)
     reply = Inbound(text="yes do it", reply_to_message_id=42)
-    assert adapter.resolve(reply) == ("2026-06-13-k3f9qa", "yes do it")
+    assert adapter.resolve(reply) == ("k3f9qa", "yes do it")
 
 
 def test_on_event_records_handle_mapping_for_the_at_fallback() -> None:
     adapter = _adapter([])
     adapter.on_event(LOUD_EVENT)
     reply = Inbound(text="@k3f9qa go", reply_to_message_id=None)
-    assert adapter.resolve(reply) == ("2026-06-13-k3f9qa", "go")
+    assert adapter.resolve(reply) == ("k3f9qa", "go")
 
 
 def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     sent: list = []
     focus = Focus()
-    focus.focus_on("2026-06-13-k3f9qa")
+    focus.focus_on("k3f9qa")
     adapter = _adapter(sent, focus=focus)
     adapter.on_event({"type": "llm_response", "payload": {},
-                      "change": {"id": "2026-06-13-k3f9qa", "title": "X"}})
+                      "change": {"id": "k3f9qa", "title": "X"}})
     assert sent == []
 
 
@@ -87,7 +87,7 @@ def test_on_event_records_handle_map_even_when_send_returns_none() -> None:
     adapter = _adapter([], message_id=None)
     adapter.on_event(LOUD_EVENT)
     reply = Inbound(text="@k3f9qa go", reply_to_message_id=None)
-    assert adapter.resolve(reply) == ("2026-06-13-k3f9qa", "go")
+    assert adapter.resolve(reply) == ("k3f9qa", "go")
 
 
 def test_silent_unfocused_event_populates_handle_map_without_sending() -> None:
@@ -106,13 +106,13 @@ def test_silent_unfocused_event_populates_handle_map_without_sending() -> None:
 
 def _narration(text: str) -> dict:
     return {"type": "llm_response",
-            "change": {"id": "2026-06-13-k3f9qa", "title": "t"},
+            "change": {"id": "k3f9qa", "title": "t"},
             "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
 
 
 def _prompt_less_await() -> dict:
     return {"type": "awaiting_user_input",
-            "change": {"id": "2026-06-13-k3f9qa", "title": "t"},
+            "change": {"id": "k3f9qa", "title": "t"},
             "payload": {"prompt": ""}}
 
 

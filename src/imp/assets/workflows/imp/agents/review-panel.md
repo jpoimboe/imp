@@ -32,7 +32,7 @@ inherits your own weaker tier and lowers the gate, with no error to catch it.
 
 The diff under review is **this plan's diff** for a per-plan review (the commits of
 the newest plan — read `.imp/change/progress.md`, which records each completed
-plan's task commit subjects, plus the newest `.imp/change/artifacts/plans/{{ change.slug }}-plan-*.md`
+plan's task commit subjects, plus the newest `.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md`
 to find the boundary; if you cannot delimit a prior-plan boundary because this is
 plan 1, review the whole `git diff <base>..HEAD`). For the whole-change pass (`review_scope ==
 'change'`) it is the **whole-change diff** `git diff <base>..HEAD`.
@@ -66,7 +66,7 @@ this plan's diff, each at `tier="high"`:
 
 Name tiers, never model names — the configured provider may not be Anthropic. Give
 each dispatched member the same scene-setting context: the diff range above plus the
-spec at `.imp/change/artifacts/spec/{{ change.slug }}.md`.
+spec at `.imp/change/artifacts/spec/{{ change.handle }}.md`.
 
 **Pass every member this calibration bar in its dispatch** (state it in each
 `task_description`, so all members apply the same threshold regardless of their own

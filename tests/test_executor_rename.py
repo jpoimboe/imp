@@ -23,14 +23,14 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="orig",
-                       change_id="2026-06-04-aaa111", base_branch="main")
+                       change_id="aaa111", base_branch="main")
     created_before = json.loads(
         (ch.change_dir / "change.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
-    new_slug = ch.rename("Add OAuth", log=ch.event_log())
+    new_handle = ch.rename("Add OAuth", log=ch.event_log())
 
-    assert new_slug == "2026-06-04-add-oauth"
+    assert new_handle == "add-oauth-aaa111"
     assert ch.title == "Add OAuth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
@@ -41,7 +41,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"][-1]
     assert renamed["payload"] == {
         "id": id_before, "old_title": "orig", "new_title": "Add OAuth",
-        "new_slug": "2026-06-04-add-oauth"}
+        "handle": "add-oauth-aaa111"}
 
 
 class _RenamingRunner:
@@ -111,7 +111,7 @@ def test_run_change_rename_keeps_id_and_path(
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="x",
-                       change_id="2026-06-04-ccc333", base_branch="main")
+                       change_id="ccc333", base_branch="main")
 
     cwd_before = os.getcwd()
     result = anyio.run(run_change, ch)
@@ -119,17 +119,17 @@ def test_run_change_rename_keeps_id_and_path(
     assert os.getcwd() == cwd_before
     # Reload to confirm the rename persisted to change.json (the in-memory ch is
     # the same object the runner mutated; reloading proves durability).
-    reloaded = Change.load(tmp_path, "2026-06-04-ccc333")
+    reloaded = Change.load(tmp_path, "ccc333")
     assert reloaded.title == "Renamed Thing"
-    assert reloaded.id == "2026-06-04-ccc333"
-    assert (tmp_path / ".imp" / "worktrees" / "2026-06-04-ccc333").is_dir()
+    assert reloaded.id == "ccc333"
+    assert (tmp_path / ".imp" / "worktrees" / "ccc333").is_dir()
 
 
 def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> None:
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="x",
-                       change_id="2026-06-04-ddd444", base_branch="main")
+                       change_id="ddd444", base_branch="main")
     (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")
 
     cwd_before = os.getcwd()
@@ -143,14 +143,14 @@ def test_seed_messages_named_carries_the_name(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Add OAuth",
-                       change_id="2026-06-05-eee555", base_branch="main")
+                       change_id="eee555", base_branch="main")
     msgs = _seed_messages(ch, None)
     assert len(msgs) == 1
     blocks = msgs[0].content
     assert len(blocks) == 1                       # single block, separator inside
     text = blocks[0].text
     assert text.startswith("<imp:begin/>")
-    assert "2026-06-05-add-oauth" in text
+    assert "add-oauth-eee555" in text
     assert "\n\n" in text                         # token and name line kept apart
 
 
@@ -159,7 +159,7 @@ def test_seed_messages_unnamed_has_no_name_block(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="2026-06-05-fff666", base_branch="main")
+                       change_id="fff666", base_branch="main")
     msgs = _seed_messages(ch, None)
     assert len(msgs) == 1
     blocks = msgs[0].content
@@ -200,7 +200,7 @@ async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="2026-06-13-aaa111", base_branch="main")
+                       change_id="aaa111", base_branch="main")
 
     events: list[dict[str, Any]] = []
     result = await run_change(
@@ -222,7 +222,7 @@ async def test_run_change_none_seed_opening_uses_begin_token(
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="2026-06-13-bbb222", base_branch="main")
+                       change_id="bbb222", base_branch="main")
 
     result = await run_change(
         ch, on_event=lambda _e: None, seed_opening=None, non_interactive=True)
@@ -240,7 +240,7 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="2026-06-13-ccc333", base_branch="main")
+                       change_id="ccc333", base_branch="main")
 
     state = State.load(ch.state_dir)
     state.resume_pending = state.step  # simulate a paused-then-resumed first step

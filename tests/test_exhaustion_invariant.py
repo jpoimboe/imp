@@ -23,7 +23,7 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 
 
-def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees. The workflow is
     read from root/imp/workflows/imp (the branch-dir model — workflow_dir =
     project_root/imp/workflows/imp), so there is no snapshot copy to make."""
@@ -35,7 +35,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
-        "id": slug, "title": title, "base_branch": "main",
+        "id": change_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -49,17 +49,17 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     # characterization fixture keeps the simpler defaults() form (unchanged from
     # the prior fixture) — the exhaustion invariant doesn't depend on overrides.
     State(
-        id=slug, step=flat[0].name if flat else None, step_attempt=0,
+        id=change_id, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(change_dir / "state")
 
     change = Change(
-        id=slug, title=title, base_branch="main",
+        id=change_id, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": slug, "slug": change.slug, "title": title},
+        payload={"id": change_id, "handle": change.handle, "title": title},
     )
     return change
 
@@ -88,7 +88,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     (wf_dir / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.slug }}\n"
+        "go {{ change.handle }}\n"
     )
     # New inline-surface format: phases is a list of {name, steps}.
     # on_max_retries uses verb-style: {pause: true}.

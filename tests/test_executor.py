@@ -37,7 +37,7 @@ def _persist_initial(invocation: AgentInvocation) -> None:
             tools_schema=[], params={}, max_tool_calls=None)
 
 
-def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees.
 
     The test sets up the workflow under root/imp/workflows/imp BEFORE
@@ -55,7 +55,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     # Write change metadata
     (change_dir / "change.json").write_text(json.dumps({
-        "id": slug, "title": title, "base_branch": "main",
+        "id": change_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -71,7 +71,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
-        id=slug,
+        id=change_id,
         step=flat[0].name if flat else None,
         step_attempt=0,
         status="running",
@@ -80,12 +80,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     ).save(change_dir / "state")
 
     change = Change(
-        id=slug, title=title, base_branch="main",
+        id=change_id, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": slug, "slug": change.slug, "title": title},
+        payload={"id": change_id, "handle": change.handle, "title": title},
     )
     return change
 
@@ -184,7 +184,7 @@ def _seed_minimal_workflow(
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.slug }}\n"
+        "go {{ change.handle }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -1597,6 +1597,6 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
 def test_change_context_defaults_empty_facts() -> None:
     from imp.agents.runner import ChangeContext
     cc = ChangeContext(
-        slug="s", title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
+        handle="s", title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
     assert cc.guidance == ""

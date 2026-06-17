@@ -1,4 +1,4 @@
-"""Change lifecycle (spec §3, §5): immutable id identity, derived slug, worktree
+"""Change lifecycle (spec §3, §5): immutable id identity, derived handle, worktree
 creation, state home inside the worktree at <worktree>/.imp/change/."""
 
 from __future__ import annotations
@@ -24,26 +24,26 @@ class Change:
     change_dir: Path             # <worktree>/.imp/change
 
     @property
-    def slug(self) -> str:
-        """Derived display name (spec filename + human output ONLY — never a path
-        or ref). `id[:10]` is the fixed-width YYYY-MM-DD prefix of the id."""
-        from imp.engine.slug import dated_slug
-        return dated_slug(self.title, date=self.id[:10])
+    def handle(self) -> str:
+        """Derived display name + filename stem (never a path or ref):
+        `slugify(title)-<id>` once named, the bare `<id>` while unnamed."""
+        from imp.engine.slug import derive_handle
+        return derive_handle(self.title, self.id)
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite change.json under the
         gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
-        Returns the new derived slug. The id is immutable, so nothing else moves."""
+        Returns the new handle. The id is immutable, so nothing else moves."""
         old_title = self.title
-        self.title = name                       # slug property now derives anew
+        self.title = name                        # handle property now derives anew
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
         log.append(agent_id=None, type="change_renamed",
                    payload={"id": self.id, "old_title": old_title,
-                            "new_title": name, "new_slug": self.slug})
-        return self.slug
+                            "new_title": name, "handle": self.handle})
+        return self.handle
 
     @property
     def live_workflow_dir(self) -> Path:
@@ -127,9 +127,7 @@ class Change:
         )
         change.event_log().append(
             agent_id=None, type="change_created",
-            # Carries BOTH id (new canonical key) and the derived slug (the
-            # narrative renderers read payload["slug"] — keep emitting it). [item 12]
-            payload={"id": change_id, "slug": change.slug, "title": title},
+            payload={"id": change_id, "handle": change.handle, "title": title},
         )
         return change
 

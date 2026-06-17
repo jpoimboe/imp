@@ -94,7 +94,7 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         events_path=worktree / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
-        slug="test",
+        handle="test",
         title="Test",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
@@ -352,58 +352,58 @@ def test_gate_writing_in_its_cwd_succeeds() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_gate_sees_post_rename_slug_not_frozen_empty() -> None:
-    """Regression: name-on-intent freezes the policy with IMP_CHANGE_SLUG="" at run
-    start; after rename_change the gate's fresh env_extra carries the real slug.
+def test_gate_sees_post_rename_handle_not_frozen_empty() -> None:
+    """Regression: name-on-intent freezes the policy with IMP_CHANGE_HANDLE="" at run
+    start; after rename_change the gate's fresh env_extra carries the real handle.
     Reproduces the dogfood failure where spec-commit-verify.sh's
-    `${IMP_CHANGE_SLUG:?not set by engine}` fired inside the bwrap --clearenv jail.
+    `${IMP_CHANGE_HANDLE:?not set by engine}` fired inside the bwrap --clearenv jail.
     """
     import dataclasses
 
     from imp.engine.gates import run_script
     from imp.engine.types import Pause, SourceLoc, Step
 
-    root = _make_root("imp-test-slug-")
+    root = _make_root("imp-test-handle-")
     try:
-        # Policy frozen with an EMPTY slug, exactly as _build_sandbox_policy bakes it
+        # Policy frozen with an EMPTY handle, exactly as _build_sandbox_policy bakes it
         # at run start before the agent has named the Change.
         pol = _active_policy(root)
-        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_SLUG", "")))
+        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_HANDLE", "")))
         step = Step(
             name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
             max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
-            command=': "${IMP_CHANGE_SLUG:?IMP_CHANGE_SLUG not set by engine}"; '
-                    'printf %s "$IMP_CHANGE_SLUG"',
+            command=': "${IMP_CHANGE_HANDLE:?IMP_CHANGE_HANDLE not set by engine}"; '
+                    'printf %s "$IMP_CHANGE_HANDLE"',
             timeout_seconds=30,
         )
         # The fresh per-spawn engine_env the executor builds from the renamed Change.
         result = run_script(step, cwd=root, policy=pol,
-                            env_extra={"IMP_CHANGE_SLUG": "2026-06-10-live-mode-log-polish"})
+                            env_extra={"IMP_CHANGE_HANDLE": "live-mode-log-polish"})
         assert result["exit"] == 0, f"gate exited {result['exit']}: {result}"
-        assert result["stdout"] == "2026-06-10-live-mode-log-polish"
+        assert result["stdout"] == "live-mode-log-polish"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_bash_tool_uses_live_change_slug_not_stale_snapshot() -> None:
-    """Regression: the bash tool must read IMP_CHANGE_SLUG from the LIVE Change, not
+def test_bash_tool_uses_live_change_handle_not_stale_snapshot() -> None:
+    """Regression: the bash tool must read IMP_CHANGE_HANDLE from the LIVE Change, not
     the frozen change_context snapshot that rename_change never updates. Without the
-    fix the agent's own bash sees the empty name-on-intent slug inside the sandbox.
+    fix the agent's own bash sees the empty name-on-intent handle inside the sandbox.
     """
     import types as _t
 
-    root = _make_root("imp-test-bash-slug-")
+    root = _make_root("imp-test-bash-handle-")
     try:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
-        # change_context = the pre-rename snapshot (empty slug); ctx.change = the
+        # change_context = the pre-rename snapshot (empty handle); ctx.change = the
         # live, renamed Change. The bash tool must prefer the live one.
         ctx.change_context = ChangeContext(
-            id="2026-06-10-x", slug="", title="",
+            id="2026-06-10-x", handle="", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
         ctx.change = _t.SimpleNamespace(
-            id="2026-06-10-x", slug="2026-06-10-renamed", title="renamed")
-        out = _bash(ctx, 'printf %s "$IMP_CHANGE_SLUG"')
+            id="2026-06-10-x", handle="2026-06-10-renamed", title="renamed")
+        out = _bash(ctx, 'printf %s "$IMP_CHANGE_HANDLE"')
         assert out["returncode"] == 0, out
         assert out["stdout"] == "2026-06-10-renamed"
     finally:
@@ -459,7 +459,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             events_path=wt_path / "events.jsonl",
         )
         ctx.change_context = ChangeContext(
-            slug="esc1",
+            handle="esc1",
             title="Escape Test",
             project_root=wt_path,
             workflow_dir=wt_path / ".imp" / "wf",

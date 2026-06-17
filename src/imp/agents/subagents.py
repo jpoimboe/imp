@@ -192,7 +192,7 @@ async def dispatch_task(
     from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
 
     cc = ctx.change_context or ChangeContext(
-        id="", slug="", title="", project_root=ctx.project_root,
+        id="", handle="", title="", project_root=ctx.project_root,
         # No change context → no change_dir, no snapshot; live dir is the only option.
         workflow_dir=(
             ctx.project_root / "imp" / "workflows"
@@ -204,7 +204,7 @@ async def dispatch_task(
     # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
     prompt_ctx = build_context(
         change_id=cc.id,
-        change_slug=cc.slug,
+        change_handle=cc.handle,
         change_title=cc.title,   # dispatch label is the title now [item 11]
         event_log=JsonlEventLog(ctx.events_path),
         vars=ctx.change_state.vars if ctx.change_state is not None else {},

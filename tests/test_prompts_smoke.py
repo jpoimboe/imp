@@ -15,10 +15,10 @@ def test_render_uses_change_namespace(tmp_path: Path) -> None:
             "name: a\ntools: [complete_step]\noutput:\n"
             "  status: {type: enum, values: [Success, Error]}"
         ),
-        body="Change {{ change.slug }}: {{ change.title }}",
+        body="Change {{ change.handle }}: {{ change.title }}",
     )
     agent = parse_agent_file(p)
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_slug="my-slug", change_title="foo", event_log=log)
+    ctx = build_context(change_handle="my-slug", change_title="foo", event_log=log)
     rendered = render_prompt(agent.prompt_template_source, ctx)
     assert "Change my-slug: foo" in rendered

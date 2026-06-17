@@ -20,7 +20,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         events_path=tmp_path / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
-        slug="test-change", title="Test Change", project_root=tmp_path,
+        handle="test-change", title="Test Change", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     return ctx
@@ -59,9 +59,9 @@ def test_bash_exposes_imp_project_root(tmp_path: Path) -> None:
     assert str(tmp_path) in out["stdout"]
 
 
-def test_bash_exposes_imp_change_slug(tmp_path: Path) -> None:
+def test_bash_exposes_imp_change_handle(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_CHANGE_SLUG"}))
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_CHANGE_HANDLE"}))
     assert out["returncode"] == 0
     assert "test-change" in out["stdout"]
 

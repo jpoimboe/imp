@@ -71,7 +71,7 @@ async def _cc_shape(tmp_path: Path) -> dict:
         agent_def=agent, provider_name="claude_code", model_name="m",
         system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
+        change_context=ChangeContext(handle="s", title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "step",
         fs_permissions=(), events_path=tmp_path / "events.jsonl",

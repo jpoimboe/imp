@@ -10,7 +10,6 @@ check is location-agnostic — no pinned file, line, or commit count.
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -115,22 +114,13 @@ def _imp(repo: str, imp: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-_MODERN_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-([a-z0-9]{6})$")
-
-
-def _resume_token(change_id: str) -> str:
-    """6-char suffix for modern YYYY-MM-DD-xxxxxx ids; full id for legacy slugs."""
-    m = _MODERN_ID.match(change_id)
-    return m.group(1) if m else change_id
-
-
 def check_readback(repo: str, imp: str) -> Result:
     ids = journal_ids(repo)
     if len(ids) != 1:
         return Result("readback", False,
                       f"expected exactly one journaled change, got {_fmt(ids)}")
     cid = ids[0]
-    token = _resume_token(cid)
+    token = cid
     log = _imp(repo, imp, "log", cid)
     log_full = _imp(repo, imp, "log", cid, "--full")
     status = _imp(repo, imp, "status", "--all")

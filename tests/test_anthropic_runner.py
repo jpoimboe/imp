@@ -51,7 +51,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
@@ -201,7 +201,7 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
         model_name="claude-sonnet-4-6", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=inv_dir,
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
@@ -857,7 +857,7 @@ async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Pa
         model_name="claude-sonnet-4-6", system_prompt="be terse",
         initial_messages=(),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            handle="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=inv_dir,
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),

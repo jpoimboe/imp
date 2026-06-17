@@ -111,7 +111,7 @@ async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
     inv = AgentInvocation(
         agent_def=agent, provider_name="fake", model_name="m",
         system_prompt="s", initial_messages=(),
-        change_context=ChangeContext(slug="x", title="t",
+        change_context=ChangeContext(handle="x", title="t",
                                      project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "td",

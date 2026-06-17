@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Generic, TypeVar
 
 from imp.cli import change_row
+from imp.engine.slug import derive_handle
 
 
 @dataclass(frozen=True)
@@ -44,8 +45,9 @@ class ResumePicker:
         for i, c in enumerate(self.candidates):
             marker = "▸ " if i == self.index else "  "
             out.append(marker + change_row.format_change_line(
-                change_id=c.change_id, title=c.title, status=c.status,
-                step=c.step, last_iso=c.last_iso, now=self.now, color=self.color))
+                handle=derive_handle(c.title, c.change_id), title=c.title,
+                status=c.status, step=c.step, last_iso=c.last_iso,
+                now=self.now, color=self.color))
         return "\n".join(out)
 
 

@@ -7,7 +7,6 @@
 # resumes task-lead with this message as feedback.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
-SLUG="${IMP_CHANGE_SLUG:?IMP_CHANGE_SLUG not set by engine}"
 
 # (1) clean worktree
 if [[ -n "$(git status --porcelain)" ]]; then

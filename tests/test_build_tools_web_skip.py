@@ -25,7 +25,7 @@ def _inv(provider: str, tools: frozenset[str], explicit_tools: bool = False) -> 
         agent_def=_agent(tools, explicit_tools=explicit_tools), provider_name=provider,
         model_name="m", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(slug="s", title="t", project_root=Path("/"),
+        change_context=ChangeContext(handle="s", title="t", project_root=Path("/"),
                                      workflow_dir=Path("/")),
         transcript_dir=Path("/"),
         fs_permissions=(), events_path=Path("/events.jsonl"))

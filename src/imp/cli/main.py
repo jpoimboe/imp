@@ -47,7 +47,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import dated_slug, new_change_id, slugify
+from imp.engine.slug import derive_handle, new_change_id
 from imp.engine.state import LockHeld, State
 from imp.engine.workflow_lifecycle import (
     DriftState,
@@ -289,11 +289,9 @@ def _recover_phase(change: Change) -> str | None:
 
 
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
-    from imp.cli.change_row import resume_token
-    from imp.cli.narrative import _slug_descriptor
-    name = _slug_descriptor(change.slug) or resume_token(change.id)
+    name = change.handle
     phase = _phase_from_events(list(change.event_log().read()))
-    return name, phase, resume_token(change.id)
+    return name, phase, change.id
 
 
 def _emit_paused_summary(change: Change) -> None:
@@ -508,12 +506,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
-    from imp.cli.narrative import _slug_descriptor
-    token = change_row.resume_token(change_id)
-    display_slug = _slug_descriptor(slug)
-    tail = f" · {display_slug} · {marker}" if display_slug else f" · {marker}"
-    return (ansi(token, *pal.NODE_COLORS["workflow"], enabled=color)
+def _run_header_line(handle: str, title: str, change_id: str, marker: str,
+                     *, color: bool) -> str:
+    named = bool(title.strip())
+    head = handle if named else change_id
+    name = title.strip() if named else "(unnamed)"
+    tail = f" · {name} · {marker}"
+    return (ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
             + ansi(tail, "dim", enabled=color))
 
 
@@ -606,7 +605,7 @@ async def _run_tui_session(
 
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
-    change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    change_id = new_change_id()
     backlog.write_record(
         control, change_id=change_id,
         title=getattr(args, "title", None) or "",
@@ -628,7 +627,7 @@ async def _run_fresh_session(
     non_interactive = bool(getattr(args, "non_interactive", False))
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
     if non_interactive:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
@@ -719,7 +718,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         # by asking); a real answer becomes the opening intent.
         opening_text = _normalize_opening_reply(reply)
 
-    change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
@@ -742,7 +741,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         # runs the agent loop; this process is a thin client that delivers
         # --message once, then detaches and lets the daemon hibernate at its gate.
         print(_run_header_line(
-            change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -755,11 +754,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     if _tui_requested(args):
         print(_run_header_line(
-            change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, seed_opening=opening_text)
 
     print(_run_header_line(
-        change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
@@ -896,7 +895,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             if rc is not None:
                 return rc
         print(_run_header_line(
-            change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -912,7 +911,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             if rc is not None:
                 return rc
         print(_run_header_line(
-            change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, resume=True, from_target=from_target)
 
     # Interactive resume: a thin session-client. Validate --from client-side
@@ -924,7 +923,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             return rc
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+        change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
@@ -1012,51 +1011,17 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
 
 
 def _resolve_id(control: Path, token: str) -> str:
-    """Resolve a user-typed token to a Change id (spec §5). Precedence:
-      1. exact id
-      2. unique id SUFFIX match (the 6-char random tail; `imp resume k3f9qa`)
-      3. exact current-slug match (slug derived from the live title)
-    Ambiguous at any level -> exit non-zero listing candidate ids. Prefix
-    matching is intentionally NOT attempted (all same-day ids share YYYY-MM-DD-)."""
+    """Resolve a user-typed token to a Change id (spec AC 7): it must be an
+    unambiguous substring of exactly one change's LIVE handle (recomputed from the
+    current title). The id is always a substring of its own handle, so a bare id
+    always resolves. Multiple matches exit non-zero listing candidates; none errors."""
     ids = _iter_change_ids(control)
-
-    if token in ids:                                       # (1) exact id
-        return token
-
-    suffix_hits = [cid for cid in ids if cid.endswith(token) and cid != token]
-    if len(suffix_hits) == 1:                              # (2) unique suffix
-        return suffix_hits[0]
-    if len(suffix_hits) > 1:
-        _exit_ambiguous(token, suffix_hits, control)
-
-    slug_hits = []
-    for cid in ids:
-        title = _title_for_id(control, cid)
-        if title is None:
-            continue
-        try:
-            dated = dated_slug(title, date=cid[:10])         # 2026-06-11-add-version-flag
-            bare = slugify(title)                            # add-version-flag
-        except Exception:
-            continue
-        # Match the human dated slug OR the bare name a user naturally types
-        # (`imp resume add-version-flag`); without the bare form this tier was
-        # dead for undated names and they fell through to "no Change matches".
-        if token in (dated, bare):
-            slug_hits.append(cid)
-    if len(slug_hits) == 1:                                 # (3) current slug
-        return slug_hits[0]
-    if len(slug_hits) > 1:
-        _exit_ambiguous(token, slug_hits, control)
-
-    # Not resolvable. A bare prefix shared by several ids (e.g. `2026-06-04`) is
-    # rejected as AMBIGUOUS and lists the candidates (spec §5 / AC 5): prefixes
-    # are never *resolved*, but a shared prefix yields a helpful candidate list
-    # rather than a blank "no match", so the user can retype with a suffix.
-    prefix_hits = [cid for cid in ids if cid.startswith(token)]
-    if len(prefix_hits) > 1:
-        _exit_ambiguous(token, prefix_hits, control)
-
+    matches = [cid for cid in ids
+               if token in derive_handle(_title_for_id(control, cid) or "", cid)]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        _exit_ambiguous(token, matches, control)
     print(f"imp: no Change matches {token!r}", file=sys.stderr)
     raise SystemExit(2)
 
@@ -1072,7 +1037,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             print(f"  {cid}", file=sys.stderr)
             continue
         print(change_row.format_change_line(
-            change_id=row[0], title=row[4], status=row[1], step=row[2],
+            handle=derive_handle(row[4], row[0]), title=row[4], status=row[1], step=row[2],
             last_iso=row[3], now=now, color=color), file=sys.stderr)
     raise SystemExit(2)
 
@@ -1092,10 +1057,10 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
-def _show_slug(control: Path, change_id: str) -> str:
-    """Current slug for a change, worktree-first then journal."""
-    title = _title_for_id(control, change_id) or change_id
-    return dated_slug(title, date=change_id[:10])
+def _show_handle(control: Path, change_id: str) -> str:
+    """Current handle for a change, worktree-first then journal."""
+    title = _title_for_id(control, change_id) or ""
+    return derive_handle(title, change_id)
 
 
 def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
@@ -1106,13 +1071,13 @@ def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     return journal.journal_show(control, change_id, rel)
 
 
-def _show_newest_plan_rel(control: Path, change_id: str, slug: str) -> str | None:
-    """plans/<slug>-plan-N.md for the highest N, live worktree first then
+def _show_newest_plan_rel(control: Path, change_id: str, handle: str) -> str | None:
+    """plans/<handle>-plan-N.md for the highest N, live worktree first then
     journal. Returns None when no plan exists in either place."""
     def _newest(names: list[str]) -> str | None:
         best, pick = -1, None
         for name in names:
-            mobj = re.fullmatch(rf"{re.escape(slug)}-plan-(\d+)\.md", name)
+            mobj = re.fullmatch(rf"{re.escape(handle)}-plan-(\d+)\.md", name)
             if mobj and int(mobj.group(1)) > best:
                 best, pick = int(mobj.group(1)), name
         return pick
@@ -1155,11 +1120,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return 2
     resource = args.resource
     if resource in ("spec", "plan"):
-        slug = _show_slug(control, change_id)
+        handle = _show_handle(control, change_id)
     if resource == "spec":
-        data = _show_artifact(control, change_id, f"spec/{slug}.md")
+        data = _show_artifact(control, change_id, f"spec/{handle}.md")
     elif resource == "plan":
-        rel = _show_newest_plan_rel(control, change_id, slug)
+        rel = _show_newest_plan_rel(control, change_id, handle)
         data = _show_artifact(control, change_id, rel) if rel else None
     elif resource == "events":
         data = _show_runtime(control, change_id, "events.jsonl")
@@ -1532,7 +1497,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     print(change_row.header_line(color=color), file=sys.stderr)
     for r in rows:
         print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color), file=sys.stderr)
     return 2
 
@@ -1632,7 +1597,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
 
-    token = change_row.resume_token(change_id)
+    token = change.handle
     do_prompt = not assume_yes and (
         _interactive() if interactive is None else interactive)
     if do_prompt:
@@ -1779,14 +1744,14 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     print(change_row.header_line(color=color))
     for r in inflight:
         print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color))
     if past:
         if inflight:
             print()
         for r in past:
             print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, dim=True))
     if backlog_lines:
         if inflight or past:

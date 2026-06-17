@@ -26,7 +26,7 @@ def _repo(tmp_path: Path) -> Path:
 def _run(script: str, root: Path, slug: str) -> int:
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_SLUG": slug,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
              "PATH": __import__("os").environ["PATH"]},
         capture_output=True, text=True,
     ).returncode
@@ -35,7 +35,7 @@ def _run(script: str, root: Path, slug: str) -> int:
 def _run_id(script: str, root: Path, slug: str, change_id: str) -> int:
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_SLUG": slug,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
              "IMP_CHANGE_ID": change_id,
              "PATH": __import__("os").environ["PATH"]},
         capture_output=True, text=True,
@@ -162,7 +162,7 @@ def _impl_repo(tmp_path: Path, *, n_tasks: int = 1) -> Path:
     cdir = root / ".imp" / "change"
     cdir.mkdir(parents=True)
     (cdir / "change.json").write_text(
-        '{"base_branch": "main", "slug": "2026-06-01-x"}'
+        '{"base_branch": "main"}'
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "chore: init change metadata")
@@ -282,10 +282,10 @@ def test_stamp_trailers_is_idempotent(tmp_path: Path) -> None:
     assert body.count("Change: 2026-06-01-x") == 1   # not duplicated
 
 
-def test_stamp_trailers_fails_on_empty_slug(tmp_path: Path) -> None:
+def test_stamp_trailers_fails_on_empty_handle(tmp_path: Path) -> None:
     root = _impl_repo(tmp_path, n_tasks=1)
     _src_commit(root, "f.py", "feat: task 1")
-    assert _run("stamp-trailers.sh", root, "") != 0   # ${IMP_CHANGE_SLUG:?}
+    assert _run("stamp-trailers.sh", root, "") != 0   # ${IMP_CHANGE_HANDLE:?}
 
 
 def test_stamp_trailers_fails_on_empty_range(tmp_path: Path) -> None:
@@ -297,7 +297,7 @@ def test_stamp_trailers_fails_on_empty_range(tmp_path: Path) -> None:
     _git(root, "commit", "-m", "seed")
     cdir = root / ".imp" / "change"
     cdir.mkdir(parents=True)
-    (cdir / "change.json").write_text('{"base_branch": "main", "slug": "2026-06-01-x"}')
+    (cdir / "change.json").write_text('{"base_branch": "main"}')
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "chore: change metadata")
     # No change branch / no divergence from main beyond what main already has:

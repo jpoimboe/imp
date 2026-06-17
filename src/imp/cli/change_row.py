@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime
 
 from imp.cli import palette as pal
@@ -25,26 +24,11 @@ def relative_age(then_iso: str | None, *, now: datetime) -> str:
     return f"{hours // 24}d"
 
 
-_MODERN_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-([a-z0-9]{6})$")
-
-
-def resume_token(change_id: str) -> str:
-    """6-char suffix for a modern `YYYY-MM-DD-xxxxxx` id, or the full id for legacy slugs."""
-    m = _MODERN_ID.match(change_id)
-    return m.group(1) if m else change_id
-
-
+HANDLE_W = 28
 TITLE_W = 24
 STATUS_W = 13   # widest status: len("merge_blocked")
 STEP_W = 20     # widest default-workflow step name
 AGE_W = 4
-# The ID column is last and holds the resume token. Modern ids yield a 6-char
-# token (resume_token), but legacy `YYYY-MM-DD-<slug>` ids have no short form, so
-# an untruncated token overflowed 80 cols in the dim past section. Cap it: the
-# fixed columns + separators sum to 69, so 11 keeps every row within 80 (hence
-# also 100). Truncating only ever touches non-actionable legacy past data — every
-# resumable change has a modern 6-char token that fits untouched.
-TOKEN_W = 11
 
 _STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("green",),
@@ -60,24 +44,36 @@ def _truncate(text: str, width: int) -> str:
     return text[: width - 1] + "…"
 
 
+def _truncate_handle(handle: str, width: int) -> str:
+    """Ellipsize the NAME part of `<name>-<id>` but always keep the `-<id>` tail
+    visible, so the id stays copy/paste-reachable from `imp status`."""
+    if len(handle) <= width:
+        return handle
+    head, sep, tail = handle.rpartition("-")
+    keep = width - 2 - len(tail)   # name… + "-" + id == width
+    if not sep or keep < 1:        # bare id or pathologically long id: plain cut
+        return _truncate(handle, width)
+    return f"{head[:keep]}…-{tail}"
+
+
 def header_line(*, color: bool) -> str:
-    text = (f"{'TITLE':<{TITLE_W}}  {'STATUS':<{STATUS_W}}  "
-            f"{'STEP':<{STEP_W}}  {'AGE':<{AGE_W}}  ID")
+    text = (f"{'HANDLE':<{HANDLE_W}}  {'TITLE':<{TITLE_W}}  {'STATUS':<{STATUS_W}}  "
+            f"{'STEP':<{STEP_W}}  {'AGE':<{AGE_W}}")
     return pal.ansi(text, "dim", enabled=color)
 
 
-def format_change_line(*, change_id: str, title: str, status: str, step: str,
+def format_change_line(*, handle: str, title: str, status: str, step: str,
                        last_iso: str | None, now: datetime,
                        color: bool, dim: bool = False) -> str:
     raw = title.strip()
+    handle_pad = f"{_truncate_handle(handle, HANDLE_W):<{HANDLE_W}}"
     title_text = "(unnamed)" if not raw else _truncate(raw, TITLE_W)
     title_pad = f"{title_text:<{TITLE_W}}"
     status_pad = f"{status:<{STATUS_W}}"
     step_pad = f"{(step or '-'):<{STEP_W}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
-    token = _truncate(resume_token(change_id), TOKEN_W)
     if dim:
-        line = f"{title_pad}  {status_pad}  {step_pad}  {age_pad}  {token}"
+        line = f"{handle_pad}  {title_pad}  {status_pad}  {step_pad}  {age_pad}"
         return pal.ansi(line, "dim", enabled=color)
     title_cell = pal.ansi(title_pad, "dim", enabled=color) if not raw else title_pad
     codes = _STATUS_COLORS.get(status, ())
@@ -85,4 +81,4 @@ def format_change_line(*, change_id: str, title: str, status: str, step: str,
         status_cell = pal.ansi(status, *codes, enabled=True) + " " * (STATUS_W - len(status))
     else:
         status_cell = status_pad
-    return f"{title_cell}  {status_cell}  {step_pad}  {age_pad}  {token}"
+    return f"{handle_pad}  {title_cell}  {status_cell}  {step_pad}  {age_pad}"

@@ -23,7 +23,7 @@ def _build(tmp_path: Path, *, name: str, body: str):
     return build_agent_invocation(
         agent_def=_agent(name=name), provider_name="anthropic", model_name="m",
         rendered_system_prompt=body, initial_messages=(),
-        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
+        change_context=ChangeContext(handle="s", title="t", project_root=tmp_path,
                                       workflow_dir=tmp_path / "wf"),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl", subagent_defs={},

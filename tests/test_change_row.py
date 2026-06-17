@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from imp.cli.change_row import format_change_line, header_line, relative_age, resume_token
+from imp.cli.change_row import format_change_line, header_line, relative_age
 
 _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
 
@@ -24,22 +24,8 @@ def test_relative_age(then_iso, expected):
     assert relative_age(then_iso, now=_NOW) == expected
 
 
-@pytest.mark.parametrize(
-    "change_id, expected",
-    [
-        ("2026-06-11-yaitd7", "yaitd7"),                 # modern id → 6-char suffix
-        ("2026-06-11-add-version-flag",
-         "2026-06-11-add-version-flag"),                 # legacy descriptive → full id
-        ("legacy-no-date", "legacy-no-date"),            # no date prefix → full id
-        ("2026-06-11-AB12CD", "2026-06-11-AB12CD"),      # uppercase tail → not modern → full id
-    ],
-)
-def test_resume_token(change_id, expected):
-    assert resume_token(change_id) == expected
-
-
 def _row(**kw):
-    base = dict(change_id="2026-06-11-yaitd7", title="Add version flag",
+    base = dict(handle="add-version-flag-yaitd7", title="Add version flag",
                 status="running", step="implement",
                 last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
     base.update(kw)
@@ -47,14 +33,36 @@ def _row(**kw):
 
 
 def test_format_columns_plain():
-    # color off → no SGR; fixed-width columns; relative age; resume-token ID.
     line = format_change_line(**_row(), color=False)
     assert "\x1b[" not in line
-    assert line.startswith("Add version flag" + " " * 8)   # TITLE padded to 24
+    assert line.startswith("add-version-flag-yaitd7")   # HANDLE first
+    assert "Add version flag" in line                   # TITLE
     assert "running" in line
     assert "implement" in line
-    assert "15m" in line                                   # relative AGE
-    assert line.rstrip().endswith("yaitd7")                # ID = resume token
+    assert "15m" in line                                # relative AGE
+    assert "yaitd7" not in line.split("Add version flag")[-1]  # no trailing ID column
+
+
+def test_format_unnamed_uses_bare_id_handle():
+    line = format_change_line(**_row(handle="yaitd7", title="   "), color=False)
+    assert line.startswith("yaitd7")
+    assert "(unnamed)" in line
+
+
+def test_format_overlong_handle_keeps_id_tail_reachable():
+    # slugify caps the name at 60, so handles can exceed HANDLE_W (28); the id
+    # must stay visible for copy/paste even when the name is truncated.
+    long_handle = "add-" + "x" * 60 + "-yaitd7"
+    line = format_change_line(**_row(handle=long_handle, title="Long one"), color=False)
+    assert "…-yaitd7" in line           # ellipsized name, id tail preserved
+    assert "yaitd7" in line
+
+
+def test_header_line_has_handle_and_title_no_id():
+    h = header_line(color=False)
+    assert h.startswith("HANDLE")
+    assert "TITLE" in h
+    assert not h.rstrip().endswith("ID")
 
 
 def test_format_truncates_long_title():
@@ -62,27 +70,6 @@ def test_format_truncates_long_title():
     # Truncated to 24 display cols: 23 chars + ellipsis.
     assert "x" * 23 + "…" in line
     assert "x" * 24 not in line
-
-
-def test_format_truncates_legacy_token_to_fit_width():
-    # A legacy `YYYY-MM-DD-<slug>` id has no short token, so the ID column would
-    # overflow 80 cols. It's truncated; modern 6-char tokens are untouched.
-    legacy = format_change_line(
-        **_row(change_id="2026-06-03-imp-init-improvements", status="abandoned"),
-        color=False, dim=True)
-    assert "…" in legacy
-    assert "2026-06-03-imp-init-improvements" not in legacy
-    # display width (the dim row has SGR wrappers) — measure the inner text.
-    inner = legacy.removeprefix("\x1b[2m").removesuffix("\x1b[0m")
-    assert len(inner) <= 80, f"{len(inner)}: {inner!r}"
-    # a modern token is short enough to survive verbatim.
-    modern = format_change_line(**_row(change_id="2026-06-11-yaitd7"), color=False)
-    assert modern.rstrip().endswith("yaitd7")
-
-
-def test_format_unnamed_title():
-    line = format_change_line(**_row(title="   "), color=False)
-    assert "(unnamed)" in line
 
 
 def test_format_status_color_running():
@@ -97,10 +84,3 @@ def test_format_dim_wraps_whole_row():
     assert line.startswith("\x1b[2m")
     assert line.endswith("\x1b[0m")
     assert "\x1b[32m" not in line                          # no per-status color in dim mode
-
-
-def test_header_line_columns_plain():
-    h = header_line(color=False)
-    assert h.startswith("TITLE" + " " * 19)                # TITLE header padded to 24
-    assert h.index("STATUS") == 26                         # 24 + 2-space gap
-    assert h.rstrip().endswith("ID")

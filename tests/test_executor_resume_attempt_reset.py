@@ -16,7 +16,7 @@ from imp.engine.state import State
 from imp.engine.types import Goto
 
 
-def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
@@ -26,7 +26,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
-        "id": slug, "title": title, "base_branch": "main",
+        "id": change_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -37,17 +37,17 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     State(
-        id=slug, step=flat[0].name if flat else None, step_attempt=0,
+        id=change_id, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(change_dir / "state")
 
     change = Change(
-        id=slug, title=title, base_branch="main",
+        id=change_id, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": slug, "slug": change.slug, "title": title},
+        payload={"id": change_id, "handle": change.handle, "title": title},
     )
     return change
 

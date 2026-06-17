@@ -25,7 +25,7 @@ def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
         ["bash", str(STAMP)],
         cwd=project_root.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(project_root),
-             "IMP_CHANGE_SLUG": SLUG},
+             "IMP_CHANGE_HANDLE": SLUG},
         capture_output=True, text=True, check=False,
     )
 

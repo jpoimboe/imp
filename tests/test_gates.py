@@ -155,13 +155,13 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
                         secret_dirs=(), secret_files=(),
-                        setenv=(("IMP_CHANGE_SLUG", ""),), network=True, note="")
+                        setenv=(("IMP_CHANGE_HANDLE", ""),), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol,
-               env_extra={"IMP_CHANGE_SLUG": "2026-06-10-real"})
+               env_extra={"IMP_CHANGE_HANDLE": "real-handle"})
     argv = captured["argv"]
-    assert argv.count("IMP_CHANGE_SLUG") == 1
-    assert argv[argv.index("IMP_CHANGE_SLUG") + 1] == "2026-06-10-real"
+    assert argv.count("IMP_CHANGE_HANDLE") == 1
+    assert argv[argv.index("IMP_CHANGE_HANDLE") + 1] == "real-handle"
 
 
 def test_run_script_timeout_kills_group(tmp_path) -> None:
@@ -194,7 +194,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
 
     change = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
-        id="2026-01-01-test", slug="test", title="Test",
+        id="test-id", handle="test", title="Test",
     )
 
     async def main() -> None:
