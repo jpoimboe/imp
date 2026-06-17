@@ -42,15 +42,22 @@ class SessionSocket:
         self._clients: set[SocketStream] = set()
         self._listener: SocketListener | None = None
         self._input_send: MemoryObjectSendStream[str] | None = None
+        self._serve_scope: anyio.CancelScope | None = None
 
     async def open(self) -> None:
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         self._listener = await anyio.create_unix_listener(self._path)
 
     async def serve(self) -> None:
-        assert self._listener is not None
-        with contextlib.suppress(anyio.ClosedResourceError):
-            await self._listener.serve(self._handle)
+        if self._listener is None:
+            return
+        try:
+            with anyio.CancelScope() as scope:
+                self._serve_scope = scope
+                with contextlib.suppress(anyio.ClosedResourceError):
+                    await self._listener.serve(self._handle)
+        finally:
+            self._serve_scope = None
 
     @property
     def attached_count(self) -> int:
@@ -113,6 +120,12 @@ class SessionSocket:
         for stream in list(self._clients):
             with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                 await stream.aclose()
+        # Cancel before close: keeps accept()'s done callback fd-valid,
+        # preventing stale selector entry on reuse.
+        if self._serve_scope is not None:
+            self._serve_scope.cancel()
+            while self._serve_scope is not None:
+                await anyio.sleep(0)
         if self._listener is not None:
             await self._listener.aclose()
             self._listener = None
