@@ -259,6 +259,18 @@ async def test_open_refuses_a_socket_dir_owned_by_another_user(
         await session.open()
 
 
+@pytest.mark.anyio
+async def test_open_tightens_socket_dir_with_loose_permissions(
+    tmp_path: Path,
+) -> None:
+    sockdir = tmp_path / "imp-sock"
+    sockdir.mkdir(mode=0o755)
+    session = SessionSocket(str(sockdir / "s.sock"))
+    await session.open()
+    await session.close()
+    assert sockdir.stat().st_mode & 0o777 == 0o700
+
+
 def test_emit_drops_a_client_whose_bounded_buffer_overflows() -> None:
     session = SessionSocket("/unused.sock")
     send, _recv = anyio.create_memory_object_stream[dict](max_buffer_size=1)

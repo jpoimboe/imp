@@ -61,12 +61,15 @@ class SessionSocket:
     async def open(self) -> None:
         parent = Path(self._path).parent
         parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        owner = parent.stat().st_uid
+        st = parent.stat()
         my_uid = os.geteuid()
-        if owner != my_uid:
+        if st.st_uid != my_uid:
             raise PermissionError(
-                f"refusing to use session-socket dir {parent}: owned by uid {owner}, "
+                f"refusing to use session-socket dir {parent}: owned by uid {st.st_uid}, "
                 f"not {my_uid}")
+        # mkdir's mode= is ignored on existing dirs; enforce it explicitly.
+        if st.st_mode & 0o777 != 0o700:
+            parent.chmod(0o700)
         # MUST NOT pre-unlink self._path before binding. A non-pre-unlink bind is
         # what makes the concurrent double-spawn race safe: the second binder fails
         # with EADDRINUSE instead of stealing the live socket. A stale .sock is
