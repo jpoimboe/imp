@@ -253,3 +253,19 @@ def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
     assert "re-open the cycle" not in text
     # It is the SOLE completeness guard now.
     assert "sole" in text.lower() and "completeness" in text.lower()
+
+
+CODE_REVIEWER = AGENTS_DIR / "code-reviewer.md"
+
+
+def test_code_reviewer_honors_dispatched_diff_range() -> None:
+    low = CODE_REVIEWER.read_text().lower()
+    # The coordinator gives the diff range (a batch range or the whole change); the
+    # reviewer must use THAT range, not assume the whole change every time.
+    assert "diff range" in low
+    assert "named in your dispatch" in low
+    # Falls back to the whole change only when no range was given.
+    assert "git diff <base>..head" in low
+    # The frontmatter description must drop the stale "whole-change" framing so the
+    # coordinator/log surface no longer mislabels the now-per-batch reviewer.
+    assert "final whole-change review" not in low
