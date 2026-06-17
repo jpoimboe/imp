@@ -199,10 +199,13 @@ def test_finalize_reads_sweep_dispositions() -> None:
         assert stale not in low, f"stale finalize vocabulary: {stale!r}"
 
 
-def test_finalize_surfaces_only_needs_decision_and_rolls_up_fixes() -> None:
+def test_finalize_counts_opportunistic_from_completed_plans() -> None:
     low = FINALIZE.read_text().lower()
-    # built carries a one-line rollup counting the opportunistic fixes.
+    # built carries a one-line rollup counting the opportunistic fixes...
     assert "opportunistic improvement" in low
+    # ...counted from the durable ## Completed plans section, NOT the transient list.
+    assert "## completed plans" in low
+
 
 
 def test_finalize_prompt_states_merge_gate_affordance() -> None:
