@@ -67,6 +67,10 @@ class SessionSocket:
             raise PermissionError(
                 f"refusing to use session-socket dir {parent}: owned by uid {owner}, "
                 f"not {my_uid}")
+        # MUST NOT pre-unlink self._path before binding. A non-pre-unlink bind is
+        # what makes the concurrent double-spawn race safe: the second binder fails
+        # with EADDRINUSE instead of stealing the live socket. A stale .sock is
+        # handled on teardown, not by pre-unlinking here.
         self._listener = await anyio.create_unix_listener(self._path)
 
     async def serve(self) -> None:
