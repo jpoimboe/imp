@@ -389,7 +389,6 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
-        server.set_pending_prompt(prompt_event)
         on_event(prompt_event)
         gate_reached.set()
         try:
