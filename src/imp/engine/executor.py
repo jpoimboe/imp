@@ -508,7 +508,7 @@ async def _route_script(
         feedback = format_script_feedback(
             step.command, out["exit"], out["stdout"], out["stderr"])
     elif isinstance(action, Pause):
-        # Script pauses (e.g. integrate-rebase exit 3/4/5, base-fresh-check exit 1,
+        # Script pauses (e.g. integrate-rebase exit 3/4/5,
         # autosquash/stamp-trailers) otherwise lose their stderr — the pause verb
         # carries no reason and the CLI keys remediation only on merge_blocked.
         # Journal it so `imp log` shows it and the CLI can surface it (findings #5/#6).
@@ -593,33 +593,19 @@ async def _route_merge(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
-    merge_to_base), re-asserts a clean worktree (DIRTY) and base freshness
-    (STALE) under the lock, performs the merge, and routes on the result via the
-    step's rules. On MERGED it stashes the commit in State.merge_commit; the
-    actual finalize (journal + worktree removal + mark completed) happens when
-    the run falls through to _complete."""
+    merge_to_base), re-asserts a clean worktree (DIRTY) under the lock, performs
+    the merge, and routes on the result via the step's rules. On MERGED it stashes
+    the commit in State.merge_commit; the actual finalize (journal + worktree
+    removal + mark completed) happens when the run falls through to _complete."""
     from imp.engine import worktree
     _emit_started(log, step)
 
     # Idempotent resume (crash-safety): if a prior run already merged (the commit
     # is durable on base) but crashed before _complete finalized, do NOT re-merge.
-    # Re-running merge_to_base would see base advanced past the recorded SHA — by
-    # OUR OWN merge commit — and return STALE, triggering a spurious re-integration
-    # and a second merge commit. The old _complete was idempotent here (git merge
-    # of an already-merged branch = "Already up to date"); preserve that.
     if state.merge_commit:
         match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
         state.vars.update(match.var_mutations)
         return _finish(log, step, match)
-
-    # Tolerate a missing SHA file -> None: merge_to_base then skips the freshness
-    # check. A genuinely missing file means integration never ran this run (a
-    # workflow without integration, or the mocked e2e harness that shims
-    # integrate-rebase.sh to `exit 0` and never writes the file), or
-    # base-fresh-check already exited 10 -> goto integrate-rebase (which records
-    # the SHA before merge-to-base re-runs). Either way, None is correct here.
-    sha_file = change.change_dir / "integrated_base_sha"
-    expected_sha = sha_file.read_text().strip() if sha_file.exists() else None
 
     # merge_to_base holds RepoGitLock and shells out to git (merge/commit); a
     # large or conflict-heavy merge can take seconds-to-minutes. Offload it to a
@@ -632,7 +618,7 @@ async def _route_merge(
         functools.partial(
             worktree.merge_to_base,
             change.control_root, change.id, change.base_branch, title=change.title,
-            body=body, project_root=change.project_root, expected_base_sha=expected_sha))
+            body=body, project_root=change.project_root))
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
         state.save(change.state_dir)
@@ -655,7 +641,7 @@ async def _route_merge(
                "action": _action_payload(pause), "var_mutations": {}})
         return pause, None, {}
 
-    # STALE -> goto integrate-rebase; MERGED -> continue (falls through to finalize).
+    # MERGED -> continue (falls through to finalize).
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)
