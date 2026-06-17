@@ -727,3 +727,32 @@ async def test_resume_from_applies_rewind_under_the_daemon_lock(
     final = State.load(change.state_dir)
 
     assert final.loop_counts == {"task-lead": 2}   # review reset, upstream kept
+
+
+@pytest.mark.anyio
+async def test_invalid_from_target_is_rejected_before_any_log_mutation(
+    tmp_path: Path,
+) -> None:
+    from imp.engine import recovery
+    from imp.engine.state import State
+
+    _seed_control_default(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(change.state_dir)
+    st.step = "review"
+    st.status = "paused"
+    st.save(change.state_dir)
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        raise AssertionError("run must not start when from_target is invalid")
+
+    with pytest.raises(recovery.RewindError):
+        await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, resume=True,
+            from_target="definitely-not-a-step")
+
+    types = [e["type"] for e in change.event_log().read()]
+    assert "workflow_resumed" not in types
