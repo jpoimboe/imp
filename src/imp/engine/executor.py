@@ -388,6 +388,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": state.merge_commit})
+    from imp.engine import merge_queue
+    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
     worktree.fold_wip_into_journal(change.control_root, change.id, {
         "events.jsonl": change.events_path,
         "change.json": change.change_dir / "change.json",
