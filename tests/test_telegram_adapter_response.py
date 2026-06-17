@@ -18,7 +18,7 @@ def _adapter(sent: list) -> TelegramNorthAdapter:
 
 def test_render_listresult_one_line_per_change() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="2026-06-13-k3f9qa", title="Dark mode",
+        ChangeInfo(id="k3f9qa", title="Dark mode",
                    status="running", step="implement")]))
     assert out == "@k3f9qa  Dark mode — running · implement"
 
@@ -45,18 +45,18 @@ def test_on_response_skips_empty_render() -> None:
 
 def test_render_listresult_multiple_changes_joined_with_newlines() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="2026-06-13-aaaaaa", title="Alpha", status="paused", step="plan"),
-        ChangeInfo(id="2026-06-13-bbbbbb", title="Beta", status="running", step="implement"),
+        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement"),
     ]))
     assert out == "@aaaaaa  Alpha — paused · plan\n@bbbbbb  Beta — running · implement"
 
 
 def test_render_listresult_marks_the_focused_change() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="2026-06-13-aaaaaa", title="Alpha", status="paused", step="plan"),
-        ChangeInfo(id="2026-06-13-bbbbbb", title="Beta", status="running",
+        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        ChangeInfo(id="bbbbbb", title="Beta", status="running",
                    step="implement"),
-    ]), focused_id="2026-06-13-bbbbbb")
+    ]), focused_id="bbbbbb")
     assert out == (
         "@aaaaaa  Alpha — paused · plan\n"
         "● @bbbbbb  Beta — running · implement")

@@ -8,7 +8,7 @@ CHAT = 4242
 EVENT = {
     "type": "awaiting_user_input",
     "payload": {"prompt": "go?"},
-    "change": {"id": "2026-06-13-k3f9qa", "title": "Dark mode"},
+    "change": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 
@@ -39,7 +39,7 @@ def test_poll_routes_a_native_reply_as_a_reply_command() -> None:
         send=lambda text, silent: 42, get_updates=get_updates, focus=focus)
     adapter.on_event(EVENT)          # records message_id 42 -> the Change
     adapter.poll_once()
-    assert submitted == [Reply("2026-06-13-k3f9qa", "approved")]
+    assert submitted == [Reply("k3f9qa", "approved")]
 
 
 def test_poll_advances_the_offset_across_cycles() -> None:
@@ -73,4 +73,4 @@ def test_poll_routes_an_at_handle_reply_as_a_reply_command() -> None:
         send=lambda text, silent: 42, get_updates=get_updates, focus=focus)
     adapter.on_event(EVENT)          # records handle k3f9qa -> the Change
     adapter.poll_once()
-    assert submitted == [Reply("2026-06-13-k3f9qa", "go")]
+    assert submitted == [Reply("k3f9qa", "go")]
