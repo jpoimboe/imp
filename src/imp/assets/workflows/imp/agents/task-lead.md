@@ -17,9 +17,12 @@ reads, what is already committed, and progress notes.
 Read first, every entry:
 - The current plan: the newest `.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md`
   (highest N — find it with glob).
-- `.imp/change/progress.md` if it exists (tasks done, each task's
-  commit subject (so a buried task can be re-found for a fixup), carried
-  followups, deviation notes).
+- `.imp/change/progress.md` if it exists. It is **bounded**: a durable
+  `## Completed plans` section (one line per plan: what landed + a representative
+  commit) plus the transient `## Deferred Followups` list. While you implement the
+  current plan, keep each task's **commit subject** here (so a buried task can be
+  re-found for a fixup); do NOT carry the verbose per-task narrative of plans already
+  completed.
 - The spec at `.imp/change/artifacts/spec/{{ change.handle }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
@@ -145,6 +148,13 @@ progress.md. Two feedback sources resume you here:
    can parse it (the sweep, not the human, is now the consumer of this list):
 
    `- [ ] DEFERRED task-lead: <one-line description> [scope: task]`
+
+   **Keep `progress.md` bounded.** Record the current plan's per-task entries
+   (task done + its commit subject + any deviation note) only while that plan is in
+   flight. When you return `done: true` for the plan, **collapse** it into a single
+   `## Completed plans` line — `- Plan <N>: <what landed> (<commit-sha>)` — and
+   **drop the verbose per-task narrative** for that completed plan. One line per plan
+   is the durable record; the in-flight per-task detail is transient working state.
 
    **Record an `open_items` note
    whenever a round was NOT clean on first pass** — any of: a reviewer raised a

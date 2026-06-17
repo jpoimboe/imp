@@ -261,6 +261,20 @@ def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
 CODE_REVIEWER = AGENTS_DIR / "code-reviewer.md"
 
 
+def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
+    text = TASK_LEAD.read_text()
+    low = text.lower()
+    # progress.md has a durable, bounded ## Completed plans section.
+    assert "## Completed plans" in text
+    assert "one line per plan" in low
+    # On done, collapse the current plan and drop its verbose per-task narrative.
+    assert "collapse" in low
+    assert "drop the verbose per-task" in low or "drop the per-task narrative" in low
+    # The current plan's per-task commit subjects are still kept WHILE implementing
+    # (needed to re-find a buried task for a fixup).
+    assert "commit subject" in low
+
+
 def test_code_reviewer_honors_dispatched_diff_range() -> None:
     low = CODE_REVIEWER.read_text().lower()
     # The coordinator gives the diff range (a batch range or the whole change); the
