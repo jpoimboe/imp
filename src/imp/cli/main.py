@@ -627,7 +627,7 @@ async def _run_fresh_session(
     non_interactive = bool(getattr(args, "non_interactive", False))
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.handle, change.id, "new", color=should_use_color(sys.stdout)))
+        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
     if non_interactive:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
@@ -741,7 +741,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         # runs the agent loop; this process is a thin client that delivers
         # --message once, then detaches and lets the daemon hibernate at its gate.
         print(_run_header_line(
-            change.handle, change.id, "new", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -754,11 +754,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     if _tui_requested(args):
         print(_run_header_line(
-            change.handle, change.id, "new", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, seed_opening=opening_text)
 
     print(_run_header_line(
-        change.handle, change.id, "new", color=should_use_color(sys.stdout)))
+        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
@@ -895,7 +895,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             if rc is not None:
                 return rc
         print(_run_header_line(
-            change.handle, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -911,7 +911,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             if rc is not None:
                 return rc
         print(_run_header_line(
-            change.handle, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, resume=True, from_target=from_target)
 
     # Interactive resume: a thin session-client. Validate --from client-side
@@ -923,7 +923,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             return rc
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.handle, change.id, "resuming", color=should_use_color(sys.stdout)))
+        change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
