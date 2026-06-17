@@ -1,34 +1,42 @@
 """wait_for_user (Part A): the agent's explicit "yield to the human" terminator.
 
-Attended (an input channel is attached): emit awaiting_user_input, solicit a
-reply, and RETURN it as this tool's result — a normal tool result, so the
-provider loop continues and the conversation is multi-turn for free. A subagent
-or a run with no input channel (user_input_fn is None) emits awaiting_user_input
-then raises AwaitingUserInput, which unwinds to a clean pause. A headless
-top-level run IS attended (it has a one-shot --message reply channel): it
-consumes its `--message` on the first solicit, then the reply fn itself raises
-AwaitingUserInput on any later solicit — so the pause comes from the channel, not
-from this tool. The paused wait_for_user tool_use is left DANGLING and resolved
-by the REAL human reply on an attended resume — never a synthetic placeholder
-(see transcript.py).
+ONE path: emit awaiting_user_input, then do a single blocking read on the input
+channel and RETURN its reply as this tool's result — a normal tool result, so the
+provider loop continues and the conversation is multi-turn for free. There is no
+attended/unattended control-flow fork: the channel is the attached human channel
+when one is present (ctx.user_input_fn), else the no-human channel _headless_pause,
+which raises AwaitingUserInput on read. Parking is thus a property of the CHANNEL,
+not a duality inside this tool. A queued interject (a line the human typed mid-run,
+R6) satisfies the wait first, regardless of which channel backs the read. A
+headless top-level run is attended via its one-shot --message reply channel, which
+raises AwaitingUserInput once the message is consumed. The paused wait_for_user
+tool_use is left DANGLING and resolved by the REAL human reply on an attended
+resume — never a synthetic placeholder (see transcript.py).
 """
 
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, NoReturn
 
 from imp.agents.tools import Tool
 
 
 class AwaitingUserInput(Exception):
-    """Raised by wait_for_user when no human is attached. Propagates out of the
-    provider run() (the provider re-raises it past the generic tool except,
-    mirroring SubagentSuspended) and is caught in drive_invocation as a pause."""
+    """Raised by a no-human input channel (_headless_pause, the headless --message
+    reply fn, or the daemon's hibernation gate) to park a run at a wait_for_user
+    gate. Propagates out of the provider run() (the provider re-raises it past the
+    generic tool except, mirroring SubagentSuspended) and is caught in
+    drive_invocation as a pause."""
 
     def __init__(self, prompt: str = "") -> None:
         super().__init__("awaiting user input")
         self.prompt = prompt
+
+
+def _headless_pause(_query: str) -> NoReturn:
+    """No-human input channel: always parks the run by raising AwaitingUserInput."""
+    raise AwaitingUserInput()
 
 
 def _cancelled_exc() -> type[BaseException]:
@@ -53,9 +61,11 @@ def make_wait_for_user_tool() -> Tool:
                 type="awaiting_user_input",
                 payload={"prompt": ""},
             )
-        attended = ctx.user_input_fn is not None
-        if not attended:
-            raise AwaitingUserInput()
+        # Resolve the input channel: the attached human channel when present, else
+        # the no-human channel that parks the run. Both flow through the SAME
+        # single read below — there is no attended/unattended control-flow fork.
+        input_fn = (
+            ctx.user_input_fn if ctx.user_input_fn is not None else _headless_pause)
         # R6: a line the human typed WHILE the agent was running was routed to the
         # interject queue at submit time. If one is pending now, it SATISFIES this
         # wait — consume it instead of soliciting fresh input, so the human's
@@ -64,7 +74,7 @@ def make_wait_for_user_tool() -> Tool:
         coord = getattr(ctx, "coordinator", None)
         if coord is not None:
             pending = coord.drain_interject()
-        reply = pending if pending is not None else ctx.user_input_fn("")
+        reply = pending if pending is not None else input_fn("")
         if inspect.isawaitable(reply):
             # Attended agent is about to BLOCK on a human reply: freeze the
             # inactivity watchdog for the duration of the await so it cannot

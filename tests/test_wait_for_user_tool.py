@@ -58,6 +58,17 @@ async def test_headless_raises_awaiting_user_input(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_no_channel_with_pending_interject_returns_it(tmp_path):
+    # R6 interject drain runs even with no channel: queued line returned, not parked.
+    coord = _FakeCoordinator(["queued human line"])
+    ctx = _ctx(tmp_path, user_input_fn=None, non_interactive=False,
+               coordinator=coord)
+    tool = make_wait_for_user_tool()
+    result = await tool.async_invoke(ctx, {})
+    assert result == "queued human line"
+
+
+@pytest.mark.anyio
 async def test_pending_interject_satisfies_wait_for_user(tmp_path):
     # R6: a line typed mid-run was queued as an interject; when the agent then
     # calls wait_for_user, the queued interject SATISFIES the wait — it's returned
