@@ -47,26 +47,34 @@ scope. Decide one of:
 
 1. **fixed** — the improvement is **low-risk AND worth doing**: a
    behavior-preserving refactor, a dedup, a rename, dead-code removal, a
-   clarity/tidying edit, a test-strengthening, or a doc/comment fix — anything the
-   existing test/lint/typecheck gate can verify. **There is no scope ceiling:** the
-   fix may reach files the change never touched. Skip non-improvements — no churn
-   for churn's sake. Apply it (see *Dispatch* and *Commit granularity* below) and
-   record it `fixed`.
+   clarity/tidying edit, a test-strengthening, a doc/comment fix, or a **fail-fast
+   guard** — a guard that turns currently-silent wrong/surprising behavior into a
+   loud error, with no behavior change for any input reachable today, is worth
+   doing — anything the existing test/lint/typecheck gate can verify. **There is no
+   scope ceiling:** the fix may reach files the change never touched. Skip
+   non-improvements — no churn for churn's sake; the guard stays **dismissable** when
+   you judge the silent path is not a real footgun. Apply it (see *Dispatch* and
+   *Commit granularity* below) and record it `fixed`.
 
 2. **needs-decision** — the item **needs a design choice or a spec call**, OR it is
    **genuinely high-risk**: it changes observable/external behavior or a public
    contract (CLI / API / data format), shifts an invariant, touches
    concurrency / locking / migrations, or **cannot be verified by the existing
-   suite**. Leave it unfixed; it surfaces to the human via finalize.
+   suite**. An item that is neither a design/spec choice nor genuinely high-risk must
+   **not** be parked here out of uncertainty about whether it is worth doing — that
+   "is this cheap change worth it?" judgment is your own call (fix it or dismiss it),
+   never a `needs-decision`. Leave a genuine needs-decision item unfixed; it surfaces
+   to the human via finalize.
 
 3. **dismissed** — you considered it and judged it **not an improvement, or not
    worth the diff**. Record it for audit; it is never surfaced.
 
 The line between **fixed** and **needs-decision** is risk: if the existing gate can
 prove the change safe and it preserves observable behavior, it is **fixed**; if it
-needs human judgment or can change what users/callers observe, it is
-**needs-decision**. If an item you started to fix turns out high-risk once you touch
-it, re-classify it as **needs-decision** — never force it through.
+needs a design or spec choice, or is genuinely high-risk (alters observable behavior,
+a public contract, or cannot be verified by the suite), it is **needs-decision**. If
+an item you started to fix turns out high-risk once you touch it, re-classify it as
+**needs-decision** — never force it through.
 
 ## Dispatch — preserve the reviewer discipline
 

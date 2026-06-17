@@ -97,6 +97,8 @@ IF reviewer suggests "implementing properly":
 
 **Rule:** "You and reviewer both report to the user. If we don't need this feature, don't add it."
 
+**Scope:** YAGNI targets *unused features or abstractions you would build speculatively* — it does **not** cover a cheap defensive guard or assertion that hardens existing reachable code; that guard is cheap insurance, not a speculative feature.
+
 ## Implementation Order
 
 ```

@@ -36,3 +36,13 @@ def test_skills_are_imp_native_not_superpowers() -> None:
         body = load_skill_body(_skills_dir(), name)
         assert "superpowers:" not in body, f"{name} keeps a superpowers: cross-ref"
         assert "Skill tool" not in body, f"{name} keeps a Skill-tool reference"
+
+
+def test_yagni_scope_excludes_cheap_defensive_guards() -> None:
+    body = load_skill_body(_skills_dir(), "receiving-code-review").lower()
+    pos = body.find("yagni check")
+    assert pos >= 0
+    section = body[pos : pos + 900]
+    assert "speculativ" in section
+    assert "guard" in section
+    assert "reachable" in section

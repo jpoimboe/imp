@@ -55,3 +55,23 @@ def test_deferred_sweep_prompt_pins_three_dispositions_and_safeguards() -> None:
     assert "malformed" in low
     # The three output formats that finalize reads must be pinned.
     assert "— fixed" in low and "— needs-decision:" in low and "— dismissed:" in low
+
+
+def test_deferred_sweep_calibration_clauses() -> None:
+    low = SWEEP.read_text().lower()
+    # needs-decision must not absorb low-stakes "is it worth doing?" calls.
+    nd = low.find("needs-decision** — the item")
+    assert nd >= 0
+    nd_block = low[nd : nd + 800]
+    assert "worth doing" in nd_block
+    assert "fix it or dismiss it" in nd_block
+    # fixed bucket recognizes the fail-fast guard in definitional framing.
+    fx = low.find("fixed** — the improvement")
+    assert fx >= 0
+    fixed_block = low[fx : fx + 900]
+    assert "fail-fast" in fixed_block
+    assert "silent" in fixed_block and "loud" in fixed_block
+    assert "reachable today" in fixed_block
+    assert "dismissable" in fixed_block
+    # The spec-prohibited numeric fence must not appear (definitional framing only).
+    assert "four-test" not in fixed_block
