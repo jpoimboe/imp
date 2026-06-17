@@ -6,6 +6,7 @@ from imp.engine.slug import (
     MAX_SLUG_LEN,
     InvalidSlug,
     dated_slug,
+    derive_handle,
     slugify,
 )
 
@@ -75,3 +76,21 @@ def test_dated_slug_empty_name_returns_empty() -> None:
 def test_dated_slug_unsluggable_name_returns_empty() -> None:
     # A title with no slug-able characters also reads as unnamed.
     assert dated_slug("!!!", date="2026-06-01") == ""
+
+
+def test_derive_handle_named() -> None:
+    assert derive_handle("Add OAuth support", "abc123") == "add-oauth-support-abc123"
+
+
+def test_derive_handle_unnamed_is_bare_id() -> None:
+    assert derive_handle("", "abc123") == "abc123"
+    assert derive_handle("   ", "abc123") == "abc123"
+
+
+def test_derive_handle_unsluggable_title_is_bare_id() -> None:
+    assert derive_handle("!!!", "abc123") == "abc123"
+
+
+def test_derive_handle_caps_name_then_appends_id() -> None:
+    h = derive_handle("x" * 200, "abc123")
+    assert h == "x" * MAX_SLUG_LEN + "-abc123"

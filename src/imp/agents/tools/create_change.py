@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from imp.agents.tools import imp_tool
@@ -24,7 +23,7 @@ def create_change(
     if ctx.change_state is None:
         raise RuntimeError("create_change is only available to top-level Change steps")
     control_root = ctx.change.control_root
-    new_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    new_id = new_change_id()
     deps = list(depends_on or [])
     backlog.write_record(
         control_root, change_id=new_id, title=title, brief=brief,

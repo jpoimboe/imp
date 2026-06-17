@@ -606,7 +606,7 @@ async def _run_tui_session(
 
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
-    change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    change_id = new_change_id()
     backlog.write_record(
         control, change_id=change_id,
         title=getattr(args, "title", None) or "",
@@ -719,7 +719,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         # by asking); a real answer becomes the opening intent.
         opening_text = _normalize_opening_reply(reply)
 
-    change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""

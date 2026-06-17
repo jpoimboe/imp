@@ -1,5 +1,6 @@
 """Slug derivation (spec §3.1): lowercase, non-alphanumerics -> '-', collapse
-repeats, trim. One name for Change <-> branch <-> worktree <-> state dir."""
+repeats, trim. The id alone names the branch/worktree/state dir; the handle is a
+display name + filename stem derived from title + id."""
 
 from __future__ import annotations
 
@@ -47,15 +48,22 @@ def dated_slug(name: str, *, date: str) -> str:
         return ""
 
 
-# Immutable Change identity (spec §1): YYYY-MM-DD- + 6 chars from [a-z0-9] drawn
-# with secrets. Ref-safe, coordination-free, collision-free at this scale
-# (~2.2 billion/day). The date prefix gives ULID-style chronological sort of the
-# stable key; the suffix is unique within a day, not globally.
+# Immutable Change identity (spec AC 1): 6 chars from [a-z0-9] drawn with
+# secrets, no date prefix. Ref-safe and coordination-free; collisions are caught
+# by the branch/worktree-exists guard at create time, not avoided by a date.
 _ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 
-def new_change_id(*, date: str) -> str:
-    """`<date>-<6 random ref-safe chars>`. `date` is a fixed-width YYYY-MM-DD
-    string (the caller passes today's date)."""
-    suffix = "".join(secrets.choice(_ID_ALPHABET) for _ in range(6))
-    return f"{date}-{suffix}"
+def new_change_id() -> str:
+    """6 random ref-safe chars from [a-z0-9]."""
+    return "".join(secrets.choice(_ID_ALPHABET) for _ in range(6))
+
+
+def derive_handle(title: str, change_id: str) -> str:
+    """`slugify(title)-<id>` once named; the bare `<id>` while unnamed (title
+    blank or unsluggable). The id tail makes a handle self-identifying: seeing
+    `add-oauth-abc123.md` names its change exactly."""
+    try:
+        return f"{slugify(title)}-{change_id}"
+    except InvalidSlug:
+        return change_id
