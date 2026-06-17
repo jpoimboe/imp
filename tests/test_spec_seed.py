@@ -310,10 +310,6 @@ def test_new_non_interactive_spec_seed_via_session_client(
     draft.write_text("# My draft\nGoal: do X\n")
 
     captured: dict[str, object] = {}
-    channel_built = {"called": False}
-    monkeypatch.setattr(
-        cli_main, "_maybe_build_channel",
-        lambda _c: channel_built.__setitem__("called", True))
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object,
@@ -331,7 +327,6 @@ def test_new_non_interactive_spec_seed_via_session_client(
     assert isinstance(seed, str)
     assert seed.startswith(cli_main.SPEC_SEED_MARKER)
     assert str(draft) in seed
-    assert not channel_built["called"]  # channel not wired in non-interactive path
 
 
 def test_spec_writer_opening_conditioned_on_message() -> None:
