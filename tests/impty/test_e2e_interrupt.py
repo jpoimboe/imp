@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import signal
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -26,9 +27,14 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
         [sys.executable, "-m", "imp", "new", "demo", "--non-interactive"],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     ) as s:
-        # The step has started and the scripted bash is now sleeping → output
-        # settles. Settling (not a fixed timer) guarantees we interrupt mid-step.
-        s.wait_idle(idle=0.4, hard=12.0)
+        # Poll until the scripted bash's "echo running" is visible, which
+        # guarantees sleep 30 is running before SIGINT lands.
+        deadline = time.monotonic() + 12.0
+        while "running" not in "\n".join(s.lines()):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            s.wait_idle(idle=0.1, hard=min(0.5, remaining))
         s.send_signal(signal.SIGINT)
         rc = s.run_to_completion(hard=20.0)
 
