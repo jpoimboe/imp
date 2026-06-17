@@ -19,27 +19,16 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_parse_event_returns_the_dict_for_valid_ndjson() -> None:
-    assert runner.parse_event('{"type": "agent_output", "x": 1}') == {
-        "type": "agent_output", "x": 1}
-
-
-def test_parse_event_returns_none_for_garbage() -> None:
-    assert runner.parse_event("not json") is None
-    assert runner.parse_event("[1, 2, 3]") is None   # valid JSON, but not an event dict
-
-
-def test_drain_outbound_feeds_each_queued_line_to_on_event() -> None:
+def test_drain_outbound_feeds_each_queued_event_to_on_event() -> None:
     seen: list[dict] = []
 
     class FakeAdapter:
         def on_event(self, event: dict) -> None:
             seen.append(event)
 
-    q: queue.Queue[str] = queue.Queue()
-    q.put('{"type": "a"}')
-    q.put("garbage")                 # dropped, not forwarded
-    q.put('{"type": "b"}')
+    q: queue.Queue[dict] = queue.Queue()
+    q.put({"type": "a"})
+    q.put({"type": "b"})
     runner.drain_outbound(FakeAdapter(), q)
     assert seen == [{"type": "a"}, {"type": "b"}]
     assert q.empty()
@@ -218,7 +207,7 @@ def test_sender_worker_shutdown_survives_a_failing_outbound_drain(
     stop = threading.Event()
     stop.set()                                       # skip the loop, go to final drain
     outbound: queue.Queue = queue.Queue()
-    outbound.put('{"type": "x"}')
+    outbound.put({"type": "x"})
 
     class _FailingOutboundAdapter:
         def on_event(self, event: dict) -> None:

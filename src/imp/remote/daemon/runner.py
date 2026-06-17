@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import os
 import queue
@@ -92,29 +91,17 @@ class DaemonAlreadyRunning(Exception):
     """A daemon is already accepting on this repo's socket (single daemon per repo)."""
 
 
-def parse_event(line: str) -> dict[str, Any] | None:
-    """One forwarded south NDJSON line → event dict, or None for non-JSON or non-object."""
-    try:
-        obj = json.loads(line)
-    except json.JSONDecodeError:
-        return None
-    return obj if isinstance(obj, dict) else None
-
-
-def drain_outbound(adapter: Any, outbound: queue.Queue[str]) -> bool:
-    """Flush every queued south line into the adapter; garbage lines are dropped.
-    Returns True iff at least one line was dequeued (so the sender loop can wait
-    only when both queues were empty)."""
+def drain_outbound(adapter: Any, outbound: queue.Queue[dict[str, Any]]) -> bool:
+    """Flush every queued south event into the adapter. Returns True iff at least
+    one event was dequeued."""
     drained = False
     while True:
         try:
-            line = outbound.get_nowait()
+            event = outbound.get_nowait()
         except queue.Empty:
             return drained
         drained = True
-        event = parse_event(line)
-        if event is not None:
-            adapter.on_event(event)
+        adapter.on_event(event)
 
 
 def drain_responses(adapter: Any, responses: queue.Queue[Response]) -> bool:
@@ -212,7 +199,7 @@ def _poll_worker(adapter: Any, stop: threading.Event) -> None:
 
 
 def _sender_worker(
-    adapter: Any, outbound: queue.Queue[str],
+    adapter: Any, outbound: queue.Queue[dict[str, Any]],
     responses: queue.Queue[Response], stop: threading.Event,
 ) -> None:
     """Outbound only: flush south events and command responses to chat as soon as
@@ -373,7 +360,7 @@ async def run_daemon(
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
 
     spath = socket_path(control_root)
-    outbound: queue.Queue[str] = queue.Queue()
+    outbound: queue.Queue[dict[str, Any]] = queue.Queue()
     inbound: queue.Queue[Command] = queue.Queue()
     responses: queue.Queue[Response] = queue.Queue()
     stop = threading.Event()
@@ -383,7 +370,7 @@ async def run_daemon(
     hub = SouthHub(str(spath), on_event=lambda cid, line: None)
     supervisor = RelaySupervisor(
         control_root=control_root,
-        sink=lambda event: outbound.put(json.dumps(event)),
+        sink=lambda event: outbound.put(event),
         events=("all",),
         title_for=lambda cid: (discover.snapshot(control_root, cid) or ("", "", ""))[2])
     control = ControlPlane(
