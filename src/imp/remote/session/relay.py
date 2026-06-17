@@ -28,6 +28,7 @@ class SessionRelay:
         self._curator = EventCurator(id=change_id, title=title, events=events)
         self._sink = sink
         self._gate_send: MemoryObjectSendStream[None] | None = None
+        self.gated: bool = False
 
     async def run(self) -> None:
         """Relay curated events to sink; detach at gate. Raises OSError if none is resident."""
@@ -60,4 +61,5 @@ class SessionRelay:
         if curated is not None:
             self._sink(curated)
         if event.get("type") == "awaiting_user_input" and self._gate_send is not None:
+            self.gated = True
             self._gate_send.send_nowait(None)

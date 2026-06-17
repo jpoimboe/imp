@@ -127,3 +127,87 @@ async def test_supervisor_reattaches_after_relay_exits(
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await sock.close()
+
+
+@pytest.mark.anyio
+async def test_supervisor_does_not_reattach_across_a_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The relay detaches at the awaiting_user_input gate so the session can
+    # hibernate (subscription does not pin residency). Even while the socket stays
+    # live, the supervisor must NOT re-attach across that gate — re-attaching would
+    # pin the change resident and it could never hibernate.
+    cid = "gated-one"
+    monkeypatch.setattr(
+        "imp.remote.daemon.directory.list_changes",
+        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    await sock.open()
+    sink: list[dict[str, Any]] = []
+    sup = RelaySupervisor(
+        control_root=tmp_path, sink=sink.append, events=("all",),
+        title_for=lambda _cid: "T", poll_gap=0.02)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(sock.serve)
+        tg.start_soon(sup.run)
+        with anyio.fail_after(5):
+            while sock.attached_count == 0:
+                await anyio.sleep(0.02)
+        await sock.broadcast(
+            {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+        # Relay forwards the gate event then detaches → attached_count drops to 0.
+        with anyio.fail_after(5):
+            while sock.attached_count != 0:
+                await anyio.sleep(0.02)
+        # Several poll cycles (0.2 s ≫ 0.02 s poll); the supervisor must NOT re-attach.
+        await anyio.sleep(0.2)
+        assert sock.attached_count == 0
+        tg.cancel_scope.cancel()
+    await sock.close()
+    assert sink[-1]["type"] == "awaiting_user_input"
+
+
+@pytest.mark.anyio
+async def test_supervisor_reattaches_after_rehydration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # After a gate detach the change hibernates (drops out of the directory); a later
+    # reply rehydrates it (reappears). Gate avoidance suppresses re-attach only WHILE
+    # the change stays continuously resident — once it goes non-resident the latch
+    # clears, so the supervisor re-attaches on rehydration.
+    cid = "rehydrated-one"
+    visible = {"resident": True}
+
+    def _list(_cr: Any) -> list[ChangeInfo]:
+        if visible["resident"]:
+            return [ChangeInfo(id=cid, title="T", status="running", step="plan")]
+        return []
+
+    monkeypatch.setattr("imp.remote.daemon.directory.list_changes", _list)
+    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    await sock.open()
+    sink: list[dict[str, Any]] = []
+    sup = RelaySupervisor(
+        control_root=tmp_path, sink=sink.append, events=("all",),
+        title_for=lambda _cid: "T", poll_gap=0.02)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(sock.serve)
+        tg.start_soon(sup.run)
+        with anyio.fail_after(5):
+            while sock.attached_count == 0:
+                await anyio.sleep(0.02)
+        await sock.broadcast(
+            {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+        with anyio.fail_after(5):
+            while sock.attached_count != 0:
+                await anyio.sleep(0.02)
+        # Hibernate: the change leaves the directory, clearing the gate latch.
+        visible["resident"] = False
+        await anyio.sleep(0.1)
+        # Rehydrate: it reappears → the supervisor re-attaches.
+        visible["resident"] = True
+        with anyio.fail_after(5):
+            while sock.attached_count == 0:
+                await anyio.sleep(0.02)
+        tg.cancel_scope.cancel()
+    await sock.close()
