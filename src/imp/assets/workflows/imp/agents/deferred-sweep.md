@@ -104,18 +104,29 @@ implementer to make a NEW commit per item:
 `git add <files> && git commit -m "<type>: <item summary>"` — no `Change:` trailer
 (the workflow stamps it later).
 
-## Record each disposition (rewrite the line in progress.md)
+## Record each disposition — keep `progress.md` bounded
 
-After processing an item, rewrite its line in `.imp/change/progress.md`, recording
-the disposition after an em-dash ` — `:
+`progress.md` has a durable `## Completed plans` section (one line per plan, plus
+opportunistic-improvement lines) and a transient `## Deferred Followups` list. After
+processing an item, update the file so the transient list shrinks as it drains:
 
-- fixed → `- [x] DEFERRED <source>: <desc> [scope: …] — fixed <commit-sha>`
-- needs-decision → `- [ ] DEFERRED <source>: <desc> [scope: …] — needs-decision: <why>`
-- dismissed → `- [x] DEFERRED <source>: <desc> [scope: …] — dismissed: <why>`
+- **fixed** → first **append a durable line** under `## Completed plans` (create the
+  heading if absent) recording the improvement and its commit sha:
+  `- opportunistic (<source>): <desc> — fixed <commit-sha>`
+  Then **prune** (delete) the transient `- [ ] DEFERRED …` line. Resolve `<commit-sha>`
+  with `git rev-parse --short HEAD` after the implementer's commit. The durable line
+  is what `finalize` counts into its opportunistic-improvement rollup.
+- **dismissed** → **remove the transient line** with **no durable record** —
+  `finalize` never surfaces dismissed items, so they leave no trace.
+- **needs-decision** → leave the item in the transient list, rewritten in place so
+  its reason survives to the merge gate:
+  `- [ ] DEFERRED <source>: <desc> [scope: …] — needs-decision: <why>`
+  It **stays in the transient list**; `finalize` reads needs-decision items there.
+- **malformed** → untouched (fail-safe; never silently dropped).
 
-Resolve `<commit-sha>` with `git rev-parse --short HEAD` after the implementer's
-commit. finalize reads these dispositions and surfaces only `needs-decision` items;
-it counts `fixed` items into a one-line rollup and ignores `dismissed`.
+finalize counts opportunistic improvements from the `## Completed plans` durable
+lines, surfaces only `needs-decision` items from the transient list, and never
+re-raises a dismissed item.
 
 ## Degraded marker
 

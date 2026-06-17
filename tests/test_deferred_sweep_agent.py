@@ -31,30 +31,36 @@ def test_deferred_sweep_loads_as_part_of_the_workflow() -> None:
     assert "deferred-sweep" in wf.agents
 
 
-def test_deferred_sweep_prompt_pins_three_dispositions_and_safeguards() -> None:
+def test_deferred_sweep_prunes_and_records_fixes_durably() -> None:
     low = SWEEP.read_text().lower()
-    # The three dispositions of the new risk-gated model.
+    # Three dispositions of the risk-gated model survive.
     assert "record it `fixed`" in low and "needs-decision" in low and "dismissed" in low
     # Risk, not scope, is the gate.
     assert "low-risk" in low and "high-risk" in low
     # The pinned input line the sweep parses.
     assert "- [ ] deferred" in low
-    # Reviewer discipline: trivial/mechanical fixes skip the quality-reviewer.
+    # Reviewer discipline preserved.
     assert "no quality-reviewer" in low or "without a quality-reviewer" in low
-    # Non-trivial fixes must dispatch the quality-reviewer (other half of AC 2).
     pos = low.find("non-trivial")
     assert pos >= 0 and "quality-reviewer" in low[pos : pos + 250]
-    # Commit granularity preserved.
     assert "one clean commit" in low
-    # The scope-ceiling phrasing is gone (AC 1).
-    assert "never grow the change" not in low
-    # Regression guard: plan-writer routing vocabulary must not reappear.
-    assert "auto-route" not in low
-    # Polish never marks the run degraded; fail-safe retained.
-    assert "degraded" in low
+    # #4: a FIXED item is recorded durably under ## Completed plans, then the
+    # transient line is PRUNED (not left as a checked line).
+    assert "## completed plans" in low
+    assert "fixed <" in low                          # durable opportunistic line carries the sha
+    assert "opportunistic (" in low               # durable line prefix that finalize parses
+    assert "prune" in low or "remove the transient line" in low
+    # A DISMISSED item is pruned with NO durable record; needs-decision STAYS.
+    assert "no durable record" in low
+    assert "stays in the transient" in low
+    # Fail-safe: malformed lines untouched; polish never marks the run degraded.
     assert "malformed" in low
-    # The three output formats that finalize reads must be pinned.
-    assert "— fixed" in low and "— needs-decision:" in low and "— dismissed:" in low
+    assert "degraded" in low
+    # The terminal gate markers stay inert.
+    assert "seeded <change" in low and "ignored-at-gate" in low
+    assert "needs-decision:" in low               # parseable format that finalize reads
+    assert "never grow the change" not in low
+    assert "auto-route" not in low
 
 
 def test_deferred_sweep_calibration_clauses() -> None:
