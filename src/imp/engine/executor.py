@@ -421,6 +421,8 @@ async def _dispatch_step(
     if step.kind == "wait_for_head":
         assert wait_for_turn_fn is not None
         return await _route_wait_for_head(step, change, state, log, wait_for_turn_fn)
+    if step.kind == "dequeue_wake":
+        return _route_dequeue_wake(step, change, state, log)
     if step.kind == "branch":
         return _route_branch(step, state, log)
     if step.kind == "merge":
@@ -569,6 +571,17 @@ async def _route_wait_for_head(
                 "action": _action_payload(pause), "var_mutations": {}})
             return pause, None, {}
 
+    match = evaluate_rules(step.rules, vars=state.vars, output=None)
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
+
+
+def _route_dequeue_wake(
+    step: Step, change: Change, state: State, log: EventLog,
+) -> tuple[Action, str | None, dict[str, object]]:
+    from imp.engine import merge_queue
+    _emit_started(log, step)
+    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)
