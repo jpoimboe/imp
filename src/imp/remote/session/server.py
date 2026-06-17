@@ -8,7 +8,7 @@ from typing import Any
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
-from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_INTERRUPT
+from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_DETACH, CONTROL_INTERRUPT
 from imp.remote.session.socket_server import SessionSocket
 
 _log = logging.getLogger("imp.remote.session.server")
@@ -177,6 +177,8 @@ class SessionServer:
     async def _dispatch_control(self, action: str) -> None:
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c")
+        elif action == CONTROL_DETACH:
+            await self._socket.detach_all()
         elif action == CONTROL_ABANDON:
             self.abandoned = True
             if self._on_abandon is not None:

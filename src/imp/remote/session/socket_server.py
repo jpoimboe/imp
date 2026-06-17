@@ -171,10 +171,13 @@ class SessionSocket:
                     self._on_detach()
             await stream.aclose()
 
-    async def close(self) -> None:
+    async def detach_all(self) -> None:
         for client in list(self._clients):
             with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                 await client.stream.aclose()
+
+    async def close(self) -> None:
+        await self.detach_all()
         # Cancel before close: keeps accept()'s done callback fd-valid,
         # preventing stale selector entry on reuse.
         if self._serve_scope is not None:

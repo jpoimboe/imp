@@ -450,6 +450,46 @@ async def test_ordinary_control_overflow_is_logged_not_silently_suppressed(
 
 
 @pytest.mark.anyio
+async def test_explicit_detach_control_reaches_the_detach_teardown(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    detaches: list[bool] = []
+    server._socket._on_detach = lambda: detaches.append(True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await anyio.sleep(0.02)
+        return "detached"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.send((encode_control("detach") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "detached"
+        assert detaches == [True]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
 async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
     tmp_path: Path,
 ) -> None:
