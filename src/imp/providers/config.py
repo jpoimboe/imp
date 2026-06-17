@@ -279,7 +279,7 @@ def _parse_provider_envs(raw: Any, src: SourceLoc) -> dict[str, str]:
 
 
 _SANDBOX_BOOL_KEYS = ("enabled", "allow_unsandboxed", "network")
-_DRIVER_KNOWN_KEYS = {"name", "events", "startup_timeout", "reply_timeout"}
+_DRIVER_KNOWN_KEYS = {"name", "events", "startup_timeout"}
 _SANDBOX_LIST_KEYS = (
     "secret_paths", "writable_caches", "extra_readable", "extra_writable", "extra_env",
 )
@@ -361,13 +361,6 @@ def _parse_remote(raw: Any, src: SourceLoc) -> dict[str, Any]:
                 "remote.driver.startup_timeout must be a positive number of seconds",
                 src)
         out["startup_timeout"] = float(st)
-    if "reply_timeout" in overrides:
-        rt = overrides["reply_timeout"]
-        if rt is not None and (
-                not isinstance(rt, (int, float)) or isinstance(rt, bool) or rt <= 0):
-            raise LoadError(
-                "remote.driver.reply_timeout must be null or a positive number", src)
-        out["reply_timeout"] = float(rt) if rt is not None else None
     return {"driver": out}
 
 

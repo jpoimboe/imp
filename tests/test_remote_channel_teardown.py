@@ -18,7 +18,7 @@ def anyio_backend() -> str:
 def _channel(cmd: list[str], errors: list[str]) -> RemoteChannel:
     return RemoteChannel(
         command=tuple(cmd), events=("all",), startup_timeout=2.0,
-        reply_timeout=None, id="2026-06-11-abc", title="t",
+        id="2026-06-11-abc", title="t",
         on_error=errors.append)
 
 

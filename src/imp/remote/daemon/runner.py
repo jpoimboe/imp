@@ -10,12 +10,13 @@ import signal
 import sys
 import threading
 import urllib.error
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 import anyio
 
+from imp.engine.change import Change
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.commands import (
     HELP_TEXT,
@@ -36,8 +37,10 @@ from imp.remote.daemon.commands import (
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
+from imp.remote.session.reply import deliver_session_reply
 
 _log = logging.getLogger("imp.daemon")
 
@@ -332,6 +335,14 @@ async def _await_shutdown_signals(shutdown: anyio.Event) -> None:
             return
 
 
+async def deliver_to_session(
+    control_root: Path, change_id: str, text: str,
+) -> None:
+    """Deliver one reply into change_id's session daemon, rehydrating if hibernated."""
+    change = await anyio.to_thread.run_sync(Change.load, control_root, change_id)
+    await deliver_session_reply(change, text)
+
+
 async def run_daemon(
     control_root: Path,
     *,
@@ -340,7 +351,7 @@ async def run_daemon(
         [Mapping[str, str], Callable[[Command], None], Focus],
         Any,
     ] = _make_telegram_adapter,
-    resume: Callable[[str, str], None] | None = None,
+    deliver: Callable[[str, str], Awaitable[None]] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
@@ -350,7 +361,7 @@ async def run_daemon(
     """Run the daemon until shutdown: bind socket, own adapter, relay both directions."""
     env = os.environ if env is None else env
     shutdown = anyio.Event() if shutdown is None else shutdown
-    resume = resume or (lambda cid, text: spawn.resume_change(control_root, cid, text))
+    deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_change(control_root, prompt))
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
@@ -362,12 +373,15 @@ async def run_daemon(
     stop = threading.Event()
     focus = Focus()
 
-    hub = SouthHub(
-        str(spath), on_event=lambda cid, line: outbound.put(line),
-        on_attach=lambda cid, autosubscribe: focus.focus_on(cid) if autosubscribe else None,
-        on_detach=lambda cid: focus.clear_if(cid))
+    # on_event is a no-op: events now arrive via the supervisor's directory pull.
+    hub = SouthHub(str(spath), on_event=lambda cid, line: None)
+    supervisor = RelaySupervisor(
+        control_root=control_root,
+        sink=lambda event: outbound.put(json.dumps(event)),
+        events=("all",),
+        title_for=lambda cid: (discover.snapshot(control_root, cid) or ("", "", ""))[2])
     control = ControlPlane(
-        hub=hub, resume=resume, create=create,
+        deliver=deliver, create=create,
         abandon=abandon, list_changes=list_changes,
         focus=focus,
         snapshot=lambda cid: discover.snapshot(control_root, cid),
@@ -385,6 +399,7 @@ async def run_daemon(
         await hub.open()
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
+            tg.start_soon(supervisor.run)
             tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
             tg.start_soon(anyio.to_thread.run_sync, _poll_worker, adapter, stop)
             tg.start_soon(anyio.to_thread.run_sync,

@@ -17,7 +17,6 @@ remote:
   #   name: telegram
   #   events: [all]             # or an explicit event-type allowlist
   #   startup_timeout: 10
-  #   reply_timeout: null       # wait forever, like a local prompt
 ```
 
 Credentials stay in the environment (never in config). Built-ins:

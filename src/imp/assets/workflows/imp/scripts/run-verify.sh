@@ -6,7 +6,7 @@
 #
 # Contract:
 #   - IMP_VERIFY_COMMAND set and non-empty → run it via `bash -c` under a timeout
-#     (IMP_VERIFY_TIMEOUT seconds, default 300); propagate its exit code. On
+#     (IMP_VERIFY_TIMEOUT seconds, default 600); propagate its exit code. On
 #     timeout (exit 124) print an explicit diagnosis to stderr — truncated output
 #     otherwise reads as a hang at whatever check happened to be printing. The
 #     workflow routes exit 124 to a human pause (re-running can't beat the clock),
@@ -41,7 +41,7 @@ if [[ -n "$tree" && -f "$cache" && "$(cat "$cache")" == "$tree" ]]; then
   exit 0
 fi
 
-verify_timeout="${IMP_VERIFY_TIMEOUT:-300}"
+verify_timeout="${IMP_VERIFY_TIMEOUT:-600}"
 rc=0
 # -k 30: SIGKILL stragglers that ignore the TERM.
 timeout -k 30 "$verify_timeout" bash -c "$IMP_VERIFY_COMMAND" || rc=$?

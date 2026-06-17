@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys as _sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -103,31 +102,30 @@ def test_is_benign_interrupt_teardown_matches_exit_143_process_error() -> None:
         ProcessError("Command failed with exit code 1", exit_code=1))
 
 
-def test_new_tui_on_non_tty_warns_and_streams(tmp_path, monkeypatch, capsys) -> None:
-    from imp.engine.executor import RunResult
+def test_new_tui_on_non_tty_warns_and_routes_to_session_client(
+        tmp_path, monkeypatch, capsys) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-
-    async def fake_run_change(change, **kwargs):
-        on_event = kwargs["on_event"]
-        on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"slug": change.slug, "title": change.title}})
-        on_event({"id": "2", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "s", "kind": "agent", "phase": "design",
-                              "model": "x", "provider": "anthropic"}})
-        return RunResult.COMPLETED
-
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
 
-    # Under pytest's capture, sys.stdout.isatty() is False → the non-tty path.
+    called = {"n": 0}
+
+    async def _fake_client(change, *, driver, coord, solicit,
+                           seed_opening=None, status=None) -> int:
+        called["n"] += 1
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    # Under pytest's capture, sys.stdout.isatty() is False → --tui falls back to
+    # the streaming session-client path.
     args = argparse.Namespace(title="demo", tui=True)
     rc = anyio.run(m._async_cmd_new, args)
-    out, err = capsys.readouterr()
+    _out, err = capsys.readouterr()
     assert rc == 0
     assert "interactive terminal" in err     # warning surfaced on stderr
-    assert "design" in out                    # still streamed via LiveDriver
+    assert called["n"] == 1                   # routed to the session client
 
 
 @pytest.fixture
@@ -180,114 +178,6 @@ class _FakeTuiApp:
         stream.write("COLLAPSED-TRANSCRIPT\n")
 
 
-@pytest.mark.anyio
-async def test_run_tui_session_streams_no_esc_reader_then_handles_outcome(
-    monkeypatch, capsys,
-) -> None:
-    captured: list[_FakeTuiApp] = []
-    outcomes: list[RunResult] = []
-
-    class _CapturingApp(_FakeTuiApp):
-        def __init__(self, **kwargs: object) -> None:
-            super().__init__(**kwargs)
-            captured.append(self)
-
-    async def _fake_run_change(change, *, on_event, user_chat_input_fn,
-                               coordinator, non_interactive, seed_opening=None):
-        on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"slug": "s", "title": "t"}})
-        return RunResult.COMPLETED
-
-    def _boom_esc_reader(*a, **k):
-        raise AssertionError("EscKeyReader must not be started in --tui mode")
-
-    monkeypatch.setattr(m, "TuiApp", _CapturingApp)
-    monkeypatch.setattr(m, "run_change", _fake_run_change)
-    monkeypatch.setattr(m, "EscKeyReader", _boom_esc_reader)
-    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
-    monkeypatch.setattr(m, "_handle_terminal_outcome",
-                        lambda change, result, coord: outcomes.append(result) or 0)
-
-    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
-
-    assert rc == 0
-    assert outcomes == [RunResult.COMPLETED]
-    assert captured and captured[0].events
-    assert captured[0].transcript_written is True
-    assert "COLLAPSED-TRANSCRIPT" in capsys.readouterr().out
-
-
-@pytest.mark.anyio
-async def test_run_tui_session_result_none_calls_finalize_paused(
-    monkeypatch, capsys,
-) -> None:
-    finalized: list[str] = []
-
-    class _QuickExitApp(_FakeTuiApp):
-        async def run_async(self) -> None:
-            pass  # exits immediately, before run_change completes
-
-    async def _slow_run_change(change, **kwargs):
-        import anyio as _anyio
-        await _anyio.sleep(100)  # never completes
-
-    monkeypatch.setattr(m, "TuiApp", _QuickExitApp)
-    monkeypatch.setattr(m, "run_change", _slow_run_change)
-    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
-    monkeypatch.setattr(m, "_finalize_paused_exit",
-                        lambda change, driver, coord, reason:
-                            finalized.append(reason) or 130)
-
-    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
-
-    assert rc == 130
-    assert finalized
-
-
-@pytest.mark.anyio
-async def test_run_tui_session_load_error_returns_2(monkeypatch, capsys) -> None:
-    from imp.engine.errors import LoadError
-
-    async def _error_run_change(change, **kwargs):
-        raise LoadError("bad config")
-
-    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
-    monkeypatch.setattr(m, "run_change", _error_run_change)
-    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
-
-    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
-
-    assert rc == 2
-    assert "bad config" in capsys.readouterr().err
-
-
-@pytest.mark.anyio
-async def test_run_tui_session_composes_channel_on_event(monkeypatch, capsys) -> None:
-    channel_events: list[object] = []
-
-    class _FakeChannel:
-        async def start(self, tg: object) -> bool:
-            return True
-
-        def on_event(self, event: object) -> None:
-            channel_events.append(event)
-
-    async def _fake_run_change(change, *, on_event, **kwargs):
-        on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"slug": "s", "title": "t"}})
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
-    monkeypatch.setattr(m, "run_change", _fake_run_change)
-    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: _FakeChannel())
-    monkeypatch.setattr(m, "_handle_terminal_outcome",
-                        lambda change, result, coord: 0)
-
-    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
-
-    assert rc == 0
-    assert any(e.get("type") == "change_created" for e in channel_events)
-
 
 @pytest.mark.anyio
 async def test_benign_loop_handler_swallows_paused_and_benign_then_restores() -> None:
@@ -327,71 +217,129 @@ async def test_benign_loop_handler_swallows_paused_and_benign_then_restores() ->
     assert loop.get_exception_handler() is prior
 
 
-def test_async_cmd_new_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
-    import contextlib
+@pytest.mark.anyio
+async def test_run_tui_session_renders_events_and_handles_outcome(
+    monkeypatch, capsys,
+) -> None:
+    captured: list[_FakeTuiApp] = []
+    outcomes: list[RunResult] = []
 
+    class _CapturingApp(_FakeTuiApp):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            captured.append(self)
+
+    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+        driver.on_event({"id": "1", "agent_id": None, "type": "change_created",
+                         "payload": {"slug": "s", "title": "t"}})
+
+    monkeypatch.setattr(m, "TuiApp", _CapturingApp)
+    monkeypatch.setattr(m, "run_terminal_client", _fake_terminal_client)
+    monkeypatch.setattr(m, "build_session_attach",
+                        lambda *a, **k: (lambda on_event: None))
+    monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
+    monkeypatch.setattr(m, "_handle_terminal_outcome",
+                        lambda change, result, coord: outcomes.append(result) or 0)
+
+    rc = await m._run_tui_session(SimpleNamespace())
+
+    assert rc == 0
+    assert outcomes == [RunResult.COMPLETED]
+    assert captured and captured[0].events            # event reached the TUI driver
+    assert captured[0].transcript_written is True
+    assert "COLLAPSED-TRANSCRIPT" in capsys.readouterr().out
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
+    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+        await coord.signal_pause(reason="ctrl-c")     # sets should_pause + reason
+
+    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "run_terminal_client", _fake_terminal_client)
+    monkeypatch.setattr(m, "build_session_attach",
+                        lambda *a, **k: (lambda on_event: None))
+    monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.PAUSED)
+
+    rc = await m._run_tui_session(SimpleNamespace())
+
+    assert rc == 130
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> None:
+    replies: list[str] = []
+
+    class _SolicitApp(_FakeTuiApp):
+        async def solicit(self, change) -> str:
+            return "the reply"
+
+    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+        replies.append(await solicit("prompt?"))
+
+    monkeypatch.setattr(m, "TuiApp", _SolicitApp)
+    monkeypatch.setattr(m, "run_terminal_client", _fake_terminal_client)
+    monkeypatch.setattr(m, "build_session_attach",
+                        lambda *a, **k: (lambda on_event: None))
+    monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
+    monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
+
+    rc = await m._run_tui_session(SimpleNamespace())
+
+    assert rc == 0
+    assert replies == ["the reply"]
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_threads_resume_from_target_to_attach(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_attach(change, *, seed_opening=None, resume=False, from_target=None):
+        seen["seed_opening"] = seed_opening
+        seen["resume"] = resume
+        seen["from_target"] = from_target
+        return lambda on_event: None
+
+    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+        return None
+
+    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "run_terminal_client", _fake_terminal_client)
+    monkeypatch.setattr(m, "build_session_attach", _fake_attach)
+    monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
+    monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
+
+    rc = await m._run_tui_session(SimpleNamespace(), resume=True, from_target="review")
+
+    assert rc == 0
+    assert seen == {"seed_opening": None, "resume": True, "from_target": "review"}
+
+
+def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
+    ch = Change.create(Path(tmp_path), title="demo", change_id="feat",
+                       base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
 
-    entered = {"n": 0}
+    seen: dict[str, object] = {}
 
-    @contextlib.contextmanager
-    def fake_handler(coord):
-        entered["n"] += 1
-        yield
-
-    async def fake_session(change, *, tg, **kwargs):
-        tg.cancel_scope.cancel()
+    async def _fake_tui(change, *, seed_opening=None, resume=False,
+                        from_target=None) -> int:
+        seen["resume"] = resume
+        seen["from_target"] = from_target
         return 0
 
-    monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
-    monkeypatch.setattr(m, "_run_change_session", fake_session)
+    monkeypatch.setattr(m, "_run_tui_session", _fake_tui)
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
 
-    rc = anyio.run(m._async_cmd_new, argparse.Namespace(
-        title="demo", tui=False, non_interactive=True, message="go"))
+    args = argparse.Namespace(token="feat", from_target=None, tui=True,
+                              non_interactive=False, message=None)
+    rc = anyio.run(m._async_cmd_resume, args)
+
     assert rc == 0
-    assert entered["n"] == 1
-
-
-def _seed_change(tmp_path: Path) -> Change:
-    cd = tmp_path / ".imp" / "change"
-    (cd / "state").mkdir(parents=True, exist_ok=True)
-    (cd / "change.json").write_text(json.dumps(
-        {"id": "c", "title": "t", "base_branch": "main"}))
-    State(id="c", step="s", step_attempt=0, status="running").save(cd / "state")
-    return Change(id="c", title="t", base_branch="main",
-                  control_root=tmp_path, project_root=tmp_path, change_dir=cd)
-
-
-@pytest.mark.anyio
-async def test_run_tui_session_paused_writes_single_workflow_paused(
-    monkeypatch, tmp_path, capsys,
-) -> None:
-    """TUI interrupt-pause: the executor emitted workflow_paused before returning
-    RunResult.PAUSED, so the REAL _finalize_paused_exit (whose pause_and_exit
-    journal-tail guard sees the open pause) must NOT append a duplicate. Closes
-    the gate gap left by the monkeypatched-finalize test — exactly one
-    workflow_paused must remain."""
-    change = _seed_change(tmp_path)
-
-    async def _paused_run_change(change, *, on_event, user_chat_input_fn,
-                                 coordinator, non_interactive, seed_opening=None):
-        coordinator.request_exit("ctrl-c")  # sets should_pause + pause_reason
-        change.event_log().append(  # the executor's own emission
-            agent_id=None, type="workflow_paused",
-            payload={"reason": "ctrl-c", "interrupt_reason": "ctrl-c"})
-        return RunResult.PAUSED
-
-    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
-    monkeypatch.setattr(m, "run_change", _paused_run_change)
-    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
-
-    rc = await m._run_tui_session(change, args=argparse.Namespace(tui=True))
-
-    assert rc == 130
-    assert State.load(change.state_dir).status == "paused"
-    paused = [e for e in change.event_log().read()
-              if e.get("type") == "workflow_paused"]
-    assert len(paused) == 1  # the executor's event, NOT duplicated by finalize
+    assert seen == {"resume": True, "from_target": None}

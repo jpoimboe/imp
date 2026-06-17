@@ -32,22 +32,23 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
-from imp.cli.remote_channel import (
-    RemoteChannel,
-    compose_on_event,
-    effective_reply_fn,
-    select_driver_config,
+from imp.cli.session_run import (
+    infer_session_result,
+    make_headless_solicit,
+    make_interactive_solicit,
+    run_session_client,
 )
-from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
-from imp.cli.slash import ask_line_with_slash
+from imp.cli.session_terminal import run_terminal_client
+from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
+from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id, slugify
-from imp.engine.state import LockHeld, ProjectLock, State
+from imp.engine.state import LockHeld, State
 from imp.engine.workflow_lifecycle import (
     DriftState,
     classify_drift,
@@ -55,6 +56,8 @@ from imp.engine.workflow_lifecycle import (
     workflow_update_notice,
 )
 from imp.providers.config import parse_default_workflow
+from imp.remote.daemon.directory import session_is_resident
+from imp.remote.session.attach import build_session_attach
 
 
 class ReplyInterjectRouter:
@@ -221,79 +224,6 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
-def _maybe_build_channel(change: Change) -> RemoteChannel | None:
-    """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
-    behaves exactly as today). Title is captured at run start. A bad config is
-    surfaced elsewhere (run_change reloads it) — never fail channel construction
-    over config here; return None on any config error."""
-    from imp.providers.effective import load_effective_config
-    try:
-        config = load_effective_config(
-            project_root=change.project_root,
-            control_root=change.control_root).config
-    except (LoadError, LoadErrors):
-        return None
-    dc = select_driver_config(
-        config, control_root=change.control_root,
-        change_id=change.id, title=change.title, env=os.environ)
-    if dc is None:
-        return None
-    return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
-
-
-def _build_interactive_input(
-    change: Change, status: LiveStatus, coord: Any, esc_reader: Any, driver: Any,
-) -> tuple[ReplyInterjectRouter, Callable[[], Awaitable[str]]]:
-    """Build the interactive input plumbing shared by `new` and `resume` (Task 11).
-
-    Returns `(router, solicit_fn)`:
-      - `router` is the testable routing core (reply-vs-interject by submit-time
-        state, see ReplyInterjectRouter);
-      - `solicit_fn` is what the engine calls to SOLICIT a reply (wait_for_user):
-        it marks the router's solicit flag active for the duration
-        of the prompt_toolkit read and returns the typed line. Same behavior as
-        the legacy `_ask_line` — the prompt owns the tty (ESC quiesced) and the
-        line is the REPLY.
-
-    Where do interject lines come from? NOT a competing prompt — that would steal
-    /dev/tty from the ESC reader during agent-thinking and break ESC-to-pause (the
-    landed invariant). Instead the ESC reader — the sole /dev/tty owner during
-    thinking — gets an `on_interject` sink: a line typed while the agent runs is
-    captured raw and handed to `router.route`, which (solicit inactive) enqueues
-    it as an interject. During a solicit the ESC reader is quiesced and silent, so
-    its sink never fires then; the prompt owns input and the line is a reply.
-
-    The solicit-active flag is thus realized two ways that agree: the router's
-    boolean (set around the prompt read) and, physically, the ESC reader's
-    quiesce state. `router.route` is the pure, unit-tested decision; this wiring
-    is the thin, TTY-fragile shell around it (the interject read path is the one
-    documented to CPR-degrade under impty — L4).
-    """
-    prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                    editing_mode=_editing_mode(change.control_root),
-                    color=should_use_color(sys.stdout))
-    router = ReplyInterjectRouter(coord)
-
-    # The ESC reader funnels a mid-run typed line here; route() enqueues it as an
-    # interject (no solicit active) — delivered at the next agent turn boundary.
-    esc_reader.set_interject_sink(router.route)
-
-    async def _solicit() -> str:
-        # Reply path: identical to the legacy _ask_line, but flag the router
-        # active for the prompt's duration so the reply-vs-interject model is
-        # explicit (and a stray sink call during a prompt would route as reply).
-        router.begin_solicit()
-        try:
-            return await ask_line_with_slash(
-                prompt, status, change,
-                color=should_use_color(sys.stdout), width=_term_width(),
-                coord=coord, driver=driver)
-        finally:
-            router.end_solicit()
-
-    return router, _solicit
-
-
 # -- end-of-run status lines ------------------------------------------------
 # Semantic color + a leading glyph tell you at a glance how a run ended. The
 # decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
@@ -364,15 +294,6 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str]:
     name = _slug_descriptor(change.slug) or resume_token(change.id)
     phase = _phase_from_events(list(change.event_log().read()))
     return name, phase, resume_token(change.id)
-
-
-def _emit_paused(change: Change, reason: str | None = None) -> None:
-    """Interactive exit — print the dimmed pause headline (with trigger reason if given)."""
-    color = should_use_color(sys.stdout)
-    name, phase, token = _pause_facts(change)
-    print("\n" + "\n".join(
-        _pause_lines(name, phase, token, reason=reason, color=color,
-                     recover_phase=_recover_phase(change))))
 
 
 def _emit_paused_summary(change: Change) -> None:
@@ -450,18 +371,6 @@ def _should_respawn_reader(*, reader_exited: bool) -> bool:
     return reader_exited
 
 
-def _interactive_loop_predicate(
-    *, non_interactive: bool, reader_armed: bool,
-    stdin_tty: bool, stdout_tty: bool,
-) -> bool:
-    """The §2 loop runs only for an attended session: not --non-interactive, the
-    ESC reader armed at startup (LATCHED — not a live is_running(), which reads
-    false right after an ESC interrupt), and both stdin/stdout are ttys (the
-    reader opens /dev/tty, so a piped stdin must not park a run at a prompt
-    consuming pipe content as replies)."""
-    return (not non_interactive) and reader_armed and stdin_tty and stdout_tty
-
-
 def _handle_terminal_outcome(
     change: Change, result: RunResult, coord: Any,
 ) -> int:
@@ -497,258 +406,6 @@ def _handle_terminal_outcome(
             )
     _emit_paused_summary(change)
     return 1
-
-
-async def _run_actuator(
-    coord: Any, exit_event: Any, run_scope_holder: dict[str, Any],
-) -> None:
-    """Watch the escalation + exit events; on either, cancel ONLY the current
-    round's run scope (held in run_scope_holder) — never the task group, which
-    owns the signal receiver + status ticker the exit path still needs. On
-    escalation, also set coord.escalated so the loop routes to force-quit."""
-
-    async def _on_esc() -> None:
-        await coord.escalation_event.wait()
-        coord.escalated = True
-        sc = run_scope_holder["scope"]
-        if sc is not None:
-            sc.cancel()
-
-    async def _on_exit() -> None:
-        await exit_event.wait()
-        sc = run_scope_holder["scope"]
-        if sc is not None:
-            sc.cancel()
-
-    async with anyio.create_task_group() as wtg:
-        wtg.start_soon(_on_esc)
-        wtg.start_soon(_on_exit)
-
-
-async def _run_change_session(
-    change: Change,
-    *,
-    coord: Any,
-    driver: Any,
-    status: Any,
-    esc_reader: EscKeyReader | None,
-    reply_input_fn: Callable[[], Awaitable[str]],
-    non_interactive: bool,
-    tg: Any,
-    channel: Any = None,
-    seed_opening: str | None = None,
-) -> int:
-    """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
-    loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
-    exiting. Runs INSIDE the caller's task group (`tg`).
-
-    Each round runs `run_change` under a FRESH single-use CancelScope (published
-    to `run_scope_holder` so the C4 actuator can cancel the live run on escalation
-    / exit-event). On a loopable interrupt pause the coordinator is reset, the ESC
-    reader respawned if it exited, and a prompt collects the next message before
-    the next round; a bare Enter with an empty queue re-prompts. Out-of-band stops
-    (Ctrl-D, force-quit, SIGTERM/exit-event) finalize a paused exit (rc 130). On
-    every exit path the live status is reset and the task group cancelled."""
-    # C4 actuator scaffolding + ack hook (in scope for the whole session).
-    coord.escalation_event = anyio.Event()
-    exit_event = anyio.Event()
-    coord._exit_event = exit_event   # the D3 prompt-teardown race reads this
-    coord.set_escalation_hook(coord.escalation_event.set)
-    coord.set_exit_hook(lambda _r: exit_event.set())  # only signals; pause
-    # state is set on the signal paths themselves (review B2)
-    if not non_interactive:
-        coord.set_ack_hook(status.show_stop_ack)
-    run_scope_holder: dict[str, Any] = {"scope": None}
-
-    tg.start_soon(_run_actuator, coord, exit_event, run_scope_holder)
-
-    try:
-        if channel is not None and not await channel.start(tg):
-            channel = None
-        run_on_event = (
-            compose_on_event(driver.on_event, channel.on_event)
-            if channel is not None else driver.on_event)
-        reader_armed = (
-            bool(esc_reader and esc_reader._armed) if not non_interactive else False)
-        result: RunResult | None = None
-        seed_opening_pending = seed_opening
-        while True:
-            run_scope_holder["scope"] = anyio.CancelScope()
-            try:
-                with run_scope_holder["scope"]:
-                    # Bind the CURRENT reply_input_fn (it is rebound on reader
-                    # respawn each round) so the wait_for_user channel always
-                    # calls the live one.
-                    _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
-                        reply_input_fn, channel, non_interactive=non_interactive)
-
-                    def _chat(
-                        _q: object,
-                        _fn: Callable[[], Awaitable[str]] = _reply,
-                    ) -> Awaitable[str]:
-                        return _fn()
-
-                    result = await run_change(
-                        change, on_event=run_on_event,
-                        user_chat_input_fn=_chat,
-                        coordinator=coord, non_interactive=non_interactive,
-                        seed_opening=seed_opening_pending)
-                    seed_opening_pending = None
-            except EOFError:
-                return _finalize_paused_exit(
-                    change, driver, coord,
-                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
-            except KeyboardInterrupt:
-                return _finalize_paused_exit(
-                    change, driver, coord,
-                    _exit_pause_reason(coord.pause_reason, "ctrl-c"))
-
-            if coord.escalated:
-                return _finalize_paused_exit(change, driver, coord, "force-quit")
-            if exit_event.is_set():
-                return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "sigterm")
-            assert result is not None
-
-            interrupt_paused = (
-                result is RunResult.PAUSED
-                and coord.should_pause
-                and not coord.escalated)
-            if not interrupt_paused:
-                # Terminal outcome (COMPLETED, or a non-interrupt PAUSE such as
-                # merge_blocked). Do NOT reload State here: a merge-completing run
-                # has already finalized in _complete by removing the worktree —
-                # the change state dir, and its state.json, went with it — so
-                # State.load(change.state_dir) would crash with FileNotFoundError.
-                # final_state is only ever consulted on the interrupt-paused
-                # loopable path below, so it is never needed here. The terminal
-                # handler reads the outcome from `result`, not from disk.
-                break
-            final_state = State.load(change.state_dir)
-            interactive = _interactive_loop_predicate(
-                non_interactive=non_interactive, reader_armed=reader_armed,
-                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
-            loopable = (
-                coord.pause_reason in ("esc", "ctrl-c")
-                and final_state.status == "paused"
-                and interactive)
-            if not loopable:
-                # An interrupt paused the run but the session is not loopable
-                # (--non-interactive, or no controlling tty): exit paused,
-                # mirroring the legacy `coord.should_pause` arm (rc 130).
-                return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "ctrl-c")
-
-            coord.reset()
-            if not non_interactive and _should_respawn_reader(
-                    reader_exited=(coord._esc_reader is None)):
-                esc_reader = EscKeyReader(coord)
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-                await tg.start(esc_reader.run)
-                reader_armed = bool(esc_reader._armed)
-
-            at_completion = final_state.completion_pending
-            try:
-                line, slash = await _collect_resume_input(
-                    reply_input_fn, coord, at_completion=at_completion)
-            except EOFError:
-                # Ctrl-D at the resume prompt → pause-and-exit (rc 130), the same
-                # finalize as a Ctrl-D during the run (plan §2: the interrupted
-                # prompt's Ctrl-D pauses, it does not crash).
-                return _finalize_paused_exit(
-                    change, driver, coord,
-                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
-            except KeyboardInterrupt:
-                # Second Ctrl-C or SIGTERM at the resume prompt: pause-and-exit,
-                # mirroring the run loop's exit arm.
-                return _finalize_paused_exit(
-                    change, driver, coord, _exit_pause_reason(coord.pause_reason, "ctrl-c"))
-            if slash != "continue" and line.strip():
-                coord.enqueue_interject(line)
-            change.event_log().append(
-                agent_id=None, type="workflow_resumed", payload={})
-            running_state = State.load(change.state_dir)
-            running_state.status = "running"
-            running_state.save(change.state_dir)
-        driver.finish()
-        return _handle_terminal_outcome(change, result, coord)
-    finally:
-        if channel is not None:
-            with anyio.CancelScope(shield=True):
-                await channel.stop()
-        status.reset()
-        tg.cancel_scope.cancel()
-
-
-def _exit_pause_reason(engine_reason: str | None, gesture: str) -> str:
-    return engine_reason or gesture
-
-
-def _finalize_paused_exit(
-    change: Change, driver: Any, coord: Any, reason: str,
-) -> int:
-    """Finish the driver, persist the paused state, journal the pause (guarded
-    by the journal-tail idempotency check in pause_and_exit), and return rc 130.
-    The single exit sequence shared by every interrupt/EOF/SIGTERM/escalation
-    path out of the session loop."""
-    driver.finish()
-    pause_and_exit(change, reason=reason)
-    _emit_paused(change, reason)
-    return 130
-
-
-async def _collect_resume_input(
-    reply_input_fn: Callable[[], Awaitable[str]],
-    coord: Any,
-    *,
-    at_completion: bool,
-) -> tuple[str, str | None]:
-    """Inner prompt loop for a paused interrupt round: re-prompt WITHOUT
-    re-entering run_change until the user submits something that resumes. Returns
-    (line, slash) at the resume decision. A bare Enter / empty-queue re-prompts;
-    at completion only /continue (or Ctrl-D) finishes. Ctrl-D raises EOFError out
-    of reply_input_fn; the caller wraps this call in `except EOFError` to
-    pause-and-exit (rc 130) — EOFError is propagated, never swallowed here."""
-    if not at_completion and sys.stdout.isatty():
-        print("paused — type a message to redirect, "
-              "or ctrl-d to leave it paused")
-    reminder_shown = False
-    while True:
-        line = await reply_input_fn()  # Ctrl-D → EOFError (propagated to caller)
-        slash = "continue" if line.strip() == "/continue" else None
-        if at_completion:
-            if slash == "continue":
-                return line, slash
-            if sys.stdout.isatty():
-                print("no step left to take input — "
-                      "/continue to finish or ctrl-d to exit"
-                      if line.strip()
-                      else "/continue to finish or ctrl-d to exit")
-            continue
-        queued = coord.has_queued_interject()
-        if _decide_resume_action(line=line, queued=queued, slash=slash) == "reprompt":
-            if not reminder_shown and sys.stdout.isatty():
-                reminder_shown = True
-                print("enter a message, /continue to resume, "
-                      "ctrl-d to exit")
-            continue
-        return line, slash
-
-
-def _decide_resume_action(*, line: str, queued: bool, slash: str | None) -> str:
-    """Pure §2 resume-vs-re-prompt decision. Returns 'resume' or 'reprompt'.
-
-    Resume whenever there is text to deliver: a non-empty line, a queued
-    interject, or explicit /continue. A bare Enter with an empty queue
-    re-prompts (an accidental Enter must not relaunch a billable turn)."""
-    if slash == "continue":
-        return "resume"
-    if line.strip():
-        return "resume"
-    if queued:
-        return "resume"
-    return "reprompt"
 
 
 def _project_root() -> Path:
@@ -913,52 +570,38 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 
 
 async def _run_tui_session(
-        change: Change, *, args: argparse.Namespace, seed_opening: str | None = None) -> int:
+        change: Change, *, seed_opening: str | None = None,
+        resume: bool = False, from_target: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
-    # No EscKeyReader — TuiApp owns the tty exclusively.
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
-    channel = _maybe_build_channel(change)
+    attach = build_session_attach(
+        change, seed_opening=seed_opening, resume=resume, from_target=from_target)
 
-    async def _solicit(*_a: object, **_k: object) -> str:
+    async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)
 
-    holder: dict[str, Any] = {}
-    load_err: Exception | None = None
     with _benign_interrupt_loop_handler(coord):
-        try:
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(coord.run_signal_receiver)
-                if channel is not None and not await channel.start(tg):
-                    channel = None
-                run_on_event = (
-                    compose_on_event(app.on_event, channel.on_event)
-                    if channel is not None else app.on_event)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(coord.run_signal_receiver)
 
-                async def _run() -> None:
-                    try:
-                        holder["result"] = await run_change(
-                            change, on_event=run_on_event, user_chat_input_fn=_solicit,
-                            coordinator=coord, non_interactive=False,
-                            seed_opening=seed_opening)
-                    finally:
-                        app.exit()
+            async def _run() -> None:
+                try:
+                    with contextlib.suppress(TimeoutError):
+                        await run_terminal_client(
+                            attach=attach, driver=app, coord=coord, solicit=_solicit)
+                finally:
+                    app.exit()
 
-                tg.start_soon(_run)
-                await app.run_async()
-                tg.cancel_scope.cancel()
-        except* (LoadError, LoadErrors) as eg:
-            load_err = eg.exceptions[0]
+            tg.start_soon(_run)
+            await app.run_async()
+            tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
-    if load_err is not None:
-        print(f"imp: {load_err}", file=sys.stderr)
-        return 2
-    result = holder.get("result")
-    if result is None or (result is RunResult.PAUSED and coord.should_pause):
-        return _finalize_paused_exit(
-            change, app, coord, coord.pause_reason or "ctrl-c")
+    result = infer_session_result(change)
+    if result is RunResult.PAUSED and coord.should_pause:
+        return 130
     return _handle_terminal_outcome(change, result, coord)
 
 
@@ -978,60 +621,41 @@ def _record_backlog(args: argparse.Namespace, control: Path) -> int:
 async def _run_fresh_session(
     change: Change, *, args: argparse.Namespace, seed_opening: str | None,
 ) -> int:
+    """Run a freshly-created change (new / playbook / materialized backlog) through
+    the per-change session daemon, dispatching on headless / --tui / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
-    try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            print(_run_header_line(
-                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
-            non_interactive = bool(getattr(args, "non_interactive", False))
-            _warn_if_tui_unavailable(args, sys.stdout)
-            if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(
-                    change, args=args, seed_opening=seed_opening)
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            channel = _maybe_build_channel(change)
-            rc = 0
-            esc_reader: EscKeyReader | None = None
-            if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
-                    args.message)
-            else:
-                esc_reader = EscKeyReader(coord)
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-
-            try:
-                with _benign_interrupt_loop_handler(coord):
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        if not non_interactive:
-                            tg.start_soon(status.tick)
-                            assert esc_reader is not None
-                            # blocks until armed: avoids /dev/tty race if first step is interactive
-                            await tg.start(esc_reader.run)
-                        rc = await _run_change_session(
-                            change, coord=coord, driver=driver, status=status,
-                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=seed_opening)
-            except* (LoadError, LoadErrors) as eg:
-                driver.finish()
-                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
-                rc = 2
-            return rc
-    except LockHeld as e:
-        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-              file=sys.stderr)
-        return 2
+    non_interactive = bool(getattr(args, "non_interactive", False))
+    _warn_if_tui_unavailable(args, sys.stdout)
+    print(_run_header_line(
+        change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+    if non_interactive:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_headless_solicit(args.message, coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=seed_opening, status=status)
+    if _tui_requested(args):
+        return await _run_tui_session(change, seed_opening=seed_opening)
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(stream=sys.stdout,
+                        color=should_use_color(sys.stdout),
+                        width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        seed_opening=seed_opening, status=status)
 
 
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
+    from imp.cli.signals import InterruptCoordinator
 
     try:
         control = _control_root()
@@ -1071,13 +695,14 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     if _notice is not None:
         print(f"imp: {_notice}")
 
+    non_interactive = bool(getattr(args, "non_interactive", False))
     _verify_command_nudge(
         project_root=control, control_root=control,
-        non_interactive=bool(getattr(args, "non_interactive", False)),
+        non_interactive=non_interactive,
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
-    interactive = (not bool(getattr(args, "non_interactive", False))
+    interactive = (not non_interactive
                    and sys.stdin.isatty() and sys.stdout.isatty())
     opening_text = seed.seed_text
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
@@ -1111,7 +736,40 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    return await _run_fresh_session(change, args=args, seed_opening=opening_text)
+    _warn_if_tui_unavailable(args, sys.stdout)
+    if non_interactive:
+        # Headless: the per-change session daemon owns the worktree + lock and
+        # runs the agent loop; this process is a thin client that delivers
+        # --message once, then detaches and lets the daemon hibernate at its gate.
+        print(_run_header_line(
+            change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_headless_solicit(args.message, coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=opening_text, status=status)
+
+    if _tui_requested(args):
+        print(_run_header_line(
+            change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+        return await _run_tui_session(change, seed_opening=opening_text)
+
+    print(_run_header_line(
+        change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(stream=sys.stdout,
+                        color=should_use_color(sys.stdout),
+                        width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        seed_opening=opening_text, status=status)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -1172,6 +830,29 @@ async def _maybe_resume_backlog(
     return await _run_fresh_session(change, args=args, seed_opening=rec["brief"])
 
 
+def _validate_from_target(
+    change: Change, state: State, from_target: str,
+) -> int | None:
+    """Validates --from without mutating state; returns rc 2 on a bad target, else None."""
+    from imp.engine.loader import load_workflow
+    from imp.providers.effective import load_effective_config
+    try:
+        cfg = load_effective_config(
+            project_root=change.project_root,
+            control_root=change.control_root).config
+        workflow = load_workflow(
+            change.workflow_dir, configured_tiers=cfg.tier_names())
+    except (LoadError, LoadErrors) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    try:
+        recovery.plan_rewind(workflow, state, from_target)
+    except (recovery.RewindError, recovery.GateBypassRequired) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    return None
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1196,10 +877,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     except (LoadError, LoadErrors):
         return _resume_gone(control, change_id)
     state = State.load(change.state_dir)
-    # `running` is allowed THROUGH: it may be a crashed run (the OS dropped its
-    # lock, but the status.json still says running). The ProjectLock acquire below
-    # adjudicates — a genuinely-live run still holds the lock and trips LockHeld
-    # ("already running"); a crashed one's lock is free, so we recover it.
+    # `running` is allowed through: the status may be stale if a previous run
+    # crashed without updating it. The daemon resolves the ambiguity at connect time.
     if state.status not in RESUMABLE and state.status != "running":
         print(
             f"imp: Change {change.id} status is {state.status!r}; "
@@ -1207,144 +886,55 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            # Re-read status under the lock: the precondition above is an
-            # unlocked read, so a concurrent `imp abandon` (which sets
-            # status="abandoned", journals, then releases the lock before
-            # removing the worktree) could have landed in the gap. Re-checking
-            # here ensures resume never runs a Change abandon has finalized.
-            state = State.load(change.state_dir)
-            # We now HOLD the lock, so a `running` status here is a crashed run,
-            # not a live one (a live holder would have tripped LockHeld) — resume
-            # it. The re-read still catches a concurrent abandon (→ "abandoned").
-            if state.status not in RESUMABLE and state.status != "running":
-                print(
-                    f"imp: Change {change.id} status is {state.status!r}; "
-                    "nothing to resume",
-                    file=sys.stderr,
-                )
-                return 2
-            # Resume gets no `change_created` event, so the driver won't print the
-            # workflow header — emit a matching one here with a dim resuming marker,
-            # so a resumed run opens like a fresh one. A title-less change defers
-            # its header too (Option B), matching new.
-            print(_run_header_line(
-                change.slug, change.id, "resuming",
-                color=should_use_color(sys.stdout)))
 
-            # spec 2026-06-04: --from rewind preflight, before any run. Resolve
-            # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
-            # a refused --from leaves zero new events. The status precondition
-            # above still gates this — --from cannot bypass it.
-            from_target = getattr(args, "from_target", None)
-            rewind_plan = None
-            workflow = None
-            if from_target is not None:
-                from imp.engine.loader import load_workflow
-                from imp.providers.effective import load_effective_config
-                try:
-                    cfg = load_effective_config(
-                        project_root=change.project_root,
-                        control_root=change.control_root,
-                    ).config
-                    workflow = load_workflow(
-                        change.workflow_dir, configured_tiers=cfg.tier_names(),
-                        project_keys=frozenset(cfg.project_facts))
-                except (LoadError, LoadErrors) as e:
-                    print(f"imp: {e}", file=sys.stderr)
-                    return 2
-                try:
-                    rewind_plan = recovery.plan_rewind(
-                        workflow, state, from_target)
-                except (recovery.RewindError, recovery.GateBypassRequired) as e:
-                    # str(e) bare (not the usual f"imp: {e}"): these messages
-                    # already embed the "imp:" prefix and are multi-line (they
-                    # list valid targets / skipped gates), so they are printed
-                    # verbatim rather than re-prefixed.
-                    print(str(e), file=sys.stderr)
-                    return 2
+    non_interactive = bool(getattr(args, "non_interactive", False))
+    from_target = getattr(args, "from_target", None)
+    if non_interactive:
+        # Headless: validate --from locally so rc 2 returns before the daemon spawns.
+        if from_target is not None:
+            rc = _validate_from_target(change, state, from_target)
+            if rc is not None:
+                return rc
+        print(_run_header_line(
+            change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_headless_solicit(args.message, coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            resume=True, from_target=from_target, status=status)
+    if _tui_requested(args):
+        if from_target is not None:
+            rc = _validate_from_target(change, state, from_target)
+            if rc is not None:
+                return rc
+        print(_run_header_line(
+            change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+        return await _run_tui_session(change, resume=True, from_target=from_target)
 
-            non_interactive = bool(getattr(args, "non_interactive", False))
-            _warn_if_tui_unavailable(args, sys.stdout)
-            # Append the resume marker exactly once (for the persisted log /
-            # imp log). NO replay: the engine picks up from the current step
-            # cursor, re-emitting step_started + the step body fresh
-            # (design "Resume — no replay").
-            change.event_log().append(
-                agent_id=None, type="workflow_resumed", payload={})
-            # P1 crash recovery: a crashed run (status still "running" on disk)
-            # never set resume_pending, so the executor would enter the current
-            # step fresh and re-burn its work/quota. Keep and replay the current
-            # step's transcript. A never-ran step (empty transcript) still starts
-            # fresh via _resume_replays_transcript. Skipped on a --from rewind,
-            # which manages resume_pending through apply_rewind.
-            if from_target is None and state.status == "running":
-                state.resume_pending = state.step
-            state.status = "running"
-            # Apply the rewind AFTER the resume marker so step_rewound follows
-            # workflow_resumed in the append-only log.
-            if rewind_plan is not None:
-                # workflow is set whenever rewind_plan is (both assigned only
-                # inside `if from_target is not None`); assert narrows for mypy.
-                assert workflow is not None
-                recovery.apply_rewind(
-                    rewind_plan, workflow, state, change.event_log())
-                print(_rewind_note_line(
-                    rewind_plan.from_step, rewind_plan.target,
-                    color=should_use_color(sys.stdout)))
-            state.save(change.state_dir)
-
-            if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(change, args=args)
-
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            channel = _maybe_build_channel(change)
-            rc = 0
-            esc_reader: EscKeyReader | None = None
-            if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
-                    args.message)
-            else:
-                esc_reader = EscKeyReader(coord)
-                # Task 11: ESC reader captures interjects; router-flagged prompt is
-                # the reply channel (see _build_interactive_input).
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-
-            try:
-                with _benign_interrupt_loop_handler(coord):
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        if not non_interactive:
-                            tg.start_soon(status.tick)
-                            assert esc_reader is not None
-                            # Block until the reader has armed (or given up): a
-                            # workflow whose first step is interactive must not start
-                            # its prompt before the ESC reader holds /dev/tty, or the
-                            # prompt and the reader race for the terminal's termios.
-                            await tg.start(esc_reader.run)
-                        rc = await _run_change_session(
-                            change, coord=coord, driver=driver, status=status,
-                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=None)
-            except* (LoadError, LoadErrors) as eg:
-                # A bad workflow/config raised on the FIRST run_change (it never
-                # reaches the loop). _run_change_session has already cleaned up
-                # (status.reset) in its finally; surface the error as rc 2.
-                driver.finish()
-                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
-                rc = 2
+    # Interactive resume: a thin session-client. Validate --from client-side
+    # (non-mutating) so a bad target returns rc 2 before the daemon spawns; the
+    # daemon owns the worktree + lock and runs resume prep + the agent loop.
+    if from_target is not None:
+        rc = _validate_from_target(change, state, from_target)
+        if rc is not None:
             return rc
-    except LockHeld as e:
-        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-              file=sys.stderr)
-        return 2
+    _warn_if_tui_unavailable(args, sys.stdout)
+    print(_run_header_line(
+        change.slug, change.id, "resuming", color=should_use_color(sys.stdout)))
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(stream=sys.stdout,
+                        color=should_use_color(sys.stdout),
+                        width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        resume=True, from_target=from_target, status=status)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
@@ -2005,6 +1595,24 @@ async def _pick_playbook(control: Path, *, non_interactive: bool) -> str | int:
     return chosen.name if chosen is not None else 2
 
 
+def _deliver_abandon_resident(control: Path, change_id: str) -> None:
+    from imp.remote.session.client import SessionClient
+    from imp.remote.session.discover import session_socket_path
+    from imp.remote.session.protocol import CONTROL_ABANDON
+
+    async def _run() -> None:
+        path = str(session_socket_path(control, change_id))
+        client = SessionClient(path, change_id, "", on_event=lambda _: None)
+        await client.connect()
+        try:
+            await client.send_control(CONTROL_ABANDON)
+            await client.receive_events()
+        finally:
+            await client.aclose()
+
+    anyio.run(_run)
+
+
 def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
              interactive: bool | None = None,
              input_fn: Callable[[str], str] = input) -> int:
@@ -2042,28 +1650,20 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
             print(f"Abandon cancelled; {token} left intact.")
             return 1
 
+    if session_is_resident(control, change_id):
+        try:
+            _deliver_abandon_resident(control, change_id)
+        except OSError:
+            pass  # daemon exited between check and connect; fall through to direct teardown
+        else:
+            print(f"Abandoned {token}.")
+            return 0
     try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # timeout=0
-            state = State.load(change.state_dir)
-            state.status = "abandoned"
-            state.save(change.state_dir)                          # (a)
-            change.event_log().append(                            # (b)
-                agent_id=None, type="change_abandoned", payload={})
-            worktree.fold_wip_into_journal(control, change_id, {   # (c)
-                "events.jsonl": change.events_path,
-                "change.json": change.change_dir / "change.json",
-                "state.json": change.state_dir / "state.json",
-            })
-        # lock released here (after c, before d): nothing below needs it, and
-        # the persisted status="abandoned" blocks any concurrent resume —
-        # _async_cmd_resume re-reads status under the lock and refuses.
+        tear_down_change(change)
     except LockHeld as e:
         print(f"imp: Change {change_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
-
-    worktree.remove_worktree(control, change_id, force=True)      # (d)
-    worktree.delete_branch(control, change_id)                    # (e)
     print(f"Abandoned {token}.")
     return 0
 

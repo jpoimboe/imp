@@ -37,13 +37,6 @@ def _imp(*args: str) -> list[str]:
     return [sys.executable, "-m", "imp", *args]
 
 
-def resume_change(control_root: Path, change_id: str, text: str) -> None:
-    """Deliver a reply to a Change paused on disk via `imp resume --message`."""
-    _spawn_detached(
-        _imp("resume", change_id, "--non-interactive", "--message", text),
-        _base_env(), control_root)
-
-
 def create_change(control_root: Path, prompt: str) -> None:
     env = _base_env()
     env["IMP_REMOTE_AUTOSUBSCRIBE"] = "1"

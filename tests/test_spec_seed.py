@@ -9,7 +9,6 @@ import pytest
 
 import imp.cli.prompt as prompt_mod
 from imp.cli import main as cli_main
-from imp.engine.executor import RunResult
 from tests.conftest import _seed_control
 
 
@@ -132,14 +131,14 @@ def test_new_positional_delivers_verbatim_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     args = _new_args(opening="add a dark-mode toggle", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -157,14 +156,14 @@ def test_new_title_flag_sets_change_title(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     args = _new_args(title="dark mode", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -183,14 +182,14 @@ def test_new_spec_file_delivers_wrapped_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     args = _new_args(spec_file=str(draft), non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -211,20 +210,12 @@ def test_new_positional_and_spec_file_rc2(
     monkeypatch.chdir(tmp_path)
     draft = tmp_path / "draft.md"
     draft.write_text("Goal: x\n")
-    ran = {"called": False}
-
-    async def _fake_run(*_a: object, **_k: object) -> RunResult:
-        ran["called"] = True
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
 
     args = _new_args(opening="add dark mode", spec_file=str(draft),
                      non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 2
-    assert ran["called"] is False
     assert "mutually exclusive" in capsys.readouterr().err
 
 
@@ -233,19 +224,11 @@ def test_new_missing_spec_file_rc2_no_change(
         capsys: pytest.CaptureFixture[str]) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ran = {"called": False}
-
-    async def _fake_run(*_a: object, **_k: object) -> RunResult:
-        ran["called"] = True
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
 
     args = _new_args(spec_file=str(tmp_path / "nope.md"), non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 2
-    assert ran["called"] is False
     assert "nope.md" in capsys.readouterr().err
     worktrees = tmp_path / ".imp" / "worktrees"
     assert not worktrees.exists() or not any(worktrees.iterdir())
@@ -258,19 +241,11 @@ def test_new_spec_file_and_message_rc2(
     monkeypatch.chdir(tmp_path)
     draft = tmp_path / "draft.md"
     draft.write_text("Goal: x\n")
-    ran = {"called": False}
-
-    async def _fake_run(*_a: object, **_k: object) -> RunResult:
-        ran["called"] = True
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
 
     args = _new_args(spec_file=str(draft), message="hi", non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 2
-    assert ran["called"] is False
     assert "mutually exclusive" in capsys.readouterr().err
 
 
@@ -278,18 +253,17 @@ def test_new_positional_with_message_legal(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli_main, "_maybe_build_channel", lambda _c: None)
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None) -> int:
         captured["seed_opening"] = seed_opening
-        captured["reply"] = await user_chat_input_fn(None)  # type: ignore[operator]
-        return RunResult.COMPLETED
+        captured["reply"] = await solicit("")  # type: ignore[operator]
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     args = _new_args(opening="add dark mode", non_interactive=True, message="reply")
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -309,8 +283,8 @@ def test_new_tui_delivers_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_tui(change: object, *, args: object,
-                        seed_opening: str | None = None) -> int:
+    async def _fake_tui(change: object, *, seed_opening: str | None = None,
+                        resume: bool = False, from_target: str | None = None) -> int:
         captured["seed_opening"] = seed_opening
         return 0
 
@@ -328,44 +302,22 @@ def test_new_tui_delivers_seed(
     assert "--tui does not deliver" not in capsys.readouterr().err
 
 
-def test_new_non_interactive_channel_delivers_seed(
+def test_new_non_interactive_spec_seed_via_session_client(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     draft = tmp_path / "draft.md"
     draft.write_text("# My draft\nGoal: do X\n")
 
-    class _FakeChannel:
-        reply_timeout = None
-
-        def __init__(self) -> None:
-            self.stopped = False
-
-        async def start(self, _tg: object) -> bool:
-            return True
-
-        def on_event(self, _event: object) -> None:
-            pass
-
-        async def next_reply(self, *, timeout: float | None = None) -> str:
-            return "from-phone"
-
-        async def stop(self) -> None:
-            self.stopped = True
-
-    channel = _FakeChannel()
-    monkeypatch.setattr(cli_main, "_maybe_build_channel", lambda _c: channel)
-
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None) -> int:
         captured["seed_opening"] = seed_opening
-        captured["solicit"] = await user_chat_input_fn(None)  # type: ignore[operator]
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     args = _new_args(spec_file=str(draft), non_interactive=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
@@ -373,10 +325,8 @@ def test_new_non_interactive_channel_delivers_seed(
     assert rc == 0
     seed = captured["seed_opening"]
     assert isinstance(seed, str)
-    assert seed.startswith(cli_main.SPEC_SEED_MARKER)  # seed delivered as opening message
+    assert seed.startswith(cli_main.SPEC_SEED_MARKER)
     assert str(draft) in seed
-    assert captured["solicit"] == "from-phone"      # reply channel free for real solicits
-    assert channel.stopped is True                   # channel torn down
 
 
 def test_spec_writer_opening_conditioned_on_message() -> None:
@@ -422,13 +372,13 @@ def test_opening_prompt_reply_wires_to_seed_opening(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object = None,
+                           status: object = None) -> int:
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, question: object = None,
                         width: object = None, prompt_text: object = None) -> str:
@@ -457,13 +407,13 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
 
     captured: dict[str, object] = {}
 
-    async def _fake_run(change: object, *, on_event: object,
-                        user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object, seed_opening: object) -> RunResult:
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object = None,
+                           status: object = None) -> int:
         captured["seed_opening"] = seed_opening
-        return RunResult.COMPLETED
+        return 0
 
-    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, question: object = None,
                         width: object = None, prompt_text: object = None) -> str:

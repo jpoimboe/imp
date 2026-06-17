@@ -1,19 +1,17 @@
 """Transport-agnostic control plane: list / reply / create / abandon, routed by change_id."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.focus import Focus
-from imp.remote.daemon.server import SouthHub
 
 
 class ControlPlane:
     def __init__(
         self,
         *,
-        hub: SouthHub,
-        resume: Callable[[str, str], None],
+        deliver: Callable[[str, str], Awaitable[None]],
         create: Callable[[str], None],
         abandon: Callable[[str], int],
         list_changes: Callable[[], list[ChangeInfo]],
@@ -21,8 +19,7 @@ class ControlPlane:
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[str]],
     ) -> None:
-        self._hub: SouthHub = hub
-        self._resume = resume
+        self._deliver = deliver
         self._create = create
         self._abandon = abandon
         self._list_fn = list_changes
@@ -36,12 +33,9 @@ class ControlPlane:
     def recent_narrative(self, change_id: str, n: int) -> list[str]:
         return self._recent_narrative(change_id, n)
 
-    async def reply(self, change_id: str, text: str) -> str:
-        """Route a reply: live south connection returns "live"; paused Change returns "resumed"."""
-        if await self._hub.send_reply(change_id, text):
-            return "live"
-        self._resume(change_id, text)
-        return "resumed"
+    async def reply(self, change_id: str, text: str) -> None:
+        """Deliver a reply into the change's session daemon, rehydrating if hibernated."""
+        await self._deliver(change_id, text)
 
     def create(self, prompt: str) -> None:
         self._create(prompt)

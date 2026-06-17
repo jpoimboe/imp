@@ -29,7 +29,6 @@ def test_parse_remote_dict_form_keeps_knob_overrides(tmp_path: Path) -> None:
         "    name: telegram\n"
         "    events: [awaiting_user_input, errored]\n"
         "    startup_timeout: 3\n"
-        "    reply_timeout: 30\n"
     )))
     assert layer is not None
     out, _src = layer
@@ -37,23 +36,29 @@ def test_parse_remote_dict_form_keeps_knob_overrides(tmp_path: Path) -> None:
         "name": "telegram",
         "events": ["awaiting_user_input", "errored"],
         "startup_timeout": 3.0,
-        "reply_timeout": 30.0,
     }
 
 
 def test_parse_remote_dict_form_keeps_only_present_knobs(tmp_path: Path) -> None:
     # A partial override carries only the leaves present; unset knobs are absent
-    # (the driver falls back to its own defaults), and `reply_timeout: null`
-    # round-trips to None — the "wait forever, like a local prompt" form.
+    # (the driver falls back to its own defaults).
     layer = parse_config_layer(_write(tmp_path, (
         "remote:\n"
         "  driver:\n"
         "    name: telegram\n"
-        "    reply_timeout: null\n"
+        "    startup_timeout: 3\n"
     )))
     assert layer is not None
     out, _src = layer
-    assert out["remote"]["driver"] == {"name": "telegram", "reply_timeout": None}
+    assert out["remote"]["driver"] == {"name": "telegram", "startup_timeout": 3.0}
+
+
+def test_parse_remote_rejects_reply_timeout_key(tmp_path: Path) -> None:
+    # `reply_timeout` is no longer a known driver key (the blocking-input reply
+    # path is gone); the schema rejects it like any other unknown knob.
+    with pytest.raises(LoadError):
+        parse_config_layer(_write(tmp_path,
+            "remote:\n  driver:\n    name: telegram\n    reply_timeout: 30\n"))
 
 
 def test_parse_remote_rejects_command_key(tmp_path: Path) -> None:

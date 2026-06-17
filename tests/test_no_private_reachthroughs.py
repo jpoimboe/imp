@@ -51,6 +51,7 @@ def test_no_private_reachthrough_across_providers() -> None:
         "src/imp/providers/claude_code.py",
         "src/imp/providers/codex.py",
         "src/imp/providers/codex_runner.py",
+        "src/imp/cli/session_controls.py",
     )
     offending = [
         line for line in proc.stdout.splitlines()

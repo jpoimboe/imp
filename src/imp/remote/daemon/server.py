@@ -68,17 +68,6 @@ class SouthHub:
                     self._on_detach(change_id)
             await stream.aclose()
 
-    async def send_reply(self, change_id: str, text: str) -> bool:
-        """Push one reply line to the connection for change_id; return False if not live."""
-        stream = self._conns.get(change_id)
-        if stream is None:
-            return False
-        try:
-            await stream.send((text + "\n").encode("utf-8"))
-        except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-            return False
-        return True
-
     async def close(self) -> None:
         if self._listener is not None:
             await self._listener.aclose()
