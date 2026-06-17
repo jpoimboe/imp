@@ -56,3 +56,48 @@ def test_concurrent_enqueue_preserves_all_entries(tmp_path: Path) -> None:
     stamps = [e["enqueued_at"] for e in lane]
     assert all(isinstance(s, str) and "T" in s for s in stamps)
     assert mq.position(tmp_path, lane[0]["change_id"], "main") == 0
+
+
+def test_pop_and_wake_removes_self_and_wakes_new_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    # Change.load runs before spawn_fn, so real worktrees are required.
+    from imp.engine.change import Change
+    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
+    Change.create(tmp_path, title="b", change_id="b", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "main")
+    woken: list[str] = []
+    mq.pop_and_wake(
+        tmp_path, "a", "main",
+        spawn_fn=lambda change, **kw: woken.append((change.id, kw.get("resume"))),
+    )
+    assert all(e["change_id"] != "a" for e in mq.read(tmp_path))   # self removed
+    assert woken == [("b", True)]                                  # new head woken with resume
+
+
+def test_pop_and_wake_no_wake_when_lane_empties(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    woken: list[str] = []
+    mq.pop_and_wake(tmp_path, "a", "main", spawn_fn=lambda change, **kw: woken.append(change.id))
+    assert mq.read(tmp_path) == []
+    assert woken == []                                             # nothing left to wake
+
+
+def test_pop_and_wake_no_wake_when_self_not_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "main")
+    woken: list[str] = []
+    # 'b' (not head) removes itself: the head 'a' is untouched and not re-woken.
+    mq.pop_and_wake(tmp_path, "b", "main", spawn_fn=lambda change, **kw: woken.append(change.id))
+    assert [e["change_id"] for e in mq.read(tmp_path)] == ["a"]
+    assert woken == []
+
+
+def test_remove_drops_entry(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "main")
+    mq.remove(tmp_path, "a")
+    assert [e["change_id"] for e in mq.read(tmp_path)] == ["b"]
