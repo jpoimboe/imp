@@ -45,12 +45,12 @@ def test_build_tree_empty_yields_root_only() -> None:
     assert tree.root.children == []
 
 
-def test_change_created_sets_slug_and_title() -> None:
+def test_change_created_sets_handle_and_title() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
          "payload": {"handle": "add-auth-abc123", "title": "add auth"}},
     ])
-    assert tree.root.slug == "add-auth-abc123"
+    assert tree.root.handle == "add-auth-abc123"
     assert tree.root.title == "add auth"
 
 
@@ -972,7 +972,7 @@ def test_close_subagent_success_with_marker_text_is_not_terminal_state():
     assert fold.is_error is False
 
 
-def test_change_renamed_updates_root_title_and_slug() -> None:
+def test_change_renamed_updates_root_title_and_handle() -> None:
     # The narrative builder must reflect the settled name after change_renamed.
     b = nv.NarrativeBuilder()
     b.add(ev("1", "change_created", handle="", title=""))
@@ -980,7 +980,7 @@ def test_change_renamed_updates_root_title_and_slug() -> None:
              old_title="", new_title="Add OAuth",
              handle="add-oauth-aaa111"))
     assert b.tree.root.title == "Add OAuth"
-    assert b.tree.root.slug == "add-oauth-aaa111"
+    assert b.tree.root.handle == "add-oauth-aaa111"
 
 
 def test_change_renamed_ignores_legacy_partial_event() -> None:
@@ -993,7 +993,7 @@ def test_change_renamed_ignores_legacy_partial_event() -> None:
              old_title="orig",
              title="renamed"))   # NO new_title and NO handle — legacy/partial schema
     assert b.tree.root.title == "orig"          # unchanged (event ignored)
-    assert b.tree.root.slug == "orig-xyz"  # unchanged (no half-update)
+    assert b.tree.root.handle == "orig-xyz"  # unchanged (no half-update)
 
 
 def test_toolcall_call_ts_stamped_by_all_three_constructors() -> None:
@@ -1551,7 +1551,7 @@ def test_non_interrupt_config_error_still_renders() -> None:
 
 def test_change_merged_becomes_merged_node_not_fallback() -> None:
     tree = nv.build_tree([
-        _ev("0", "change_created", id="run-x", handle="run-x",
+        _ev("0", "change_created", id="runx01", handle="run-x-runx01",
             title="Run X"),
         _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
         _ev("2", "step_completed", step="merge-to-base", kind="merge",
@@ -1560,7 +1560,7 @@ def test_change_merged_becomes_merged_node_not_fallback() -> None:
     ])
     merged = [c for c in tree.root.children if isinstance(c, nv.MergedNode)]
     assert len(merged) == 1
-    assert merged[0].change_id == "2026-06-12-run-x"
+    assert merged[0].change_id == "run-x-runx01"
     assert merged[0].base == "master"
     # the raw event no longer leaks as a fallback line anywhere in the tree
     fbs: list[nv.FallbackLine] = []

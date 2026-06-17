@@ -169,7 +169,9 @@ def test_status_inflight_takes_precedence_over_journal(
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
-    assert out.count("both") == 1  # only in the in-flight section
+    # The change appears only once (in-flight section wins; no duplicate in past).
+    data_rows = [ln for ln in out.splitlines() if "both" in ln and "HANDLE" not in ln]
+    assert len(data_rows) == 1
 
 
 def test_status_skips_malformed_journal_entry(
@@ -399,13 +401,12 @@ def test_status_default_inflight_columns_and_color(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Default view: header + a running row with the TITLE-leading columns and a
-    green STATUS cell; the 6-char resume token trails as the ID."""
+    """Default view: header leads with HANDLE, then TITLE, STATUS with color."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Add version flag",
-                  change_id="2026-06-11-yaitd7", base_branch="main")
+                  change_id="yaitd7", base_branch="main")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -416,10 +417,13 @@ def test_status_default_inflight_columns_and_color(
     out = capsys.readouterr().out
     lines = out.splitlines()
     plain_header = re.sub(r"\x1b\[[0-9;]*m", "", lines[0])
-    assert "TITLE" in plain_header and plain_header.index("STATUS") == 26
+    assert plain_header.startswith("HANDLE")
+    assert "TITLE" in plain_header
+    assert "STATUS" in plain_header
     assert "Add version flag" in out
     assert "\x1b[32mrunning\x1b[0m" in out
-    assert lines[1].rstrip().endswith("yaitd7")
+    # handle leads the row
+    assert lines[1].startswith("add-version-flag-yaitd7")
 
 
 def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:

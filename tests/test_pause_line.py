@@ -49,7 +49,7 @@ def test_pause_lines_color_dims_with_reason() -> None:
     assert lines[0] == "\x1b[2mPaused  add-version-flag  at implement  (ctrl-c)\x1b[0m"
 
 
-def test_pause_facts_unnamed_change_labels_with_resume_token(tmp_path: Path) -> None:
+def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
@@ -61,7 +61,7 @@ def test_pause_facts_unnamed_change_labels_with_resume_token(tmp_path: Path) -> 
     assert token == "qzbscf"
 
 
-def test_pause_facts_named_change_labels_with_slug_descriptor(tmp_path: Path) -> None:
+def test_pause_facts_named_change_shows_handle(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 

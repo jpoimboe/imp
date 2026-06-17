@@ -33,21 +33,6 @@ def slugify(text: str) -> str:
     return s
 
 
-def dated_slug(name: str, *, date: str) -> str:
-    """`<date>-<slugified name>`. `date` is a fixed-width `YYYY-MM-DD` string.
-    The name keeps the MAX_SLUG_LEN cap (slugify), so the full slug is at most
-    11 + MAX_SLUG_LEN chars — the date prefix does not eat the name budget.
-
-    Returns `""` when `name` is blank or has no slug-able characters: an unnamed
-    Change has an empty title, and `""` is the canonical "unnamed" signal
-    (Change.slug derives from this). slugify itself still raises on empty — it is
-    the validator rename_change uses for a *new* name."""
-    try:
-        return f"{date}-{slugify(name)}"
-    except InvalidSlug:
-        return ""
-
-
 # Immutable Change identity (spec AC 1): 6 chars from [a-z0-9] drawn with
 # secrets, no date prefix. Ref-safe and coordination-free; collisions are caught
 # by the branch/worktree-exists guard at create time, not avoided by a date.

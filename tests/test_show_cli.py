@@ -11,26 +11,24 @@ import pytest
 from imp.cli.main import main
 from imp.engine import worktree
 from imp.engine.change import Change
-from imp.engine.slug import dated_slug
+from imp.engine.slug import derive_handle
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
-# A realistic id whose [:10] prefix is a real date, so _show_slug derives the
-# same dated slug both live and (via the journaled title) after merge.
-_ID = "2026-06-15-feat01"
+_ID = "feat01"
 
 
 def _seed_with_artifacts(control: Path, change_id: str, title: str) -> tuple[Change, str]:
     ch = Change.create(control, title=title, change_id=change_id, base_branch="main")
-    slug = dated_slug(ch.title, ch.id[:10])       # matches _show_slug artifact naming
+    handle = derive_handle(ch.title, ch.id)       # matches _show_handle artifact naming
     spec = ch.change_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
-    (spec / f"{slug}.md").write_text("# SPEC BODY\n")
+    (spec / f"{handle}.md").write_text("# SPEC BODY\n")
     plans = ch.change_dir / "artifacts" / "plans"
     plans.mkdir(parents=True)
-    (plans / f"{slug}-plan-1.md").write_text("# PLAN ONE\n")
-    (plans / f"{slug}-plan-2.md").write_text("# PLAN TWO\n")
-    return ch, slug
+    (plans / f"{handle}-plan-1.md").write_text("# PLAN ONE\n")
+    (plans / f"{handle}-plan-2.md").write_text("# PLAN TWO\n")
+    return ch, handle
 
 
 def _run(monkeypatch: pytest.MonkeyPatch, control: Path, *argv: str) -> str:
@@ -105,7 +103,7 @@ def test_show_spec_falls_back_to_journal_after_merge(
     })
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
-    # Worktree gone -> journal fallback (slug re-derived from the journaled title).
+    # Worktree gone -> journal fallback (handle re-derived from the journaled title).
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
     assert "PLAN TWO" in _run(monkeypatch, tmp_path, "show", _ID, "plan")
     assert "completed" in _run(monkeypatch, tmp_path, "show", _ID, "status")

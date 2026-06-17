@@ -5,7 +5,6 @@ import pytest
 from imp.engine.slug import (
     MAX_SLUG_LEN,
     InvalidSlug,
-    dated_slug,
     derive_handle,
     slugify,
 )
@@ -52,30 +51,6 @@ def test_three_word_phrase() -> None:
 def test_empty_after_strip_raises() -> None:
     with pytest.raises(InvalidSlug):
         slugify("!!!")
-
-
-def test_dated_slug_prepends_date() -> None:
-    assert dated_slug("Add OAuth", date="2026-06-01") == "2026-06-01-add-oauth"
-
-
-def test_dated_slug_caps_name_not_date() -> None:
-    # The name keeps the MAX_SLUG_LEN cap; the 11-char date prefix is added on
-    # top, so a long title never silently loses name chars to the prefix.
-    s = dated_slug("x" * 200, date="2026-06-01")
-    assert s == "2026-06-01-" + "x" * MAX_SLUG_LEN
-    assert len(s) == 11 + MAX_SLUG_LEN
-
-
-def test_dated_slug_empty_name_returns_empty() -> None:
-    # An unnamed Change has an empty title; dated_slug must yield "" (the
-    # canonical "unnamed" signal), NOT raise — slug is now derived, not validated.
-    assert dated_slug("", date="2026-06-01") == ""
-    assert dated_slug("   ", date="2026-06-01") == ""
-
-
-def test_dated_slug_unsluggable_name_returns_empty() -> None:
-    # A title with no slug-able characters also reads as unnamed.
-    assert dated_slug("!!!", date="2026-06-01") == ""
 
 
 def test_derive_handle_named() -> None:

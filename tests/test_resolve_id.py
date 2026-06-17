@@ -1,5 +1,5 @@
-"""_resolve_id precedence: exact id / unique suffix / current slug / ambiguous
-(spec §5, AC 5)."""
+"""_resolve_id: a token resolves iff it is an unambiguous substring of exactly
+one change's live handle (spec AC 7)."""
 
 from __future__ import annotations
 
@@ -16,75 +16,41 @@ def _mk(tmp_path: Path, change_id: str, title: str) -> Change:
     return Change.create(tmp_path, title=title, change_id=change_id, base_branch="main")
 
 
-def test_exact_id(tmp_path: Path) -> None:
+def test_bare_id_resolves_named_or_unnamed(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "One")
-    assert _resolve_id(tmp_path, "aaa111") == "aaa111"
+    _mk(tmp_path, "abc123", "Add OAuth")
+    assert _resolve_id(tmp_path, "abc123") == "abc123"
+    # unnamed: derive_handle("", "xyz789") == "xyz789", bare id still resolves
+    _mk(tmp_path, "xyz789", "")
+    assert _resolve_id(tmp_path, "xyz789") == "xyz789"
 
 
-def test_unique_suffix(tmp_path: Path) -> None:
+def test_name_substring_resolves(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "One")
-    _mk(tmp_path, "bbb222", "Two")
-    assert _resolve_id(tmp_path, "222") == "bbb222"
+    _mk(tmp_path, "abc123", "Add OAuth")        # handle add-oauth-abc123
+    assert _resolve_id(tmp_path, "oauth") == "abc123"
 
 
-def test_shared_prefix_is_ambiguous(tmp_path: Path, capsys) -> None:
+def test_full_handle_resolves(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "One")
-    _mk(tmp_path, "aaa222", "Two")
+    _mk(tmp_path, "abc123", "Add OAuth")
+    assert _resolve_id(tmp_path, "add-oauth-abc123") == "abc123"
+
+
+def test_ambiguous_substring_lists_candidates(tmp_path: Path, capsys) -> None:
+    _seed_control(tmp_path)
+    _mk(tmp_path, "abc123", "Add OAuth")        # add-oauth-abc123
+    _mk(tmp_path, "def456", "Add OAuth login")  # add-oauth-login-def456
     with pytest.raises(SystemExit):
-        _resolve_id(tmp_path, "aaa")     # prefix shared -> ambiguous, not resolved
-    err = capsys.readouterr().err
-    # AC 5: rejected as ambiguous AND lists the candidates via the shared formatter
-    # (TITLE header + each title + resume token), not a blank no-match.
-    assert "ambiguous" in err
-    assert "TITLE" in err
-    assert "One" in err and "Two" in err
-    assert "aaa111" in err and "aaa222" in err
-
-
-def test_current_handle_resolves(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = _mk(tmp_path, "aaa111", "Add OAuth")
-    assert ch.handle == "add-oauth-aaa111"
-    assert _resolve_id(tmp_path, "add-oauth") == "aaa111"
-
-
-def test_bare_name_resolves(tmp_path: Path) -> None:
-    # The bare name a user naturally types resolves via the slug tier.
-    _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "Add version flag")
-    assert _resolve_id(tmp_path, "add-version-flag") == "aaa111"
-
-
-def test_bare_name_collision_is_ambiguous(tmp_path: Path, capsys) -> None:
-    # Two changes sharing a name -> the bare name is ambiguous and lists
-    # candidates, rather than a blank no-match.
-    _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "Add version flag")
-    _mk(tmp_path, "bbb222", "Add version flag")
-    with pytest.raises(SystemExit):
-        _resolve_id(tmp_path, "add-version-flag")
+        _resolve_id(tmp_path, "oauth")
     err = capsys.readouterr().err
     assert "ambiguous" in err
-    assert "aaa111" in err and "bbb222" in err
+    assert "abc123" in err and "def456" in err
+    assert "HANDLE" in err
 
 
 def test_no_match_exits(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "One")
+    _mk(tmp_path, "abc123", "One")
     with pytest.raises(SystemExit):
-        _resolve_id(tmp_path, "nonexistent")
-
-
-def test_shared_suffix_is_ambiguous(tmp_path: Path, capsys) -> None:
-    _seed_control(tmp_path)
-    _mk(tmp_path, "aaa111", "One")
-    _mk(tmp_path, "bbb111", "Two")
-    with pytest.raises(SystemExit):
-        _resolve_id(tmp_path, "111")        # suffix shared by both ids -> ambiguous
-    err = capsys.readouterr().err
-    assert "ambiguous" in err
-    assert "One" in err and "Two" in err
-    assert "aaa111" in err and "bbb111" in err
+        _resolve_id(tmp_path, "zzzzzz")
