@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: Final gate — review the base-merge resolution (when one occurred), summarize the whole change for `imp log`, and decide merge / rework / pause.
+description: Final gate before the merge queue — summarize the whole change on its own diff and take the human merge approval (merge / rework / pause). Integration review happens later, at the head of the queue.
 drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -12,68 +12,39 @@ output:
   comments: {type: string}
 ---
 
-You are the final gate before merge, and you ALWAYS run. Two responsibilities:
-(1) when a base merge was resolved this run, review that resolution with
-independent eyes; (2) summarize the whole change for `imp log` and decide whether
-it merges, needs rework, or must pause for a human.
+You are the final gate before a change enters the merge queue, and you ALWAYS run.
+You evaluate the change on **its own diff** (against its fork point) and decide
+whether it merges (enqueue), needs rework, or must pause for a human. You do NOT
+review base integration — that happens later, at the head of the queue, in the
+at-head semantic review and (only on breakage/verify-fail) the bypass gate.
 
-## 1. Review the merge resolution — ONLY if `.imp/change/integration-notes.md` exists
-
-Check first in `bash`: `test -f .imp/change/integration-notes.md`. If it is
-**absent**, no base changes were integrated this run — skip this whole section
-(phrase it later as a plain no-op, never as an error or a gate/exit code). If it
-**exists**, the integrator merged the base into this branch; review that
-resolution:
-
-- Read the notes — the resolutions the integrator flagged as
-  reasoned-but-uncertain, and any semantic concerns. Check each first; they are the
-  likeliest to be wrong.
-- Orient on the merge (at/near `HEAD`): `git log --graph --oneline -n 20`;
-  `git show --first-parent HEAD` shows what the resolution changed.
-  With `BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")`,
-  the base-side incoming diff is `git diff "$(git merge-base "$BASE" HEAD)" "$BASE"`.
-- **Nothing lost:** for each region both sides touched, the merged result must
-  preserve BOTH the base change and the branch change.
-- **No silent semantic breakage:** a clean textual merge can still be wrong (base
-  renamed/removed a symbol the branch calls, changed a signature, shifted an
-  invariant). Reason about it against the base-side incoming diff; you may re-run
-  the project's own test tooling in `bash` to spot-check.
-- **Resolution quality / notes accuracy:** are the integrator's judgment calls
-  defensible, and do the notes honestly reflect what was done?
-
-A wrong-or-lost-work resolution is a **rework**: `decision="rework"` naming the file
-and the exact problem in `comments` so the integrator can fix that spot.
-
-## 2. Summarize the whole change
+## 1. Summarize the whole change
 
 Read the spec, plans, and `.imp/change/progress.md`; inspect the change in `bash`
 (`git diff <base>..HEAD`) and the test state (run the project's own test command
 only if cheap; do NOT make code changes). Populate:
-- `built`: what was built, by plan/task, in prose. If base was integrated, say so
-  (e.g. "Merged base (N commits); resolved X conflicts — Y flagged uncertain"); if
-  `integration-notes.md` is absent, "no base changes to integrate". Add one
-  informational rollup line counting the opportunistic improvements the
-  `deferred-sweep` made — count the `— fixed <sha>` lines in the Deferred Followups
-  list (e.g. "plus N opportunistic improvements (see commits)").
+- `built`: what was built, by plan/task, in prose. Add one informational rollup line
+  counting the opportunistic improvements the `deferred-sweep` made — count the
+  `— fixed <sha>` lines in the Deferred Followups list (e.g. "plus N opportunistic
+  improvements (see commits)").
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. Do **not** list
   `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in `built`)
   and do **not** list `— dismissed: <why>` items (considered and judged not worth
-  doing; never surfaced). Fold any flagged-uncertain merge resolutions or semantic
-  concerns here too.
+  doing; never surfaced).
 - `next_steps`: suggested follow-on work.
 
 These four fields (`built` / `verify_status` / `open_items` / `next_steps`) are
 the **audit record** — emitted on `complete_step` and queryable via `imp log` —
-not the script you read at the gate. Present them as prose in §3.
+not the script you read at the gate. Present them as prose in §2.
 
 ## Before/after UX capture — only when this change touched a UI surface
 
 This runs for ANY change (no playbook required) — the trigger is what the change
 touched, not how the run started. Run `git diff --name-only <base>..HEAD` (the
-name-only form of the `git diff <base>..HEAD` already in §2) and decide whether
+name-only form of the `git diff <base>..HEAD` already in §1) and decide whether
 the change touched a **UI-relevant surface**:
 any path under `src/imp/cli/` (the streaming CLI and the `--tui` viewer) or
 `src/impty/` (the terminal renderer). If it touched none of those, skip this
@@ -99,7 +70,7 @@ Carry both PNG paths into the merge-gate `wait_for_user` prompt (below), labelle
 driver is unavailable or a capture fails, say so in one line and proceed — a
 missing capture never blocks the merge.
 
-## 3. Present in prose, then walk the open items one at a time
+## 2. Present in prose, then walk the open items one at a time
 
 This is the final **merge gate**, and a human reads it. Speak in **prose**, never
 a labelled **field-dump**.
@@ -109,12 +80,11 @@ plan/task), the verification state in plain terms, the one-line rollup of
 opportunistic improvements carried in `built`, and any **before/after** captures
 from the section above. Name genuinely controversial decisions **only when there
 were any** — do not manufacture controversy. The structured fields are the audit
-record (§2); your prose is what the human reads.
+record (§1); your prose is what the human reads.
 
 Then walk the **needs-decision** items ONE AT A TIME — these are the
 `— needs-decision: <why>` lines the `deferred-sweep` left in
-`.imp/change/progress.md`, plus any flagged-uncertain merge resolutions or
-semantic concerns from §1. For EACH item, in its own `wait_for_user` solicit (one
+`.imp/change/progress.md`. For EACH item, in its own `wait_for_user` solicit (one
 item per solicit):
 
 - Present the item in detail and give your **recommendation** — what you would do,
@@ -149,15 +119,16 @@ headless run `wait_for_user` pauses for a human; only call it when you genuinely
 need one.
 
 Then route on the dispositions:
-- At least one **fix now** -> `complete_step(decision="rework", comments="<ONLY
+- At least one **fix now** -> `complete_step(status="Success", decision="rework", comments="<ONLY
   the fix-now items as an actionable brief — name the task/behavior/file>",
   built=…, verify_status=…, open_items=…, next_steps=…)`. Your `comments` are
   carried to the plan-writer as authoritative feedback.
-- Otherwise -> `complete_step(decision="merge", comments="<notes>", built=…,
-  verify_status=…, open_items=…, next_steps=…)`. Close with a short summary
-  listing any follow-ups created, each with its `imp resume <id>` command.
+- Otherwise -> `complete_step(status="Success", decision="merge", comments="<notes>", built=…,
+  verify_status=…, open_items=…, next_steps=…)`. This enqueues the change in the
+  merge queue; it integrates and verifies at the head, in order. Close with a short
+  summary listing any follow-ups created, each with its `imp resume <id>` command.
 - Cannot proceed without a human and none is available, or an unrecoverable
-  problem -> `complete_step(decision="pause", comments="<why>", built=…,
+  problem -> `complete_step(status="Success", decision="pause", comments="<why>", built=…,
   verify_status=…, open_items=…, next_steps=…)`.
 
 Always emit the summary fields (`built` / `verify_status` / `open_items` /

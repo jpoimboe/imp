@@ -1,0 +1,21 @@
+from pathlib import Path
+
+WF = Path("src/imp/assets/workflows/imp")
+
+
+def test_finalize_no_longer_reviews_integration_resolution() -> None:
+    body = (WF / "agents" / "finalize.md").read_text()
+    assert "integration-notes.md" not in body
+    assert "Review the merge resolution" not in body
+
+
+def test_finalize_still_decides_merge_or_rework() -> None:
+    from imp.engine.loader import parse_agent_file
+    agent = parse_agent_file((WF / "agents" / "finalize.md").resolve())
+    fields = {f.name: f for f in agent.output_schema.fields}
+    assert set(fields["decision"].values) == {"merge", "rework", "pause"}
+
+
+def test_finalize_merge_decision_explains_enqueue() -> None:
+    body = (WF / "agents" / "finalize.md").read_text()
+    assert "enqueues" in body or "merge queue" in body
