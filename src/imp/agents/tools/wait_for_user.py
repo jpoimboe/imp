@@ -61,9 +61,6 @@ def make_wait_for_user_tool() -> Tool:
                 type="awaiting_user_input",
                 payload={"prompt": ""},
             )
-        # Resolve the input channel: the attached human channel when present, else
-        # the no-human channel that parks the run. Both flow through the SAME
-        # single read below — there is no attended/unattended control-flow fork.
         input_fn = (
             ctx.user_input_fn if ctx.user_input_fn is not None else _headless_pause)
         # R6: a line the human typed WHILE the agent was running was routed to the
