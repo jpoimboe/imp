@@ -229,7 +229,7 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
             super().__init__(**kwargs)
             captured.append(self)
 
-    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
         driver.on_event({"id": "1", "agent_id": None, "type": "change_created",
                          "payload": {"slug": "s", "title": "t"}})
 
@@ -241,7 +241,7 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
     monkeypatch.setattr(m, "_handle_terminal_outcome",
                         lambda change, result, coord: outcomes.append(result) or 0)
 
-    rc = await m._run_tui_session(SimpleNamespace())
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"))
 
     assert rc == 0
     assert outcomes == [RunResult.COMPLETED]
@@ -252,7 +252,7 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
 
 @pytest.mark.anyio
 async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
-    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
         await coord.signal_pause(reason="ctrl-c")     # sets should_pause + reason
 
     monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
@@ -260,8 +260,9 @@ async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
     monkeypatch.setattr(m, "build_session_attach",
                         lambda *a, **k: (lambda on_event: None))
     monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.PAUSED)
+    monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 1)
 
-    rc = await m._run_tui_session(SimpleNamespace())
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"))
 
     assert rc == 130
 
@@ -274,7 +275,7 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
         async def solicit(self, change) -> str:
             return "the reply"
 
-    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
         replies.append(await solicit("prompt?"))
 
     monkeypatch.setattr(m, "TuiApp", _SolicitApp)
@@ -284,7 +285,7 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
     monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
     monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
 
-    rc = await m._run_tui_session(SimpleNamespace())
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"))
 
     assert rc == 0
     assert replies == ["the reply"]
@@ -300,7 +301,7 @@ async def test_run_tui_session_threads_resume_from_target_to_attach(monkeypatch)
         seen["from_target"] = from_target
         return lambda on_event: None
 
-    async def _fake_terminal_client(*, attach, driver, coord, solicit) -> None:
+    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
         return None
 
     monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
@@ -309,7 +310,7 @@ async def test_run_tui_session_threads_resume_from_target_to_attach(monkeypatch)
     monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
     monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
 
-    rc = await m._run_tui_session(SimpleNamespace(), resume=True, from_target="review")
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"), resume=True, from_target="review")
 
     assert rc == 0
     assert seen == {"seed_opening": None, "resume": True, "from_target": "review"}

@@ -824,3 +824,42 @@ async def test_invalid_from_target_is_rejected_before_any_log_mutation(
 
     types = [e["type"] for e in change.event_log().read()]
     assert "workflow_resumed" not in types
+
+
+def test_main_unknown_change_id_prints_clean_error_and_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.remote.session.daemon as daemon
+    from imp.engine.errors import LoadError
+
+    def boom(_root: Path, _cid: str) -> object:
+        raise LoadError("no such change feat")
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(boom))
+    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat"])
+    assert rc == 2
+    assert "no such change feat" in capsys.readouterr().err
+
+
+def test_main_maps_paused_outcome_to_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon
+    from imp.engine.executor import RunResult
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(lambda r, c: object()))
+    monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
+    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat"])
+    assert rc == 1
+
+
+def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon
+    from imp.engine.executor import RunResult
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(lambda r, c: object()))
+    monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
+    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat", "--resume"])
+    assert rc == 1

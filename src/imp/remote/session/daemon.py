@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,9 @@ import anyio
 
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
+from imp.engine.recovery import GateBypassRequired, RewindError
 from imp.engine.state import EventLog, ProjectLock, State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
@@ -147,7 +150,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--from", dest="from_target", default=None)
     ns = parser.parse_args(argv)
-    change = Change.load(Path(ns.control_root), ns.change_id)
+    try:
+        change = Change.load(Path(ns.control_root), ns.change_id)
+    except LoadError as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
     kwargs: dict[str, Any] = {}
     if ns.seed_opening is not None:
         kwargs["seed_opening"] = ns.seed_opening
@@ -155,11 +162,15 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["resume"] = True
     if ns.from_target is not None:
         kwargs["from_target"] = ns.from_target
-    if kwargs:
-        anyio.run(functools.partial(serve_change_session, change, **kwargs))
-    else:
-        anyio.run(serve_change_session, change)
-    return 0
+    try:
+        if kwargs:
+            result = anyio.run(functools.partial(serve_change_session, change, **kwargs))
+        else:
+            result = anyio.run(serve_change_session, change)
+    except (LoadError, LoadErrors, RewindError, GateBypassRequired) as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
+    return 1 if result is RunResult.PAUSED else 0
 
 
 if __name__ == "__main__":
