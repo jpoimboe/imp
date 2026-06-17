@@ -12,7 +12,7 @@ import anyio
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
-from imp.engine.state import ProjectLock, State
+from imp.engine.state import EventLog, ProjectLock, State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
@@ -23,6 +23,18 @@ _RESUME_PROMPT = "paused — type a message to redirect, or detach to leave it p
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
     return result is RunResult.PAUSED and coordinator.should_pause
+
+
+def _trailing_is_workflow_resumed(log: EventLog) -> bool:
+    last: dict[str, Any] | None = None
+    for ev in log.read():
+        last = ev
+    return last is not None and last.get("type") == "workflow_resumed"
+
+
+def _append_workflow_resumed(log: EventLog) -> None:
+    if not _trailing_is_workflow_resumed(log):
+        log.append(agent_id=None, type="workflow_resumed", payload={})
 
 
 async def serve_change_session(
@@ -75,7 +87,7 @@ async def serve_change_session(
         if resume:
             log = change.event_log()
             state = State.load(change.state_dir)
-            log.append(agent_id=None, type="workflow_resumed", payload={})
+            _append_workflow_resumed(log)
             # P1 crash recovery: a crashed run (status still "running" on disk)
             # never set resume_pending, so the executor would re-enter the current
             # step fresh and re-burn its work. Keep and replay it. Skipped on a
@@ -111,6 +123,7 @@ async def serve_change_session(
             coordinator.reset()
             if reply.strip():
                 coordinator.enqueue_interject(reply)
+            _append_workflow_resumed(change.event_log())
             result = await run_fn(
                 change,
                 on_event=on_event,

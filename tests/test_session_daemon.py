@@ -729,6 +729,74 @@ async def test_resume_from_applies_rewind_under_the_daemon_lock(
     assert final.loop_counts == {"task-lead": 2}   # review reset, upstream kept
 
 
+def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    daemon._append_workflow_resumed(log)
+    daemon._append_workflow_resumed(log)   # trailing already resumed → no-op
+    assert [e["type"] for e in log.read()].count("workflow_resumed") == 1
+
+
+@pytest.mark.anyio
+async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
+    from imp.cli.signals import _open_pause_exists
+
+    change = _make_change(tmp_path, "2026-06-15-bal")
+    calls = {"n": 0}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            change.event_log().append(
+                agent_id=None, type="workflow_paused",
+                payload={"reason": "interrupt"})
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    sock = str(session_socket_path(change.control_root, change.id))
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        seen: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title, on_event=seen.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+
+        async def _answer() -> None:
+            answered = 0
+            while "r" not in result:
+                prompts = sum(e.get("type") == "awaiting_user_input" for e in seen)
+                if prompts > answered:
+                    await client.send_input("go")
+                    answered += 1
+                await anyio.sleep(0.02)
+        tg.start_soon(_answer)
+        with anyio.fail_after(10):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        types = [e["type"] for e in change.event_log().read()]
+        assert types.count("workflow_paused") == 2
+        assert types.count("workflow_resumed") == 2
+        assert not _open_pause_exists(change)
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
 @pytest.mark.anyio
 async def test_invalid_from_target_is_rejected_before_any_log_mutation(
     tmp_path: Path,
