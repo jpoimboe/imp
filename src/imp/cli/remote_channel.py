@@ -24,6 +24,8 @@ from typing import Any
 
 import anyio
 
+from imp.remote.curate import EventCurator
+
 _log = logging.getLogger("imp.remote")
 
 _CRASH_PROBE_SECONDS = 0.2   # bound on the spawn-then-immediately-crash check
@@ -131,14 +133,10 @@ class RemoteChannel:
         on_error: Callable[[str], None] = _default_on_error,
     ) -> None:
         self._command = command
-        self._events = events
         self._startup_timeout = startup_timeout
-        self._id = id
-        self._title = title
+        self._curator = EventCurator(id=id, title=title, events=events)
         self._on_error = on_error
         self._proc: Any = None
-        self._step: str | None = None
-        self._status = "running"
 
     @classmethod
     def from_driver_config(
@@ -152,37 +150,10 @@ class RemoteChannel:
 
     # -- event tap (engine on_event port) ------------------------------------
     def on_event(self, event: Any) -> None:
-        if not isinstance(event, dict):
+        curated = self._curator.curate(event)
+        if curated is None:
             return
-        etype = event.get("type")
-        self._track(event)
-        if not self._allowed(etype):
-            return
-        # Change context is namespaced under "change" so it never clobbers the
-        # event's OWN id/payload fields (events carry their own log id).
-        line = json.dumps({
-            **event,
-            "change": {
-                "id": self._id, "title": self._title,
-                "step": self._step, "status": self._status,
-            },
-        }) + "\n"
-        self._write_nonblocking(line)
-
-    def _allowed(self, etype: Any) -> bool:
-        return "all" in self._events or etype in self._events
-
-    def _track(self, event: dict[str, Any]) -> None:
-        etype = event.get("type")
-        payload = event.get("payload") or {}
-        if etype == "step_started" and payload.get("step") is not None:
-            self._step = payload["step"]
-        elif etype == "workflow_paused":
-            self._status = "paused"
-        elif etype == "merge_blocked":
-            self._status = "merge_blocked"
-        elif etype == "change_merged":
-            self._status = "completed"
+        self._write_nonblocking(json.dumps(curated) + "\n")
 
     def _write_nonblocking(self, line: str) -> None:
         """Best-effort, never fatal: write one NDJSON line to the driver's stdin.
