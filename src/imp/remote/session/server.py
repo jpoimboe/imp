@@ -146,6 +146,18 @@ class SessionServer:
         if evt is not None:
             await evt.wait()
 
+    async def wait_for_turn(
+        self, predicate: Callable[[], bool], *, poll_interval: float = 2.0,
+    ) -> None:
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        while True:
+            if predicate():
+                return
+            if self._socket.attached_count == 0:
+                raise AwaitingUserInput()
+            with anyio.move_on_after(poll_interval):
+                await self.wait_for_attach_change()
+
     def set_pending_prompt(self, event: dict[str, Any] | None) -> None:
         """Track a prompt event to re-emit to clients that connect after it fires."""
         self._pending_prompt = event
