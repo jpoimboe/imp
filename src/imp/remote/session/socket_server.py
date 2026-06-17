@@ -43,6 +43,7 @@ class SessionSocket:
         self._listener: SocketListener | None = None
         self._input_send: MemoryObjectSendStream[str] | None = None
         self._serve_scope: anyio.CancelScope | None = None
+        self._serve_done: anyio.Event | None = None
 
     async def open(self) -> None:
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +52,8 @@ class SessionSocket:
     async def serve(self) -> None:
         if self._listener is None:
             return
+        done = anyio.Event()
+        self._serve_done = done
         try:
             with anyio.CancelScope() as scope:
                 self._serve_scope = scope
@@ -58,6 +61,8 @@ class SessionSocket:
                     await self._listener.serve(self._handle)
         finally:
             self._serve_scope = None
+            self._serve_done = None
+            done.set()
 
     @property
     def attached_count(self) -> int:
@@ -123,9 +128,10 @@ class SessionSocket:
         # Cancel before close: keeps accept()'s done callback fd-valid,
         # preventing stale selector entry on reuse.
         if self._serve_scope is not None:
+            done = self._serve_done
             self._serve_scope.cancel()
-            while self._serve_scope is not None:
-                await anyio.sleep(0)
+            if done is not None:
+                await done.wait()
         if self._listener is not None:
             await self._listener.aclose()
             self._listener = None
