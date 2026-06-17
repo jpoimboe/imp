@@ -418,6 +418,38 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
 
 
 @pytest.mark.anyio
+async def test_abandon_is_delivered_even_when_the_control_queue_is_full() -> None:
+    abandoned: list[bool] = []
+    server = SessionServer("/unused.sock", on_abandon=lambda: abandoned.append(True))
+    from imp.remote.session.server import _CONTROL_QUEUE_DEPTH
+    for _ in range(_CONTROL_QUEUE_DEPTH):
+        server._enqueue_control("interrupt")
+    server._enqueue_control("abandon")
+    assert server._abandon_requested is True  # signal set regardless of queue state
+    async with anyio.create_task_group() as tg:
+        server._serve_scope = tg.cancel_scope
+        tg.start_soon(server._control_loop)
+        # _dispatch_control(CONTROL_ABANDON) calls on_abandon() then cancels _serve_scope,
+        # which cancels the task group — the loop exits cleanly.
+    assert abandoned == [True]
+
+
+@pytest.mark.anyio
+async def test_ordinary_control_overflow_is_logged_not_silently_suppressed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+    server = SessionServer("/unused.sock")
+    from imp.remote.session.server import _CONTROL_QUEUE_DEPTH
+    for _ in range(_CONTROL_QUEUE_DEPTH):
+        server._enqueue_control("interrupt")
+    with caplog.at_level(logging.WARNING, logger="imp.remote"):
+        server._enqueue_control("interrupt")   # overflow
+    assert any("control" in r.message.lower() and "overflow" in r.message.lower()
+               for r in caplog.records)
+
+
+@pytest.mark.anyio
 async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
     tmp_path: Path,
 ) -> None:

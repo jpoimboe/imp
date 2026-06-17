@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -9,6 +10,8 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 
 from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_INTERRUPT
 from imp.remote.session.socket_server import SessionSocket
+
+_log = logging.getLogger("imp.remote.session.server")
 
 RunFn = Callable[..., Awaitable[Any]]
 
@@ -30,6 +33,7 @@ class SessionServer:
         self._lock = lock
         self._hibernate = hibernate
         self.abandoned = False
+        self._abandon_requested = False
         self._serve_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         # Initialized in open() because anyio.Event needs a running event loop.
@@ -147,11 +151,27 @@ class SessionServer:
         self._pulse_attach_change()
 
     def _enqueue_control(self, action: str) -> None:
-        with contextlib.suppress(anyio.WouldBlock):
+        if action == CONTROL_ABANDON:
+            # Terminal control: a guaranteed off-queue signal the consumer checks
+            # every iteration, PLUS a best-effort enqueue so an empty/non-full
+            # queue wakes the consumer immediately. When the queue is full the
+            # enqueue is dropped but the buffered items still wake the loop, which
+            # then fires abandon on its very next iteration via the signal.
+            self._abandon_requested = True
+            with contextlib.suppress(anyio.WouldBlock):
+                self._control_send.send_nowait(action)
+            return
+        try:
             self._control_send.send_nowait(action)
+        except anyio.WouldBlock:
+            _log.warning(
+                "session control queue overflow; dropping ordinary control %r", action)
 
     async def _control_loop(self) -> None:
         async for action in self._control_recv:
+            if self._abandon_requested:
+                await self._dispatch_control(CONTROL_ABANDON)
+                return
             await self._dispatch_control(action)
 
     async def _dispatch_control(self, action: str) -> None:
