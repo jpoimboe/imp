@@ -1158,3 +1158,19 @@ def test_status_spinner_is_render_safe_ascii() -> None:
     status = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
     assert status is not None
     assert status[0] == _SPINNER[0]              # the rendered spinner glyph is ASCII
+
+
+def test_status_line_shows_step_then_activity_then_elapsed() -> None:
+    from imp.cli.live_driver import compose_activity_status
+
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="plan-review", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
+    ]:
+        b.add(e)
+    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
+    assert "plan-review · thinking" in line
+    assert "18s" in line
