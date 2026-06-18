@@ -623,6 +623,19 @@ def _record_backlog(args: argparse.Namespace, control: Path) -> int:
     return 0
 
 
+def _select_headless(
+    args: argparse.Namespace, *, stdin: Any = None, stdout: Any = None,
+) -> tuple[bool, bool]:
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    non_interactive = bool(getattr(args, "non_interactive", False))
+    if getattr(args, "tui", False):
+        return False, False  # explicit --tui: let _tui_requested decide availability
+    interactive = not non_interactive and stdin.isatty() and stdout.isatty()
+    headless = non_interactive or not interactive
+    return headless, headless and not non_interactive
+
+
 async def _run_fresh_session(
     change: Change, *, args: argparse.Namespace, seed_opening: str | None,
 ) -> int:
@@ -630,17 +643,20 @@ async def _run_fresh_session(
     the per-change session daemon, dispatching on headless / --tui / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
-    non_interactive = bool(getattr(args, "non_interactive", False))
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
         change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
-    if non_interactive:
+    headless, auto_headless = _select_headless(args)
+    if headless:
+        if auto_headless:
+            print(f"imp: no tty detected — running headless; resume with "
+                  f"`imp resume {change.id}`", file=sys.stderr)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width(), status=status)
         coord = InterruptCoordinator()
-        solicit = make_headless_solicit(args.message, coord)
+        solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=seed_opening, status=status)
@@ -742,10 +758,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
     _warn_if_tui_unavailable(args, sys.stdout)
-    if non_interactive:
-        # Headless: the per-change session daemon owns the worktree + lock and
-        # runs the agent loop; this process is a thin client that delivers
-        # --message once, then detaches and lets the daemon hibernate at its gate.
+    headless, auto_headless = _select_headless(args)
+    if headless:
+        if auto_headless:
+            print(f"imp: no tty detected — running headless; resume with "
+                  f"`imp resume {change.id}`", file=sys.stderr)
         print(_run_header_line(
             change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
@@ -753,7 +770,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             color=should_use_color(sys.stdout),
                             width=_term_width(), status=status)
         coord = InterruptCoordinator()
-        solicit = make_headless_solicit(args.message, coord)
+        solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status)
@@ -892,14 +909,17 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         )
         return 2
 
-    non_interactive = bool(getattr(args, "non_interactive", False))
     from_target = getattr(args, "from_target", None)
-    if non_interactive:
+    headless, auto_headless = _select_headless(args)
+    if headless:
         # Headless: validate --from locally so rc 2 returns before the daemon spawns.
         if from_target is not None:
             rc = _validate_from_target(change, state, from_target)
             if rc is not None:
                 return rc
+        if auto_headless:
+            print(f"imp: no tty detected — running headless; resume with "
+                  f"`imp resume {change.id}`", file=sys.stderr)
         print(_run_header_line(
             change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
@@ -907,7 +927,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             color=should_use_color(sys.stdout),
                             width=_term_width(), status=status)
         coord = InterruptCoordinator()
-        solicit = make_headless_solicit(args.message, coord)
+        solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             resume=True, from_target=from_target, status=status)

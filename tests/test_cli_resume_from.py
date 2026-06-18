@@ -126,6 +126,7 @@ def test_resume_interactive_routes_through_session_client(
         return 5
 
     monkeypatch.setattr(m, "run_session_client", _fake_run_session_client)
+    monkeypatch.setattr(m, "_select_headless", lambda _args, **_kw: (False, False))
 
     rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
         token="feat", from_target=None))
