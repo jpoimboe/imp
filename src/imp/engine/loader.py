@@ -12,7 +12,7 @@ import dataclasses
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -44,6 +44,7 @@ from imp.engine.types import (
     Continue,
     FsRule,
     Goto,
+    Kind,
     Mutation,
     Pause,
     Phase,
@@ -239,7 +240,7 @@ def _output_types_for_step(
         return dict(_SCRIPT_OUTPUT_TYPES)
     if step_kind == "merge":
         return {"merge": "string"}   # engine produces merge: MERGED|STALE|CONFLICT|REFUSED|DIRTY
-    return None  # branch
+    return None  # branch / engine-native (no typed output env)
 
 
 # ── Kind inference ────────────────────────────────────────────────────────────
@@ -248,6 +249,7 @@ _KIND_SIGNALS = {
     "agent": ("file", "prompt"),
     "script": ("command",),
 }
+_ENGINE_NATIVE = ("merge", "wait_for_head", "dequeue_wake")
 
 
 def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
@@ -256,13 +258,11 @@ def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
     }
     has_rules = "rules" in raw
     explicit = raw.get("kind")
-    if explicit == "merge":
-        # Engine-native step: no file/command key signals it, so it must be
-        # declared. It routes on an engine-produced `merge` output via rules.
+    if explicit in _ENGINE_NATIVE:
         if present:
             raise LoadError(
-                "merge step carries no file/command (engine-native)", source)
-        return "merge"
+                f"{explicit} step carries no file/command (engine-native)", source)
+        return str(explicit)
     if len(present) > 1:
         raise LoadError(
             f"step has conflicting kind signals {sorted(present)}; "
@@ -605,7 +605,7 @@ def _parse_step(
 
     if "rules" in raw:
         rules = _parse_rules(raw["rules"], source, yaml_path)
-    elif kind in ("script", "branch", "merge"):
+    elif kind in ("script", "branch", "merge", "wait_for_head", "dequeue_wake"):
         raise LoadError(f"{kind} step {name!r} requires a rules: block", source)
     # agent with no rules means continue-on-success (rules stays ())
 
@@ -635,9 +635,9 @@ def _parse_step(
             timeout_seconds=raw.get("timeout"),
             quiet=quiet,
         )
-    elif kind == "merge":
+    elif kind in ("merge", "wait_for_head", "dequeue_wake"):
         step = Step(
-            name=name, phase=phase_name, kind="merge", rules=rules,
+            name=name, phase=phase_name, kind=cast(Kind, kind), rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
             quiet=quiet,
         )

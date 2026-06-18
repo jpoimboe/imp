@@ -48,16 +48,17 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
     ]
 
 
-def test_review_phase_starts_at_stamp_trailers_then_repins() -> None:
+def test_review_phase_is_stamp_trailers_then_finalize() -> None:
+    # Merge-queue: the review phase only stamps trailers and takes the merge
+    # approval; integration moves to the at-head merge phase, so integrate-rebase /
+    # integrator / integrate-verify / repin-after-rebase no longer live here.
     review = next(p for p in _wf().phases if p.name == "review")
-    names = [s.name for s in review.steps]
-    assert names[0] == "stamp-trailers"
-    assert names.index("integrate-verify") < names.index("repin-after-rebase")
-    assert names.index("repin-after-rebase") < names.index("finalize")
-    gone = {s.name for s in _wf().flat_steps()}
-    for missing in ("integration-gate", "integration-pass", "integration-sweep",
-                    "integration-sweep-verify", "stamp-sweep-trailers"):
-        assert missing not in gone, missing
+    assert [s.name for s in review.steps] == ["stamp-trailers", "finalize"]
+    names = {s.name for s in _wf().flat_steps()}
+    for gone in ("integration-gate", "integration-pass", "integration-sweep",
+                 "integration-sweep-verify", "stamp-sweep-trailers",
+                 "repin-after-rebase", "base-fresh-check"):
+        assert gone not in names, gone
 
 
 def test_standalone_panel_gate_and_recheck_are_gone() -> None:
@@ -272,14 +273,6 @@ def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
     assert m_batch.var_mutations["review_base"] == "cafef00d"
 
 
-def test_repin_after_rebase_advances_review_base() -> None:
-    rules = _steps(_wf())["repin-after-rebase"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"exit": 0, "stdout": "rebased1", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["review_base"] == "rebased1"
-
-
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
@@ -296,11 +289,9 @@ def test_finalize_rework_routes_to_plan_writer() -> None:
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={**base, "decision": "rework", "comments": "fix X"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.var_mutations["merge_approved"] is False
     m_merge = evaluate_rules(rules, vars=_BASE_VARS,
                              output={**base, "decision": "merge"})
-    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "merge"
-    assert m_merge.var_mutations["merge_approved"] is True
+    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "wait-for-head"
 
 
 def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:

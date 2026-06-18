@@ -336,7 +336,7 @@ def _emit_merge_blocked(
 
 
 def _emit_script_blocked(step: str, stderr: str) -> None:
-    """A script step paused (e.g. integrate-rebase exit 3/4/5, base-fresh-check exit 1).
+    """A script step paused (e.g. integrate-rebase exit 3/4/5).
     Print its stderr so the recovery text reaches the user."""
     color = should_use_color(sys.stdout)
     mark = "⚠ " if color else ""

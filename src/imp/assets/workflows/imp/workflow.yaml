@@ -20,8 +20,6 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
-  merge_approved:         {type: bool, default: false}
-  reintegrate_clean:      {type: bool, default: false}
 
 defaults:
   max_retries: 3
@@ -232,14 +230,31 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
+      - name: finalize
+        file: agents/finalize.md
+        tier: high
+        max_loops: 20
+        rules:
+          - {if: {decision: merge},  goto: wait-for-head}
+          - {if: {decision: rework}, goto: plan-writer, feedback: "Here's the feedback to address:"}
+          - {else: true, pause: true}
+
+  # ── merge: the FIFO merge queue. Only the head touches the base. ───────
+  - name: merge
+    steps:
+      - name: wait-for-head
+        kind: wait_for_head
+        quiet: true
+        rules:
+          - {else: true, continue: true}
+
       - name: integrate-rebase
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
-          - {if: {exit: 2, merge_approved: true}, goto: base-fresh-check}
-          - {if: {exit: 2}, goto: finalize}
-          - {if: {exit: 0}, set: {reintegrate_clean: true},  goto: integrate-verify}
-          - {if: {exit: 6}, set: {reintegrate_clean: false}, continue: true}
+          - {if: {exit: 2}, goto: merge-to-base}
+          - {if: {exit: 0}, goto: integration-review}
+          - {if: {exit: 6}, continue: true}
           - {else: true, pause: true}
 
       - name: integrator
@@ -249,49 +264,38 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
 
-      - name: integrate-verify
+      - name: integration-review
+        file: agents/integration-review.md
+        tier: high
+        rules:
+          - {if: {verdict: breakage}, goto: bypass-dequeue}
+          - {else: true, continue: true}
+
+      - name: integration-verify
         command: ./scripts/run-verify.sh
-        max_loops: 5
         rules:
-          - {if: {exit: 0, merge_approved: true, reintegrate_clean: true}, goto: base-fresh-check}
-          - {if: {exit: 0}, continue: true}
+          - {if: {exit: 0}, goto: merge-to-base}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: integrator}
+          - {else: true, goto: bypass-dequeue}
 
-      # After the rebase fully settles (clean exit, or conflict resolved AND verified),
-      # advance review_base to the post-rebase HEAD: a later rework re-entry then diffs
-      # from fully-reviewed work, never leaking the freshly-pulled base delta (Q1 fix).
-      - name: repin-after-rebase
+      - name: bypass-dequeue
+        kind: dequeue_wake
         quiet: true
-        command: ./scripts/pin-review-base.sh head
         rules:
-          - {if: {exit: 0}, set: {review_base: output.stdout}, continue: true}
-          - {else: true, pause: true}
+          - {else: true, continue: true}
 
-      - name: finalize
-        file: agents/finalize.md
+      - name: integration-resolve
+        file: agents/integration-resolve.md
         tier: high
         max_loops: 20
         rules:
-          - {if: {decision: merge},  set: {merge_approved: true},  goto: merge}
-          - {if: {decision: rework}, set: {merge_approved: false}, goto: plan-writer, feedback: "Here's the feedback to address:"}
+          - {if: {decision: merge},  goto: wait-for-head}
+          - {if: {decision: rework}, goto: plan-writer, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
-  # ── merge ───────────────────────────────────────────────────────────
-  - name: merge
-    steps:
-      - name: base-fresh-check       # B3: cheap pre-lock freshness fast-path
-        quiet: true
-        command: ./scripts/base-fresh-check.sh
-        max_loops: 10
-        rules:
-          - {if: {exit: 0}, continue: true}          # base unchanged / not-integrated -> take the lock
-          - {if: {exit: 10}, goto: integrate-rebase}  # base advanced -> re-integrate
-          - {else: true, pause: true}                # exit 1 preamble failure -> human
-
-      - name: merge-to-base          # B3: engine-native, lock-protected, routable
+      - name: merge-to-base
         kind: merge
         rules:
-          - {if: {merge: STALE}, goto: integrate-rebase}   # base moved between check and lock -> re-integrate
-          - {if: {merge: MERGED}, continue: true}          # falls through to _complete finalize
-          - {else: true, pause: true}                      # defensive fallback; _route_merge intercepts CONFLICT/REFUSED/DIRTY first to emit merge_blocked + a reasoned pause
+          - {if: {merge: MERGED}, continue: true}
+          - {if: {merge: STALE}, pause: true}
+          - {else: true, pause: true}

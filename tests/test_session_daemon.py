@@ -47,6 +47,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_change_seams(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> str:
         reply = await user_chat_input_fn("")
         on_event({"type": "agent_output", "payload": {"reply": reply}})
@@ -90,6 +91,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> str:
         try:
             await user_chat_input_fn("")
@@ -111,6 +113,7 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> str:
         await release.wait()
         return "done"
@@ -144,6 +147,7 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> str:
         with anyio.fail_after(5):
             while not coordinator.should_pause:
@@ -206,6 +210,7 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> str:
         await anyio.sleep_forever()   # only an abandon-cancel ends this run
         return "x"
@@ -241,6 +246,7 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
         if calls["n"] == 1:
@@ -303,6 +309,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
         if calls["n"] == 1:
@@ -354,6 +361,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
         await coordinator.signal_pause(reason="ctrl-c")
@@ -410,6 +418,7 @@ async def test_seed_opening_is_forwarded_to_the_first_run_only(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, seed_opening: str | None = None,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         seeds.append(seed_opening)
         if len(seeds) == 1:
@@ -465,6 +474,7 @@ async def test_resume_marks_running_and_journals_workflow_resumed(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         # The prep must already be visible to the run: status flipped to running.
         seen["status"] = State.load(change.state_dir).status
@@ -500,6 +510,7 @@ async def test_resume_sets_resume_pending_for_a_crashed_run(tmp_path: Path) -> N
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         seen["resume_pending"] = State.load(change.state_dir).resume_pending
         return RunResult.COMPLETED
@@ -528,6 +539,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         seen["status"] = State.load(change.state_dir).status
         return RunResult.COMPLETED
@@ -709,6 +721,7 @@ async def test_resume_from_applies_rewind_under_the_daemon_lock(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         return RunResult.COMPLETED
 
@@ -751,6 +764,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
         if calls["n"] <= 2:
@@ -814,6 +828,7 @@ async def test_invalid_from_target_is_rejected_before_any_log_mutation(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
+        wait_for_turn_fn: Any = None,
     ) -> RunResult:
         raise AssertionError("run must not start when from_target is invalid")
 

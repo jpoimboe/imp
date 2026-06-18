@@ -608,6 +608,14 @@ def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["merge_blocked"] = _h_merge_blocked
 
 
+def _h_waiting_for_head(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    self._append(LiteralTextNode(text=f"waiting to merge — {p.get('ahead', 0)} ahead"))
+
+
+NarrativeBuilder._HANDLERS["waiting_for_head"] = _h_waiting_for_head
+
+
 def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it

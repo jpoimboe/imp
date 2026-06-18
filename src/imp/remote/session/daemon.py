@@ -15,7 +15,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.recovery import GateBypassRequired, RewindError
-from imp.engine.state import EventLog, ProjectLock, State
+from imp.engine.state import EventLog, LockHeld, ProjectLock, State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
@@ -79,10 +79,9 @@ async def serve_change_session(
     server = SessionServer(
         socket_path,
         coordinator=coordinator,
-        lock=ProjectLock(change.change_dir / "lock"),
+        lock=None,
         hibernate=hibernate,
     )
-    await server.open()
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -110,6 +109,7 @@ async def serve_change_session(
             on_event=on_event,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
+            wait_for_turn_fn=server.wait_for_turn,
             **first_kwargs,
         )
         while _is_interrupt_pause(result, coordinator):
@@ -132,10 +132,17 @@ async def serve_change_session(
                 on_event=on_event,
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
+                wait_for_turn_fn=server.wait_for_turn,
             )
         return result
 
-    result = await server.serve(_bound)
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():
+            await server.open()
+            result = await server.serve(_bound)
+    except LockHeld:
+        # A wake-spawn raced a resident change: exit harmlessly without binding socket.
+        return None
     if server.abandoned:
         # cwd is control_root, not the worktree, so worktree removal is safe
         await anyio.to_thread.run_sync(tear_down, change)

@@ -158,8 +158,11 @@ async def run_change(
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
     seed_opening: str | None = None,
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
+    if wait_for_turn_fn is None:
+        wait_for_turn_fn = _headless_wait_for_turn
     if coordinator is None:
         # Lazy import to avoid circular dep at module-load time.
         from imp.cli.signals import InterruptCoordinator
@@ -249,7 +252,8 @@ async def run_change(
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
                 project_facts=state.project_facts or {},
-                guidance=state.guidance or "")
+                guidance=state.guidance or "",
+                wait_for_turn_fn=wait_for_turn_fn)
             if seed_for_step is not None:
                 pending_seed = None
 
@@ -384,6 +388,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": state.merge_commit})
+    from imp.engine import merge_queue
+    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
     worktree.fold_wip_into_journal(change.control_root, change.id, {
         "events.jsonl": change.events_path,
         "change.json": change.change_dir / "change.json",
@@ -404,6 +410,7 @@ async def _dispatch_step(
     seed_opening: str | None = None,
     project_facts: dict[str, str] | None = None,
     guidance: str = "",
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -413,6 +420,12 @@ async def _dispatch_step(
         state.retry_feedback = None
         state.save(change.state_dir)
 
+    if step.kind == "wait_for_head":
+        if wait_for_turn_fn is None:
+            raise RuntimeError("wait_for_turn_fn is required for wait_for_head steps")
+        return await _route_wait_for_head(step, change, state, log, wait_for_turn_fn)
+    if step.kind == "dequeue_wake":
+        return _route_dequeue_wake(step, change, state, log)
     if step.kind == "branch":
         return _route_branch(step, state, log)
     if step.kind == "merge":
@@ -496,7 +509,7 @@ async def _route_script(
         feedback = format_script_feedback(
             step.command, out["exit"], out["stdout"], out["stderr"])
     elif isinstance(action, Pause):
-        # Script pauses (e.g. integrate-rebase exit 3/4/5, base-fresh-check exit 1,
+        # Script pauses (e.g. integrate-rebase exit 3/4/5,
         # autosquash/stamp-trailers) otherwise lose their stderr — the pause verb
         # carries no reason and the CLI keys remediation only on merge_blocked.
         # Journal it so `imp log` shows it and the CLI can surface it (findings #5/#6).
@@ -524,37 +537,76 @@ def _decisions_body(spec_path: Path) -> str | None:
     return text or None
 
 
+async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
+    """Default wait_for_turn used when run_change runs without a session server
+    (tests, or a non-daemon caller): proceed iff already head, else hibernate."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    if predicate():
+        return
+    raise AwaitingUserInput()
+
+
+async def _route_wait_for_head(
+    step: Step, change: Change, state: State, log: EventLog,
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]],
+) -> tuple[Action, str | None, dict[str, object]]:
+    """Enqueue-if-absent, then proceed when head; otherwise wait. A non-head
+    change with a client attached stays resident (wait_for_turn_fn polls the
+    queue and watches detach); with no client it hibernates (AwaitingUserInput ->
+    a clean paused exit, rehydrated later by the popping head's `imp resume`)."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine import merge_queue
+    _emit_started(log, step)
+    merge_queue.enqueue_if_absent(change.control_root, change.id, change.base_branch)
+
+    def _is_head() -> bool:
+        return merge_queue.is_head(change.control_root, change.id, change.base_branch)
+
+    if not _is_head():
+        ahead = merge_queue.position(change.control_root, change.id, change.base_branch)
+        _emit(log, "waiting_for_head", {"base": change.base_branch, "ahead": ahead})
+        try:
+            await wait_for_turn_fn(_is_head)
+        except AwaitingUserInput:
+            pause = Pause(reason="awaiting_turn")
+            _emit(log, "step_completed", {
+                "step": step.name, "kind": step.kind,
+                "action": _action_payload(pause), "var_mutations": {}})
+            return pause, None, {}
+
+    match = evaluate_rules(step.rules, vars=state.vars, output=None)
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
+
+
+def _route_dequeue_wake(
+    step: Step, change: Change, state: State, log: EventLog,
+) -> tuple[Action, str | None, dict[str, object]]:
+    from imp.engine import merge_queue
+    _emit_started(log, step)
+    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
+    match = evaluate_rules(step.rules, vars=state.vars, output=None)
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
+
+
 async def _route_merge(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
-    merge_to_base), re-asserts a clean worktree (DIRTY) and base freshness
-    (STALE) under the lock, performs the merge, and routes on the result via the
-    step's rules. On MERGED it stashes the commit in State.merge_commit; the
-    actual finalize (journal + worktree removal + mark completed) happens when
-    the run falls through to _complete."""
+    merge_to_base), re-asserts a clean worktree (DIRTY) under the lock, performs
+    the merge, and routes on the result via the step's rules. On MERGED it stashes
+    the commit in State.merge_commit; the actual finalize (journal + worktree
+    removal + mark completed) happens when the run falls through to _complete."""
     from imp.engine import worktree
     _emit_started(log, step)
 
     # Idempotent resume (crash-safety): if a prior run already merged (the commit
     # is durable on base) but crashed before _complete finalized, do NOT re-merge.
-    # Re-running merge_to_base would see base advanced past the recorded SHA — by
-    # OUR OWN merge commit — and return STALE, triggering a spurious re-integration
-    # and a second merge commit. The old _complete was idempotent here (git merge
-    # of an already-merged branch = "Already up to date"); preserve that.
     if state.merge_commit:
         match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
         state.vars.update(match.var_mutations)
         return _finish(log, step, match)
-
-    # Tolerate a missing SHA file -> None: merge_to_base then skips the freshness
-    # check. A genuinely missing file means integration never ran this run (a
-    # workflow without integration, or the mocked e2e harness that shims
-    # integrate-rebase.sh to `exit 0` and never writes the file), or
-    # base-fresh-check already exited 10 -> goto integrate-rebase (which records
-    # the SHA before merge-to-base re-runs). Either way, None is correct here.
-    sha_file = change.change_dir / "integrated_base_sha"
-    expected_sha = sha_file.read_text().strip() if sha_file.exists() else None
 
     # merge_to_base holds RepoGitLock and shells out to git (merge/commit); a
     # large or conflict-heavy merge can take seconds-to-minutes. Offload it to a
@@ -567,7 +619,7 @@ async def _route_merge(
         functools.partial(
             worktree.merge_to_base,
             change.control_root, change.id, change.base_branch, title=change.title,
-            body=body, project_root=change.project_root, expected_base_sha=expected_sha))
+            body=body, project_root=change.project_root))
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
         state.save(change.state_dir)
@@ -590,7 +642,7 @@ async def _route_merge(
                "action": _action_payload(pause), "var_mutations": {}})
         return pause, None, {}
 
-    # STALE -> goto integrate-rebase; MERGED -> continue (falls through to finalize).
+    # MERGED -> continue (falls through to finalize).
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)

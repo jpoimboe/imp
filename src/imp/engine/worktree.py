@@ -225,37 +225,17 @@ def _merge_subject(title: str, change_id: str, body: str | None) -> str:
 def merge_to_base(
     control_root: Path, change_id: str, base: str, *, title: str,
     body: str | None = None,
-    project_root: Path | None = None, expected_base_sha: str | None = None,
+    project_root: Path | None = None,
 ) -> MergeResult:
     """Integrate imp/<id> into <base> (spec §4). B1: git decides on base dirt.
-    B3: re-assert UNDER THE LOCK (the race-proof point) optional preconditions —
-    when `project_root` is given, re-assert the change worktree is clean (DIRTY):
-    the integrator is the last committer, so a dirty tree would silently drop its
-    work then be destroyed by remove_worktree (H1 net, R5); when
-    `expected_base_sha` is given, re-assert base still equals the integrated SHA
-    (else STALE -> the caller re-integrates). Each gate is independent."""
+    B3: re-assert UNDER THE LOCK (the race-proof point) that the change worktree
+    is clean (DIRTY) when `project_root` is given: the integrator is the last
+    committer, so a dirty tree would silently drop its work then be destroyed by
+    remove_worktree (H1 net, R5)."""
     branch = f"imp/{change_id}"
     with RepoGitLock(control_root).acquire():
         if project_root is not None and is_dirty(project_root):
             return MergeResult("DIRTY")
-        if expected_base_sha is not None:
-            actual = _git_ok(control_root, "rev-parse", f"{base}^{{commit}}").strip()
-            if actual != expected_base_sha:
-                # Base advanced past the SHA we integrated. Distinguish "advanced
-                # by OUR OWN merge" (the crash window between the merge and
-                # state.save — today in _complete; Task 10's _route_merge) from a
-                # genuine third-party advance: if the branch tip is already
-                # contained in base, treat it as already merged and report MERGED
-                # idempotently (no spurious re-integration / second merge commit).
-                # Single-principal system: we don't distinguish our own --no-ff
-                # merge from a third-party advance that coincidentally absorbed the
-                # branch commits; either way the work is present in base, so
-                # treating both as MERGED is safe.
-                already = _git(control_root, "merge-base", "--is-ancestor",
-                               branch, base).returncode == 0
-                if already:
-                    return MergeResult("MERGED", actual)
-                return MergeResult("STALE")
         live = _worktree_on_branch(control_root, base)
         if live is not None:
             return _merge_in_place(live, branch, title, change_id, body)

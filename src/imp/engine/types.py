@@ -156,7 +156,7 @@ class AgentDef:
 
 # ── Steps & phases ────────────────────────────────────────────────────────────
 
-Kind = Literal["agent", "script", "branch", "merge"]
+Kind = Literal["agent", "script", "branch", "merge", "wait_for_head", "dequeue_wake"]
 
 
 @dataclass(frozen=True, slots=True)
