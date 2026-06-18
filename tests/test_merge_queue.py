@@ -55,6 +55,7 @@ def test_concurrent_enqueue_preserves_all_entries(tmp_path: Path) -> None:
     lane = [e for e in entries if e["base_branch"] == "main"]
     stamps = [e["enqueued_at"] for e in lane]
     assert all(isinstance(s, str) and "T" in s for s in stamps)
+    assert stamps == sorted(stamps)
     assert mq.position(tmp_path, lane[0]["change_id"], "main") == 0
 
 
@@ -101,3 +102,44 @@ def test_remove_drops_entry(tmp_path: Path) -> None:
     mq.enqueue_if_absent(tmp_path, "b", "main")
     mq.remove(tmp_path, "a")
     assert [e["change_id"] for e in mq.read(tmp_path)] == ["b"]
+
+
+def test_position_absent_returns_lane_length(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "main")
+    assert mq.position(tmp_path, "absent", "main") == 2
+
+
+def test_pop_and_wake_cross_lane_isolation(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "release")
+    woken: list[str] = []
+    # "main" lane empties after pop — no wake. "release" lane must be unaffected.
+    mq.pop_and_wake(
+        tmp_path, "a", "main",
+        spawn_fn=lambda change, **kw: woken.append(change.id),
+    )
+    assert all(e["change_id"] != "a" for e in mq.read(tmp_path))   # "a" removed
+    assert any(e["change_id"] == "b" for e in mq.read(tmp_path))   # "b" untouched
+    assert woken == []                                               # no cross-lane wake
+
+
+def test_remove_absent_is_noop(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.remove(tmp_path, "absent")
+    assert [e["change_id"] for e in mq.read(tmp_path)] == ["a"]
+
+
+def test_pop_and_wake_absent_noop(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "main")
+    from unittest.mock import Mock
+    spawn_mock = Mock()
+    mq.pop_and_wake(tmp_path, "absent", "main", spawn_fn=spawn_mock)
+    lane_ids = [e["change_id"] for e in mq.read(tmp_path) if e["base_branch"] == "main"]
+    assert lane_ids == ["a", "b"]
+    spawn_mock.assert_not_called()
