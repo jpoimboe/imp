@@ -98,6 +98,7 @@ class ScriptedAgentRunner:
         ctx.verify_command = invocation.verify_command
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.user_input_fn = invocation.user_input_fn
         ctx.event_log = elog
         self._ctx = ctx
 
