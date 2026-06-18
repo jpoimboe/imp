@@ -100,3 +100,15 @@ def test_finalize_merge_routes_to_wait_for_head() -> None:
             "open_items": "", "next_steps": ""}
     m = evaluate_rules(rules, vars=_BASE, output={**base, "decision": "merge"})
     assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
+
+
+def test_finalize_rework_and_pause_routing() -> None:
+    wf = load_workflow(WF)
+    rules = next(s for s in wf.flat_steps() if s.name == "finalize").rules
+    _BASE = {}
+    base = {"status": "Success", "comments": "", "built": "", "verify_status": "",
+            "open_items": "", "next_steps": ""}
+    m = evaluate_rules(rules, vars=_BASE, output={**base, "decision": "rework"})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    m = evaluate_rules(rules, vars=_BASE, output={**base, "decision": "other"})
+    assert isinstance(m.action, Pause)
