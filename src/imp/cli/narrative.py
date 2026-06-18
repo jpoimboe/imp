@@ -624,6 +624,11 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     name changes from the current open one, lazily create a PhaseNode, append it
     to the workflow root, and make it the current scope. There are no
     phase_started/phase_completed events — phase is purely DERIVED here."""
+    # A dropped step opener leaves prose as held AgentTextNodes under the workflow
+    # root, where no step_completed can un-hold them — stalling the emit cursor.
+    for c in self._root.children:
+        if isinstance(c, AgentTextNode) and c.held:
+            c.held = False
     if (self._current_phase is not None and not self._current_phase.closed
             and self._current_phase.name == name):
         return

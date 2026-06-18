@@ -132,3 +132,36 @@ def test_held_narration_never_accumulates(path: Path) -> None:
                 f"{e.get('type')} event — only the trailing narration may be held. "
                 f"Stale held nodes permanently block the live emit cursor."
             )
+
+
+@pytest.mark.parametrize("path", _CORPUS, ids=lambda p: p.stem)
+def test_dropped_first_step_started_still_renders_later_headers(path: Path) -> None:
+    # Simulate the attach race that replay closes: the first step_started is lost.
+    # The dropped step legitimately loses its own headers, but EVERY later step
+    # completed before the final open step must still render its conclusion — a
+    # stalled cursor (the catastrophic bug) withholds them all.
+    events = _events(path)
+    first_i = next(i for i, e in enumerate(events) if e.get("type") == "step_started")
+    dropped = events[first_i]["payload"]["step"]
+    skip = events[:first_i] + events[first_i + 1:]
+
+    starts = [i for i, e in enumerate(skip) if e.get("type") == "step_started"]
+    assert starts, f"{path.name}: no step_started survives the drop"
+    last_start_i = starts[-1]
+    non_quiet = {
+        e["payload"]["step"] for e in skip
+        if e.get("type") == "step_started" and not e["payload"].get("quiet")
+    }
+    completed_before_open = {
+        e["payload"].get("step") for i, e in enumerate(skip)
+        if e.get("type") == "step_completed" and i < last_start_i
+    }
+    expect = {n for n in completed_before_open if n in non_quiet and n != dropped}
+    assert expect, f"{path.name}: need a later completed step to test"
+
+    body = _live_no_finish(skip)
+    withheld = sorted(n for n in expect if f"{n} complete" not in body)
+    assert not withheld, (
+        f"{path.name}: after dropping the first step_started, the live view "
+        f"withheld later completed steps {withheld} — the cursor stalled."
+    )
