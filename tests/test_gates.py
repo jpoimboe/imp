@@ -173,17 +173,7 @@ def test_run_script_timeout_kills_group(tmp_path) -> None:
 
 
 def test_route_script_does_not_block_event_loop(tmp_path) -> None:
-    """A script gate's blocking subprocess must run OFF the event loop so
-    concurrent tasks keep running while it executes.
-
-    Regression for the frozen live status line ("running · 0s") during a
-    multi-minute verify gate: `_route_script` ran the subprocess via a
-    synchronous `proc.communicate()` on the event-loop thread, starving every
-    concurrent anyio task (the status `tick()` animator, the signal receiver,
-    the remote-channel poller, live-view event processing) for the command's
-    entire duration. This drives a `sleep` gate while a ticker counts loop
-    iterations and asserts the loop kept turning.
-    """
+    """Blocking subprocess must run off the event loop (regression: frozen live-status tick)."""
     import inspect
     import types
 
@@ -226,5 +216,67 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
             f"event loop starved during script gate: only {during} ticks "
             "advanced while a 0.5s subprocess ran (expected ~25)"
         )
+
+    anyio.run(main)
+
+
+def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
+    """exit-0 Goto carries no feedback; success routes must not inject retry framing."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+    )
+    step = Step(
+        name="autosquash", phase="p", kind="script",
+        rules=(_rule(None, Goto("review")),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo 'no fixup!/squash!/amend! commits to autosquash'; exit 0",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={})
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Goto)
+        assert feedback is None
+
+    anyio.run(main)
+
+
+def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
+    """Non-zero exit Goto carries retry feedback: 'not accepted' and 'failed (exit N)'."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+    )
+    step = Step(
+        name="check", phase="p", kind="script",
+        rules=(_rule(None, Goto("spec-writer")),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo boom; exit 3",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={})
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Goto)
+        assert feedback is not None
+        assert "failed (exit 3)" in feedback
+        assert "not accepted" in feedback
 
     anyio.run(main)
