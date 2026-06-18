@@ -16,9 +16,9 @@ def _steps(wf):
 # All declared workflow vars at their defaults — a realistic evaluate_rules fixture.
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False, "panel_done": False,
-    "multi_plan": False,
+    "plan_minors_integrated": False, "plan_panel_done": False,
     "review_scope": "plan",
+    "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
 }
 
 
@@ -92,8 +92,8 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     # phase jumps clear (plain goto)
     assert by["review"].rules[0].action.target == "task-lead"     # task_gap -> implementer
     assert by["review"].rules[0].action.resume is False           # cross-phase plain goto
-    assert by["review"].rules[1].action.target == "plan-writer"   # plan_gap -> plan-writer
-    assert by["review"].rules[1].action.resume is False
+    # else: approve -> continue (deferred-sweep); plan_gap route is removed
+    assert isinstance(by["review"].rules[-1].action, Continue)
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
@@ -245,13 +245,13 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_implement_phase_stamps_trailers_after_sweep_verify() -> None:
+def test_stamp_trailers_heads_the_review_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
+    review = next(p for p in wf.phases if p.name == "review")
+    assert review.steps[0].name == "stamp-trailers"
     impl = next(p for p in wf.phases if p.name == "implement")
-    names = [s.name for s in impl.steps]
-    assert names.index("sweep-verify") < names.index("stamp-trailers"), names
-    assert names.index("stamp-trailers") < names.index("plan-cycle-check"), names
+    assert "stamp-trailers" not in [s.name for s in impl.steps]
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -484,11 +484,16 @@ def test_plan_writer_declares_wait_for_user() -> None:
     assert "wait_for_user" in wf.agents["plan-writer"].tools
 
 
-def test_review_scope_declared_default_plan() -> None:
+def test_review_cadence_vars_declared() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.vars.defaults()["multi_plan"] is False
-    assert wf.vars.defaults()["review_scope"] == "plan"
+    d = wf.vars.defaults()
+    assert d["review_scope"] == "plan"
+    assert d["review_base"] == ""
+    assert d["tasks_since_review"] == 0
+    assert d["review_batch_size"] == 7
+    assert "panel_done" not in d            # removed: review-panel keys on review_scope only
+    assert "multi_plan" not in d        # removed: plan-cycle-check owns coverage
 
 
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
@@ -535,33 +540,24 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
     assert isinstance(m.action, Continue)
 
 
-def test_autosquash_fast_path_skips_review_to_stamp_trailers() -> None:
+def test_autosquash_non_fast_path_goes_to_review_base_init() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["autosquash"].rules
-    # Clean fold on the fast path -> stamp-trailers, skipping
-    # review/deferred-sweep/sweep-verify.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "fast_path": True},
-        output={"exit": 0, "stdout": "", "stderr": ""},
-    )
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
+                       output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "stamp-trailers" and m.action.resume is False
+    assert m.action.target == "review-base-init" and m.action.resume is False
 
 
-def test_autosquash_non_fast_path_goes_to_review() -> None:
+def test_autosquash_fast_path_goes_to_review_base_init() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["autosquash"].rules
-    # Clean fold on the standard path -> the review panel, unchanged.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "fast_path": False},
-        output={"exit": 0, "stdout": "", "stderr": ""},
-    )
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
+                       output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "review" and m.action.resume is False
+    assert m.action.target == "review-base-init" and m.action.resume is False
 
 
 def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:

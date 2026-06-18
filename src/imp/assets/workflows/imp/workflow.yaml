@@ -3,24 +3,23 @@ description: |
   spec -> (plan -> implement*)* -> review -> merge
 
 
-# The tier menu is config.tiers.keys() (always low/medium/high in this design).
 # Single provider by design: review independence is by MODEL TIER (an opus panel
-# reviewing sonnet's work), not by vendor. `differ_from` is removed from the
-# review phase. The `review` step is a sonnet coordinator that runs INSIDE the
-# per-plan implement loop; it dispatches a four-member opus panel on first pass,
-# or just the generalist reviewer on re-entry (panel_done) or fast-path. The
-# deferred-sweep drains Minor/Nit observations after each plan. When >1 plan ran,
-# `plan-cycle-check` routes to `review` again with `review_scope=change` for a
-# whole-change pass before `integrate-rebase`.
+# reviewing sonnet's work), not by vendor. Review fires on an ACCUMULATED-TASK
+# cadence decided by plan-cycle-check, which is the sole coverage guard: a single
+# `code-reviewer` per batch (review_base..HEAD) when tasks_since_review crosses
+# review_batch_size, and the full 4-member opus panel exactly once at change end
+# (review_scope=change, merge-base..HEAD). deferred-sweep is paired with each review;
+# verify and plan-review stay per-plan.
 
 vars:
   fast_path:              {type: bool, default: false}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
-  panel_done:             {type: bool, default: false}
-  plan_panel_done:        {type: bool, default: false}   # re-verify dial for the plan-review panel (2 reviewers first pass, 1 on bounce-back); mirrors panel_done
-  multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the whole-change review pass
-  review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
+  plan_panel_done:        {type: bool, default: false}   # plan-review-panel re-verify dial (unrelated to review cadence)
+  review_scope:           {type: string, default: plan}  # plan | change — per-batch vs end-of-change review
+  review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
+  tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
+  review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
   merge_approved:         {type: bool, default: false}
   reintegrate_clean:      {type: bool, default: false}
 
@@ -125,47 +124,74 @@ phases:
         command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {if: {exit: 124}, pause: true}   # timeout (run-verify.sh kill): suite is slower than the gate; re-running can't fix it — escalate to a human, don't loop task-lead
+          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human, don't loop task-lead
           - {else: true, resume: task-lead}
 
-      # ── autosquash runs INSIDE the per-plan loop so each panel reviews folded,
-      #    one-commit-per-task diffs. autosquash.sh folds AND (on re-entry after
-      #    autosquash-resolve) verifies the fold preserved the tree, in one script.
-      #    The clean fold is a pure deterministic step (no agent).
+      # autosquash folds this plan's fixup chain into one-commit-per-task BEFORE any
+      # review reads the diff. Clean fold -> pin the per-batch diff base.
       - name: autosquash
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: stamp-trailers}   # trivial change: skip review/deferred-sweep/sweep-verify
-          - {if: {exit: 0}, goto: review}          # clean fold / verified resolution: skip the resolver, go to the panel
-          - {if: {exit: 2}, continue: true}        # resolvable fold conflict / verify failed -> autosquash-resolve
-          - {else: true, pause: true}              # hard failure (exit 1) / verify bound exhausted -> human
+          - {if: {exit: 0}, goto: review-base-init}                    # clean fold / verified resolution -> pin diff base
+          - {if: {exit: 2}, continue: true}                            # resolvable fold conflict -> autosquash-resolve
+          - {else: true, pause: true}                                  # hard failure / verify bound exhausted
 
       - name: autosquash-resolve
         file: agents/autosquash-resolve.md
         tier: high
-        max_loops: 6                               # defensive backstop; the script's 3-attempt bound aborts first
+        max_loops: 6
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {else: true, goto: autosquash}         # re-run autosquash.sh -> verify-mode (before-tree sentinel present)
+          - {else: true, goto: autosquash}
 
-      # ── merged review-panel. The agent tiers INTERNALLY on vars:
-      #    first pass (panel_done false, not fast_path) = full opus 4-member panel;
-      #    same-plan rework re-entry (panel_done true) = single opus re-verify (high);
-      #    trivial fast_path = single medium re-verify.
+      # Capture the per-batch diff base ONCE, at the first implement entry (review_base
+      # still empty): the fork point. Idempotent — later laps see a non-empty review_base
+      # (re-pinned to HEAD after each batch) and leave it untouched.
+      - name: review-base-init
+        quiet: true
+        command: ./scripts/pin-review-base.sh fork
+        rules:
+          - {if: {exit: 0, review_base: ''}, set: {review_base: output.stdout}, continue: true}
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}
+
+      # SOLE arbiter of coverage AND review cadence. Increments tasks_since_review by the
+      # just-completed plan's task count (read from the plan file) and emits the running
+      # total as `running_tasks`. First-match-wins; more_plans:false wins over the counter.
+      - name: plan-cycle-check
+        file: agents/plan-cycle-check.md
+        tier: medium
+        rules:
+          # batch full (more scope remains AND counter crossed N) -> per-batch review.
+          # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
+          # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
+          # per-batch review as the full panel.
+          - {if: "output.more_plans and output.running_tasks >= review_batch_size",
+             set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"}, goto: review}
+          # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
+          - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
+             goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}
+          # coverage complete, trivial change -> no panel, straight to integration via stamp-trailers
+          - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: stamp-trailers}
+          # coverage complete -> end-of-change FULL panel over the whole-change diff
+          - {else: true, set: {review_scope: "'change'", tasks_since_review: "output.running_tasks"}, goto: review}
+
+      # Per-batch = single code-reviewer over review_base..HEAD; end-of-change
+      # (review_scope==change) = the full 4-member opus panel over merge-base..HEAD.
+      # The review no longer judges coverage: verdict is approve | task_gap only.
       - name: review
         file: agents/review-panel.md
         tier: medium
         max_loops: 6
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations to progress.md
+          - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations
         rules:
-          - {if: {verdict: task_gap}, set: {panel_done: true}, goto: task-lead, feedback: "The review panel found an implemented task needs rework. Findings:"}
-          - {if: {verdict: plan_gap}, set: {panel_done: true}, goto: plan-writer, feedback: "The review found the plan needs revision. Findings:"}
-          - {else: true, set: {panel_done: true}, continue: true}
+          - {if: {verdict: task_gap}, goto: task-lead, feedback: "The review panel found an implemented task needs rework. Findings:"}
+          - {else: true, continue: true}
 
       - name: deferred-sweep
         file: agents/deferred-sweep.md
@@ -173,19 +199,32 @@ phases:
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
-        # no rules: continue-on-success. The sweep drains the list and never routes.
 
       - name: sweep-verify
         command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human
+          - {if: {exit: 124}, pause: true}
           - {else: true, resume: deferred-sweep}
 
-      # One idempotent stamp of all run commits — task commits AND the sweep commits
-      # the panel/deferred-sweep just produced — before plan-cycle-check. Re-running it
-      # under the whole-change pass (review_scope=change) is a no-op on already-stamped
-      # commits (trailer.ifexists=doNothing).
+      # After a batch's review + sweep settle, advance the diff base to HEAD and reset
+      # the counter. The end-of-change pass (review_scope==change) is the last review,
+      # so route it to integration (via the review-phase stamp-trailers); a per-batch
+      # pass returns to plan-writer for the next plan.
+      - name: review-base-repin
+        quiet: true
+        command: ./scripts/pin-review-base.sh head
+        rules:
+          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
+          - {if: {exit: 0}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: plan-writer}
+          - {else: true, pause: true}
+
+  - name: review
+    steps:
+      # Stamp the Change: trailer on every run commit ONCE, before integration. Content-
+      # idempotent; a plain rebase preserves the trailer, so re-integration rounds need
+      # no re-stamp. Reached from plan-cycle-check (fast-path) and review-base-repin
+      # (end-of-change), so it runs on every path into integration.
       - name: stamp-trailers
         quiet: true
         command: ./scripts/stamp-trailers.sh
@@ -193,28 +232,15 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
-      - name: plan-cycle-check
-        file: agents/plan-cycle-check.md
-        tier: medium        # Sonnet coverage judgment
-        # No plans-per-spec cap: a spec needs as many plans as it needs. Falls back
-        # to the default max_loops backstop, which catches a genuinely runaway state.
-        rules:
-          - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}   # supercycle
-          - {if: {multi_plan: true, review_scope: plan}, set: {review_scope: "'change'", panel_done: false}, goto: review}   # one whole-change review pass over the full diff
-          - {else: true, goto: integrate-rebase}   # single-plan, or the whole-change pass already ran (review_scope=change is the one-shot guard)
-
-  - name: review
-    steps:
-      # ── rebase the branch ONTO base, before review folds into one decision ──
       - name: integrate-rebase
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
           - {if: {exit: 2, merge_approved: true}, goto: base-fresh-check}
-          - {if: {exit: 2}, goto: finalize}          # base already ancestor: nothing to integrate
+          - {if: {exit: 2}, goto: finalize}
           - {if: {exit: 0}, set: {reintegrate_clean: true},  goto: integrate-verify}
           - {if: {exit: 6}, set: {reintegrate_clean: false}, continue: true}
-          - {else: true, pause: true}                # bad ref / dirty / leftover rebase / limit
+          - {else: true, pause: true}
 
       - name: integrator
         file: agents/integrator.md
@@ -222,7 +248,6 @@ phases:
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
-        # no rules: continue-on-success. finalize always reviews the resolution.
 
       - name: integrate-verify
         command: ./scripts/run-verify.sh
@@ -230,8 +255,18 @@ phases:
         rules:
           - {if: {exit: 0, merge_approved: true, reintegrate_clean: true}, goto: base-fresh-check}
           - {if: {exit: 0}, continue: true}
-          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human
+          - {if: {exit: 124}, pause: true}
           - {else: true, resume: integrator}
+
+      # After the rebase fully settles (clean exit, or conflict resolved AND verified),
+      # advance review_base to the post-rebase HEAD: a later rework re-entry then diffs
+      # from fully-reviewed work, never leaking the freshly-pulled base delta (Q1 fix).
+      - name: repin-after-rebase
+        quiet: true
+        command: ./scripts/pin-review-base.sh head
+        rules:
+          - {if: {exit: 0}, set: {review_base: output.stdout}, continue: true}
+          - {else: true, pause: true}
 
       - name: finalize
         file: agents/finalize.md

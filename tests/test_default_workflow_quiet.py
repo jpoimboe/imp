@@ -7,8 +7,10 @@ from imp.engine.loader import load_workflow
 _QUIET = {
     # spec/plan/implement plumbing
     "spec-verify-commit", "plan-verify-commit", "commit-check",
+    # per-batch diff-base pinning (mechanical git commands, no narrative)
+    "autosquash", "review-base-init", "review-base-repin",
     # review/merge plumbing: mechanical git scripts + pure routing gates
-    "autosquash", "stamp-trailers",
+    "stamp-trailers", "repin-after-rebase",
     "base-fresh-check", "integrate-rebase",
 }
 

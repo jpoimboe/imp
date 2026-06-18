@@ -15,21 +15,21 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [16..19] = integrate-rebase, integrator, integrate-verify, finalize.
+    # Span [18..22] = integrate-rebase, integrator, integrate-verify, repin-after-rebase, finalize.
     # Gates: integrate-rebase (pause), integrate-verify (resume: integrator, backward),
-    # finalize (pause + goto implement backward).
+    # repin-after-rebase (pause), finalize (pause + goto implement backward).
     # integrator (no rules / continue-only) is NOT a gate.
-    assert gate_steps_in_span(wf, 16, 19) == (
-        "integrate-rebase", "integrate-verify", "finalize",
+    assert gate_steps_in_span(wf, 18, 22) == (
+        "integrate-rebase", "integrate-verify", "repin-after-rebase", "finalize",
     )
 
 
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
-    # autosquash(9) and stamp-trailers(14) gate via `pause: true` (no goto).
+    # autosquash(9) and stamp-trailers(17) gate via `pause: true` (no goto).
     assert gate_steps_in_span(_wf(), 9, 9) == ("autosquash",)
-    assert gate_steps_in_span(_wf(), 14, 14) == ("stamp-trailers",)
+    assert gate_steps_in_span(_wf(), 17, 17) == ("stamp-trailers",)
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
@@ -63,7 +63,7 @@ def test_plan_rewind_backward_to_step() -> None:
 
     plan = plan_rewind(_wf(), _state("review"), "review")
     assert plan.to_step == "review"
-    assert plan.target_idx == 11
+    assert plan.target_idx == 13
     assert plan.from_step == "review"
 
 
@@ -73,7 +73,7 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("integrate-rebase"), "merge")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integrate-verify", "finalize",
+        "integrate-rebase", "integrate-verify", "repin-after-rebase", "finalize",
     )
     msg = str(exc.value)
     assert "integrate-rebase" in msg
@@ -95,7 +95,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # review (11) maxed; task-lead (6) upstream; finalize (19) downstream.
+    # review (13) maxed; task-lead (6) upstream; finalize (22) downstream.
     st = _state("review",
                 loop_counts={"task-lead": 2, "review": 6, "finalize": 1})
     log = InMemoryEventLog()
@@ -119,7 +119,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator (17) -> integrate-verify (18): span [17,17] = integrator,
+    # integrator (19) -> integrate-verify (20): span [19,19] = integrator,
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
     plan = plan_rewind(_wf(), _state("integrator"), "integrate-verify")
     assert plan.to_step == "integrate-verify"

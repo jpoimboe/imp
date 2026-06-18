@@ -53,8 +53,10 @@ only if cheap; do NOT make code changes). Populate:
   (e.g. "Merged base (N commits); resolved X conflicts — Y flagged uncertain"); if
   `integration-notes.md` is absent, "no base changes to integrate". Add one
   informational rollup line counting the opportunistic improvements the
-  `deferred-sweep` made — count the `— fixed <sha>` lines in the Deferred Followups
-  list (e.g. "plus N opportunistic improvements (see commits)").
+  `deferred-sweep` made — count the `— fixed <sha>` opportunistic lines under the
+  `## Completed plans` section of `.imp/change/progress.md` (the sweep records each
+  fix there and prunes it from the transient list), e.g. "plus N opportunistic
+  improvements (see commits)".
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md`, and surface ONLY the

@@ -199,10 +199,13 @@ def test_finalize_reads_sweep_dispositions() -> None:
         assert stale not in low, f"stale finalize vocabulary: {stale!r}"
 
 
-def test_finalize_surfaces_only_needs_decision_and_rolls_up_fixes() -> None:
+def test_finalize_counts_opportunistic_from_completed_plans() -> None:
     low = FINALIZE.read_text().lower()
-    # built carries a one-line rollup counting the opportunistic fixes.
+    # built carries a one-line rollup counting the opportunistic fixes...
     assert "opportunistic improvement" in low
+    # ...counted from the durable ## Completed plans section, NOT the transient list.
+    assert "## completed plans" in low
+
 
 
 def test_finalize_prompt_states_merge_gate_affordance() -> None:
@@ -230,3 +233,56 @@ def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
     low = FINALIZE.read_text().lower()
     for stale in ("fyi", "veto", "fyi-fixed", "silent-fixed", "still-deferred"):
         assert stale not in low, f"reintroduced stale finalize vocabulary: {stale!r}"
+
+
+PLAN_CYCLE_CHECK = AGENTS_DIR / "plan-cycle-check.md"
+
+
+def test_plan_cycle_check_counts_tasks_from_plan_file() -> None:
+    low = PLAN_CYCLE_CHECK.read_text().lower()
+    # Counts the just-implemented plan's tasks from the PLAN FILE, not progress.md.
+    assert "running_tasks" in low
+    assert "{{ vars.tasks_since_review }}".lower() in low
+    assert "plan file" in low
+    assert "## task" in low
+    # Emits the running total so the workflow counter advances.
+
+
+
+def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
+    text = PLAN_CYCLE_CHECK.read_text()
+    # The review can no longer re-open the cycle via plan_gap; that sentence is gone.
+    assert "plan_gap" not in text
+    assert "re-open the cycle" not in text
+    # It is the SOLE completeness guard now.
+    assert "sole" in text.lower() and "completeness" in text.lower()
+
+
+CODE_REVIEWER = AGENTS_DIR / "code-reviewer.md"
+
+
+def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
+    text = TASK_LEAD.read_text()
+    low = text.lower()
+    # progress.md has a durable, bounded ## Completed plans section.
+    assert "## Completed plans" in text
+    assert "one line per plan" in low
+    # On done, collapse the current plan and drop its verbose per-task narrative.
+    assert "collapse" in low
+    assert "drop the verbose per-task" in low or "drop the per-task narrative" in low
+    # The current plan's per-task commit subjects are still kept WHILE implementing
+    # (needed to re-find a buried task for a fixup).
+    assert "commit subject" in low
+
+
+def test_code_reviewer_honors_dispatched_diff_range() -> None:
+    low = CODE_REVIEWER.read_text().lower()
+    # The coordinator gives the diff range (a batch range or the whole change); the
+    # reviewer must use THAT range, not assume the whole change every time.
+    assert "diff range" in low
+    assert "named in your dispatch" in low
+    # Falls back to the whole change only when no range was given.
+    assert "git diff <base>..head" in low
+    # The frontmatter description must drop the stale "whole-change" framing so the
+    # coordinator/log surface no longer mislabels the now-per-batch reviewer.
+    assert "final whole-change review" not in low
