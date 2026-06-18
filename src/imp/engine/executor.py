@@ -421,7 +421,8 @@ async def _dispatch_step(
         state.save(change.state_dir)
 
     if step.kind == "wait_for_head":
-        assert wait_for_turn_fn is not None
+        if wait_for_turn_fn is None:
+            raise RuntimeError("wait_for_turn_fn is required for wait_for_head steps")
         return await _route_wait_for_head(step, change, state, log, wait_for_turn_fn)
     if step.kind == "dequeue_wake":
         return _route_dequeue_wake(step, change, state, log)

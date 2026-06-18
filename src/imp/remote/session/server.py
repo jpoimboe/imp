@@ -143,8 +143,8 @@ class SessionServer:
     async def wait_for_attach_change(self) -> None:
         """Wait for the next attach or detach event."""
         evt = self._attach_changed
-        if evt is not None:
-            await evt.wait()
+        assert evt is not None
+        await evt.wait()
 
     async def wait_for_turn(
         self, predicate: Callable[[], bool], *, poll_interval: float = 2.0,
