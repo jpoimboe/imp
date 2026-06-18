@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers import anthropic, claude_code, openai
+from imp.providers import anthropic, claude_code, openai, scripted
 
-PROVIDERS = [anthropic, openai, claude_code]
+PROVIDERS = [anthropic, openai, claude_code, scripted]
 
 
 def _agent(tools):
