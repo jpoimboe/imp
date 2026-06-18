@@ -66,18 +66,24 @@ async def run_terminal_client(
             controls = SessionControls(client, coord)
             async with anyio.create_task_group() as tg:
                 async def _answer_gates() -> None:
-                    async for prompt in gate_recv:
-                        while True:
-                            reply = await solicit(prompt)
-                            if reply.strip() == "/abandon":
-                                confirm = await solicit(
-                                    f"abandon `{change_id}`? [y/N]")
-                                if confirm.strip().lower() in ("y", "yes"):
-                                    await controls.abandon()
-                                    return
-                                continue
-                            await client.send_input(reply)
-                            break
+                    try:
+                        async for prompt in gate_recv:
+                            while True:
+                                reply = await solicit(prompt)
+                                if reply.strip() == "/abandon":
+                                    confirm = await solicit(
+                                        f"abandon `{change_id}`? [y/N]")
+                                    if confirm.strip().lower() in ("y", "yes"):
+                                        await controls.abandon()
+                                        return
+                                    continue
+                                await client.send_input(reply)
+                                break
+                    except EOFError:
+                        # A non-tty solicit (prompt_toolkit add_reader on a piped
+                        # stdin) or Ctrl-D at a real tty surfaces as EOFError.
+                        # Treat it as a deliberate detach: leave the change paused.
+                        coord.escalation_event.set()
 
                 async def _watch_force_quit() -> None:
                     # cancel scope → finally → client.aclose; daemon detaches and runs on
