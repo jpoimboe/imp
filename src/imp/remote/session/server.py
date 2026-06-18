@@ -3,13 +3,14 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_DETACH, CONTROL_INTERRUPT
-from imp.remote.session.socket_server import SessionSocket
+from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
 
 _log = logging.getLogger("imp.remote.session.server")
 
@@ -27,11 +28,13 @@ class SessionServer:
         on_abandon: Callable[[], None] | None = None,
         lock: Any = None,
         hibernate: bool = False,
+        events_path: Path | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
         self._lock = lock
         self._hibernate = hibernate
+        self._events_path = events_path
         self.abandoned = False
         self._abandon_requested = False
         self._serve_scope: anyio.CancelScope | None = None
@@ -154,10 +157,14 @@ class SessionServer:
 
     def _on_attach_pulse(
         self, _attach: Any, send_one: Callable[[dict[str, Any]], None],
-    ) -> None:
+    ) -> ReplaySnapshot | None:
         self._pulse_attach_change()
+        snapshot = (
+            ReplaySnapshot.capture(self._events_path)
+            if self._events_path is not None else None)
         if self._pending_prompt is not None:
             send_one(self._pending_prompt)
+        return snapshot
 
     def _on_detach_pulse(self) -> None:
         self._pulse_attach_change()

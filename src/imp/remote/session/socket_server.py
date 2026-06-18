@@ -7,6 +7,8 @@ control dispatch are added in Task 3."""
 from __future__ import annotations
 
 import contextlib
+import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +30,37 @@ from imp.remote.session.protocol import (
 )
 
 _CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
+_log = logging.getLogger("imp.remote.session.socket_server")
+
+
+@dataclass
+class ReplaySnapshot:
+    """On-disk event prefix re-framed for the wire; capture() must be called synchronously."""
+    payload: bytes
+
+    @classmethod
+    def capture(cls, events_path: Path) -> ReplaySnapshot:
+        framed: list[bytes] = []
+        try:
+            with events_path.open("rb") as f:
+                for raw in f:
+                    if not raw.endswith(b"\n"):
+                        break  # partial trailing line: writer mid-append; skip it
+                    try:
+                        record = json.loads(raw)
+                    except json.JSONDecodeError:
+                        _log.warning("replay: corrupt line in %s; truncating replay", events_path)
+                        break
+                    framed.append((encode_event(record) + "\n").encode("utf-8"))
+        except OSError:
+            _log.warning(
+                "replay: cannot read %s; client gets the live stream only",
+                events_path)
+            return cls(payload=b"")
+        return cls(payload=b"".join(framed))
+
+    def wire_bytes(self) -> bytes:
+        return self.payload
 
 
 @dataclass(eq=False)  # eq=False keeps identity hash/eq so _Client is set-storable
@@ -42,7 +75,9 @@ class SessionSocket:
         self,
         path: str,
         *,
-        on_attach: Callable[[Attach, Callable[[dict[str, Any]], None]], None] | None = None,
+        on_attach: Callable[
+            [Attach, Callable[[dict[str, Any]], None]], ReplaySnapshot | None
+        ] | None = None,
         on_detach: Callable[[], None] | None = None,
         on_control: Callable[[str], None] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
