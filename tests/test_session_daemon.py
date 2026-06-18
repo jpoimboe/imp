@@ -878,3 +878,32 @@ def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
     rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat", "--resume"])
     assert rc == 1
+
+
+def test_append_workflow_resumed_idempotent_across_rewind_window(
+    tmp_path: Path,
+) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    daemon._append_workflow_resumed(log)
+    # apply_rewind appends exactly one step_rewound AFTER workflow_resumed.
+    log.append(agent_id=None, type="step_rewound", payload={})
+    daemon._append_workflow_resumed(log)   # trailing step_rewound → still idempotent
+    assert [e["type"] for e in log.read()].count("workflow_resumed") == 1
+
+
+def test_append_workflow_resumed_appends_after_a_real_event(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    daemon._append_workflow_resumed(log)
+    log.append(agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
+    daemon._append_workflow_resumed(log)   # real event between → a second marker
+    assert [e["type"] for e in log.read()].count("workflow_resumed") == 2

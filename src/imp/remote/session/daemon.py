@@ -29,10 +29,10 @@ def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
 
 
 def _trailing_is_workflow_resumed(log: EventLog) -> bool:
-    last: dict[str, Any] | None = None
-    for ev in log.read():
-        last = ev
-    return last is not None and last.get("type") == "workflow_resumed"
+    entries = log.tail(2)
+    if entries and entries[-1].get("type") == "step_rewound":
+        entries = entries[:-1]
+    return bool(entries) and entries[-1].get("type") == "workflow_resumed"
 
 
 def _append_workflow_resumed(log: EventLog) -> None:
