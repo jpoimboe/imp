@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from imp.engine.state import JsonlEventLog, State
+from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 
 
 def test_state_roundtrip_vars_and_loop_counts(tmp_path: Path) -> None:
@@ -231,6 +231,52 @@ def test_state_roundtrips_abandoned_status(tmp_path: Path) -> None:
     State(id="s", step=None, step_attempt=0, status="abandoned").save(state_dir)
     loaded = State.load(state_dir)
     assert loaded.status == "abandoned"
+
+
+def test_jsonl_tail_returns_last_n_records_in_order(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    for i in range(5):
+        log.append(agent_id=None, type=f"e{i}", payload={"i": i})
+    assert [e["type"] for e in log.tail(2)] == ["e3", "e4"]
+
+
+def test_jsonl_tail_fewer_than_n_when_shorter(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    log.append(agent_id=None, type="only", payload={})
+    assert [e["type"] for e in log.tail(3)] == ["only"]
+
+
+def test_jsonl_tail_empty_when_no_events(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    assert log.tail(2) == []
+
+
+def test_inmemory_tail_returns_last_n_records_in_order(tmp_path: Path) -> None:
+    log = InMemoryEventLog()
+    for i in range(4):
+        log.append(agent_id=None, type=f"e{i}", payload={})
+    assert [e["type"] for e in log.tail(2)] == ["e2", "e3"]
+    assert [e["type"] for e in log.tail(5)] == ["e0", "e1", "e2", "e3"]
+    assert InMemoryEventLog().tail(2) == []
+
+
+def test_jsonl_tail_zero_returns_empty(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    log.append(agent_id=None, type="e0", payload={})
+    assert log.tail(0) == []
+
+
+def test_inmemory_tail_zero_returns_empty() -> None:
+    log = InMemoryEventLog()
+    log.append(agent_id=None, type="e0", payload={})
+    assert log.tail(0) == []
+
+
+def test_jsonl_tail_empty_file_returns_empty(tmp_path: Path) -> None:
+    path = tmp_path / "events.jsonl"
+    path.touch()  # exists but zero bytes
+    log = JsonlEventLog(path)
+    assert log.tail(2) == []
 
 
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:

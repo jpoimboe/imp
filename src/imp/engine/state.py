@@ -196,6 +196,7 @@ class EventLog(Protocol):
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
+    def tail(self, n: int) -> list[dict[str, Any]]: ...
     def update_last_llm_response_usage(
         self, *, agent_id: str, usage: dict[str, Any],
     ) -> None: ...
@@ -373,6 +374,32 @@ class JsonlEventLog(_BaseEventLog):
                 except json.JSONDecodeError:
                     yield {"_malformed": True, "raw": line}
 
+    def tail(self, n: int) -> list[dict[str, Any]]:
+        if n <= 0 or not self.path.exists():
+            return []
+        chunk = 4096
+        with self.path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            pos = f.tell()
+            data = b""
+            # Read backward until we have captured more than n line breaks (so the
+            # n trailing records are complete) or reach the start of the file.
+            while pos > 0 and data.count(b"\n") <= n:
+                step = min(chunk, pos)
+                pos -= step
+                f.seek(pos)
+                data = f.read(step) + data
+        out: list[dict[str, Any]] = []
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                out.append({"_malformed": True, "raw": line})
+        return out[-n:]
+
     def update_last_llm_response_usage(
         self, *, agent_id: str, usage: dict[str, Any],
     ) -> None:
@@ -420,6 +447,11 @@ class InMemoryEventLog(_BaseEventLog):
 
     def read(self) -> Iterator[dict[str, Any]]:
         yield from list(self._events)
+
+    def tail(self, n: int) -> list[dict[str, Any]]:
+        if n <= 0:
+            return []
+        return list(self._events[-n:])
 
     def update_last_llm_response_usage(
         self, *, agent_id: str, usage: dict[str, Any],
