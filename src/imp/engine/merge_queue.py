@@ -58,16 +58,14 @@ def enqueue_if_absent(control_root: Path, change_id: str, base_branch: str) -> N
 
 
 def is_head(control_root: Path, change_id: str, base_branch: str) -> bool:
-    with RepoGitLock(control_root).acquire():
-        lane = _lane(read(control_root), base_branch)
+    lane = _lane(read(control_root), base_branch)
     return bool(lane) and lane[0]["change_id"] == change_id
 
 
 def position(control_root: Path, change_id: str, base_branch: str) -> int:
     """Number of entries ahead of change_id in its lane (0 == head). Returns the
     lane length when change_id is absent (treated as 'behind everyone')."""
-    with RepoGitLock(control_root).acquire():
-        lane = _lane(read(control_root), base_branch)
+    lane = _lane(read(control_root), base_branch)
     ids = [e["change_id"] for e in lane]
     return ids.index(change_id) if change_id in ids else len(ids)
 
