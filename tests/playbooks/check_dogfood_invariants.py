@@ -92,14 +92,20 @@ def check_artifacts_in_journal(repo: str) -> Result:
                   f"(spec rc={spec.returncode}, plans rc={plans.returncode})")
 
 
-def check_no_artifacts_on_code_branch(repo: str) -> Result:
-    spec = _git(repo, "ls-files", "imp/specs").stdout.strip()
-    plan = _git(repo, "ls-files", "imp/plans").stdout.strip()
-    ok = not spec and not plan
-    return Result("no_artifacts_on_code_branch", ok,
-                  "no imp/specs or imp/plans tracked on the code branch" if ok else
-                  f"code branch still tracks imp/specs or imp/plans files: "
-                  f"{_fmt((spec + ' ' + plan).split())}")
+def check_no_artifacts_on_code_branch(repo: str, base: str) -> Result:
+    # Scope to the run's commits (base..HEAD): catch a run *introducing* a
+    # spec/plan onto the code branch, not a self-host target (e.g. imp's own
+    # repo) that already version-controls imp/specs and imp/plans as committed
+    # design history. Mirrors check_no_imp_in_history's commit-range scoping.
+    out = _git(repo, "log", "--name-only", "--pretty=format:",
+               f"{base}..HEAD").stdout
+    artifacts = sorted({ln for ln in out.splitlines()
+                        if ln.startswith(("imp/specs/", "imp/plans/"))})
+    return Result("no_artifacts_on_code_branch", not artifacts,
+                  "no imp/specs or imp/plans introduced on the code branch"
+                  if not artifacts else
+                  f"run committed imp/specs or imp/plans files to the code "
+                  f"branch: {_fmt(artifacts)}")
 
 
 def journal_ids(repo: str) -> list[str]:
@@ -161,7 +167,7 @@ def run_checks(repo: str, sentinel: str, base: str, imp: str) -> list[Result]:
         ("artifacts_in_journal",
          lambda: check_artifacts_in_journal(repo)),
         ("no_artifacts_on_code_branch",
-         lambda: check_no_artifacts_on_code_branch(repo)),
+         lambda: check_no_artifacts_on_code_branch(repo, base)),
         ("readback", lambda: check_readback(repo, imp)),
     ]
     return [_safe(name, thunk) for name, thunk in checks]
