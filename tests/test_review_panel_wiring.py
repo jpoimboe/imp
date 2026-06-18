@@ -47,9 +47,9 @@ def test_implement_phase_is_the_per_plan_loop() -> None:
     ]
 
 
-def test_review_phase_starts_at_integrate_rebase() -> None:
+def test_review_phase_is_just_finalize() -> None:
     review = next(p for p in _wf().phases if p.name == "review")
-    assert next(s.name for s in review.steps) == "integrate-rebase"
+    assert next(s.name for s in review.steps) == "finalize"
     names = {s.name for s in _wf().flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers"):
@@ -174,14 +174,14 @@ def test_plan_cycle_check_routes_supercycle_wholechange_and_merge() -> None:
                         output={"status": "Success", "more_plans": False, "rationale": "x"})
     assert isinstance(m2.action, Goto) and m2.action.target == "review"
     assert m2.var_mutations["review_scope"] == "change"
-    # whole-change pass already ran (review_scope==change) -> integrate-rebase
+    # whole-change pass already ran (review_scope==change) -> finalize
     m3 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True, "review_scope": "change"},
                         output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m3.action, Goto) and m3.action.target == "integrate-rebase"
-    # single-plan change -> straight to integrate-rebase
+    assert isinstance(m3.action, Goto) and m3.action.target == "finalize"
+    # single-plan change -> straight to finalize
     m4 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": False},
                         output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m4.action, Goto) and m4.action.target == "integrate-rebase"
+    assert isinstance(m4.action, Goto) and m4.action.target == "finalize"
 
 
 def test_review_panel_reads_review_scope_not_integration_pass() -> None:
@@ -247,11 +247,9 @@ def test_finalize_rework_routes_to_plan_writer() -> None:
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={**base, "decision": "rework", "comments": "fix X"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.var_mutations["merge_approved"] is False
     m_merge = evaluate_rules(rules, vars=_BASE_VARS,
                              output={**base, "decision": "merge"})
-    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "merge"
-    assert m_merge.var_mutations["merge_approved"] is True
+    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "wait-for-head"
 
 
 def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:

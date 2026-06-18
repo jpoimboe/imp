@@ -9,7 +9,7 @@ _QUIET = {
     "spec-verify-commit", "plan-verify-commit", "commit-check",
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "autosquash", "stamp-trailers",
-    "base-fresh-check", "integrate-rebase",
+    "wait-for-head", "integrate-rebase", "bypass-dequeue",
 }
 
 
@@ -26,5 +26,6 @@ def test_substantive_steps_stay_loud() -> None:
     # agents and the consequential merge step carry real narrative — never quiet.
     for name in ("spec-writer", "plan-writer", "task-lead", "spec-reviewer",
                  "verify", "review", "deferred-sweep",
-                 "autosquash-resolve", "integrator", "finalize", "merge-to-base"):
+                 "autosquash-resolve", "integrator", "integration-review",
+                 "integration-resolve", "finalize", "merge-to-base"):
         assert by_name[name].quiet is False, name

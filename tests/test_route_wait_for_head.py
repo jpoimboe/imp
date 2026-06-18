@@ -9,7 +9,7 @@ from imp.engine.change import Change
 from imp.engine.executor import _headless_wait_for_turn, _route_wait_for_head
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import Continue, Pause, Rule, SourceLoc, Step
-from tests.conftest import _git, _seed_control
+from tests.conftest import _seed_control
 
 
 def _wait_step():

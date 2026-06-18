@@ -53,14 +53,15 @@ def test_base_unmoved_exits_2(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
     r = _run(pr)
-    assert r.returncode == 2                                  # empty base-side diff -> merge directly
+    assert r.returncode == 2    # empty base-side diff -> merge directly
 
 
 def test_bad_base_ref_exits_3(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
     cd = pr / ".imp" / "change"
-    (cd / "change.json").write_text(json.dumps({"id": "x", "title": "t", "base_branch": "nonexistent"}))
+    (cd / "change.json").write_text(
+        json.dumps({"id": "x", "title": "t", "base_branch": "nonexistent"}))
     r = _run(pr)
     assert r.returncode == 3
 

@@ -59,9 +59,11 @@ def test_integration_review_routing() -> None:
     wf = load_workflow(WF)
     rules = next(s for s in wf.flat_steps() if s.name == "integration-review").rules
     _BASE = {}
-    m = evaluate_rules(rules, vars=_BASE, output={"verdict": "breakage", "status": "Success", "summary": ""})
+    out = {"verdict": "breakage", "status": "Success", "summary": ""}
+    m = evaluate_rules(rules, vars=_BASE, output=out)
     assert isinstance(m.action, Goto) and m.action.target == "bypass-dequeue"
-    m = evaluate_rules(rules, vars=_BASE, output={"verdict": "ok", "status": "Success", "summary": ""})
+    out = {"verdict": "ok", "status": "Success", "summary": ""}
+    m = evaluate_rules(rules, vars=_BASE, output=out)
     assert isinstance(m.action, Continue)
 
 

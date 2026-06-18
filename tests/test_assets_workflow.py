@@ -97,7 +97,9 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
-    assert [s.name for s in wf.phases[-1].steps] == ["base-fresh-check", "merge-to-base"]
+    assert [s.name for s in wf.phases[-1].steps] == [
+        "wait-for-head", "integrate-rebase", "integrator", "integration-review",
+        "integration-verify", "bypass-dequeue", "integration-resolve", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge"
 
 
@@ -286,8 +288,8 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
     from imp.engine.types import Pause
     wf = load_workflow(bundled_workflow_dir("imp"))
     steps = _steps(wf)
-    vars_ = {**_BASE_VARS, "merge_approved": True, "reintegrate_clean": True}
-    for name in ("verify", "sweep-verify", "integrate-verify"):
+    vars_ = _BASE_VARS
+    for name in ("verify", "sweep-verify", "integration-verify"):
         rules = steps[name].rules
         timed_out = evaluate_rules(rules, vars=vars_,
                                    output={"exit": 124, "stdout": "", "stderr": ""})

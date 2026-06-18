@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
 from imp.engine.abandon import tear_down_change

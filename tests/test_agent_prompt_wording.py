@@ -12,7 +12,7 @@ def _agent_prompt(name: str) -> str:
 def test_finalize_prompt_has_plain_language_guidance() -> None:
     body = _agent_prompt("finalize")
     assert "never surface internal gate jargon" in body
-    assert "no base changes to integrate" in body
+    assert "own diff" in body
 
 
 def test_finalize_prompt_avoids_full_width_rules() -> None:

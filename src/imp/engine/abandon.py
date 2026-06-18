@@ -1,4 +1,4 @@
-"""Destroy a Change: status -> abandoned, remove from merge queue, journal it, remove worktree + branch."""
+"""Abandon a Change: mark abandoned, remove from merge queue, journal, remove worktree + branch."""
 from __future__ import annotations
 
 from imp.engine import merge_queue, worktree

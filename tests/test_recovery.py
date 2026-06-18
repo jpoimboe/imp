@@ -11,16 +11,15 @@ def _wf():
     return load_workflow(bundled_workflow_dir("imp"), configured_tiers=_TIERS)
 
 
-def test_gate_steps_in_span_review_phase() -> None:
+def test_gate_steps_in_span_merge_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [16..19] = integrate-rebase, integrator, integrate-verify, finalize.
-    # Gates: integrate-rebase (pause), integrate-verify (resume: integrator, backward),
-    # finalize (pause + goto implement backward).
-    # integrator (no rules / continue-only) is NOT a gate.
-    assert gate_steps_in_span(wf, 16, 19) == (
-        "integrate-rebase", "integrate-verify", "finalize",
+    # Merge phase = flat [17..24]. Gates (pause or backward/self goto):
+    # integrate-rebase (else pause), integration-verify (exit-124 pause),
+    # integration-resolve (backward goto + pause), merge-to-base (pause).
+    assert gate_steps_in_span(wf, 17, 24) == (
+        "integrate-rebase", "integration-verify", "integration-resolve", "merge-to-base",
     )
 
 
@@ -71,9 +70,9 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     from imp.engine.recovery import GateBypassRequired, plan_rewind
 
     with pytest.raises(GateBypassRequired) as exc:
-        plan_rewind(_wf(), _state("integrate-rebase"), "merge")
+        plan_rewind(_wf(), _state("wait-for-head"), "merge-to-base")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integrate-verify", "finalize",
+        "integrate-rebase", "integration-verify", "integration-resolve",
     )
     msg = str(exc.value)
     assert "integrate-rebase" in msg
@@ -87,7 +86,7 @@ def test_plan_rewind_merge_blocked_reentry_no_gates() -> None:
     # cursor None (terminal): the merge-blocked state; vars are opaque to recovery.
     st = _state(None)
     plan = plan_rewind(_wf(), st, "merge")
-    assert plan.to_step == "base-fresh-check"        # B3: re-enters the merge phase
+    assert plan.to_step == "wait-for-head"           # re-enters the merge phase
     assert plan.from_step is None                    # nullable from a None cursor
 
 
@@ -95,7 +94,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # review (11) maxed; task-lead (6) upstream; finalize (19) downstream.
+    # review (11) maxed; task-lead (6) upstream; finalize (16) downstream.
     st = _state("review",
                 loop_counts={"task-lead": 2, "review": 6, "finalize": 1})
     log = InMemoryEventLog()
@@ -119,7 +118,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator (17) -> integrate-verify (18): span [17,17] = integrator,
+    # integrator (19) -> integration-review (20): span [19,19] = integrator,
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
-    plan = plan_rewind(_wf(), _state("integrator"), "integrate-verify")
-    assert plan.to_step == "integrate-verify"
+    plan = plan_rewind(_wf(), _state("integrator"), "integration-review")
+    assert plan.to_step == "integration-review"

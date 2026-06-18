@@ -1,10 +1,11 @@
+import typing
 from pathlib import Path
 
 import pytest
 
 from imp.engine.errors import LoadError
 from imp.engine.loader import _infer_kind, _output_types_for_step
-from imp.engine.types import SourceLoc
+from imp.engine.types import Kind, SourceLoc
 
 _LOC = SourceLoc(file=Path("wf.yaml"), line=1)
 
@@ -20,8 +21,6 @@ def test_engine_native_kind_rejects_file_or_command() -> None:
 
 
 def test_engine_native_kinds_have_no_typed_output_env() -> None:
-    import typing
-    from imp.engine.types import Kind
     kind_args = typing.get_args(Kind)
     assert "wait_for_head" in kind_args
     assert "dequeue_wake" in kind_args

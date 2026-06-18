@@ -28,6 +28,7 @@ from imp.engine.state import State
 from imp.providers import resolve
 from imp.providers.anthropic import AnthropicProvider
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+from tests.openai_fakes import resp_function_call, resp_response
 
 
 def _canned_anthropic(**overrides):
@@ -50,6 +51,44 @@ def _canned_anthropic(**overrides):
     }
     fields.update(overrides)
     return response(tool_use("c0", "complete_step", fields), stop_reason="tool_use")
+
+
+# Unique text that appears only in integration-review's rendered system prompt
+# (the opening line of the agent body, also in the completion instruction).
+_IR_SIG = "HEAD of the merge queue"
+
+
+def _anthropic_step_aware(**kwargs):
+    """Callable default for FakeAsyncAnthropic: returns integration-review-
+    appropriate canned response (verdict: ok) when the system prompt signals
+    that step; falls back to the standard response otherwise."""
+    system = kwargs.get("system", "")
+    if _IR_SIG in system:
+        return _canned_anthropic(verdict="ok")
+    return _canned_anthropic()
+
+
+def _openai_step_aware(**kwargs):
+    """Callable default for FakeResponsesClient: same step-awareness as
+    _anthropic_step_aware but for the OpenAI responses API (instructions=)."""
+    instructions = kwargs.get("instructions", "")
+    verdict = "ok" if _IR_SIG in instructions else "approve"
+    fields = {
+        "status": "Success",
+        "verdict": verdict, "findings": "none",
+        "decision": "merge", "comments": "",
+        "phase": "written", "spec_path": "stub-spec.md",
+        "complexity": "standard",
+        "plan_path": "stub-plan.md", "plan_number": 1,
+        "done": True, "deviation": False, "summary": "ok",
+        "more_plans": False, "rationale": "ok",
+        "blocking": False, "has_minor_findings": False,
+        "built": "stub", "verify_status": "ok",
+        "open_items": "", "next_steps": "",
+        "result": "DONE", "report": "ok",
+        "integration": "clean",
+    }
+    return resp_response(resp_function_call("c0", "complete_step", json.dumps(fields)))
 
 
 def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
@@ -184,46 +223,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     #   deviation:false    task-lead     → no supercycle back to plan-writer
     #   more_plans:false   plan-cycle-check → no supercycle, continue
     #   blocking:false     spec/plan reviewers → no rework loop
-    default = response(
-        tool_use("c0", "complete_step", {
-            "status": "Success",
-            # review-panel / recheck routing
-            "verdict": "approve",
-            "findings": "none",
-            # finalize routing
-            "decision": "merge",
-            "comments": "",
-            # spec-writer phase
-            "phase": "written",
-            "spec_path": "stub-spec.md",
-            "complexity": "standard",
-            # plan-writer
-            "plan_path": "stub-plan.md",
-            "plan_number": 1,
-            # task-lead loop control
-            "done": True,
-            "deviation": False,
-            "summary": "ok",
-            # plan-cycle-check
-            "more_plans": False,
-            "rationale": "ok",
-            # reviewers
-            "blocking": False,
-            "has_minor_findings": False,
-            # finalize
-            "built": "stub",
-            "verify_status": "ok",
-            "open_items": "",
-            "next_steps": "",
-            # implementer
-            "result": "DONE",
-            "report": "ok",
-            # integrator
-            "integration": "clean",
-        }),
-        stop_reason="tool_use",
-    )
-    fake = FakeAsyncAnthropic([], default_response=default)
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -251,14 +251,8 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
 async def test_full_default_workflow_completes_with_canned_openai(
     tmp_path: Path,
 ) -> None:
-    import json
-
     from imp.providers.openai import OpenAIProvider
-    from tests.openai_fakes import (
-        FakeResponsesClient,
-        resp_function_call,
-        resp_response,
-    )
+    from tests.openai_fakes import FakeResponsesClient
 
     change = _seed_default_workflow(tmp_path)
     # Rewrite config to OpenAI provider for every role (both layers: the legacy
@@ -266,24 +260,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
     _rewrite_config(tmp_path, ("anthropic", "openai"),
                     ("claude-sonnet-4-6", "gpt-4o-mini"))
 
-    default_completion = resp_response(
-        resp_function_call("c0", "complete_step", json.dumps({
-            "status": "Success",
-            "verdict": "approve", "findings": "none",
-            "decision": "merge", "comments": "",
-            "phase": "written", "spec_path": "stub-spec.md",
-            "complexity": "standard",
-            "plan_path": "stub-plan.md", "plan_number": 1,
-            "done": True, "deviation": False, "summary": "ok",
-            "more_plans": False, "rationale": "ok",
-            "blocking": False, "has_minor_findings": False,
-            "built": "stub", "verify_status": "ok",
-            "open_items": "", "next_steps": "",
-            "result": "DONE", "report": "ok",
-            "integration": "clean",
-        })),
-    )
-    fake = FakeResponsesClient([], default_response=default_completion)
+    fake = FakeResponsesClient([], default_response=_openai_step_aware)
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -323,15 +300,19 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     _rewrite_config(tmp_path, ("anthropic", "claude_code"),
                     ("claude-sonnet-4-6", "claude-sonnet-4-5"))
 
-    # The CC fake is per-step; each runner spawns a fresh client. Use a
-    # factory that returns the same scripted reply for every new client.
+    # The CC fake is per-step; each runner spawns a fresh client.
+    # step_started fires before the factory is called, so cur_step["name"]
+    # is already set to the running step when the factory executes.
+    cur_step: dict[str, str] = {"name": ""}
+
     def _scripted():
+        verdict = "ok" if cur_step["name"] == "integration-review" else "approve"
         return [
             assistant(
                 text("ok"),
                 cc_tool_use("c0", "complete_step", {
                     "status": "Success",
-                    "verdict": "approve", "findings": "none",
+                    "verdict": verdict, "findings": "none",
                     "decision": "merge", "comments": "",
                     "phase": "written", "spec_path": "stub-spec.md",
                     "complexity": "standard",
@@ -359,10 +340,11 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
         ),
     )
 
-    result = await run_change(
-        change,
-        on_event=lambda _e: None,
-    )
+    def on_event(rec: dict) -> None:
+        if rec.get("type") == "step_started":
+            cur_step["name"] = rec.get("payload", {}).get("step", "")
+
+    result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
 
 
@@ -377,7 +359,13 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     # minors-integrated flag), then owes ONE verification review. That second
     # review is also clean, and because the flag is set it terminates and advances
     # to the next phase -- dropping its own minors rather than looping forever.
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(has_minor_findings=True))
+    def _default_with_minors(**kwargs):
+        system = kwargs.get("system", "")
+        if _IR_SIG in system:
+            return _canned_anthropic(verdict="ok")
+        return _canned_anthropic(has_minor_findings=True)
+
+    fake = FakeAsyncAnthropic([], default_response=_default_with_minors)
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -435,7 +423,13 @@ async def test_fast_path_skips_reviewers_and_review(
     # unseen change), plan-review (plan-verify-commit fast-path rule), and the whole
     # review -> deferred-sweep -> sweep-verify block (A.2: autosquash routes to
     # stamp-trailers). The run still reaches planning, implementation, and merge.
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
+    def _default_trivial(**kwargs):
+        system = kwargs.get("system", "")
+        if _IR_SIG in system:
+            return _canned_anthropic(verdict="ok")
+        return _canned_anthropic(complexity="trivial")
+
+    fake = FakeAsyncAnthropic([], default_response=_default_trivial)
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -493,25 +487,7 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     st.save(change.state_dir)
     assert "review" not in st.loop_counts          # the load-bearing reset guard
 
-    default = response(
-        tool_use("c0", "complete_step", {
-            "status": "Success",
-            "verdict": "approve", "findings": "none",
-            "decision": "merge", "comments": "",
-            "phase": "written", "spec_path": "stub-spec.md",
-            "complexity": "standard",
-            "plan_path": "stub-plan.md", "plan_number": 1,
-            "done": True, "deviation": False, "summary": "ok",
-            "more_plans": False, "rationale": "ok",
-            "blocking": False,
-            "built": "stub", "verify_status": "ok",
-            "open_items": "", "next_steps": "",
-            "result": "DONE", "report": "ok",
-            "integration": "clean",
-        }),
-        stop_reason="tool_use",
-    )
-    fake = FakeAsyncAnthropic([], default_response=default)
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic", env_check=lambda: True,
@@ -552,7 +528,8 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
         }),
         stop_reason="tool_use",
     )
-    fake = FakeAsyncAnthropic([wfu_response, merge_response])
+    fake = FakeAsyncAnthropic(
+        [wfu_response, merge_response], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic", env_check=lambda: True,
@@ -579,9 +556,10 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
 @pytest.mark.anyio
 async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None:
     """A clean rebase (the stubbed integrate-rebase.sh exits 0): the integrator is
-    SKIPPED; the tail is integrate-rebase -> integrate-verify -> finalize."""
+    SKIPPED; the merge tail is finalize → wait-for-head → integrate-rebase →
+    integration-review → integration-verify → merge-to-base."""
     change = _seed_default_workflow(tmp_path)
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic",
@@ -594,24 +572,28 @@ async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("integrate-rebase", "integrate-verify", "finalize"):
+    for name in ("finalize", "wait-for-head", "integrate-rebase",
+                 "integration-review", "integration-verify", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert "integrator" not in steps, "clean rebase must not call the integrator"
-    assert (steps.index("integrate-rebase")
-            < steps.index("integrate-verify")
-            < steps.index("finalize"))
+    assert (steps.index("finalize")
+            < steps.index("wait-for-head")
+            < steps.index("integrate-rebase")
+            < steps.index("integration-review")
+            < steps.index("integration-verify")
+            < steps.index("merge-to-base"))
 
 
 @pytest.mark.anyio
 async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None:
     """A conflict rebase (integrate-rebase.sh exits 6) routes through the
-    integrator before integrate-verify and finalize."""
+    integrator before integration-review → integration-verify → merge-to-base."""
     change = _seed_default_workflow(tmp_path)
     ir = (change.project_root / "imp" / "workflows" / "imp"
           / "scripts" / "integrate-rebase.sh")
     ir.write_text("#!/usr/bin/env bash\nexit 6\n")
     ir.chmod(0o755)
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic",
@@ -624,18 +606,20 @@ async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("integrate-rebase", "integrator", "integrate-verify", "finalize"):
+    for name in ("integrate-rebase", "integrator", "integration-review",
+                 "integration-verify", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-rebase")
             < steps.index("integrator")
-            < steps.index("integrate-verify")
-            < steps.index("finalize"))
+            < steps.index("integration-review")
+            < steps.index("integration-verify")
+            < steps.index("merge-to-base"))
 
 
 @pytest.mark.anyio
 async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
     change = _seed_default_workflow(tmp_path)
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic",
@@ -649,9 +633,9 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
     types_seen = [e.get("type") for e in change.event_log().read()]
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started"]
-    assert "base-fresh-check" in steps
+    assert "wait-for-head" in steps
     assert "merge-to-base" in steps
-    assert "change_merged" in types_seen   # finalize still emits this
+    assert "change_merged" in types_seen
 
 
 @pytest.mark.anyio
@@ -664,7 +648,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
     from imp.engine.worktree import MergeResult
     monkeypatch.setattr(_wt, "merge_to_base",
                         lambda *a, **k: MergeResult("CONFLICT", detail="boom"))
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic",
@@ -685,7 +669,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
 async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Path) -> None:
     # No workflow var override needed — finalize merges without a human gate.
     change = _seed_default_workflow(tmp_path)
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic",
@@ -717,7 +701,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     from imp.engine.loader import load_workflow
 
     change = _seed_default_workflow(tmp_path)
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic", env_check=lambda: True,
@@ -758,42 +742,3 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body), (
         "expected the humanized spec-reviewer → plan breadcrumb:\n" + "\n".join(body))
 
-
-@pytest.mark.anyio
-async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
-    """The re-integration EDGE (base advanced during review -> goto integrate-rebase
-    -> re-integrate -> merge), driven deterministically. We do NOT try to provoke
-    the under-lock STALE status in the mocked harness — that is covered by Task 8's
-    worktree unit test, and forcing it here risks a max_loops-bounded re-STALE loop
-    because the shimmed integrate-rebase.sh never refreshes integrated_base_sha.
-    Instead we make base-fresh-check report 'advanced' exactly once, then
-    'unchanged' — exercising `{else: goto integrate-rebase}` and convergence."""
-    change = _seed_default_workflow(tmp_path)
-    # Overwrite the (shimmed) base-fresh-check with one that exits 10 on its first
-    # call and 0 thereafter, via a call-count file under the gitignored .imp/.
-    bfc = (change.project_root / "imp" / "workflows" / "imp"
-           / "scripts" / "base-fresh-check.sh")
-    bfc.write_text(
-        "#!/usr/bin/env bash\n"
-        'f="${IMP_PROJECT_ROOT}/.imp/change/_bfc_calls"\n'
-        'n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$f"\n'
-        '[ "$n" -eq 1 ] && exit 10 || exit 0\n')
-    bfc.chmod(0o755)
-    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
-    resolve.reset_providers_for_tests()
-    resolve.register_provider(
-        "anthropic",
-        env_check=lambda: True,
-        factory=lambda model: AnthropicProvider(
-            model_name=model, client_factory=lambda: fake,
-        ),
-    )
-    result = await run_change(change, non_interactive=True)
-    assert result is RunResult.COMPLETED
-    started = [e["payload"].get("step") for e in change.event_log().read()
-               if e.get("type") == "step_started"]
-    types_seen = [e.get("type") for e in change.event_log().read()]
-    # integrate-rebase ran twice: the initial integration + the re-integration the
-    # base-advance triggered. The run still converged to a merge.
-    assert started.count("integrate-rebase") >= 2
-    assert "change_merged" in types_seen

@@ -45,6 +45,8 @@ class _FakeMessages:
         self.calls.append(kwargs)
         if self._responses:
             return self._responses.pop(0)
+        if callable(self._default):
+            return self._default(**kwargs)
         if self._default is not None:
             return self._default
         raise IndexError("FakeMessages: out of canned responses (no default set)")
