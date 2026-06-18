@@ -173,17 +173,7 @@ def test_run_script_timeout_kills_group(tmp_path) -> None:
 
 
 def test_route_script_does_not_block_event_loop(tmp_path) -> None:
-    """A script gate's blocking subprocess must run OFF the event loop so
-    concurrent tasks keep running while it executes.
-
-    Regression for the frozen live status line ("running · 0s") during a
-    multi-minute verify gate: `_route_script` ran the subprocess via a
-    synchronous `proc.communicate()` on the event-loop thread, starving every
-    concurrent anyio task (the status `tick()` animator, the signal receiver,
-    the remote-channel poller, live-view event processing) for the command's
-    entire duration. This drives a `sleep` gate while a ticker counts loop
-    iterations and asserts the loop kept turning.
-    """
+    """Blocking subprocess must run off the event loop (regression: frozen live-status tick)."""
     import inspect
     import types
 
@@ -231,9 +221,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
 
 
 def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
-    """A success (exit-0) script Goto — e.g. autosquash's no-op 'no fixup!/squash!'
-    pass — must NOT inject 'was not accepted / failed (exit 0)' retry framing into
-    the downstream agent. The returned feedback is None on a clean gate."""
+    """exit-0 Goto carries no feedback; success routes must not inject retry framing."""
     import types
 
     import anyio
@@ -263,9 +251,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
 
 
 def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
-    """A genuine failure-retry route (non-zero exit on a Goto) still carries the
-    existing format_script_feedback framing, including the 'not accepted' wrapper
-    and the 'failed (exit N)' detail."""
+    """Non-zero exit Goto carries retry feedback: 'not accepted' and 'failed (exit N)'."""
     import types
 
     import anyio

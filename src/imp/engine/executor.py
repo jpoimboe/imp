@@ -504,9 +504,7 @@ async def _route_script(
     feedback = None
     if isinstance(action, Goto):
         assert step.command is not None, "script step must have a command"
-        # An exit-0 Goto is a success forward-route (e.g. autosquash no-op -> review):
-        # the downstream step has no use for the prior gate's stdout, so inject no
-        # retry framing. Only a non-zero exit is a genuine failure-retry route.
+        # exit-0 Goto is a success forward-route; only non-zero exit is a failure-retry.
         if out["exit"] != 0:
             feedback = format_script_feedback(
                 step.command, out["exit"], out["stdout"], out["stderr"])
