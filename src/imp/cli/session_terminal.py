@@ -14,7 +14,6 @@ and the solicit callback, and replaces the in-process run_change call in
 from __future__ import annotations
 
 import contextlib
-import math
 import signal
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -34,9 +33,10 @@ async def run_terminal_client(
     driver: Any,
     coord: InterruptCoordinator,
     solicit: Callable[[str], Awaitable[str]],
+    change_id: str = "",
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
-        max_buffer_size=math.inf)
+        max_buffer_size=1)
 
     def _on_event(event: dict[str, Any]) -> None:
         driver.on_event(event)
@@ -67,11 +67,17 @@ async def run_terminal_client(
             async with anyio.create_task_group() as tg:
                 async def _answer_gates() -> None:
                     async for prompt in gate_recv:
-                        reply = await solicit(prompt)
-                        if reply.strip() == "/abandon":
-                            await controls.abandon()
+                        while True:
+                            reply = await solicit(prompt)
+                            if reply.strip() == "/abandon":
+                                confirm = await solicit(
+                                    f"abandon `{change_id}`? [y/N]")
+                                if confirm.strip().lower() in ("y", "yes"):
+                                    await controls.abandon()
+                                    return
+                                continue
+                            await client.send_input(reply)
                             break
-                        await client.send_input(reply)
 
                 async def _watch_force_quit() -> None:
                     # cancel scope → finally → client.aclose; daemon detaches and runs on

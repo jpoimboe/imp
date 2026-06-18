@@ -7,14 +7,16 @@ control dispatch are added in Task 3."""
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import anyio
 from anyio.abc import SocketListener, SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
-from anyio.streams.memory import MemoryObjectSendStream
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from imp.remote.session.protocol import (
     _MAX_FRAME,
@@ -25,28 +27,53 @@ from imp.remote.session.protocol import (
     parse_client_message,
 )
 
+_CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
+
+
+@dataclass(eq=False)  # eq=False keeps identity hash/eq so _Client is set-storable
+class _Client:
+    stream: Any
+    send: MemoryObjectSendStream[dict[str, Any]]
+    scope: Any
+
 
 class SessionSocket:
     def __init__(
         self,
         path: str,
         *,
-        on_attach: Callable[[Attach], None] | None = None,
+        on_attach: Callable[[Attach, Callable[[dict[str, Any]], None]], None] | None = None,
         on_detach: Callable[[], None] | None = None,
         on_control: Callable[[str], None] | None = None,
+        client_buffer: int = _CLIENT_BUFFER,
     ) -> None:
         self._path = path
         self._on_attach = on_attach
         self._on_detach = on_detach
         self._on_control = on_control
-        self._clients: set[SocketStream] = set()
+        self._client_buffer = client_buffer
+        self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
         self._input_send: MemoryObjectSendStream[str] | None = None
         self._serve_scope: anyio.CancelScope | None = None
         self._serve_done: anyio.Event | None = None
 
     async def open(self) -> None:
-        Path(self._path).parent.mkdir(parents=True, exist_ok=True)
+        parent = Path(self._path).parent
+        parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        st = parent.stat()
+        my_uid = os.geteuid()
+        if st.st_uid != my_uid:
+            raise PermissionError(
+                f"refusing to use session-socket dir {parent}: owned by uid {st.st_uid}, "
+                f"not {my_uid}")
+        # mkdir's mode= is ignored on existing dirs; enforce it explicitly.
+        if st.st_mode & 0o777 != 0o700:
+            parent.chmod(0o700)
+        # MUST NOT pre-unlink self._path before binding. A non-pre-unlink bind is
+        # what makes the concurrent double-spawn race safe: the second binder fails
+        # with EADDRINUSE instead of stealing the live socket. A stale .sock is
+        # handled on teardown, not by pre-unlinking here.
         self._listener = await anyio.create_unix_listener(self._path)
 
     async def serve(self) -> None:
@@ -68,11 +95,35 @@ class SessionSocket:
     def attached_count(self) -> int:
         return len(self._clients)
 
-    async def broadcast(self, event: dict[str, Any]) -> None:
-        line = (encode_event(event) + "\n").encode("utf-8")
-        for stream in list(self._clients):
-            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
-                await stream.send(line)
+    def broadcast(self, event: dict[str, Any]) -> None:
+        for client in list(self._clients):
+            self._send_one(client, event)
+
+    def _send_one(self, client: _Client, event: dict[str, Any]) -> None:
+        try:
+            client.send.send_nowait(event)
+        except anyio.WouldBlock:
+            self._drop(client)
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            self._clients.discard(client)
+
+    def _drop(self, client: _Client) -> None:
+        self._clients.discard(client)
+        with contextlib.suppress(anyio.ClosedResourceError):
+            client.send.close()
+        client.scope.cancel()
+
+    async def _pump_client(
+        self, client: _Client, recv: MemoryObjectReceiveStream[dict[str, Any]],
+    ) -> None:
+        with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
+            async for event in recv:
+                line = (encode_event(event) + "\n").encode("utf-8")
+                try:
+                    await client.stream.send(line)
+                except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                    self._drop(client)
+                    break
 
     async def next_input(self) -> str:
         if self._input_send is not None:
@@ -95,36 +146,53 @@ class SessionSocket:
             self._on_control(message.action)
 
     async def _handle(self, stream: SocketStream) -> None:
-        attached = False
         buf = BufferedByteReceiveStream(stream)
+        client: _Client | None = None
         try:
             first = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
             hello = parse_client_message(first)
             if not isinstance(hello, Attach):
                 return
-            self._clients.add(stream)
-            attached = True
-            if self._on_attach is not None:
-                self._on_attach(hello)
-            while True:
-                line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
-                with contextlib.suppress(ValueError, KeyError):
-                    self._dispatch(parse_client_message(line))
+            send, recv = anyio.create_memory_object_stream[dict[str, Any]](
+                max_buffer_size=self._client_buffer)
+            async with anyio.create_task_group() as ctg:
+                client = _Client(stream=stream, send=send, scope=ctg.cancel_scope)
+                self._clients.add(client)
+                if self._on_attach is not None:
+                    self._on_attach(hello, lambda ev: self._send_one(client, ev))
+                ctg.start_soon(self._pump_client, client, recv)
+                try:
+                    while True:
+                        line = (await buf.receive_until(
+                            b"\n", _MAX_FRAME)).decode("utf-8")
+                        with contextlib.suppress(ValueError, KeyError):
+                            self._dispatch(parse_client_message(line))
+                except (anyio.IncompleteRead, anyio.EndOfStream,
+                        anyio.ClosedResourceError, anyio.DelimiterNotFound,
+                        anyio.BrokenResourceError, ValueError, KeyError):
+                    pass
+                finally:
+                    ctg.cancel_scope.cancel()
         except (anyio.IncompleteRead, anyio.EndOfStream,
                 anyio.ClosedResourceError, anyio.DelimiterNotFound,
                 anyio.BrokenResourceError, ValueError, KeyError):
             pass
         finally:
-            if attached:
-                self._clients.discard(stream)
+            if client is not None:
+                self._clients.discard(client)
+                with contextlib.suppress(anyio.ClosedResourceError):
+                    client.send.close()
                 if self._on_detach is not None:
                     self._on_detach()
             await stream.aclose()
 
-    async def close(self) -> None:
-        for stream in list(self._clients):
+    async def detach_all(self) -> None:
+        for client in list(self._clients):
             with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
-                await stream.aclose()
+                await client.stream.aclose()
+
+    async def close(self) -> None:
+        await self.detach_all()
         # Cancel before close: keeps accept()'s done callback fd-valid,
         # preventing stale selector entry on reuse.
         if self._serve_scope is not None:

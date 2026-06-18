@@ -374,3 +374,70 @@ async def test_run_session_client_threads_from_target_into_attach(
 
     assert captured["from_target"] == "review"
     assert rc == 0
+
+
+class _NullDriver:
+    def on_event(self, _e: dict[str, Any]) -> None: ...
+    def finish(self) -> None: ...
+
+
+async def _never(*_a: Any) -> str:
+    raise AssertionError("solicit must not be called")
+
+
+@pytest.mark.anyio
+async def test_daemon_startup_timeout_surfaces_distinctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    change = _make_change(tmp_path, "feat")
+    # Worktree exists in non-completed state → daemon crashed, not fast-completed.
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step="plan", step_attempt=0, status="paused").save(
+        change.state_dir)
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+    summarized: list[Any] = []
+    monkeypatch.setattr(
+        "imp.cli.main._handle_terminal_outcome",
+        lambda c, r, co: summarized.append(r) or 1)
+
+    coord = InterruptCoordinator()
+    rc = await session_run.run_session_client(
+        change, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never())
+    assert rc == 3                       # distinct daemon-startup-failure code
+    assert summarized == []              # NOT routed through the paused summary
+    assert "daemon" in capsys.readouterr().err.lower()
+
+
+@pytest.mark.anyio
+async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+
+    change = _make_change(tmp_path, "fast-feat")
+    # No worktree → infer_session_result returns COMPLETED:
+    # the daemon finished so fast the client timed out connecting, but the run succeeded.
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+    monkeypatch.setattr(
+        "imp.cli.main._handle_terminal_outcome",
+        lambda c, r, co: 0)
+
+    coord = InterruptCoordinator()
+    rc = await session_run.run_session_client(
+        change, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never())
+    assert rc == 0                       # NOT rc=3: change already completed
+    assert "daemon" not in capsys.readouterr().err.lower()

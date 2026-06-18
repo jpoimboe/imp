@@ -69,7 +69,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
         with anyio.fail_after(5):
             while sess.attached_count == 0:
                 await anyio.sleep(0.02)
-        await sess.broadcast(
+        sess.broadcast(
             {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not adapter.events:

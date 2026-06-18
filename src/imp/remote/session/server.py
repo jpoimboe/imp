@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import contextlib
-import math
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anyio
-from anyio.streams.memory import (
-    MemoryObjectReceiveStream,
-    MemoryObjectSendStream,
-)
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
-from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_INTERRUPT
+from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_DETACH, CONTROL_INTERRUPT
 from imp.remote.session.socket_server import SessionSocket
+
+_log = logging.getLogger("imp.remote.session.server")
 
 RunFn = Callable[..., Awaitable[Any]]
 
@@ -34,6 +33,7 @@ class SessionServer:
         self._lock = lock
         self._hibernate = hibernate
         self.abandoned = False
+        self._abandon_requested = False
         self._serve_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         # Initialized in open() because anyio.Event needs a running event loop.
@@ -44,10 +44,6 @@ class SessionServer:
             on_detach=self._on_detach_pulse,
             on_control=self._enqueue_control,
         )
-        ev_send, ev_recv = anyio.create_memory_object_stream[dict[str, Any]](
-            max_buffer_size=math.inf)
-        self._event_send: MemoryObjectSendStream[dict[str, Any]] = ev_send
-        self._event_recv: MemoryObjectReceiveStream[dict[str, Any]] = ev_recv
         ctl_send, ctl_recv = anyio.create_memory_object_stream[str](
             max_buffer_size=_CONTROL_QUEUE_DEPTH)
         self._control_send: MemoryObjectSendStream[str] = ctl_send
@@ -75,13 +71,11 @@ class SessionServer:
                 self._serve_scope = tg.cancel_scope
                 tg.start_soon(self._socket.serve)
                 async with anyio.create_task_group() as pump_tg:
-                    pump_tg.start_soon(self._pump)
                     pump_tg.start_soon(self._control_loop)
                     try:
                         result = await run_fn(
                             on_event=self._emit, user_chat_input_fn=self._chat)
                     finally:
-                        await self._event_send.aclose()
                         await self._control_send.aclose()
                 tg.cancel_scope.cancel()
         finally:
@@ -91,11 +85,7 @@ class SessionServer:
     def _emit(self, event: dict[str, Any]) -> None:
         if event.get("type") == "awaiting_user_input":
             self.set_pending_prompt(event)
-        self._event_send.send_nowait(event)
-
-    async def _pump(self) -> None:
-        async for event in self._event_recv:
-            await self._socket.broadcast(event)
+        self._socket.broadcast(event)
 
     async def _chat(self, _query: str) -> str:
         try:
@@ -150,25 +140,45 @@ class SessionServer:
         """Track a prompt event to re-emit to clients that connect after it fires."""
         self._pending_prompt = event
 
-    def _on_attach_pulse(self, _attach: Any) -> None:
+    def _on_attach_pulse(
+        self, _attach: Any, send_one: Callable[[dict[str, Any]], None],
+    ) -> None:
         self._pulse_attach_change()
         if self._pending_prompt is not None:
-            self._emit(self._pending_prompt)
+            send_one(self._pending_prompt)
 
     def _on_detach_pulse(self) -> None:
         self._pulse_attach_change()
 
     def _enqueue_control(self, action: str) -> None:
-        with contextlib.suppress(anyio.WouldBlock):
+        if action == CONTROL_ABANDON:
+            # Terminal control: a guaranteed off-queue signal the consumer checks
+            # every iteration, PLUS a best-effort enqueue so an empty/non-full
+            # queue wakes the consumer immediately. When the queue is full the
+            # enqueue is dropped but the buffered items still wake the loop, which
+            # then fires abandon on its very next iteration via the signal.
+            self._abandon_requested = True
+            with contextlib.suppress(anyio.WouldBlock):
+                self._control_send.send_nowait(action)
+            return
+        try:
             self._control_send.send_nowait(action)
+        except anyio.WouldBlock:
+            _log.warning(
+                "session control queue overflow; dropping ordinary control %r", action)
 
     async def _control_loop(self) -> None:
         async for action in self._control_recv:
+            if self._abandon_requested:
+                await self._dispatch_control(CONTROL_ABANDON)
+                return
             await self._dispatch_control(action)
 
     async def _dispatch_control(self, action: str) -> None:
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c")
+        elif action == CONTROL_DETACH:
+            await self._socket.detach_all()
         elif action == CONTROL_ABANDON:
             self.abandoned = True
             if self._on_abandon is not None:

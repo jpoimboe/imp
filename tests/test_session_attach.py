@@ -109,7 +109,7 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
             while holder.get("server") is None or holder["server"].attached_count != 1:
                 await anyio.sleep(0.02)
         tg.start_soon(client.receive_events)
-        await holder["server"].broadcast(
+        holder["server"].broadcast(
             {"type": "step_started", "payload": {"step": "plan"}})
         with anyio.fail_after(5):
             while not received:
@@ -241,7 +241,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
         assert spawned == []        # resident daemon attached, never respawned
 
         tg.start_soon(client.receive_events)
-        await server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
+        server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
         with anyio.fail_after(5):
             while not received:
                 await anyio.sleep(0.02)

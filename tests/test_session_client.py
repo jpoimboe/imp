@@ -19,7 +19,7 @@ def anyio_backend() -> str:
 async def test_client_attach_sends_change_id_and_title(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     seen: list[Attach] = []
-    server = SessionSocket(sock, on_attach=seen.append)
+    server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
     client = SessionClient(sock, "2026-06-15-xyz", "Add dark mode",
                            on_event=lambda _e: None)
     async with anyio.create_task_group() as tg:
@@ -49,7 +49,7 @@ async def test_client_receives_broadcast_event(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
+        server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
         with anyio.fail_after(5):
             while not received:
                 await anyio.sleep(0.02)

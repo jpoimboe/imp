@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -11,8 +12,10 @@ import anyio
 
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
-from imp.engine.state import ProjectLock, State
+from imp.engine.recovery import GateBypassRequired, RewindError
+from imp.engine.state import EventLog, ProjectLock, State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
@@ -25,6 +28,18 @@ def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
     return result is RunResult.PAUSED and coordinator.should_pause
 
 
+def _trailing_is_workflow_resumed(log: EventLog) -> bool:
+    last: dict[str, Any] | None = None
+    for ev in log.read():
+        last = ev
+    return last is not None and last.get("type") == "workflow_resumed"
+
+
+def _append_workflow_resumed(log: EventLog) -> None:
+    if not _trailing_is_workflow_resumed(log):
+        log.append(agent_id=None, type="workflow_resumed", payload={})
+
+
 async def serve_change_session(
     change: Change,
     *,
@@ -35,6 +50,27 @@ async def serve_change_session(
     resume: bool = False,
     from_target: str | None = None,
 ) -> Any:
+    # Validate from_target before opening the socket: a bad target raises
+    # RewindError cleanly here, leaving no orphaned journal entry and no
+    # ExceptionGroup wrapping from the server's task group.
+    _rewind_plan: Any = None
+    _rewind_workflow: Any = None
+    if resume and from_target is not None:
+        from imp.engine.loader import load_workflow
+        from imp.engine.recovery import plan_rewind
+        from imp.providers.effective import load_effective_config
+
+        cfg = load_effective_config(
+            project_root=change.project_root,
+            control_root=change.control_root).config
+        _rewind_workflow = load_workflow(
+            change.workflow_dir, configured_tiers=cfg.tier_names(),
+            project_keys=frozenset(cfg.project_facts))
+        # Loaded before the lock: ProjectLock prevents concurrent mutation of
+        # state_dir, so _pre_state.step is stable through _bound's execution.
+        _rewind_plan = plan_rewind(
+            _rewind_workflow, State.load(change.state_dir), from_target)
+
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
 
@@ -52,10 +88,9 @@ async def serve_change_session(
         from imp.agents.tools.wait_for_user import AwaitingUserInput
 
         if resume:
-            # Runs once under the daemon lock before the first run.
-            change.event_log().append(
-                agent_id=None, type="workflow_resumed", payload={})
+            log = change.event_log()
             state = State.load(change.state_dir)
+            _append_workflow_resumed(log)
             # P1 crash recovery: a crashed run (status still "running" on disk)
             # never set resume_pending, so the executor would re-enter the current
             # step fresh and re-burn its work. Keep and replay it. Skipped on a
@@ -63,21 +98,10 @@ async def serve_change_session(
             if from_target is None and state.status == "running":
                 state.resume_pending = state.step
             state.status = "running"
-            # Callers must validate from_target; a raise here orphans the workflow_resumed entry.
-            if from_target is not None:
-                from imp.engine.loader import load_workflow
-                from imp.engine.recovery import apply_rewind, plan_rewind
-                from imp.providers.effective import load_effective_config
-
-                cfg = load_effective_config(
-                    project_root=change.project_root,
-                    control_root=change.control_root).config
-                workflow = load_workflow(
-                    change.workflow_dir, configured_tiers=cfg.tier_names(),
-                    project_keys=frozenset(cfg.project_facts))
+            if _rewind_plan is not None:
+                from imp.engine.recovery import apply_rewind
                 # step_rewound follows workflow_resumed in the append-only log.
-                plan = plan_rewind(workflow, state, from_target)
-                apply_rewind(plan, workflow, state, change.event_log())
+                apply_rewind(_rewind_plan, _rewind_workflow, state, log)
             state.save(change.state_dir)
         first_kwargs = (
             {"seed_opening": seed_opening} if seed_opening is not None else {})
@@ -102,6 +126,7 @@ async def serve_change_session(
             coordinator.reset()
             if reply.strip():
                 coordinator.enqueue_interject(reply)
+            _append_workflow_resumed(change.event_log())
             result = await run_fn(
                 change,
                 on_event=on_event,
@@ -125,7 +150,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--from", dest="from_target", default=None)
     ns = parser.parse_args(argv)
-    change = Change.load(Path(ns.control_root), ns.change_id)
+    try:
+        change = Change.load(Path(ns.control_root), ns.change_id)
+    except LoadError as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
     kwargs: dict[str, Any] = {}
     if ns.seed_opening is not None:
         kwargs["seed_opening"] = ns.seed_opening
@@ -133,11 +162,15 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["resume"] = True
     if ns.from_target is not None:
         kwargs["from_target"] = ns.from_target
-    if kwargs:
-        anyio.run(functools.partial(serve_change_session, change, **kwargs))
-    else:
-        anyio.run(serve_change_session, change)
-    return 0
+    try:
+        if kwargs:
+            result = anyio.run(functools.partial(serve_change_session, change, **kwargs))
+        else:
+            result = anyio.run(serve_change_session, change)
+    except (LoadError, LoadErrors, RewindError, GateBypassRequired) as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
+    return 1 if result is RunResult.PAUSED else 0
 
 
 if __name__ == "__main__":

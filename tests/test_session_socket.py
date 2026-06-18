@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -14,7 +15,7 @@ from imp.remote.session.protocol import (
     encode_input,
     parse_event,
 )
-from imp.remote.session.socket_server import SessionSocket
+from imp.remote.session.socket_server import SessionSocket, _Client
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ async def test_attach_handshake_registers_client_and_reports_attach(
 ) -> None:
     sock = str(tmp_path / "s.sock")
     attached: list[Attach] = []
-    session = SessionSocket(sock, on_attach=attached.append)
+    session = SessionSocket(sock, on_attach=lambda hello, _send: attached.append(hello))
     async with anyio.create_task_group() as tg:
         await session.open()
         tg.start_soon(session.serve)
@@ -76,7 +77,7 @@ async def test_broadcast_reaches_all_concurrent_clients(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while session.attached_count != 2:
                 await anyio.sleep(0.02)
-        await session.broadcast({"type": "agent_output", "payload": {"n": 1}})
+        session.broadcast({"type": "agent_output", "payload": {"n": 1}})
         for client in (a, b):
             buf = BufferedByteReceiveStream(client)
             line = (await buf.receive_until(b"\n", 1 << 20)).decode()
@@ -239,3 +240,49 @@ async def test_open_creates_missing_parent_directory(tmp_path: Path) -> None:
     await session.open()
     assert (tmp_path / "sessions").is_dir()
     await session.close()
+
+
+@pytest.mark.anyio
+async def test_open_refuses_a_socket_dir_owned_by_another_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os as _os
+
+    from imp.remote.session import socket_server
+
+    sockdir = tmp_path / "imp-sock"
+    sockdir.mkdir()
+    session = SessionSocket(str(sockdir / "s.sock"))
+    my_uid = _os.geteuid()
+    monkeypatch.setattr(socket_server.os, "geteuid", lambda: my_uid + 1)
+    with pytest.raises(PermissionError):
+        await session.open()
+
+
+@pytest.mark.anyio
+async def test_open_tightens_socket_dir_with_loose_permissions(
+    tmp_path: Path,
+) -> None:
+    sockdir = tmp_path / "imp-sock"
+    sockdir.mkdir(mode=0o755)
+    session = SessionSocket(str(sockdir / "s.sock"))
+    await session.open()
+    await session.close()
+    assert sockdir.stat().st_mode & 0o777 == 0o700
+
+
+def test_emit_drops_a_client_whose_bounded_buffer_overflows() -> None:
+    session = SessionSocket("/unused.sock")
+    send, _recv = anyio.create_memory_object_stream[dict](max_buffer_size=1)
+    cancelled: list[bool] = []
+    client = _Client(
+        stream=SimpleNamespace(),
+        send=send,
+        scope=SimpleNamespace(cancel=lambda: cancelled.append(True)),
+    )
+    session._clients.add(client)
+    send.send_nowait({"type": "first"})        # fill the buffer-1 stream
+    session.broadcast({"type": "overflow"})    # second event → WouldBlock → drop
+    assert client not in session._clients
+    assert cancelled == [True]
+    _recv.close()

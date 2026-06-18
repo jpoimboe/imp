@@ -82,7 +82,7 @@ async def test_e2e_chat_commands_round_trip(
             await sess.open()
             tg.start_soon(sess.serve)
             await _wait(lambda: sess.attached_count > 0)
-            await sess.broadcast(
+            sess.broadcast(
                 {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
             await _wait(lambda: _text_in_outbox(fake, "Dark mode"))
             m1 = next(m["message_id"] for m in fake.outbox() if "Dark mode" in m["text"])

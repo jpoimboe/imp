@@ -406,6 +406,14 @@ def _handle_terminal_outcome(
     return 1
 
 
+def _session_exit_code(change: Change, coord: Any) -> int:
+    result = infer_session_result(change)
+    outcome = _handle_terminal_outcome(change, result, coord)
+    if result is RunResult.PAUSED and coord.should_pause:
+        return 130
+    return outcome
+
+
 def _project_root() -> Path:
     return find_project_root()
 
@@ -589,7 +597,8 @@ async def _run_tui_session(
                 try:
                     with contextlib.suppress(TimeoutError):
                         await run_terminal_client(
-                            attach=attach, driver=app, coord=coord, solicit=_solicit)
+                            attach=attach, driver=app, coord=coord, solicit=_solicit,
+                            change_id=change.id)
                 finally:
                     app.exit()
 
@@ -598,10 +607,7 @@ async def _run_tui_session(
             tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
-    result = infer_session_result(change)
-    if result is RunResult.PAUSED and coord.should_pause:
-        return 130
-    return _handle_terminal_outcome(change, result, coord)
+    return _session_exit_code(change, coord)
 
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
@@ -1571,7 +1577,8 @@ def _deliver_abandon_resident(control: Path, change_id: str) -> None:
         await client.connect()
         try:
             await client.send_control(CONTROL_ABANDON)
-            await client.receive_events()
+            with anyio.fail_after(10):
+                await client.receive_events()
         finally:
             await client.aclose()
 
@@ -1619,7 +1626,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         try:
             _deliver_abandon_resident(control, change_id)
         except OSError:
-            pass  # daemon exited between check and connect; fall through to direct teardown
+            pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
             print(f"Abandoned {token}.")
             return 0

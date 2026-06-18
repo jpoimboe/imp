@@ -191,6 +191,28 @@ def test_abandon_resident_routes_through_daemon(
     assert delivered == ["feat"]
 
 
+def test_abandon_falls_through_when_resident_daemon_never_acks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as main_mod
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    monkeypatch.setattr(main_mod, "session_is_resident", lambda c, cid: True)
+
+    def _hang(_control: Path, _cid: str) -> None:
+        raise TimeoutError  # simulate the bounded receive timing out
+
+    torn: list[str] = []
+    monkeypatch.setattr(main_mod, "_deliver_abandon_resident", _hang)
+    monkeypatch.setattr(main_mod, "tear_down_change", lambda ch: torn.append(ch.id))
+
+    rc = main_mod._abandon(tmp_path, "feat", assume_yes=True)
+    assert rc == 0
+    assert torn == ["feat"]  # fell through to direct teardown
+
+
 def test_tear_down_change_destroys_worktree_branch_and_journals(
     tmp_path: Path,
 ) -> None:

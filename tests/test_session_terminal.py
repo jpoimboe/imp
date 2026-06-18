@@ -317,8 +317,10 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
         await client.connect()
         return client
 
+    replies = iter(["/abandon", "y"])
+
     async def _solicit(_prompt: str) -> str:
-        return "/abandon"
+        return next(replies)
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -332,8 +334,62 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit)
+                    coord=coord, solicit=_solicit, change_id="c1")
 
             tg.start_soon(_client)
 
     assert server.abandoned
+
+
+@pytest.mark.anyio
+async def test_abandon_slash_command_declined_does_not_abandon(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    got: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        reply = await user_chat_input_fn("reply?")
+        got.append(reply)
+        return reply
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["/abandon", "n", "real answer"])
+    prompts: list[str] = []
+
+    async def _solicit(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(replies)
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c1")
+
+            tg.start_soon(_client)
+
+    assert not server.abandoned
+    assert got == ["real answer"]
+    assert len(prompts) == 3
+    assert "abandon" in prompts[1].lower()
+    assert "[y/n]" in prompts[1].lower()
