@@ -193,8 +193,16 @@ class SessionSocket:
             async with anyio.create_task_group() as ctg:
                 client = _Client(stream=stream, send=send, scope=ctg.cancel_scope)
                 self._clients.add(client)
+                snapshot: ReplaySnapshot | None = None
                 if self._on_attach is not None:
-                    self._on_attach(hello, lambda ev: self._send_one(client, ev))
+                    snapshot = self._on_attach(
+                        hello, lambda ev: self._send_one(client, ev))
+                if snapshot is not None:
+                    raw = snapshot.wire_bytes()
+                    if raw:
+                        with contextlib.suppress(anyio.BrokenResourceError,
+                                                 anyio.ClosedResourceError):
+                            await stream.send(raw)
                 ctg.start_soon(self._pump_client, client, recv)
                 try:
                     while True:

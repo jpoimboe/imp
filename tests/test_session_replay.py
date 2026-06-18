@@ -5,9 +5,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
+from anyio.abc import SocketStream
+from anyio.streams.buffered import BufferedByteReceiveStream
 
-from imp.remote.session.protocol import parse_event
+from imp.remote.session.protocol import encode_attach, parse_event
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import ReplaySnapshot
 
@@ -78,3 +81,101 @@ def test_on_attach_pulse_returns_snapshot_of_current_disk(tmp_path: Path) -> Non
 def test_on_attach_pulse_without_events_path_returns_none(tmp_path: Path) -> None:
     server = SessionServer(str(tmp_path / "s.sock"))
     assert server._on_attach_pulse(None, lambda _e: None) is None
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def _attach(sock_path: str, change_id: str) -> SocketStream:
+    client = await anyio.connect_unix(sock_path)
+    await client.send((encode_attach(change_id, "T") + "\n").encode())
+    return client
+
+
+@pytest.mark.anyio
+async def test_late_attach_replays_full_disk_prefix_then_live_tail(
+    tmp_path: Path,
+) -> None:
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    # disk holds an un-broadcast leading line (change_created) plus two lines that
+    # the run also broadcasts. A broadcast-counter partition would drop "thinking";
+    # the disk-line partition replays all three.
+    prefix = [
+        {"id": "e0", "type": "change_created", "payload": {"id": "x"}},
+        {"id": "e1", "type": "step_started", "payload": {"step": "spec"}},
+        {"id": "e2", "type": "thinking", "payload": {"content": "hmm"}},
+    ]
+    _write_jsonl(events_path, prefix)
+    emitted = anyio.Event()
+    attached = anyio.Event()
+    server = SessionServer(sock, events_path=events_path)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        for e in prefix[1:]:          # e1,e2 broadcast before attach: lost to the client
+            on_event(e)
+        emitted.set()
+        await attached.wait()
+        on_event({"id": "e3", "type": "step_completed",
+                  "payload": {"step": "spec", "action": {"verb": "continue"}}})
+        await anyio.sleep(0.1)
+        return "ok"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve, run_fn)
+        await emitted.wait()
+        client = await _attach(sock, "c1")
+        buf = BufferedByteReceiveStream(client)
+        seen: list[dict[str, Any]] = []
+        with anyio.fail_after(5):
+            while len(seen) < 3:
+                seen.append(parse_event(
+                    (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        assert [s["id"] for s in seen] == ["e0", "e1", "e2"]   # full disk prefix, in order
+        attached.set()
+        with anyio.fail_after(5):
+            seen.append(parse_event(
+                (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        assert seen[-1]["id"] == "e3"                          # live tail across the seam
+        assert [s["id"] for s in seen] == ["e0", "e1", "e2", "e3"]  # each once, no gap/dup
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_resume_attach_replays_entire_prior_journal(tmp_path: Path) -> None:
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    # Simulate a resumed run: disk already holds a long prior journal + the
+    # direct-to-disk workflow_resumed, while the new process's run emits fresh
+    # events. A late attach must replay the WHOLE prior journal, not the first few.
+    prior = [{"id": f"p{i}", "type": "thinking", "payload": {"content": str(i)}}
+             for i in range(20)]
+    prior.append({"id": "wr", "type": "workflow_resumed", "payload": {}})
+    _write_jsonl(events_path, prior)
+    emitted = anyio.Event()
+    server = SessionServer(sock, events_path=events_path)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        on_event({"id": "n0", "type": "step_started", "payload": {"step": "plan"}})
+        emitted.set()
+        await anyio.sleep(0.2)
+        return "ok"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve, run_fn)
+        await emitted.wait()
+        client = await _attach(sock, "c1")
+        buf = BufferedByteReceiveStream(client)
+        seen: list[dict[str, Any]] = []
+        with anyio.fail_after(5):
+            while len(seen) < 21:
+                seen.append(parse_event(
+                    (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        assert [s["id"] for s in seen] == [f"p{i}" for i in range(20)] + ["wr"]
+        await client.aclose()
+        tg.cancel_scope.cancel()
