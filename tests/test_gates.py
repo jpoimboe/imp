@@ -228,3 +228,69 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
         )
 
     anyio.run(main)
+
+
+def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
+    """A success (exit-0) script Goto — e.g. autosquash's no-op 'no fixup!/squash!'
+    pass — must NOT inject 'was not accepted / failed (exit 0)' retry framing into
+    the downstream agent. The returned feedback is None on a clean gate."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+    )
+    step = Step(
+        name="autosquash", phase="p", kind="script",
+        rules=(_rule(None, Goto("review")),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo 'no fixup!/squash!/amend! commits to autosquash'; exit 0",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={})
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Goto)
+        assert feedback is None
+
+    anyio.run(main)
+
+
+def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
+    """A genuine failure-retry route (non-zero exit on a Goto) still carries the
+    existing format_script_feedback framing, including the 'not accepted' wrapper
+    and the 'failed (exit N)' detail."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+    )
+    step = Step(
+        name="check", phase="p", kind="script",
+        rules=(_rule(None, Goto("spec-writer")),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo boom; exit 3",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={})
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Goto)
+        assert feedback is not None
+        assert "failed (exit 3)" in feedback
+        assert "not accepted" in feedback
+
+    anyio.run(main)
