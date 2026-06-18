@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,45 @@ from imp.remote.session.socket_server import SessionSocket
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+async def _ignore_anyio_teardown_setresult_race() -> AsyncIterator[None]:
+    """Swallow anyio 4.8's benign socket-teardown InvalidStateError.
+
+    anyio's asyncio backend registers the bound ``future.set_result`` as the raw
+    fd-readable reader for UNIXSocketListener.accept and stream reads
+    (_backends/_asyncio.py:1331,1550), and only removes the reader in the future's
+    done-callback. When a cancel scope tears the socket down in the SAME loop turn
+    the fd goes readable, the already-queued ``set_result`` fires on the just-
+    cancelled future -> InvalidStateError. It is raised inside a Handle, so asyncio
+    routes it to the loop exception handler, which pytest-anyio promotes to a test
+    failure -- making the open/close/reopen tests flaky (~1/13). Delegate every
+    other loop exception to the previous handler untouched."""
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+
+    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        exc = context.get("exception")
+        callback = getattr(context.get("handle"), "_callback", None)
+        future = getattr(callback, "__self__", None)
+        if (
+            isinstance(exc, asyncio.InvalidStateError)
+            and getattr(callback, "__name__", "") == "set_result"
+            and isinstance(future, asyncio.Future)
+            and future.cancelled()
+        ):
+            return  # the anyio accept/read set_result-on-cancelled-future race
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(previous)
 
 
 @pytest.mark.anyio

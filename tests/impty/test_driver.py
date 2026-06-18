@@ -105,6 +105,15 @@ def test_send_signal_delivers_sigint_regardless_of_tty_mode() -> None:
         d.wait(idle=0.2, hard=5.0)
         screen = d.send_signal(signal.SIGINT)
         assert "GOT-SIGINT" in screen
+        # The child handler writes GOT-SIGINT then os._exit(): under load the pty
+        # output settles (so send_signal returns) a beat before the kernel finishes
+        # the exit and poll() reaps it, so the one snapshot can still read alive=True.
+        # Poll the liveness this test actually asserts on instead of trusting a single
+        # post-signal render.
+        deadline = time.monotonic() + 5.0
+        while "alive=True" in screen.splitlines()[0] and time.monotonic() < deadline:
+            time.sleep(0.01)
+            screen = d.view()
         assert "alive=False" in screen.splitlines()[0]
     finally:
         with contextlib.suppress(ProcessLookupError):
