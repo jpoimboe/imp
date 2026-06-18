@@ -86,8 +86,6 @@ class SessionServer:
         return result
 
     def _emit(self, event: dict[str, Any]) -> None:
-        if event.get("type") == "awaiting_user_input":
-            self.set_pending_prompt(event)
         self._socket.broadcast(event)
 
     async def _chat(self, _query: str) -> str:

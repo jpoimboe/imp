@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -390,6 +391,7 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
+        server.set_pending_prompt(prompt_event)
         on_event(prompt_event)
         gate_reached.set()
         try:
@@ -504,6 +506,7 @@ async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
+        server.set_pending_prompt(prompt_event)
         on_event(prompt_event)
         gate_reached.set()
         try:
@@ -541,4 +544,101 @@ async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
         assert seen2.count(prompt_event) == 1  # delivered once to the late client
         await client1.aclose()
         await client2.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_journaled_awaiting_input_is_replayed_once_not_doubled(
+    tmp_path: Path,
+) -> None:
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    recs = [
+        {"id": "e0", "type": "step_started", "payload": {"step": "spec"}},
+        {"id": "e1", "type": "awaiting_user_input", "payload": {"prompt": "go?"}},
+    ]
+    events_path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    server = SessionServer(sock, events_path=events_path)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        for r in recs:                  # broadcast before attach: lost to the client
+            on_event(r)
+        return await user_chat_input_fn("")   # the still-open gate solicits on late attach
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        buf = BufferedByteReceiveStream(client)
+        seen: list[dict[str, Any]] = []
+        with anyio.fail_after(5):
+            while len(seen) < 2:
+                seen.append(parse_event(
+                    (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        got_extra = False
+        with anyio.move_on_after(0.2):
+            await buf.receive_until(b"\n", 1 << 20)
+            got_extra = True
+        assert not got_extra, "unexpected third event (double-delivery)"
+        assert sum(1 for s in seen if s["type"] == "awaiting_user_input") == 1
+        assert server._pending_prompt is None
+        await client.send((encode_input("yes") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "yes"            # reply flows back through the open gate
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -> None:
+    # hibernate=False keeps the gate open so a late client can still attach and reply.
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    recs = [{"id": "e0", "type": "step_started", "payload": {"step": "spec"}},
+            {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}}]
+    events_path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    synthetic = {"type": "awaiting_user_input", "payload": {"prompt": "paused"}}  # no id
+    prompt_ready = anyio.Event()
+    server = SessionServer(sock, events_path=events_path)   # hibernate=False (default)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        for r in recs:
+            on_event(r)
+        server.set_pending_prompt(synthetic)
+        on_event(synthetic)            # no client yet: live broadcast lost; not on disk
+        prompt_ready.set()
+        return await user_chat_input_fn("")   # blocking gate keeps the server alive
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        await prompt_ready.wait()
+        client = await _attach(sock, "c1")
+        buf = BufferedByteReceiveStream(client)
+        seen: list[dict[str, Any]] = []
+        with anyio.fail_after(5):
+            while len(seen) < 3:
+                seen.append(parse_event(
+                    (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        assert [s.get("id") for s in seen[:2]] == ["e0", "e1"]   # replay prefix, no off-by-one
+        assert seen[2] == synthetic                               # synthetic prompt after replay
+        assert sum(1 for s in seen if s.get("type") == "awaiting_user_input") == 1
+        await client.send((encode_input("done") + "\n").encode())   # unblock the gate
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "done"           # reply flows back through the blocking gate
+        await client.aclose()
         tg.cancel_scope.cancel()
