@@ -86,8 +86,10 @@ def pop_and_wake(
         entries = read(control_root)
         lane_before = _lane(entries, base_branch)
         was_head = bool(lane_before) and lane_before[0]["change_id"] == change_id
-        entries = [e for e in entries if e["change_id"] != change_id]
-        _write(control_root, entries)
+        new_entries = [e for e in entries if e["change_id"] != change_id]
+        if new_entries != entries:
+            _write(control_root, new_entries)
+        entries = new_entries
         lane_after = _lane(entries, base_branch)
         next_id = lane_after[0]["change_id"] if (was_head and lane_after) else None
     if next_id is not None:
