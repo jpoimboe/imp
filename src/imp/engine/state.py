@@ -51,6 +51,7 @@ class State:
     status: Status
     vars: dict[str, Any] = field(default_factory=dict)
     loop_counts: dict[str, int] = field(default_factory=dict)
+    outcome_history: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
@@ -111,6 +112,7 @@ class State:
             "status": self.status,
             "vars": self.vars,
             "loop_counts": self.loop_counts,
+            "outcome_history": self.outcome_history,
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
