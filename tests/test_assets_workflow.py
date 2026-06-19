@@ -206,7 +206,7 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
     )
     assert m.var_mutations["spec_minors_integrated"] is False
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.action.target == "baseline-verify" and m.action.resume is False
 
 
 def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
@@ -220,7 +220,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
         output={"blocking": False, "has_minor_findings": False},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.action.target == "baseline-verify" and m.action.resume is False
     assert m.var_mutations == {"spec_minors_integrated": False}
 
 
@@ -515,18 +515,18 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     )
 
 
-def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
+def test_spec_verify_commit_fast_path_skips_to_baseline_verify() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-verify-commit"].rules
-    # Clean commit on the fast path -> straight to planning, skipping spec-reviewer.
+    # Clean commit on the fast path -> baseline gate, skipping spec-reviewer.
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "fast_path": True},
         output={"exit": 0, "stdout": "", "stderr": ""},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.action.target == "baseline-verify" and m.action.resume is False
 
 
 def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
@@ -582,3 +582,48 @@ def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
                    if "write" in perm.operations]
     assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
     assert all("imp/plans/" not in p for p in write_paths)
+
+
+def test_baseline_dirty_var_declared_default_false() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.vars.defaults()["baseline_dirty"] is False
+
+
+def test_baseline_verify_is_first_plan_phase_step() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    plan_phase = next(p for p in wf.phases if p.name == "plan")
+    assert plan_phase.steps[0].name == "baseline-verify"
+    assert plan_phase.steps[1].name == "plan-writer"
+    assert _steps(wf)["baseline-verify"].command == "./scripts/baseline-verify.sh"
+
+
+def test_baseline_verify_sets_dirty_on_red_baseline() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["baseline-verify"].rules
+    red = evaluate_rules(rules, vars=_BASE_VARS,
+                         output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(red.action, Continue)               # proceeds, never pauses
+    assert red.var_mutations["baseline_dirty"] is True
+    clean = evaluate_rules(rules, vars=_BASE_VARS,
+                           output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(clean.action, Continue)
+    assert "baseline_dirty" not in clean.var_mutations
+
+
+def test_spec_phase_routes_into_baseline_gate() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    steps = _steps(wf)
+    # Fast path off the spec gate now enters the baseline gate, then planning.
+    fp = evaluate_rules(steps["spec-verify-commit"].rules,
+                        vars={**_BASE_VARS, "fast_path": True},
+                        output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(fp.action, Goto) and fp.action.target == "baseline-verify"
+    # Clean spec review (verification pass, minors already integrated) also enters it.
+    rev = evaluate_rules(steps["spec-reviewer"].rules,
+                         vars={**_BASE_VARS, "spec_minors_integrated": True},
+                         output={"blocking": False, "has_minor_findings": True})
+    assert isinstance(rev.action, Goto) and rev.action.target == "baseline-verify"
