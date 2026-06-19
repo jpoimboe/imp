@@ -86,8 +86,8 @@ def build_isolated_venv(
 def _await_worktree(control_root: Path, timeout: float) -> Path:
     """Poll .imp/worktrees/ for the single Change worktree dir and return it;
     its .name is the slug. The real guard is the presence of
-    .imp/change/change.json in the candidate (scratch/.merge-* dirs lack it);
-    the leading-dot exclusion is redundant belt-and-suspenders for readability.
+    .imp/changes/<slug>/change.json at the control root (scratch/.merge-* dirs
+    have no such entry); the leading-dot exclusion is redundant belt-and-suspenders.
 
     Replaces stdout-parsing of `imp new`'s "Created Change <slug>:" line:
     sidesteps PTY/PIPE read-timing and yields the slug directly. Raises
@@ -98,7 +98,7 @@ def _await_worktree(control_root: Path, timeout: float) -> Path:
         if root.is_dir():
             for p in sorted(root.iterdir()):
                 if (p.is_dir() and not p.name.startswith(".")
-                        and (p / ".imp" / "change" / "change.json").exists()):
+                        and (control_root / ".imp" / "changes" / p.name / "change.json").exists()):
                     return p
         time.sleep(0.1)
     raise TimeoutError(

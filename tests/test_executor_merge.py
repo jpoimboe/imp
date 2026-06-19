@@ -51,9 +51,13 @@ def test_merge_step_merges_then_complete_journals_and_removes(tmp_path: Path) ->
     assert state.merge_commit is not None
     assert (tmp_path / "feature.txt").read_text() == "hi"          # merged into base
 
+    (ch.change_dir / "steps").mkdir(parents=True, exist_ok=True)
+    (ch.change_dir / "steps" / "001.json").write_text("{}")
+
     result = _complete(ch, state, log)
     assert result.value == "completed"
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists() # worktree removed
+    assert not (ch.change_dir / "steps").exists()                  # transcript dir dropped
     assert "imp/feat" in _git(tmp_path, "branch", "--list", "imp/feat").stdout  # branch kept
     assert _git(tmp_path, "show", "refs/imp/journal:feat/change.json").returncode == 0
 

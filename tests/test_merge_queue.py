@@ -175,7 +175,7 @@ def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
     Change.create(tmp_path, title="b", change_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")        # head
     mq.enqueue_if_absent(tmp_path, "b", "main")        # next
-    shutil.rmtree(tmp_path / ".imp" / "worktrees" / "b")   # next vanishes in the window
+    shutil.rmtree(tmp_path / ".imp" / "changes" / "b")   # next vanishes → load fails
     spawned: list = []
     # Must not raise even though the next head can no longer be loaded.
     mq.pop_and_wake(
@@ -189,7 +189,7 @@ def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="a", change_id="a", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
-    shutil.rmtree(tmp_path / ".imp" / "worktrees" / "a")   # records gone → load fails
+    shutil.rmtree(tmp_path / ".imp" / "changes" / "a")   # records gone → load fails
     spawned: list = []
     # Must not raise; the unloadable head is skipped silently.
     mq.ensure_head_driven(

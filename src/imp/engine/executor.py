@@ -426,7 +426,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         "change.json": change.change_dir / "change.json",
         "state.json": change.state_dir / "state.json",
     })
-    worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
+    worktree.remove_worktree(change.control_root, change.id)
+    shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
     return RunResult.COMPLETED
 
 

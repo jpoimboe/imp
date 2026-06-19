@@ -90,13 +90,14 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         return {"name": "complete_step", "input": {"status": "Success", "outcome": "ok", **fields}}
 
     spec_cmd = (
-        'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/spec && '
-        'printf "# Spec\\n\\nstub spec\\n" > ".imp/change/artifacts/spec/$IMP_CHANGE_HANDLE.md" && '
+        'mkdir -p "$IMP_CHANGE_DIR/artifacts/spec" && '
+        'printf "# Spec\\n\\nstub spec\\n"'
+        ' > "$IMP_CHANGE_DIR/artifacts/spec/$IMP_CHANGE_HANDLE.md" && '
         'imp artifact-commit spec'
     )
     plan_cmd = (
-        'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/plans && '
-        'printf "# Plan 1\\n" > ".imp/change/artifacts/plans/$IMP_CHANGE_HANDLE-plan-1.md" && '
+        'mkdir -p "$IMP_CHANGE_DIR/artifacts/plans" && '
+        'printf "# Plan 1\\n" > "$IMP_CHANGE_DIR/artifacts/plans/$IMP_CHANGE_HANDLE-plan-1.md" && '
         'imp artifact-commit plan'
     )
     lead_cmd = (
