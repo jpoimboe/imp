@@ -1276,7 +1276,8 @@ def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
     clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    assert line.split(" ", 1)[1] == "impl · implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
+    expected = "impl · implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
+    assert line.split(" ", 1)[1] == expected
 
 
 def test_status_spine_phase_label_activity_elapsed() -> None:
