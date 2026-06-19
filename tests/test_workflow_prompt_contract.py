@@ -371,7 +371,7 @@ def test_deferred_sweep_passes_through_pre_classified_needs_decision() -> None:
     text = (AGENTS_DIR / "deferred-sweep.md").read_text()
     low = text.lower()
     assert "pre-classified human" in low       # recognizes the spec/plan-authored marker
-    assert "— needs-decision:" in text          # the marker it keys on (em dash U+2014)
+    assert "leave the line exactly as-is" in low  # the pass-through instruction
     assert "never dismiss it" in low            # passed through, not risk-dismissed
 
 
