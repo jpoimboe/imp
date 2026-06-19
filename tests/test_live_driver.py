@@ -1205,6 +1205,28 @@ def test_labeled_forward_goto_label_in_both_paths() -> None:
     assert body == _render_body(events)   # live == imp log, line for line
 
 
+def test_held_narration_emits_before_open_burst_live() -> None:
+    # A trailing narration is created held=True so it can fold into a step
+    # conclusion. With eager emission it must still emit immediately; only the
+    # OPEN tool burst that follows it may be withheld. Replays WITHOUT finish() —
+    # the real, mid-run state a watching human sees.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Reading the files now."}]},
+           usage={}),
+        ev("4", "tool_call", agent_id="a", id="b1", name="read_file",
+           input={"p": "x"}),
+    ]:
+        drv.on_event(e)
+    body = out.getvalue()
+    assert "Reading the files now." in body          # held narration emits live
+    assert "read_file" not in body  # open burst still withheld
+
+
 def test_unlabeled_forward_goto_has_no_label_segment() -> None:
     drv, out = _driver()
     events = [

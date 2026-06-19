@@ -206,7 +206,10 @@ class LiveDriver:
                 # final immediately.
                 return node.route is not None
             return True
-        return not (isinstance(node, nv.AgentTextNode) and node.held)
+        # A held AgentTextNode is settled narration: it emits immediately and is
+        # never withheld behind an in-flight tool call. `held` still drives
+        # `imp log`'s static fold rendering; only the live cursor ignores it.
+        return True
 
     def _gutters(self) -> tuple[int, ...]:
         """Subagent boundary columns for the shared render helpers.
