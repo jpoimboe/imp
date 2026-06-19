@@ -19,8 +19,7 @@ def _wf():
 def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
     assert wf.name == "feature"
-    assert [p.name for p in wf.phases] == ["spec", "plan", "implement",
-                                           "review", "merge"]
+    assert [p.name for p in wf.phases] == ["spec", "plan", "implement", "merge"]
 
 
 def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:

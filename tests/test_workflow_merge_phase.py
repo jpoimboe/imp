@@ -11,12 +11,11 @@ def _phase(wf, name):
     return next(p for p in wf.phases if p.name == name)
 
 
-def test_review_phase_is_stamp_then_finalize() -> None:
-    # Trailers are stamped once (before the change enters the queue), then finalize
-    # takes the human merge approval on the change's own diff. Integration moved to
-    # the at-head merge phase, so no integrate-rebase/integrator lives here.
+def test_stamp_and_finalize_tail_the_implement_phase() -> None:
     wf = load_workflow(WF)
-    assert [s.name for s in _phase(wf, "review").steps] == ["stamp-trailers", "finalize"]
+    impl = [s.name for s in _phase(wf, "implement").steps]
+    assert impl[-2:] == ["stamp-trailers", "finalize"]
+    assert not any(p.name == "review" for p in wf.phases)
 
 
 def test_merge_phase_linear_queue_flow() -> None:

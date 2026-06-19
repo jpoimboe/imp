@@ -244,8 +244,6 @@ phases:
           - {if: {exit: 0}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: plan-writer}
           - {else: true, pause: true}
 
-  - name: review
-    steps:
       # Stamp the Change: trailer on every run commit ONCE, before integration. Content-
       # idempotent; a plain rebase preserves the trailer, so re-integration rounds need
       # no re-stamp. Reached from plan-cycle-check (fast-path) and review-base-repin

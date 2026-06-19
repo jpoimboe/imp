@@ -242,13 +242,13 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_stamp_trailers_heads_the_review_phase() -> None:
+def test_stamp_trailers_tails_the_implement_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    review = next(p for p in wf.phases if p.name == "review")
-    assert review.steps[0].name == "stamp-trailers"
     impl = next(p for p in wf.phases if p.name == "implement")
-    assert "stamp-trailers" not in [s.name for s in impl.steps]
+    names = [s.name for s in impl.steps]
+    assert "stamp-trailers" in names and "finalize" in names
+    assert names.index("stamp-trailers") == names.index("finalize") - 1
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
