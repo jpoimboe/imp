@@ -19,7 +19,7 @@ _BASE_VARS = {
     "plan_minors_integrated": False, "plan_panel_done": False,
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
-    "baseline_dirty": False, "verify_tolerated_carry": False,
+    "verify_tolerated_carry": False,
     "change_panel_done": False,
 }
 
@@ -593,12 +593,6 @@ def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
     assert all("imp/plans/" not in p for p in write_paths)
 
 
-def test_baseline_dirty_var_declared_default_false() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.vars.defaults()["baseline_dirty"] is False
-
-
 def test_baseline_verify_is_first_plan_phase_step() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
@@ -606,20 +600,6 @@ def test_baseline_verify_is_first_plan_phase_step() -> None:
     assert plan_phase.steps[0].name == "baseline-verify"
     assert plan_phase.steps[1].name == "plan-writer"
     assert _steps(wf)["baseline-verify"].command == "./scripts/baseline-verify.sh"
-
-
-def test_baseline_verify_sets_dirty_on_red_baseline() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["baseline-verify"].rules
-    red = evaluate_rules(rules, vars=_BASE_VARS,
-                         output={"exit": 1, "stdout": "", "stderr": ""})
-    assert isinstance(red.action, Continue)               # proceeds, never pauses
-    assert red.var_mutations["baseline_dirty"] is True
-    clean = evaluate_rules(rules, vars=_BASE_VARS,
-                           output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(clean.action, Continue)
-    assert "baseline_dirty" not in clean.var_mutations
 
 
 def test_verify_step_has_max_loops_5() -> None:

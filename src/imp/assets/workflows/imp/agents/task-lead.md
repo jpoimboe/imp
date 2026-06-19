@@ -181,7 +181,7 @@ common case). The record holds two entry kinds, each tagged with its origin and 
 one-line justification:
 
 - `[baseline]` — failures captured at the change's baseline (present before any
-  task ran), written by the baseline gate. Their presence sets `baseline_dirty`.
+  task ran), written by the baseline gate.
 - `[flaky]` — failures you judged non-deterministic/environmental during the run.
 
 Reason over the OPAQUE failure text against that tolerated set (`baseline ∪ flaky`)

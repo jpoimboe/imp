@@ -2,7 +2,7 @@
 # Establish the change's BASELINE verification state, ONCE, after the spec gate and
 # before planning. A CLEAN baseline leaves no tolerated-failures record. A RED
 # baseline captures the failure output into .imp/change/tolerated-failures.md tagged
-# `baseline`, and exits non-zero so the workflow sets baseline_dirty; it NEVER pauses
+# `baseline`, and exits non-zero so the workflow proceeds (continue: true); it NEVER pauses
 # (re-running the suite later is the regular verify gate's job — here we only record
 # the starting state). Locates .imp/change/ by fixed relative path after cd-ing to
 # IMP_PROJECT_ROOT; there is no $IMP_CHANGE_DIR. No -e: we capture the verify exit
