@@ -19,3 +19,11 @@ def test_finalize_still_decides_merge_or_rework() -> None:
 def test_finalize_merge_decision_explains_enqueue() -> None:
     body = (WF / "agents" / "finalize.md").read_text()
     assert "enqueues" in body or "merge queue" in body
+
+
+def test_finalize_forbids_premature_merge_claim() -> None:
+    body = (WF / "agents" / "finalize.md").read_text()
+    assert "enqueued into the merge queue" in body
+    assert 'no "Merged"' in body
+    assert "is now on master" in body
+    assert "at the queue head" in body

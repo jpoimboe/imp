@@ -150,8 +150,13 @@ Then route on the dispositions:
   carried to the plan-writer as authoritative feedback.
 - Otherwise -> `complete_step(status="Success", decision="merge", comments="<notes>", built=…,
   verify_status=…, open_items=…, next_steps=…)`. This enqueues the change in the
-  merge queue; it integrates and verifies at the head, in order. Close with a short
-  summary listing any follow-ups created, each with its `imp resume <id>` command.
+  merge queue; it integrates and verifies at the head, in order. State the
+  **decision**, never the outcome: the change is approved and
+  **enqueued into the merge queue** — it integrates, verifies, and merges at the
+  head. Do NOT assert the merge as already done — no "Merged", no "is now on master",
+  no past-tense merge claim — because the real merge happens later, at the queue head.
+  Close with a short summary listing any follow-ups created, each with its
+  `imp resume <id>` command.
 - Cannot proceed without a human and none is available, or an unrecoverable
   problem -> `complete_step(status="Success", decision="pause", comments="<why>", built=…,
   verify_status=…, open_items=…, next_steps=…)`.
