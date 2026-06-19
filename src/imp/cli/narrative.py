@@ -467,6 +467,15 @@ class NarrativeBuilder:
             self._closed_sub_by_block[fold.block_id] = fold
         self._closed_sub_by_event[fold.event_id] = fold
 
+    def _close_open_folds_at_step_end(self, ts: str | None) -> None:
+        for fold in list(self._open_sub_by_event.values()):
+            if not fold.running:
+                continue
+            self._open_sub_by_block.pop(fold.block_id, None)
+            self._open_sub_by_event.pop(fold.event_id, None)
+            self._remember_salvage_closed(fold)
+            _close_subagent_fold(fold, {}, ts)
+
     def add(self, event: Any) -> None:
         if not isinstance(event, dict) or "type" not in event:
             self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
@@ -728,6 +737,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    self._close_open_folds_at_step_end(event.get("timestamp"))
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
     if node is not None:

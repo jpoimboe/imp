@@ -330,16 +330,22 @@ def test_interleaved_sub_events_route_into_fold_without_breaking_burst() -> None
 
 
 def test_subagent_running_until_task_result_arrives() -> None:
-    tree = nv.build_tree(_step_events(
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
-            input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
-            stop_reason="end_turn", usage={}, raw={"content": []}),
-    ))   # NB: no task tool_result yet
-    step = _only_step(tree)
+    # Fold stays open mid-step when no tool_result has arrived yet...
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(_ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+              stop_reason="end_turn", usage={}, raw={"content": []}))
+    step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     assert sub.outcome is None
+    # ...but the backstop at step_completed closes it rather than leaving it running forever.
+    b.add(_ev("sc", "step_completed", step="s", kind="agent",
+              action={"verb": "continue"}, var_mutations={}))
+    assert sub.running is False
 
 
 def test_error_event_becomes_error_node() -> None:
@@ -1800,3 +1806,29 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
         folds["reviewer"].start_ts, folds["reviewer"].end_ts) == 10.0
     assert nv.elapsed_seconds(
         folds["tester"].start_ts, folds["tester"].end_ts) == 19.0
+
+
+def test_lost_task_result_resume_closed_at_step_completed() -> None:
+    # Backstop: a `task` fold opens, the parent streams a mid-turn chunk (no
+    # terminal stop_reason) so Task 1's guard keeps the fold open, and NO task
+    # tool_result ever arrives. step_completed must close the still-open fold so
+    # the live cursor advances off the dead subagent, stamping the step-end ts.
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic",
+             timestamp="2026-06-19T11:00:00+00:00"))
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+             input={"subagent_name": "reviewer", "task_description": "go"},
+             timestamp="2026-06-19T11:00:01+00:00"))
+    step = b._step_stack[-1]
+    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    b.add(ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="m", stop_reason=None, usage={},
+             raw={"content": [{"type": "text", "text": "working"}]},
+             timestamp="2026-06-19T11:00:02+00:00"))
+    assert fold.running is True                       # Task 1 keeps it open
+    b.add(ev("sc", "step_completed", step="s", kind="agent",
+             action={"verb": "continue"}, var_mutations={},
+             timestamp="2026-06-19T11:00:30+00:00"))
+    assert fold.running is False                      # backstop closed it
+    assert fold.end_ts == "2026-06-19T11:00:30+00:00"  # stamped the step-end ts
