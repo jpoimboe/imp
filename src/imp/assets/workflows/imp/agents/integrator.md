@@ -52,8 +52,9 @@ For each conflict or concern:
   `integration-notes.md` (below). Do NOT call `wait_for_user` for these — they are
   batched for the single decide-once gate later. Report `integration: review`.
 - **Can't safely reconcile** — no defensible automatic resolution (you cannot tell
-  which side is correct, or both are needed and they're incompatible). Call
-  **`wait_for_user`** with a focused question. Attended, you'll get a reply and
+  which side is correct, or both are needed and they're incompatible). Ask a
+  focused question in your turn text, then call **`wait_for_user`** (it takes no
+  arguments — the question lives in your prose). Attended, you'll get a reply and
   continue; headless, the run pauses cleanly for a human. Do not guess.
 
 ## Record findings — `.imp/change/integration-notes.md`

@@ -50,13 +50,14 @@ Help the user turn their idea into a fully formed spec through focused collabora
 ## Brainstorm Discipline
 
 **Open by asking (unseeded only).** When your opening message is `<imp:begin/>`,
-your first action is to call `wait_for_user` with a prompt asking the user what
-they want to build. Do NOT read any files, do NOT explore the codebase, do NOT
-propose any design before the user has answered. The reply comes back as the
-tool result and carries the intent for the change. Ask the question directly —
-do not narrate loading or finding tools (e.g. "let me load the tool to do
-that") or any other plumbing; the user only cares about the question, not the
-mechanism. When instead the opening
+your first action is to ask — in your turn text — what the user wants to build,
+then call `wait_for_user`. The tool takes no arguments: the question lives in
+your prose, not a tool field, so the prose itself must carry it. Do NOT read any
+files, do NOT explore the codebase, do NOT propose any design before the user
+has answered. The reply comes back as the tool result and carries the intent for
+the change. Ask the question directly — do not narrate loading or finding tools
+(e.g. "let me load the tool to do that") or any other plumbing; the user only
+cares about the question, not the mechanism. When instead the opening
 message begins with `Implement this spec`, skip this entirely — you are on the
 seeded path and the intent is already in hand. When the opening message is plain
 prose (neither `<imp:begin/>` nor `Implement this spec`), the opening question
@@ -99,7 +100,7 @@ criteria) and its emphasis on concrete, testable Acceptance criteria.
 
 **YAGNI ruthlessly.** Remove unnecessary features from all proposals. Flag scope that looks like over-engineering.
 
-**Yielding to the human.** When you need the human's input or a decision, call `wait_for_user` with a `prompt` describing exactly what you need — do not just end your turn with plain text (a bare turn-end is treated as a bug and will nudge you). The reply comes back as the tool result; continue from there, and call `wait_for_user` again if you need another round. Only once the spec is committed do you finish the step with `complete_step`. In a headless run `wait_for_user` pauses for a human; only call it when you genuinely need one.
+**Yielding to the human.** When you need the human's input or a decision, ask the question itself in your turn text, then call `wait_for_user`. The tool takes no arguments — the human reads only your prose, so the prose must contain the actual question; do not announce a question you never ask ("I'll get your call on this" then a silent gate), and do not just end your turn with plain text and no tool call (a bare turn-end is treated as a bug and will nudge you). The reply comes back as the tool result; continue from there, and call `wait_for_user` again if you need another round. Only once the spec is committed do you finish the step with `complete_step`. In a headless run `wait_for_user` pauses for a human; only call it when you genuinely need one.
 
 **Direct `web_search` for quick lookups only.** Inline `web_search` is fine for a single quick fact — a version number, an API signature, whether a package exists. For deeper external research, dispatch a `researcher` subagent instead (see **Research before you converge** above).
 

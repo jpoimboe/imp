@@ -87,7 +87,7 @@ the merge gate. The driver is already pointed at the worktree build, so:
   map; then reach the same screen and `mcp__impty__snapshot()` it.
 
 Drive read-only: do NOT change code, write files in the worktree, or commit.
-Carry both PNG paths into the merge-gate `wait_for_user` prompt (below), labelled
+Name both PNG paths in your merge-gate prose (below), labelled
 **before** and **after**, so the reviewer can open them before deciding. If the
 driver is unavailable or a capture fails, say so in one line and proceed — a
 missing capture never blocks the merge.
