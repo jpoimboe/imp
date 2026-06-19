@@ -339,3 +339,17 @@ def test_plan_verify_passes_plan_within_task_ceiling(tmp_path: Path) -> None:
     _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
     proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
     assert proc.returncode == 0
+
+
+def test_plan_verify_passes_plan_at_task_ceiling(tmp_path: Path) -> None:
+    # Exactly at the ceiling (12 tasks): the guard uses > so 12 must pass.
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    body = "# plan 1\n\n" + "".join(
+        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 13))    # 12 tasks
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    assert proc.returncode == 0
