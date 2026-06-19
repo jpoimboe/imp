@@ -169,6 +169,22 @@ def test_ensure_head_driven_empty_lane_is_noop(tmp_path) -> None:
     assert spawned == []                   # nothing to drive
 
 
+def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
+    Change.create(tmp_path, title="b", change_id="b", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "a", "main")        # head
+    mq.enqueue_if_absent(tmp_path, "b", "main")        # next
+    shutil.rmtree(tmp_path / ".imp" / "worktrees" / "b")   # next vanishes in the window
+    spawned: list = []
+    # Must not raise even though the next head can no longer be loaded.
+    mq.pop_and_wake(
+        tmp_path, "a", "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
+    assert all(e["change_id"] != "a" for e in mq.read(tmp_path))   # self still popped
+    assert spawned == []                                          # vanished head skipped
+    assert any(e["change_id"] == "b" for e in mq.read(tmp_path))   # b remains queued
+
+
 def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="a", change_id="a", base_branch="main")
