@@ -1473,3 +1473,36 @@ def test_termination_codeless_phrase_null_status_is_network() -> None:
         result(is_error=True), "API Error: Internal server error", {})
     assert isinstance(term, perr.NetworkError)
     assert term.category == "network"
+
+
+def test_build_client_installs_session_isolation_on_real_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_build_client installs isolation on the real arm but not the factory arm."""
+    import claude_agent_sdk as sdk
+
+    import imp.providers.claude_code_session as sessmod
+
+    installed: list[bool] = []
+    monkeypatch.setattr(
+        sessmod, "install_claude_session_isolation",
+        lambda: installed.append(True))
+
+    class _FakeSDKClient:
+        def __init__(self, opts: Any) -> None:
+            self.opts = opts
+
+    monkeypatch.setattr(sdk, "ClaudeSDKClient", _FakeSDKClient)
+
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5", client_factory=None)
+    client = runner._build_client("OPTS")
+    assert installed == [True], "isolation must be installed on the real-construction arm"
+    assert isinstance(client, _FakeSDKClient)
+    assert client.opts == "OPTS"
+
+    installed.clear()
+    factory_runner = ClaudeCodeAgentRunner(
+        "claude-sonnet-4-5", client_factory=lambda opts: ("factory", opts))
+    result = factory_runner._build_client("OPTS2")
+    assert result == ("factory", "OPTS2")
+    assert installed == [], "the test-factory arm must not install isolation"
