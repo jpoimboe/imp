@@ -76,12 +76,18 @@ async def serve_change_session(
 
     coordinator = InterruptCoordinator()
     socket_path = str(session_socket_path(change.control_root, change.id))
+    attach_log = change.event_log()
+
+    def _on_first_attach() -> None:
+        attach_log.append(agent_id=None, type="cli_attached", payload={})
+
     server = SessionServer(
         socket_path,
         coordinator=coordinator,
         lock=None,
         hibernate=hibernate,
         events_path=change.events_path,
+        on_first_attach=_on_first_attach,
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:

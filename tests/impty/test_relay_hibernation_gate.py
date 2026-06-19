@@ -11,11 +11,12 @@ Unconditional in the default suite: no IMP_LIVE_PROVIDERS / opted_in skip. The
 pty is required — a non-tty would exercise the Part A headless path, not the tty
 gate-render path this invariant guards.
 
-The script calls `bash sleep 1` before `wait_for_user` so the CLI has time to
-attach to the daemon socket (making attached_count > 0) before _hibernation_gate
-checks it.  Without that delay the scripted provider reaches the gate before the
-daemon's socket-serve task has accepted the incoming connection, causing an
-immediate headless-pause exit rather than the attended block the test needs.
+The script polls the change's events.jsonl for the daemon-emitted `cli_attached`
+event before `wait_for_user`, so the scripted provider blocks until the CLI has
+actually attached to the daemon socket (attached_count > 0) before
+_hibernation_gate checks it. The daemon writes `cli_attached` on the 0 -> 1
+attach transition; gating on that real signal — instead of a fixed sleep that
+races the attach — is what makes the test deterministic on loaded CI.
 """
 
 from __future__ import annotations
@@ -37,12 +38,47 @@ from tests.test_relay_hibernation_live import _event_types, _flock_free, _poll
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 
+# Bounded poll (~20s ceiling, then exit 0) on the change's events.jsonl for a
+# cli_attached marker that is FRESH for the current daemon instance. cwd is the
+# change worktree root, so the journal is at .imp/change/events.jsonl.
+#
+# cli_attached is written to the PERSISTENT journal and survives hibernation, so
+# the first-run marker is still present on the resume leg. The SAME scripted
+# script runs on BOTH legs, so a naive `grep cli_attached` matches the STALE
+# first-run marker on resume and short-circuits before the resume CLI has
+# attached; the gate then sees attached_count == 0 and the fresh daemon
+# hibernates instead of holding the flock. To distinguish the current instance's
+# attach, anchor the search to the last workflow_resumed: the daemon appends
+# workflow_resumed synchronously at _bound entry, BEFORE the socket starts
+# accepting (its start_soon tasks only run once _bound first awaits), so the
+# resume-leg cli_attached is guaranteed to land AFTER it. On the first leg there
+# is no workflow_resumed, base stays 0, and the whole file is scanned.
+#
+# Match the serialized JSON field `"type": "cli_attached"` / `"type":
+# "workflow_resumed"` (unescaped quotes) and NOT the bare word: the executor
+# journals THIS bash command's own tool_call event -- command text and all --
+# BEFORE running it (dispatch.py's append_tool_call precedes the tool
+# invocation), and the same command text is echoed in the preceding llm_response
+# raw payload. In both, json.dumps backslash-escapes the embedded quotes
+# (\"type\": \"cli_attached\"), so a pattern with literal unescaped quotes
+# matches only the real daemon event records and never this command's self-echo.
+# `: ?` tolerates either json separator spacing.
+_ATTACH_POLL = (
+    "J=.imp/change/events.jsonl; "
+    "for _ in $(seq 200); do "
+    "base=$(grep -nE '\"type\": ?\"workflow_resumed\"' \"$J\" 2>/dev/null "
+    "| tail -1 | cut -d: -f1); base=${base:-0}; "
+    "tail -n +$((base + 1)) \"$J\" 2>/dev/null "
+    "| grep -qE '\"type\": ?\"cli_attached\"' && break; "
+    "sleep 0.1; done; true"
+)
+
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 
 def _seed_scripted_gate_project(root: Path) -> Path:
     """Seed a scripted-provider repo whose single workflow step is an agent that
-    calls bash (to let the CLI attach) then wait_for_user. Returns script.json."""
+    calls bash (polling for the cli_attached marker) then wait_for_user. Returns script.json."""
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
@@ -70,9 +106,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
         {"default": [
             {"text": "waiting for you",
              "tools": [
-                 # sleep 1 gives the CLI time to attach to the daemon socket so
-                 # _hibernation_gate sees attached_count > 0 when wait_for_user runs.
-                 {"name": "bash", "input": {"command": "sleep 1"}},
+                 {"name": "bash", "input": {"command": _ATTACH_POLL}},
                  {"name": "wait_for_user", "input": {}},
              ]},
         ]}))
@@ -111,9 +145,14 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
         change = Change.load(tmp_path, slug)
         lock_path = change.change_dir / "lock"
 
+        # The daemon journals cli_attached on the 0 -> 1 attach; the scripted
+        # bash step blocks on that marker, so the provider only reaches
+        # wait_for_user once attached_count > 0 (no fixed-sleep race).
+        assert _wait_for_event(events, "cli_attached", timeout=30.0), (
+            "daemon never journaled cli_attached after the CLI attached"
+        )
         # The run reaches the natural wait_for_user gate while attended: the
         # daemon emits awaiting_user_input and holds the change flock there.
-        # (The bash sleep 1 ensures the CLI attached before wait_for_user ran.)
         assert _wait_for_event(events, "awaiting_user_input", timeout=30.0), (
             "never reached the wait_for_user gate"
         )

@@ -597,6 +597,86 @@ async def test_journaled_awaiting_input_is_replayed_once_not_doubled(
 
 
 @pytest.mark.anyio
+async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
+    from imp.engine.state import JsonlEventLog
+
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    log = JsonlEventLog(events_path)
+    release = anyio.Event()
+    sentinel = {"type": "agent_output", "payload": {"text": "live"}}
+    server = SessionServer(
+        sock,
+        events_path=events_path,
+        on_first_attach=lambda: log.append(
+            agent_id=None, type="cli_attached", payload={}),
+    )
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        on_event(sentinel)
+        await release.wait()
+        return "ok"
+
+    def _disk_records() -> list[dict[str, Any]]:
+        if not events_path.exists():
+            return []
+        return [json.loads(line) for line in events_path.read_text().splitlines()
+                if line.strip()]
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+
+        # 0 -> 1 attach: exactly one cli_attached is journaled, never broadcast.
+        client1 = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while not any(r["type"] == "cli_attached" for r in _disk_records()):
+                await anyio.sleep(0.02)
+        attached = [r for r in _disk_records() if r["type"] == "cli_attached"]
+        assert len(attached) == 1
+        rec = attached[0]
+        assert rec["agent_id"] is None
+        assert rec["payload"] == {}
+        assert rec["parent_id"] is None
+        assert isinstance(rec["id"], str) and rec["id"]
+        assert "timestamp" in rec
+
+        # 1 -> 2 attach: no second cli_attached.
+        client2 = await _attach(sock, "c2")
+        with anyio.fail_after(5):
+            while server.attached_count != 2:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.1)  # give any erroneous re-emit time to land
+        assert sum(1 for r in _disk_records() if r["type"] == "cli_attached") == 1
+
+        # cli_attached is journal-only: never on the first client's live stream.
+        buf1 = BufferedByteReceiveStream(client1)
+        seen1: list[dict[str, Any]] = []
+        with anyio.move_on_after(0.5):
+            while True:
+                seen1.append(parse_event(
+                    (await buf1.receive_until(b"\n", 1 << 20)).decode()))
+        assert sentinel in seen1
+        assert all(e.get("type") != "cli_attached" for e in seen1)
+
+        release.set()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        await client1.aclose()
+        await client2.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
 async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -> None:
     # hibernate=False keeps the gate open so a late client can still attach and reply.
     events_path = tmp_path / "events.jsonl"

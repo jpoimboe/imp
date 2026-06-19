@@ -808,6 +808,13 @@ NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
 NarrativeBuilder._HANDLERS["workflow_resumed"] = _h_workflow_resumed
 
 
+def _h_cli_attached(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    pass
+
+
+NarrativeBuilder._HANDLERS["cli_attached"] = _h_cli_attached
+
+
 def _h_awaiting_user_input(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
 ) -> None:
