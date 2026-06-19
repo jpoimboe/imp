@@ -3,13 +3,13 @@ description: |
   spec -> (plan -> implement*)* -> review -> merge
 
 
-# Single provider by design: review independence is by MODEL TIER (an opus panel
-# reviewing sonnet's work), not by vendor. Review fires on an ACCUMULATED-TASK
-# cadence decided by plan-cycle-check, which is the sole coverage guard: a single
-# `code-reviewer` per batch (review_base..HEAD) when tasks_since_review crosses
-# review_batch_size, and the full 4-member opus panel exactly once at change end
-# (review_scope=change, merge-base..HEAD). deferred-sweep is paired with each review;
-# verify and plan-review stay per-plan.
+# Single provider by design: review independence is by MODEL TIER (a high-tier
+# reviewer judging the medium-tier implementer's work), not by vendor. Review fires on
+# an ACCUMULATED-TASK cadence decided by plan-cycle-check, the sole coverage guard: a
+# single `code-reviewer` runs as the `review` step directly — per batch
+# (review_base..HEAD) when tasks_since_review crosses review_batch_size, and once over
+# the whole change at change end (review_scope=change, merge-base..HEAD). deferred-sweep
+# is paired with each review; verify and plan-review stay per-plan.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -194,12 +194,13 @@ phases:
           # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
           - {else: true, set: {review_scope: "'change'", change_panel_done: true, tasks_since_review: "output.running_tasks"}, goto: review}
 
-      # Per-batch = single code-reviewer over review_base..HEAD; end-of-change
-      # (review_scope==change) = the full 4-member opus panel over merge-base..HEAD.
-      # The review no longer judges coverage: verdict is approve | task_gap only.
+      # The review step IS the code-reviewer (no coordinator/panel): per-batch it
+      # reviews review_base..HEAD; at change end (review_scope==change) it reviews
+      # merge-base..HEAD. It routes — verdict is approve | task_gap only (coverage is
+      # plan-cycle-check's call, never the reviewer's).
       - name: review
-        file: agents/review-panel.md
-        tier: medium
+        file: agents/code-reviewer.md
+        tier: high
         max_loops: 6
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}

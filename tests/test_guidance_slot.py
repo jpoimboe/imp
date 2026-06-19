@@ -13,8 +13,7 @@ SCRIPTS = Path("src/imp/assets/workflows/imp/scripts")
 TARGETS = [
     "spec-writer", "plan-writer", "implementer",
     "spec-reviewer", "plan-reviewer", "code-reviewer", "quality-reviewer",
-    "review-panel", "plan-review-panel",
-    "completeness-slice", "spec-compliance-slice", "boundaries-slice",
+    "plan-review-panel",
 ]
 NON_TARGETS = [
     "task-lead", "integrator", "deferred-sweep", "plan-cycle-check",
