@@ -21,6 +21,12 @@ import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.ignore import (
+    is_ignored,
+    list_unignored,
+    partition_ignored,
+    repo_root,
+)
 from imp.agents.tools.limits import (
     ARTIFACTS_REL,
     EXCLUDED_DIRS,
@@ -32,12 +38,6 @@ from imp.agents.tools.limits import (
     read_text_capped,
     tool_checkpoint,
     within_artifacts,
-)
-from imp.agents.tools.ignore import (
-    is_ignored,
-    list_unignored,
-    partition_ignored,
-    repo_root,
 )
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
@@ -156,8 +156,10 @@ async def _grep_file_source(target: Path, root: Path, inside: bool,
         "src/**/*.ts) under an optional `path` base (default '.'). Absolute "
         "and out-of-worktree bases are accepted, bounded by the sandbox like "
         "bash; in-worktree matches are reported relative to the root, external "
-        "matches as absolute paths. Skips .imp/ and .git/ except the change's "
-        ".imp/change/artifacts/ subtree. Uses pathlib glob "
+        "matches as absolute paths. Skips paths git ignores (build artifacts, "
+        "caches, .venv, etc.) and the .git/ dir; the change's "
+        ".imp/change/artifacts/ subtree stays visible, and explicitly targeting "
+        "an ignored path searches it anyway. Uses pathlib glob "
         "semantics — a bare *.py matches top-level files only; this differs "
         "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
         "stays relative; search elsewhere via `path`, not an absolute pattern."
@@ -260,8 +262,11 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "content (`…[truncated]` on >2000-char lines, U+FFFD for invalid "
         "bytes) plus the invisible trailing \\r that IS content on CRLF "
         "lines — never paste rows into edit_file/write_file. "
-        "Skips .imp/ and .git/ except the change's .imp/change/artifacts/ subtree; "
-        "scans the first 5 MB per file; output capped "
+        "Skips paths git ignores (build artifacts, caches, .venv, etc.), the "
+        ".git/ dir, and binary files (like ripgrep); the change's "
+        ".imp/change/artifacts/ subtree stays visible, and explicitly targeting "
+        "an ignored path searches it anyway. "
+        "Scans the first 5 MB per file; output capped "
         "at 50 KB. Absolute and out-of-worktree paths are accepted, bounded by "
         "the sandbox like bash (in-worktree matches reported relative, external "
         "matches as absolute paths); an external-directory search stops after a "

@@ -568,6 +568,26 @@ def test_glob_escape_hatch_explicit_ignored_base(tmp_path: Path) -> None:
     assert "build/out.o" in out
 
 
+def test_glob_description_documents_gitignore_skip() -> None:
+    desc = get_registry()["glob"].description
+    assert "git ignores" in desc
+    assert ".imp/change/artifacts/" in desc
+    assert "searches it anyway" in desc
+    # retained guarantees
+    assert "bounded by the sandbox like bash" in desc
+
+
+def test_grep_description_documents_gitignore_and_binary() -> None:
+    desc = get_registry()["grep"].description
+    assert "git ignores" in desc
+    assert ".imp/change/artifacts/" in desc
+    assert "searches it anyway" in desc
+    assert "binary" in desc
+    # retained guarantees
+    assert "bounded by the sandbox like bash" in desc
+    assert "external" in desc and "cap" in desc
+
+
 def test_glob_git_failure_degrades_to_no_gitignore_filter(tmp_path: Path, monkeypatch) -> None:
     import imp.agents.tools.nav as nav_mod
 
