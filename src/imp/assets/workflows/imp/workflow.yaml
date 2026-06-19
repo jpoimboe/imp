@@ -207,6 +207,7 @@ phases:
           - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
+          - {if: {status: Error}, pause: true}
           - {else: true, continue: true}
 
       - name: deferred-sweep
