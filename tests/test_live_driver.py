@@ -1251,3 +1251,27 @@ def test_unlabeled_forward_goto_has_no_label_segment() -> None:
     assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
     assert not any(" ·  · " in ln for ln in body)   # no empty segment
     assert body == _render_body(events)
+
+
+def test_current_activity_anchors_timer_to_in_flight_call() -> None:
+    # Timer anchors to the running call (c2), not a resolved (c1) or killed (c3) call.
+    clock = [50.0]
+    b = nv.NarrativeBuilder(now=lambda: clock[0])
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="read_file",
+            input={"p": "x"}))           # stamped at clock=50.0
+    b.add(ev("r1", "tool_result", agent_id="a", id="c1", content="ok"))
+    clock[0] = 70.0
+    b.add(ev("t2", "tool_call", agent_id="a", id="c2", name="bash",
+            input={"command": "ls"}))    # stamped at clock=70.0, still running
+    clock[0] = 71.0
+    b.add(ev("t3", "tool_call", agent_id="a", id="c3", name="grep",
+            input={"q": "y"}))           # stamped at clock=71.0
+    b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))  # c3 killed
+    clock[0] = 73.0
+    act = b.current_activity()
+    assert act is not None
+    assert act.step == "s"               # the open step name
+    assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
+    assert act.count == "3 calls"        # retained Activity.count basis keeps killed
+    assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0

@@ -14,6 +14,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -143,6 +144,7 @@ class ToolCall:
     is_error: bool = False
     killed: bool = False
     call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
+    call_started: float | None = None  # monotonic anchor for the live per-call timer
     citations_footer: str = ""          # §2: rendered as the block's final line, outside the clip
 
 
@@ -172,6 +174,8 @@ class Activity:
     count: str | None = None
     detail: str | None = None
     label: str | None = None
+    step: str | None = None          # open step name (in-flight burst status)
+    call_elapsed: float | None = None  # monotonic seconds for the in-flight call
 
 
 def activity_to_text(activity: Activity | None) -> str:
@@ -342,7 +346,8 @@ class NarrativeBuilder:
       2. else dispatch by event type at the current open scope.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, now: Callable[[], float] = time.monotonic) -> None:
+        self._now = now
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
         self._current_phase: PhaseNode | None = None
@@ -417,18 +422,30 @@ class NarrativeBuilder:
             if basis:
                 n = len(basis)
                 count = f"{n} call{'s' if n != 1 else ''}"
-                named = next((c for c in reversed(basis) if not c.killed), None)
+                # In-flight = the call actually still running: no result AND not
+                # killed. A killed call keeps result is None (_h_tool_killed only
+                # sets killed=True), so it must be excluded or the timer would tick
+                # forever on a dead call. Anchors to the wedged call, not a resolved
+                # or killed one.
+                inflight = next(
+                    (c for c in reversed(basis)
+                     if c.result is None and not c.killed), None)
                 detail = None
-                if named is not None:
+                call_elapsed = None
+                if inflight is not None:
                     arg = _sanitize_activity_arg(
-                        next(iter((named.input or {}).values()), ""))
-                    detail = f"{display_tool_name(named.name)} {arg}".rstrip()
-                return Activity(count=count, detail=detail)
+                        next(iter((inflight.input or {}).values()), ""))
+                    detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
+                    if inflight.call_started is not None:
+                        call_elapsed = self._now() - inflight.call_started
+                step = self._step_stack[-1].name if self._step_stack else None
+                return Activity(count=count, detail=detail, step=step,
+                                call_elapsed=call_elapsed)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
-            step = self._step_stack[-1]
-            verb = "running" if step.kind in CHROME_KINDS else "thinking"
-            return Activity(label=f"{step.name} · {verb}")
+            top = self._step_stack[-1]
+            verb = "running" if top.kind in CHROME_KINDS else "thinking"
+            return Activity(label=f"{top.name} · {verb}")
         if self._current_phase is not None:
             return Activity(label=f"{self._current_phase.name} · working")
         return None
@@ -1051,7 +1068,8 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     call = ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
-        input=p.get("input") or {}, call_ts=event.get("timestamp"))
+        input=p.get("input") or {}, call_ts=event.get("timestamp"),
+        call_started=self._now())
     burst.calls.append(call)
     if call.name == "wait_for_user":
         self._pending_wfu[call.call_id] = str((call.input or {}).get("prompt", ""))
