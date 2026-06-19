@@ -41,8 +41,8 @@ def _append_workflow_resumed(log: EventLog) -> None:
         log.append(agent_id=None, type="workflow_resumed", payload={})
 
 
-def _last_pause_was_awaiting_turn(change: Change) -> bool:
-    for event in reversed(list(change.event_log().read())):
+def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
+    for event in reversed(list(log.read())):
         etype = event.get("type")
         if etype == "workflow_paused":
             return (event.get("payload") or {}).get("reason") == "awaiting_turn"
@@ -164,7 +164,7 @@ async def serve_change_session(
     if server.abandoned:
         # cwd is control_root, not the worktree, so worktree removal is safe
         await anyio.to_thread.run_sync(tear_down, change)
-    elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(change):
+    elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(change.event_log()):
         await anyio.to_thread.run_sync(
             ensure_head_driven, change.control_root, change.base_branch)
     return result
