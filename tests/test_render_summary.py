@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from imp.cli.render_summary import StepRow, build_summary
+import pytest
+
+from imp.cli.render_summary import StepRow, build_summary, _fmt_compact
 
 
 def _started(step: str, phase: str, ts: str) -> dict:
@@ -91,3 +93,15 @@ def test_interrupt_config_error_does_not_mark_errored():
          "payload": {"category": "config", "kind": "interrupted"}},
     ])
     assert rows[-1].errored is False
+
+
+@pytest.mark.parametrize("seconds, expected", [
+    (90, "1m30s"),
+    (4, "0m04s"),
+    (588, "9m48s"),
+    (330, "5m30s"),
+    (2342, "39m02s"),
+    (0, "0m00s"),
+])
+def test_fmt_compact(seconds, expected):
+    assert _fmt_compact(seconds) == expected

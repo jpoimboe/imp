@@ -69,3 +69,8 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
     return rows
+
+
+def _fmt_compact(seconds: float) -> str:
+    total = int(seconds)
+    return f"{total // 60}m{total % 60:02d}s"
