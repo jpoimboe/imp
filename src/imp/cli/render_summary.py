@@ -6,7 +6,7 @@ from typing import Any
 
 from imp.cli import palette as pal
 from imp.cli.change_row import _STATUS_COLORS
-from imp.cli.narrative import _elapsed_seconds
+from imp.cli.narrative import elapsed_seconds
 
 
 @dataclass
@@ -21,7 +21,7 @@ class StepRow:
     @property
     def wall_seconds(self) -> float | None:
         """start → completion wall clock; None for an open (still-running) step."""
-        return _elapsed_seconds(self.start_ts, self.end_ts)
+        return elapsed_seconds(self.start_ts, self.end_ts)
 
 
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
@@ -37,7 +37,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     def _close_wait(now_ts: str | None) -> None:
         nonlocal pending_wait_start
         if pending_wait_start is not None and open_row is not None:
-            delta = _elapsed_seconds(pending_wait_start, now_ts)
+            delta = elapsed_seconds(pending_wait_start, now_ts)
             if delta is not None and delta > 0:
                 open_row.wait_seconds += delta
         pending_wait_start = None
@@ -91,7 +91,7 @@ _WAIT_THRESHOLD = 5.0
 def summary_total(events: list[dict[str, Any]]) -> float | None:
     if not events:
         return None
-    return _elapsed_seconds(events[0].get("timestamp"), events[-1].get("timestamp"))
+    return elapsed_seconds(events[0].get("timestamp"), events[-1].get("timestamp"))
 
 
 def _header_line(h: SummaryHeader, *, color: bool) -> str:

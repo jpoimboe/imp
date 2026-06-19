@@ -762,7 +762,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
-        elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
+        elapsed = elapsed_seconds(node.start_ts, event.get("timestamp"))
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
@@ -956,10 +956,10 @@ def phase_elapsed(phase: PhaseNode) -> float | None:
     steps = [c for c in phase.children if isinstance(c, StepNode)]
     if not steps:
         return None
-    return _elapsed_seconds(steps[0].start_ts, steps[-1].end_ts)
+    return elapsed_seconds(steps[0].start_ts, steps[-1].end_ts)
 
 
-def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
+def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
     """Diff two ISO-8601 timestamps (state.py writes datetime.now(UTC).isoformat()).
     Returns None when either endpoint is missing or unparseable (issue 3)."""
     if not start_ts or not isinstance(end_ts, str) or not end_ts:
