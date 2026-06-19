@@ -1742,3 +1742,91 @@ async def test_agent_step_without_outcome_fails_to_complete(tmp_path: Path) -> N
 
     state = State.load(change.state_dir)
     assert state.outcome_history == {}
+
+
+def test_render_prior_attempts_format() -> None:
+    from imp.engine.executor import _render_prior_attempts
+
+    text = _render_prior_attempts("review", [
+        {"lap": 2, "outcome": "plan still on the code branch — rework"},
+        {"lap": 4, "outcome": "same finding: plan on code branch — rework"},
+    ])
+    expected = (
+        '⟳ Prior attempts at this step:\n'
+        '   lap 2:  review — "plan still on the code branch — rework"\n'
+        '   lap 4:  review — "same finding: plan on code branch — rework"'
+    )
+    assert text == expected
+
+
+@pytest.mark.anyio
+async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n")
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n")
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, tier: medium}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: medium\n"
+        "        max_loops: 3\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer}\n"
+        "          - {else: true, continue: true}\n")
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+
+    writer_openings: list[str] = []
+    review_count = [0]
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "writer":
+                writer_openings.append(
+                    invocation.initial_messages[0].content[0].text)
+                yield {"type": "agent_output", "payload": {
+                    "status": "Success", "outcome": "WROTE THE PLAN"}}
+            else:
+                verdict = "rework" if review_count[0] == 0 else "approve"
+                review_count[0] += 1
+                yield {"type": "agent_output", "payload": {
+                    "status": "Success", "verdict": verdict, "outcome": "reviewed"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    # Writer ran twice: the fresh entry, then the rework re-entry.
+    assert len(writer_openings) == 2
+    assert "Prior attempts at this step:" not in writer_openings[0]
+    assert "Prior attempts at this step:" in writer_openings[1]
+    assert "WROTE THE PLAN" in writer_openings[1]
+    assert "lap 1" in writer_openings[1]

@@ -83,6 +83,13 @@ def _record_outcome(state: State, step_name: str, output: dict[str, Any]) -> Non
     del hist[:-OUTCOME_HISTORY_K]
 
 
+def _render_prior_attempts(step_name: str, entries: list[dict[str, Any]]) -> str:
+    lines = ["⟳ Prior attempts at this step:"]
+    for e in entries:
+        lines.append(f'   lap {e["lap"]}:  {step_name} — "{e["outcome"]}"')
+    return "\n".join(lines)
+
+
 class RunResult(Enum):
     COMPLETED = "completed"
     PAUSED = "paused"
@@ -327,11 +334,20 @@ async def run_change(
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
-            # stash optional wrapper feedback for the target step to consume
-            if (isinstance(action, Goto) and feedback_text is not None
-                    and target_idx is not None and target_idx < len(flat)):
-                state.retry_feedback = {
-                    "target_step": flat[target_idx].name, "text": feedback_text}
+            # Stash wrapper feedback for the target step to consume via the
+            # fresh-entry opening message: the goto's rework feedback and/or a
+            # prior-attempts memory of the target step's own recent outcomes.
+            if isinstance(action, Goto) and target_idx is not None and target_idx < len(flat):
+                target_name = flat[target_idx].name
+                preamble = None
+                if target_idx <= idx:  # backward or self goto = a rework re-entry
+                    entries = state.outcome_history.get(target_name)
+                    if entries:
+                        preamble = _render_prior_attempts(target_name, entries)
+                parts = [p for p in (preamble, feedback_text) if p is not None]
+                if parts:
+                    state.retry_feedback = {
+                        "target_step": target_name, "text": "\n\n".join(parts)}
 
             # §3 case 2 — an in-flight interrupt pauses AFTER navigation, so
             # re-entry starts the navigated-to step and §2 pending texts reach it.
