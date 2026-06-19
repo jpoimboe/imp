@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.render_summary import StepRow, build_summary, _fmt_compact
+from imp.cli.render_summary import (
+    StepRow,
+    SummaryHeader,
+    _fmt_compact,
+    build_summary,
+    render_summary,
+    summary_total,
+)
 
 
 def _started(step: str, phase: str, ts: str) -> dict:
@@ -105,9 +112,6 @@ def test_interrupt_config_error_does_not_mark_errored():
 ])
 def test_fmt_compact(seconds, expected):
     assert _fmt_compact(seconds) == expected
-
-
-from imp.cli.render_summary import SummaryHeader, render_summary, summary_total
 
 
 def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):

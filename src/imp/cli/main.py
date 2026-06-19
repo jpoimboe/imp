@@ -1263,9 +1263,27 @@ def _cmd_log(args: argparse.Namespace) -> int:
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
 
-    tree = narrative.build_tree(events)
     width = _term_width()
     color = should_use_color(sys.stdout)
+
+    if args.summary:
+        from imp.cli.render_summary import (
+            SummaryHeader,
+            build_summary,
+            render_summary,
+            summary_total,
+        )
+        row = _row_for_id(control, change_id)
+        status = row[1] if row is not None else "?"
+        workflow = parse_default_workflow(control / "imp" / "project.yaml")
+        header = SummaryHeader(workflow=workflow, change_id=change_id,
+                               status=status, total_seconds=summary_total(events))
+        for line in render_summary(build_summary(events), header=header,
+                                   color=color, width=width):
+            print(line)
+        return 0
+
+    tree = narrative.build_tree(events)
     lines = render_tree(tree, full=args.full, color=color, width=width)
     # Lines carry no trailing newline; print() adds one. No pager — straight to stdout.
     for line in lines:
@@ -2045,9 +2063,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "token", nargs="?",
         help="Change id or its short token (omit for the most recent Change).")
-    p_log.add_argument(
+    p_log_mode = p_log.add_mutually_exclusive_group()
+    p_log_mode.add_argument(
         "--full", action="store_true",
         help="Render every event (no tool-burst collapse).",
+    )
+    p_log_mode.add_argument(
+        "-s", "--summary", action="store_true",
+        help="Compact run-overview timeline: one line per step occurrence, "
+             "grouped by phase, with wall-clock durations.",
     )
     p_log.set_defaults(func=_cmd_log)
 

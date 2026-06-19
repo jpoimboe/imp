@@ -25,7 +25,7 @@ class StepRow:
 
 
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
-    # The executor's interrupt marker is not a terminal failure (narrative._h_error special-cases the same shape).
+    # Executor's interrupt marker is not a terminal failure; narrative._h_error same shape.
     return p.get("category") == "config" and p.get("kind") == "interrupted"
 
 
@@ -43,8 +43,6 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         pending_wait_start = None
 
     for e in events:
-        if not isinstance(e, dict):
-            continue
         etype = e.get("type")
         ts = e.get("timestamp")
         raw = e.get("payload")
@@ -54,7 +52,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             step = str(p.get("step", "?"))
             phase = str(p.get("phase", "?"))
             _close_wait(ts)
-            # Resume re-entry: same step still open in same phase (paused mid-flight, no step_completed).
+            # Resume re-entry: same step still open — fold into existing occurrence.
             if (open_row is not None and open_row.end_ts is None
                     and open_row.step == step and open_row.phase == phase):
                 continue
