@@ -157,9 +157,6 @@ def test_verify_and_sweep_verify_share_tree_skip_cache(tmp_path: Path) -> None:
 def test_baseline_verify_clean_leaves_no_record(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
-    _git_init(project)
-    (project / "a.txt").write_text("1")
-    _git_commit_all(project, "c1")
     proc = _run("baseline-verify.sh", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "true"})
     assert proc.returncode == 0, proc.stderr
@@ -169,9 +166,6 @@ def test_baseline_verify_clean_leaves_no_record(tmp_path: Path) -> None:
 def test_baseline_verify_red_captures_baseline_entry(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
-    _git_init(project)
-    (project / "a.txt").write_text("1")
-    _git_commit_all(project, "c1")
     proc = _run("baseline-verify.sh", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_VERIFY_COMMAND": "sh -c 'echo FAILED_TEST_X; exit 1'"})
