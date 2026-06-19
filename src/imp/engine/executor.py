@@ -1012,6 +1012,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
             worktree=change.project_root, control_root=change.control_root,
             change_id=change.id, cfg=cfg, engine_env_result=eng,
             environ=os.environ, available=sandbox_available(),
+            change_dir=change.change_dir,
         )
     except SandboxUnavailable as exc:
         _emit(log, "sandbox_unavailable", {"message": str(exc)}, agent_id=None)

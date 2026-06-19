@@ -38,6 +38,7 @@ class SandboxPolicy:
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
+    change_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
 
     def allows_read(self, path: Path) -> bool:
         """In-process mirror of the sandbox's read exposure: the whole host is
@@ -61,6 +62,7 @@ class SandboxPolicy:
             ("/tmp", "rw"),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
+            *([(self.change_home, "rw")] if self.change_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],
@@ -217,7 +219,7 @@ def _existing(paths: list[str]) -> tuple[str, ...]:
 def resolve_policy(
     *, worktree: Path, control_root: Path, change_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    available: bool,
+    available: bool, change_dir: Path | None = None,
 ) -> SandboxPolicy:
     """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
 
@@ -266,6 +268,7 @@ def resolve_policy(
         active=True,
         worktree=str(worktree),
         git_common_dir=str(git),
+        change_home=str(change_dir) if change_dir is not None else "",
         git_ro_remask=tuple(remask),
         writable_caches=caches,
         extra_readable=tuple(cfg.extra_readable),
