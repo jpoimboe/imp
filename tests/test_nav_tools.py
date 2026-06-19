@@ -604,3 +604,40 @@ def test_glob_git_failure_degrades_to_no_gitignore_filter(tmp_path: Path, monkey
     # With partition_ignored failing, ignored build/ is NOT filtered
     assert "ok.py" in out
     assert "build/out.py" in out
+
+
+def test_grep_no_repo_fallback_uses_excluded_dirs_not_gitignore(tmp_path: Path) -> None:
+    # No git repo: grep falls back to os.walk + EXCLUDED_DIRS ({".imp", ".git"}).
+    # A directory that git would normally ignore (build/) is still searched.
+    (tmp_path / "real.py").write_text("NEEDLE here\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "out.py").write_text("NEEDLE in build\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "real.py" in out
+    assert "build/out.py" in out   # not ignored — fallback uses EXCLUDED_DIRS only
+
+
+def test_grep_git_path_respects_sandbox_masking(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "ok.py").write_text("NEEDLE ok\n")
+    (tmp_path / "secret.py").write_text("NEEDLE secret\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-qm", "add files"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    ctx = _ctx(tmp_path)
+    ctx.sandbox_policy = _policy(tmp_path, secret_files=(str(tmp_path / "secret.py"),))
+    out = _grep(ctx, pattern="NEEDLE", path=".")
+    assert "ok.py" in out
+    assert "secret.py" not in out
+
+
+def test_grep_binary_skip_on_escape_hatch_path(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "text.txt").write_text("NEEDLE text\n")
+    (tmp_path / "build" / "bin.dat").write_bytes(b"NEEDLE\x00binary content\n")
+    # Explicitly targeting ignored build/ triggers the escape hatch (plain os.walk).
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path="build")
+    assert "build/text.txt" in out
+    assert "bin.dat" not in out
