@@ -31,10 +31,17 @@ CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge"})
 _TURN_END_STOP_REASONS: frozenset[str] = frozenset(
     {"end_turn", "stop_sequence", "max_tokens"})
 
+# OpenAI Responses terminal statuses (stored as stop_reason); non-terminal = not turn-end
+_OPENAI_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"completed", "incomplete", "failed", "cancelled"})
+
 
 def _llm_response_is_turn_end(payload: dict[str, Any]) -> bool:
     # load-bearing: codex None = turn-end; claude_code None = mid-stream fragment
-    if payload.get("provider") == "codex":
+    provider = payload.get("provider")
+    if provider == "openai":
+        return payload.get("stop_reason") in _OPENAI_TERMINAL_STATUSES
+    if provider == "codex":
         return True
     return payload.get("stop_reason") in _TURN_END_STOP_REASONS
 
