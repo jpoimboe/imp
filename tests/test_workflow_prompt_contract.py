@@ -464,3 +464,8 @@ def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
     assert "new tolerated" in low
     # Else branch: any failure outside the tolerated set -> solicit the human.
     assert "solicit" in low
+    # It now refers to "the recorded tolerated set", not the old baseline ∪ flaky union.
+    assert "recorded tolerated set" in low
+    assert "baseline ∪ flaky" not in text
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
