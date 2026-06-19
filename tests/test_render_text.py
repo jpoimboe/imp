@@ -1426,3 +1426,21 @@ def test_breadcrumb_without_label_is_bare_arrow() -> None:
     assert "→ merge" in crumb
     assert "entering the merge queue" not in crumb
     assert " ·  · " not in crumb            # no empty segment when label absent
+
+
+def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
+    events = [
+        _ev("1", "change_created", change_id=1, title="x"),
+        _ev("2", "step_started", step="finalize", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("3", "step_completed", step="finalize", kind="agent",
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            var_mutations={}, label="entering the merge queue"),
+        _ev("4", "step_started", step="wait-for-head", kind="wait_for_head",
+            phase="merge", model="m", provider="anthropic"),
+        _ev("5", "step_completed", step="wait-for-head", kind="wait_for_head",
+            action={"verb": "continue"}, var_mutations={}, label=None),
+    ]
+    out = "\n".join(_lines(events))
+    assert "finalize complete · → merge · entering the merge queue" in out

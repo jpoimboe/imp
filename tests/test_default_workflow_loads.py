@@ -129,3 +129,14 @@ def test_no_agent_prompt_uses_artifacts_namespace() -> None:
     for md in (bundled_workflow_dir("imp") / "agents").glob("*.md"):
         body = md.read_text()
         assert "{{ artifacts" not in body, md.name
+
+
+def test_finalize_merge_route_is_labeled_integration_resolve_is_not() -> None:
+    # The byte-identical {decision: merge} rule lives on BOTH finalize and
+    # integration-resolve; only finalize's is labeled (spec caution).
+    wf = _wf()
+    steps = {s.name: s for s in wf.flat_steps()}
+    fin = steps["finalize"].rules[0]
+    assert fin.label == "entering the merge queue"
+    ir = steps["integration-resolve"].rules[0]
+    assert ir.label is None
