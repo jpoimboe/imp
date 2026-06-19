@@ -54,7 +54,8 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", change_id="zzz999", base_branch="main")
     meta = json.loads((ch.change_dir / "change.json").read_text())
-    assert set(meta) == {"id", "title", "base_branch", "created_at", "depends_on"}
+    assert set(meta) == {"id", "title", "base_branch", "created_at",
+                         "depends_on", "project_root"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
@@ -113,6 +114,35 @@ def test_workflow_dir_prefers_snapshot_when_present(tmp_path: Path) -> None:
     # Once the snapshot exists, workflow_dir resolves to it, NOT the live dir.
     assert ch.workflow_dir == snapshot
 
+
+
+def test_create_persists_project_root(tmp_path: Path) -> None:
+    import json
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="prr", base_branch="main")
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["project_root"] == str((tmp_path / ".imp" / "worktrees" / "prr").resolve())
+
+
+def test_load_reads_persisted_project_root(tmp_path: Path) -> None:
+    import json
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="lrr", base_branch="main")
+    # Rewrite the field to a sentinel to prove load READS it rather than
+    # re-deriving project_root by worktree convention.
+    meta_path = ch.change_dir / "change.json"
+    meta = json.loads(meta_path.read_text())
+    meta["project_root"] = "/sentinel/root"
+    meta_path.write_text(json.dumps(meta))
+    assert Change.load(tmp_path, "lrr").project_root == Path("/sentinel/root")
+
+
+def test_set_project_root_rewrites_change_json(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="spr", base_branch="main")
+    ch.set_project_root(Path("/new/wt"))
+    assert ch.project_root == Path("/new/wt")
+    assert Change.load(tmp_path, "spr").project_root == Path("/new/wt")
 
 
 def test_live_workflow_dir_ignores_the_snapshot(tmp_path: Path) -> None:

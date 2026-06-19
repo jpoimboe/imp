@@ -45,6 +45,13 @@ class Change:
                             "new_title": name, "handle": self.handle})
         return self.handle
 
+    def set_project_root(self, new_root: Path) -> None:
+        self.project_root = new_root
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["project_root"] = str(new_root)
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
     @property
     def live_workflow_dir(self) -> Path:
         from imp.providers.config import parse_default_workflow
@@ -84,6 +91,7 @@ class Change:
             "id": change_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
+            "project_root": str(wt_path),
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -139,7 +147,10 @@ class Change:
         if not change_dir.is_dir():
             raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
+        project_root = (Path(meta["project_root"])
+                        if meta.get("project_root") else wt_path)
         return cls(
             id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],
-            control_root=control_root, project_root=wt_path, change_dir=change_dir,
+            control_root=control_root, project_root=project_root,
+            change_dir=change_dir,
         )
