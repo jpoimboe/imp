@@ -951,3 +951,66 @@ def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> No
     change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     # No events at all — the fallback must be False
     assert daemon._last_pause_was_awaiting_turn(change) is False
+
+
+@pytest.mark.anyio
+async def test_awaiting_turn_hibernation_exit_drives_now_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.attach as attach_mod
+    from imp.engine import merge_queue as mq
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb is now the lane head
+
+    spawned: list = []
+    monkeypatch.setattr(
+        attach_mod, "spawn_session_daemon",
+        lambda ch, **kw: spawned.append((ch.id, kw.get("resume"))))
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        change.event_log().append(
+            agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(change, run_fn=fake_run, hibernate=False)
+
+    assert result is RunResult.PAUSED
+    assert spawned == [("bbb", True)]    # hook re-drove the now-head after lock release
+
+
+@pytest.mark.anyio
+async def test_non_awaiting_turn_pause_does_not_drive_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.attach as attach_mod
+    from imp.engine import merge_queue as mq
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb IS head, yet no spawn
+
+    spawned: list = []
+    monkeypatch.setattr(
+        attach_mod, "spawn_session_daemon", lambda ch, **kw: spawned.append(ch.id))
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        change.event_log().append(
+            agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(change, run_fn=fake_run, hibernate=False)
+
+    assert result is RunResult.PAUSED
+    assert spawned == []   # a user-pause exit suppresses the handoff-repair hook

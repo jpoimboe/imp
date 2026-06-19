@@ -14,6 +14,7 @@ from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
+from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.recovery import GateBypassRequired, RewindError
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State
 from imp.remote.session.discover import session_socket_path
@@ -163,6 +164,9 @@ async def serve_change_session(
     if server.abandoned:
         # cwd is control_root, not the worktree, so worktree removal is safe
         await anyio.to_thread.run_sync(tear_down, change)
+    elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(change):
+        await anyio.to_thread.run_sync(
+            ensure_head_driven, change.control_root, change.base_branch)
     return result
 
 
