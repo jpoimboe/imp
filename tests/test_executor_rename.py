@@ -55,7 +55,7 @@ class _RenamingRunner:
         ch = invocation.change
         if ch is not None and ch.title == "x":
             ch.rename("Renamed Thing", log=invocation.event_log or ch.event_log())
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
         pass
@@ -176,7 +176,7 @@ class _RecordingRunner:
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
         self._sink[invocation.agent_id] = invocation.initial_messages
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
         pass

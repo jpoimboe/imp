@@ -851,3 +851,53 @@ async def test_real_wait_for_user_solicit_is_not_torn_down_by_watchdog(
         and e["payload"].get("kind") == "stalled"
     ]
     assert stalls == []                            # no false config/stalled teardown
+
+
+def test_build_agent_invocation_injects_outcome_field_when_requested(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        change_context=_cc(tmp_path),
+        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
+        fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        subagent_defs={}, tiers=(), max_tool_calls=None,
+        agent_id="step:p/s", event_log=None, change_state=None,
+        first_event_parent_id=None, resolved_tiers=None, coordinator=None,
+        inject_outcome_field=True)
+
+    fields = inv.agent_def.output_schema.fields
+    outcome = next(f for f in fields if f.name == "outcome")
+    assert outcome.required is True
+    assert outcome.type == "string"
+    assert outcome.description != ""  # model-facing guidance is present
+
+
+def test_build_agent_invocation_omits_outcome_field_by_default(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        change_context=_cc(tmp_path),
+        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
+        fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        subagent_defs={}, tiers=(), max_tool_calls=None,
+        agent_id="step:p/s", event_log=None, change_state=None,
+        first_event_parent_id=None, resolved_tiers=None, coordinator=None)
+
+    assert "outcome" not in [f.name for f in inv.agent_def.output_schema.fields]
+
+
+def test_with_outcome_field_is_idempotent() -> None:
+    from imp.engine.agent_run import with_outcome_field
+
+    once = with_outcome_field(_agent())
+    twice = with_outcome_field(once)
+    names = [f.name for f in twice.output_schema.fields]
+    assert names.count("outcome") == 1

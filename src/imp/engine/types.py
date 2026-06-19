@@ -105,6 +105,7 @@ class OutputField:
     type: Literal["string", "int", "bool", "enum", "object"]
     values: tuple[str, ...] = ()  # for enum
     required: bool = True
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)

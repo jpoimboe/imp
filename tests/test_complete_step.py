@@ -42,3 +42,19 @@ def test_schema_normalized_for_anthropic() -> None:
     assert "$defs" not in s
     # Strictness against LLM fabrication.
     assert s.get("additionalProperties") is False
+
+
+def test_field_description_threads_into_tool_schema() -> None:
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="status", type="enum",
+                        values=("Success", "Error"), required=True),
+            OutputField(name="outcome", type="string", required=True,
+                        description="one-line outcome + disposition"),
+        ),
+        source=SourceLoc(file=Path("agent.md"), line=1),
+    )
+    props = make_complete_step_tool(schema).input_schema["properties"]
+    assert props["outcome"]["description"] == "one-line outcome + disposition"
+    # A field with no description carries no description key.
+    assert "description" not in props["status"]

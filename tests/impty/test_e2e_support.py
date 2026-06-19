@@ -21,7 +21,7 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
             'cd "$IMP_PROJECT_ROOT" && mkdir -p src && '
             f'printf "# {sentinel}\\n" > src/marker.py && '
             'git add src/marker.py && git commit -qm "feat: marker"')}},
-        {"name": "complete_step", "input": {"status": "Success"}},
+        {"name": "complete_step", "input": {"status": "Success", "outcome": "ok"}},
     ]}]}
     script_path = seed_minimal_repo(tmp_path, script=script)
 

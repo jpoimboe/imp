@@ -199,7 +199,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     class _ReworkRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             yield {"type": "agent_output",
-                   "payload": {"status": "Success", "verdict": "rework"}}
+                   "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
 
         async def interrupt(self) -> None:
             pass

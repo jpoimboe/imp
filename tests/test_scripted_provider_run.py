@@ -53,7 +53,7 @@ def test_scripted_tool_calls_produce_real_commit_and_sentinel(
                     f"printf '{sentinel}\\n' > src/sentinel.py && "
                     "git add -A && git commit -qm 'add sentinel'"
                 )}},
-                {"name": "complete_step", "input": {"status": "Success"}},
+                {"name": "complete_step", "input": {"outcome": "ok", "status": "Success"}},
             ]},
         ],
     }

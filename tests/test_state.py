@@ -279,6 +279,30 @@ def test_jsonl_tail_empty_file_returns_empty(tmp_path: Path) -> None:
     assert log.tail(2) == []
 
 
+def test_state_roundtrip_outcome_history(tmp_path: Path) -> None:
+    s = State(id="c1", step="writer", step_attempt=0, status="running",
+              outcome_history={"writer": [{"lap": 1, "outcome": "wrote plan-1"}]})
+    s.save(tmp_path)
+    back = State.load(tmp_path)
+    assert back.outcome_history == {"writer": [{"lap": 1, "outcome": "wrote plan-1"}]}
+
+
+def test_state_outcome_history_defaults_empty(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="running")
+    assert s.outcome_history == {}
+    s.save(tmp_path)
+    assert State.load(tmp_path).outcome_history == {}
+
+
+def test_state_load_forward_compatible_without_outcome_history(tmp_path: Path) -> None:
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "c1", "step": "writer", "step_attempt": 0, "status": "running",
+        "vars": {}, "loop_counts": {}, "current_step": None,
+        "retry_feedback": None,
+    }))
+    assert State.load(tmp_path).outcome_history == {}
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json

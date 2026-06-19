@@ -388,7 +388,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
             self._output = output
 
         async def run(self, invocation: AgentInvocation):
-            yield {"type": "agent_output", "payload": self._output}
+            yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
 
         async def interrupt(self) -> None:
             pass

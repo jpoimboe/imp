@@ -62,7 +62,7 @@ async def test_scripted_wait_for_user_consumes_wired_reply(
     script = {"default": [
         {"text": "asking", "tools": [{"name": "wait_for_user", "input": {}}]},
         {"text": "done",
-         "tools": [{"name": "complete_step", "input": {"status": "Success"}}]},
+         "tools": [{"name": "complete_step", "input": {"outcome": "ok", "status": "Success"}}]},
     ]}
     script_path = tmp_path / "script.json"
     script_path.write_text(json.dumps(script))

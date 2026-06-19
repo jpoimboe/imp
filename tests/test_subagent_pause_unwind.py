@@ -179,7 +179,7 @@ async def test_subagent_pause_unwinds_then_resume_restarts(tmp_path: Path) -> No
                 state["first"] = False
                 raise SubagentSuspended("paused inside subagent")
                 yield  # async generator
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
         async def interrupt(self) -> None: ...
 
     runner = _Runner()
