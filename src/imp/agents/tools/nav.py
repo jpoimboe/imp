@@ -36,6 +36,7 @@ from imp.agents.tools.limits import (
 from imp.agents.tools.ignore import (
     is_ignored,
     list_unignored,
+    partition_ignored,
     repo_root,
 )
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
@@ -171,7 +172,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
-    out: list[str] = []
+    matched: list[Path] = []
     for p in sorted(base.glob(pattern)):
         await tool_checkpoint(coordinator, deadline)
         resolved = p.resolve()
@@ -185,7 +186,20 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
         if (any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
                 and not (inside and within_artifacts(resolved.relative_to(root)))):
             continue
-        out.append(p.relative_to(root).as_posix() if inside else p.as_posix())
+        matched.append(p)
+
+    if inside and matched:
+        gbase = base.resolve()
+        repo = await repo_root(gbase if gbase.is_dir() else gbase.parent)
+        if repo is not None and not await is_ignored(repo, gbase):
+            to_check = {p.resolve() for p in matched
+                        if not within_artifacts(p.resolve().relative_to(root))}
+            ignored = await partition_ignored(repo, to_check)
+            if ignored:
+                matched = [p for p in matched if p.resolve() not in ignored]
+
+    out = [p.relative_to(root).as_posix() if inside else p.as_posix()
+           for p in matched]
     return "\n".join(out) if out else "(no matches)"
 
 
