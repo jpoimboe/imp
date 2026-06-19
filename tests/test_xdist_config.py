@@ -5,6 +5,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 
@@ -28,18 +30,21 @@ def _make_dry_run(*goals: str) -> str:
 
 
 def test_make_test_is_parallel_by_default() -> None:
+    pytest.importorskip("xdist")
     recipe = _make_dry_run("test")
     assert "--dist loadgroup" in recipe
     assert re.search(r"-n \S+", recipe), f"expected an -n worker flag in: {recipe!r}"
 
 
 def test_make_test_verbose_is_parallel_by_default() -> None:
+    pytest.importorskip("xdist")
     recipe = _make_dry_run("test-verbose")
     assert "--dist loadgroup" in recipe
     assert re.search(r"-n \S+", recipe), f"expected an -n worker flag in: {recipe!r}"
 
 
 def test_make_test_runs_serial_when_xdist_overridden_empty() -> None:
+    pytest.importorskip("xdist")
     recipe = _make_dry_run("test", "XDIST=")
     assert "--dist" not in recipe
     assert not re.search(r"-n \S+", recipe), f"expected no -n flag in: {recipe!r}"

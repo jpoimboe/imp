@@ -5,10 +5,20 @@ import json
 from pathlib import Path
 
 import anyio
+import pytest
 
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from tests.conftest import _git, _init_repo, write_agent_md
+
+
+@pytest.fixture(autouse=True)
+def _ensure_builtin_providers() -> None:
+    # The provider registry is import-time global state; other tests clear it
+    # via reset_providers_for_tests() teardown. Restore the built-ins so this
+    # test is independent of xdist worker ordering.
+    from imp.providers import register_builtin_providers
+    register_builtin_providers()
 
 
 def _seed_scripted_repo(root: Path, script_path: Path) -> None:
