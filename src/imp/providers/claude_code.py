@@ -29,6 +29,7 @@ import inspect
 import json
 import re
 import shutil
+import signal
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -60,7 +61,7 @@ from imp.agents.subagents import (
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ToolContext, kill_process_group
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
@@ -252,6 +253,25 @@ def _subprocess_diag(client: Any) -> dict[str, Any]:
     if tail:
         out["stderr_tail"] = str(tail)[-2000:]
     return out
+
+
+_REAP_GRACE_SECONDS = 0.5
+
+
+async def _reap_transport_group(client: Any) -> None:
+    """SIGTERM→SIGKILL the transport child's process group; no-op when absent."""
+    transport = getattr(client, "_transport", None)
+    process = getattr(transport, "_process", None)
+    if process is None:
+        return
+    with contextlib.suppress(ProcessLookupError, OSError):
+        await kill_process_group(process, signal.SIGTERM)
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(process.wait(), timeout=_REAP_GRACE_SECONDS)
+            return  # exited within grace; already reaped
+        await kill_process_group(process, signal.SIGKILL)
+        with contextlib.suppress(Exception):
+            await process.wait()
 
 
 def _is_terminated_process_teardown(exc: BaseException) -> bool:
@@ -1031,6 +1051,8 @@ class ClaudeCodeAgentRunner:
                 with contextlib.suppress(Exception):
                     self._impty_driver.close()
                 self._impty_driver = None
+            if self._client is not None:
+                await _reap_transport_group(self._client)
             self._client = None
 
     async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
@@ -1638,6 +1660,7 @@ class ClaudeCodeAgentRunner:
             # Idempotent vs the `async with` __aexit__ that also disconnects.
             client = self._client
             if client is not None:
+                await _reap_transport_group(client)
                 with contextlib.suppress(Exception):
                     await client.disconnect()
 
