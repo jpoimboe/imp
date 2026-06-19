@@ -348,6 +348,8 @@ async def grep(
                 f, coordinator=coordinator, deadline=deadline)
         except OSError:
             continue
+        if "\x00" in text:
+            continue  # binary file (NUL): skip silently, like ripgrep's default
         cap_truncated = file_is_cap_truncated(read_truncated, f)
         lines = split_lines(text, cap_truncated=cap_truncated)
 

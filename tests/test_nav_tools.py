@@ -477,3 +477,37 @@ def test_grep_git_failure_degrades_to_fallback(tmp_path: Path, monkeypatch) -> N
     (tmp_path / "build" / "x.py").write_text("NEEDLE in build\n")
     out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
     assert "build/x.py" in out
+
+
+def test_grep_skips_binary_file_with_nul_no_repo(tmp_path: Path) -> None:
+    (tmp_path / "bin.dat").write_bytes(b"NEEDLE\x00more bytes\n")
+    (tmp_path / "text.txt").write_text("NEEDLE in text\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "text.txt" in out
+    assert "bin.dat" not in out
+
+
+def test_grep_skips_tracked_binary_in_repo(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "img.bin").write_bytes(b"NEEDLE\x00\x01\x02payload\n")
+    (tmp_path / "src.txt").write_text("NEEDLE source\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-qm", "add binary"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "src.txt" in out
+    assert "img.bin" not in out
+
+
+def test_grep_binary_skip_on_external_target(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "bin.dat").write_bytes(b"NEEDLE\x00rest\n")
+    (ext / "text.txt").write_text("NEEDLE text\n")
+    out = _grep(_ctx(wt), pattern="NEEDLE", path=str(ext))
+    assert (ext / "text.txt").as_posix() in out
+    assert "bin.dat" not in out
