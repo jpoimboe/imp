@@ -15,7 +15,7 @@
 #     (no verify gate; project hasn't wired / has opted out of verify_command).
 #
 # Tree-SHA skip cache: record the git tree SHA of the last green (exit-0) run in a
-# per-change file under .imp/change/. On entry, if HEAD's tree equals the last
+# per-change file under $IMP_CHANGE_DIR. On entry, if HEAD's tree equals the last
 # green tree, skip (exit 0) — identical tree ⇒ identical result. Logged explicitly,
 # never silent.
 #
@@ -34,7 +34,7 @@ if [[ -z "${IMP_VERIFY_COMMAND:-}" ]]; then
   exit 0
 fi
 
-cache=".imp/change/last_green_tree"
+cache="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}/last_green_tree"
 tree="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
 if [[ -n "$tree" && -f "$cache" && "$(cat "$cache")" == "$tree" ]]; then
   echo "verify skipped — tree unchanged since last green run"
@@ -54,6 +54,6 @@ if (( rc == 124 )); then
 fi
 
 if (( rc == 0 )) && [[ -n "$tree" ]]; then
-  mkdir -p .imp/change && echo "$tree" > "$cache" || true
+  mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$cache" || true
 fi
 exit "$rc"

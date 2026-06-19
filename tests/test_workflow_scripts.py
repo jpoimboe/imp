@@ -49,7 +49,8 @@ def test_run_verify_command_succeeds(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
     proc = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "true"})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "true",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 0, proc.stderr
 
 
@@ -57,7 +58,8 @@ def test_run_verify_command_fails(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
     proc = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "false"})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "false",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert proc.returncode != 0
 
 
@@ -66,7 +68,8 @@ def test_run_verify_timeout_exits_124_with_diagnosis(tmp_path: Path) -> None:
     project.mkdir()
     proc = _run("run-verify.sh", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "sleep 5",
-        "IMP_VERIFY_TIMEOUT": "1"})
+        "IMP_VERIFY_TIMEOUT": "1",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 124, proc.stderr
     assert "timed out after 1s" in proc.stderr
 
@@ -104,12 +107,14 @@ def test_run_verify_skips_on_unchanged_tree(tmp_path: Path) -> None:
     cmd = f'sh -c "echo x >> {counter}"'
 
     first = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd,
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert first.returncode == 0
     assert counter.read_text().count("x") == 1
 
     second = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd,
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert second.returncode == 0
     assert "verify skipped — tree unchanged since last green run" in second.stdout
     assert counter.read_text().count("x") == 1   # command NOT re-run
@@ -117,7 +122,8 @@ def test_run_verify_skips_on_unchanged_tree(tmp_path: Path) -> None:
     (project / "a.txt").write_text("2")
     _git_commit_all(project, "c2")
     third = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd,
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert third.returncode == 0
     assert counter.read_text().count("x") == 2   # tree changed => re-ran
 
@@ -139,15 +145,32 @@ def test_verify_and_sweep_verify_share_tree_skip_cache(tmp_path: Path) -> None:
 
     # First invocation (the `verify` step): runs the command, records the green tree.
     verify = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd,
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert verify.returncode == 0, verify.stderr
     assert counter.read_text().count("x") == 1
 
     # Second invocation (the `sweep-verify` step) at the SAME tree -> cache hit.
     sweep_verify = _run("run-verify.sh", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd,
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert sweep_verify.returncode == 0, sweep_verify.stderr
     assert "verify skipped — tree unchanged since last green run" in sweep_verify.stdout
     assert counter.read_text().count("x") == 1   # sweep-verify did NOT re-run
+
+
+def test_run_verify_writes_cache_to_change_dir(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    home = tmp_path / "home"
+    proc = _run("run-verify.sh", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "true",
+        "IMP_CHANGE_DIR": str(home)})
+    assert proc.returncode == 0, proc.stderr
+    assert (home / "last_green_tree").exists()
+    assert not (project / ".imp" / "change" / "last_green_tree").exists()
 
 
