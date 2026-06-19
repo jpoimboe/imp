@@ -133,21 +133,21 @@ def test_loud_forward_goto_route_resolves_to_target_phase() -> None:
 
 
 def test_loud_same_phase_forward_goto_route_is_silent() -> None:
-    # review-panel (loud, review phase) clean-approves with a forward goto to
+    # review (loud, review phase) clean-approves with a forward goto to
     # integrate-rebase, which is ALSO in the review phase: an internal skip, not a
     # phase transition -> the resolved-but-silent "" sentinel (no arrow).
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="review-panel", kind="agent", phase="review",
+        ev("2", "step_started", step="review", kind="agent", phase="review",
            model="m", provider="anthropic"),
-        ev("3", "step_completed", step="review-panel", kind="agent",
+        ev("3", "step_completed", step="review", kind="agent",
            action={"verb": "goto", "target": "integrate-rebase",
                    "resume": False, "rework": False},
            var_mutations={}),
         ev("4", "step_started", step="integrate-rebase", kind="script",
            phase="review", quiet=True),
     ])
-    assert _breadcrumb(_steps(tree)["review-panel"]).route == ""
+    assert _breadcrumb(_steps(tree)["review"]).route == ""
 
 
 def test_loud_reviewer_rework_via_plain_goto_resolves_to_reworking() -> None:
