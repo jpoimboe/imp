@@ -207,7 +207,7 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
     )
     assert m.var_mutations["spec_minors_integrated"] is False
     assert isinstance(m.action, Goto)
-    assert m.action.target == "baseline-verify" and m.action.resume is False
+    assert m.action.target == "plan-writer" and m.action.resume is False
 
 
 def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
@@ -221,7 +221,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
         output={"blocking": False, "has_minor_findings": False},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "baseline-verify" and m.action.resume is False
+    assert m.action.target == "plan-writer" and m.action.resume is False
     assert m.var_mutations == {"spec_minors_integrated": False}
 
 
@@ -523,18 +523,18 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     )
 
 
-def test_spec_verify_commit_fast_path_skips_to_baseline_verify() -> None:
+def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-verify-commit"].rules
-    # Clean commit on the fast path -> baseline gate, skipping spec-reviewer.
+    # Clean commit on the fast path -> straight into planning, skipping spec-reviewer.
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "fast_path": True},
         output={"exit": 0, "stdout": "", "stderr": ""},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "baseline-verify" and m.action.resume is False
+    assert m.action.target == "plan-writer" and m.action.resume is False
 
 
 def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
@@ -592,13 +592,11 @@ def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
     assert all("imp/plans/" not in p for p in write_paths)
 
 
-def test_baseline_verify_is_first_plan_phase_step() -> None:
+def test_plan_writer_is_first_plan_phase_step() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     plan_phase = next(p for p in wf.phases if p.name == "plan")
-    assert plan_phase.steps[0].name == "baseline-verify"
-    assert plan_phase.steps[1].name == "plan-writer"
-    assert _steps(wf)["baseline-verify"].command == "./scripts/baseline-verify.sh"
+    assert plan_phase.steps[0].name == "plan-writer"
 
 
 def test_verify_step_has_max_loops_5() -> None:

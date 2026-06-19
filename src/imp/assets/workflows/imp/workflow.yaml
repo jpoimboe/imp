@@ -45,7 +45,7 @@ phases:
         quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: baseline-verify}   # trivial fast path: skip spec-reviewer; baseline gate then planning
+          - {if: {exit: 0, fast_path: true}, goto: plan-writer}   # trivial fast path: skip spec-reviewer, enter planning
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
@@ -64,17 +64,11 @@ phases:
           - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
              resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
-          - {else: true, set: {spec_minors_integrated: false}, goto: baseline-verify}
+          - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 
   - name: plan
     steps:
-      # Runs exactly once per change: spec phase routes here; supercycle/rework goto plan-writer directly.
-      - name: baseline-verify
-        command: ./scripts/baseline-verify.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, continue: true}
-
+      # plan-writer is the plan-phase entry: the spec phase routes here, and supercycle/rework goto plan-writer directly.
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high

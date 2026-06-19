@@ -26,9 +26,9 @@ def test_gate_steps_in_span_merge_phase() -> None:
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
-    # autosquash(10) and stamp-trailers(18) gate via `pause: true` (no goto).
-    assert gate_steps_in_span(_wf(), 10, 10) == ("autosquash",)
-    assert gate_steps_in_span(_wf(), 18, 18) == ("stamp-trailers",)
+    # autosquash(9) and stamp-trailers(17) gate via `pause: true` (no goto).
+    assert gate_steps_in_span(_wf(), 9, 9) == ("autosquash",)
+    assert gate_steps_in_span(_wf(), 17, 17) == ("stamp-trailers",)
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
@@ -62,7 +62,7 @@ def test_plan_rewind_backward_to_step() -> None:
 
     plan = plan_rewind(_wf(), _state("review"), "review")
     assert plan.to_step == "review"
-    assert plan.target_idx == 14
+    assert plan.target_idx == 13
     assert plan.from_step == "review"
 
 
@@ -94,7 +94,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # review (14) maxed; task-lead (7) upstream; finalize (19) downstream.
+    # review (13) maxed; task-lead (6) upstream; finalize (18) downstream.
     st = _state("review",
                 loop_counts={"task-lead": 2, "review": 6, "finalize": 1})
     log = InMemoryEventLog()

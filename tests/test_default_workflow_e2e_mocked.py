@@ -406,10 +406,10 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
     # Termination is the REVIEWER's goto on the verification pass (minors-integrated
     # already set), not a separate gate: the second spec-reviewer jumps to
-    # baseline-verify, the second plan-review jumps to task-lead.
+    # plan-writer, the second plan-review jumps to task-lead.
     assert any(
         s == "spec-reviewer"
-        and a.get("verb") == "goto" and a.get("target") == "baseline-verify"
+        and a.get("verb") == "goto" and a.get("target") == "plan-writer"
         for s, a in completed
     ), completed
     assert any(
