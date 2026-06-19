@@ -1275,3 +1275,21 @@ def test_current_activity_anchors_timer_to_in_flight_call() -> None:
     assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
     assert act.count == "3 calls"        # retained Activity.count basis keeps killed
     assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0
+
+
+def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
+    from imp.cli.live_driver import compose_activity_status
+
+    clock = [100.0]
+    b = nv.NarrativeBuilder(now=lambda: clock[0])
+    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+            input={"command": "sleep 600"}))       # stamped at clock=100.0
+    clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
+    line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
+    assert line is not None
+    assert "implement" in line          # open step name
+    assert "bash sleep 600" in line     # in-flight tool detail
+    assert "1 call" in line             # retained Activity.count segment
+    assert "5m 12s" in line             # per-call timer (the primary figure)
+    assert "(step 15m 0s)" in line      # session/step elapsed as the parenthetical
