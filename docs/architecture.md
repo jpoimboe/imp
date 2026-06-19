@@ -164,7 +164,7 @@ flowchart TD
 
 ### Phase ② plan
 
-Write the next bite-sized `plan-N` (same read-only helper subagents), verify the commit, then a **plan-review panel** dispatches independent `plan-reviewer` subagents that read the plan's prescribed code like a diff (2 reviewers first pass, 1 on bounce-back). `fast_path` skips review. Mirrors the spec minors loop.
+Write the next bite-sized `plan-N` (same read-only helper subagents), verify the commit, then a single **`plan-reviewer`** runs directly, reading the plan's prescribed code like a diff. `fast_path` skips review. Mirrors the spec minors loop.
 
 ```mermaid
 flowchart TD
@@ -172,7 +172,7 @@ flowchart TD
   PW --> PVC{{"plan-verify-commit"}}
   PVC -. fail .-> PW
   PVC -->|fast_path| out([→ implement])
-  PVC --> PR["plan-review<br/>panel → plan-reviewer ×N"]
+  PVC --> PR["plan-review<br/>(plan-reviewer)"]
   PR -->|"Critical / Major"| PW
   PR -->|"minors: one pass"| PW
   PR -->|clean| out
@@ -249,8 +249,7 @@ flowchart TD
 | `spec-writer` | high | Brainstorm with user, name the change, write+commit the spec. |
 | `spec-reviewer` | high | Review spec vs captured intent; blocking iff Critical/Major. |
 | `plan-writer` | high | Write the next bite-sized `plan-N` from spec + progress. |
-| `plan-review-panel` | medium | Plan-review coordinator; dispatches `plan-reviewer` subagents and collapses their verdicts into one envelope. |
-| `plan-reviewer` | high | Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
+| `plan-reviewer` | high | Run directly as the `plan-review` step. Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
 | `task-lead` | medium | Implement controller: pick task, dispatch implementer + reviewer, adjudicate, commit one unit, record progress. |
 | `implementer` | medium | Implement one task / apply directed fixes; commit. |
 | `quality-reviewer` | medium | Per-task read-only quality review back to task-lead. |
