@@ -1,14 +1,17 @@
-"""Tests for the codex SDK subprocess stdout read-limit patch.
+"""Tests for the codex SDK subprocess spawn patch (read-limit + session isolation).
 
 Covers:
 - Behavioral regression: a line > 64 KiB raises ValueError at asyncio's default limit.
 - The fix value (CODEX_STREAM_LIMIT) reads that same line cleanly.
-- _LimitRaisingAsyncio proxy: injects default limit, respects explicit limit, forwards attrs.
-- install_codex_stream_limit: idempotent, replaces the SDK module ref, forwards real attrs.
+- _SubprocessPatchingAsyncio proxy: injects default limit AND start_new_session,
+  respects explicit values for each, forwards other attrs.
+- install_codex_subprocess_patches: idempotent, replaces the SDK module ref, forwards real attrs.
+- Real grouping: a child spawned through the proxy lands in its own process group.
 """
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -16,10 +19,10 @@ from typing import Any
 
 import pytest
 
-from imp.providers.codex_stream_limit import (
+from imp.providers.codex_subprocess_patch import (
     CODEX_STREAM_LIMIT,
-    _LimitRaisingAsyncio,
-    install_codex_stream_limit,
+    _SubprocessPatchingAsyncio,
+    install_codex_subprocess_patches,
 )
 
 
@@ -77,13 +80,13 @@ async def test_codex_limit_reads_oversized_line() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Proxy unit tests
+# Proxy unit test
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio
-async def test_proxy_injects_default_limit_and_respects_explicit() -> None:
-    """_LimitRaisingAsyncio injects default limit when absent, respects explicit limit,
-    and forwards other attributes unchanged."""
+async def test_proxy_injects_limit_and_session_isolation() -> None:
+    """_SubprocessPatchingAsyncio injects a default limit AND start_new_session,
+    respects explicit values for each, and forwards other attributes unchanged."""
     calls: list[dict[str, Any]] = []
 
     class _FakeAsyncio:
@@ -93,30 +96,52 @@ async def test_proxy_injects_default_limit_and_respects_explicit() -> None:
             calls.append(k)
             return "proc"
 
-    proxy = _LimitRaisingAsyncio(_FakeAsyncio(), 123)
+    proxy = _SubprocessPatchingAsyncio(_FakeAsyncio(), 123)
+
     await proxy.create_subprocess_exec("prog")
     assert calls[-1]["limit"] == 123, "default limit should be injected"
+    assert calls[-1]["start_new_session"] is True, "session isolation should be injected"
 
-    await proxy.create_subprocess_exec("prog", limit=999)
+    await proxy.create_subprocess_exec("prog", limit=999, start_new_session=False)
     assert calls[-1]["limit"] == 999, "explicit limit must win over default"
+    assert calls[-1]["start_new_session"] is False, "explicit session flag must win"
 
     assert proxy.SENTINEL == 7, "non-overridden attributes should forward unchanged"
 
 
 # ---------------------------------------------------------------------------
-# Installer: idempotency + real attr forwarding + isolation (restores original)
+# Installer: idempotency + real attr forwarding
 # ---------------------------------------------------------------------------
 
 def test_install_is_idempotent_and_forwards() -> None:
-    """install_codex_stream_limit() is idempotent and the proxy forwards real asyncio attrs."""
+    """install_codex_subprocess_patches() is idempotent; the proxy forwards real asyncio attrs."""
     from openai_codex_sdk import exec as codex_exec  # type: ignore[import-untyped]
 
     original = codex_exec.asyncio
     try:
-        install_codex_stream_limit()
-        install_codex_stream_limit()  # second call must be a no-op
-        assert isinstance(codex_exec.asyncio, _LimitRaisingAsyncio)
+        install_codex_subprocess_patches()
+        install_codex_subprocess_patches()  # second call must be a no-op
+        assert isinstance(codex_exec.asyncio, _SubprocessPatchingAsyncio)
         assert codex_exec.asyncio.FIRST_COMPLETED is asyncio.FIRST_COMPLETED
         assert codex_exec.asyncio.create_subprocess_exec is not None
     finally:
         codex_exec.asyncio = original  # restore so the patch doesn't leak
+
+
+# ---------------------------------------------------------------------------
+# Real grouping integration test (acceptance #5)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_proxy_spawns_child_in_its_own_process_group() -> None:
+    """Through the real proxy, create_subprocess_exec spawns a session-isolated
+    child: its process-group id differs from imp's own."""
+    proxy = _SubprocessPatchingAsyncio(asyncio, CODEX_STREAM_LIMIT)
+    proc = await proxy.create_subprocess_exec(
+        sys.executable, "-c", "import time; time.sleep(30)",
+        stdout=asyncio.subprocess.PIPE)
+    try:
+        assert os.getpgid(proc.pid) != os.getpgid(0)
+    finally:
+        proc.kill()
+        await proc.wait()
