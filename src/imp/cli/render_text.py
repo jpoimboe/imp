@@ -317,17 +317,17 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    label = node.name
+    label = node.label or node.name
+    if not node.resumed:
+        text = f"{label} · {node.model}" if node.model else label
+        return _line(text, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
+    # Resumed re-entry: a gray " (resume)" after the label, before the model suffix.
+    indent = _gutter_indent(depth, gutters, color)
+    parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
+             pal.ansi(" (resume)", "gray", enabled=color)]
     if node.model:
-        # The model rides on the step line itself (design: drop the separate
-        # `▸ context · provider/model · N tools` line from the lean view — it
-        # survives only in `imp log --full`). Same gray as the rest of the step
-        # chrome, one space around the `·` to match every other dotted line; the
-        # provider and tool count are detail that the full view owns. An
-        # interactive step carries no `(interactive)` tag — its blank-line lead-in
-        # (spaces_before) is the only marker it needs.
-        label += f" · {node.model}"
-    return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
+        parts.append(pal.ansi(f" · {node.model}", *pal.NODE_COLORS["step"], enabled=color))
+    return indent + "".join(parts)
 
 
 def _subagent_model(sub: nv.SubagentFold) -> str | None:

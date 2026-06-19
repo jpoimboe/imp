@@ -1473,3 +1473,28 @@ def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
     out = "\n".join(_lines(events))
     assert "finalize · complete" in out
     assert any(ln.strip() == "→ entering the merge queue" for ln in out.split("\n"))
+
+
+def test_header_line_uses_step_label_and_falls_back_to_id() -> None:
+    labeled = nv.StepNode(name="code-reviewer", kind="agent", label="reviewing code")
+    assert rt.header_line(labeled, depth=1, color=False) == "  reviewing code"
+    unlabeled = nv.StepNode(name="commit-check", kind="script")
+    assert rt.header_line(unlabeled, depth=1, color=False) == "  commit-check"
+
+
+def test_header_line_appends_gray_resume_marker() -> None:
+    node = nv.StepNode(name="code-reviewer", kind="agent",
+                       label="reviewing code", model="opus", resumed=True)
+    # plain text: marker sits after the label, before the model suffix.
+    assert rt.header_line(node, depth=0, color=False) == "reviewing code (resume) · opus"
+    # color: the " (resume)" span is chrome gray (theme-resolved).
+    colored = rt.header_line(node, depth=0, color=True)
+    assert pal.ansi(" (resume)", "gray") in colored
+    # a non-resumed step carries no marker.
+    fresh = nv.StepNode(name="code-reviewer", kind="agent",
+                        label="reviewing code", model="opus")
+    assert "(resume)" not in rt.header_line(fresh, depth=0, color=False)
+    # a resumed step with no model has no model tail.
+    no_model = nv.StepNode(name="commit-check", kind="script",
+                           label="checking commit", resumed=True)
+    assert rt.header_line(no_model, depth=0, color=False) == "checking commit (resume)"
