@@ -473,7 +473,7 @@ async def _dispatch_step(
 
 def _step_started_payload(step: Step) -> dict[str, Any]:
     return {"step": step.name, "kind": step.kind, "phase": step.phase,
-            "quiet": step.quiet}
+            "quiet": step.quiet, "label": step.label}
 
 
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
@@ -726,7 +726,8 @@ async def _route_agent(
             fs_permissions=step.fs_permissions, tier=step.tier, step_name=step.name,
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
-            step_started_payload_extras=_step_started_payload(step),
+            step_started_payload_extras={
+                **_step_started_payload(step), "resumed": is_resume},
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
