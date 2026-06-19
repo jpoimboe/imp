@@ -32,6 +32,7 @@ AGE_W = 4
 
 _STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("green",),
+    "merged": ("green",),
     "paused": ("cyan",),
     "merge_blocked": ("yellow",),
     "errored": ("bold", "red"),
