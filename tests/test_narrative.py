@@ -525,7 +525,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity(label="spec · thinking")
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -543,7 +543,7 @@ def test_current_activity_agent_step_with_thinking_child_is_thinking() -> None:
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity(label="spec · thinking")
 
 
 
@@ -1087,13 +1087,13 @@ def test_current_activity_all_killed_basis_is_bare_count() -> None:
 def test_current_activity_agent_step_no_burst_is_thinking() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity(label="s · thinking")
 
 
 def test_current_activity_chrome_step_is_running() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="g", kind="merge", phase="p"))
-    assert b.current_activity() == nv.Activity(label="running")
+    assert b.current_activity() == nv.Activity(label="g · running")
 
 
 def test_activity_to_text_flattens_segments() -> None:
@@ -1676,3 +1676,39 @@ def test_blocking_panel_findings_not_promoted_to_prose() -> None:
     step = tree.root.children[0].children[0]
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     assert literals == []                  # findings arg is not a prose block (E1)
+
+
+def test_current_activity_prefixes_open_step_name_for_agent() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="plan-review", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
+    ]:
+        b.add(e)
+    assert b.current_activity() == nv.Activity(label="plan-review · thinking")
+
+
+def test_current_activity_running_label_for_chrome_step() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="merge-it", kind="merge", phase="integrate"),
+    ]:
+        b.add(e)
+    assert b.current_activity() == nv.Activity(label="merge-it · running")
+
+
+def test_current_activity_prefixes_step_name_for_subagent() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="plan-review", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("tk1", "tool_call", agent_id="step:review/plan-review", id="b2", name="task",
+           input={"subagent_name": "plan-reviewer", "task_description": "go"}),
+        ev("s1", "thinking", agent_id="sub:tk1", content="reviewing"),
+    ]:
+        b.add(e)
+    assert b.current_activity().label == "plan-review \u203a task → plan-reviewer · 1 events"

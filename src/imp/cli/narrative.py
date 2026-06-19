@@ -406,6 +406,8 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} more {noun})"
+            if self._step_stack:
+                label = f"{self._step_stack[-1].name} \u203a {label}"
             return Activity(label=label)
         burst = self._current_burst
         if burst is not None:
@@ -423,7 +425,8 @@ class NarrativeBuilder:
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             step = self._step_stack[-1]
-            return Activity(label="running" if step.kind in CHROME_KINDS else "thinking")
+            verb = "running" if step.kind in CHROME_KINDS else "thinking"
+            return Activity(label=f"{step.name} · {verb}")
         if self._current_phase is not None:
             return Activity(label=f"{self._current_phase.name} · working")
         return None
@@ -621,6 +624,11 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     name changes from the current open one, lazily create a PhaseNode, append it
     to the workflow root, and make it the current scope. There are no
     phase_started/phase_completed events — phase is purely DERIVED here."""
+    # A dropped step opener leaves prose as held AgentTextNodes under the workflow
+    # root, where no step_completed can un-hold them — stalling the emit cursor.
+    for c in self._root.children:
+        if isinstance(c, AgentTextNode) and c.held:
+            c.held = False
     if (self._current_phase is not None and not self._current_phase.closed
             and self._current_phase.name == name):
         return

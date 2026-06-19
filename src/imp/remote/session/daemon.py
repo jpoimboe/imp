@@ -81,6 +81,7 @@ async def serve_change_session(
         coordinator=coordinator,
         lock=None,
         hibernate=hibernate,
+        events_path=change.events_path,
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:

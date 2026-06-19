@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -62,7 +63,8 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
     got: list[str] = []
     gate_emitted = anyio.Event()
 
-    server = SessionServer(sock)
+    events_path = tmp_path / "events.jsonl"
+    server = SessionServer(sock, events_path=events_path)
     await server.open()
 
     async def _run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
@@ -72,7 +74,9 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
                 await anyio.sleep(0.02)
         # Emit the gate event and open the gate — the foreground client is
         # already attached and will receive this broadcast.
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+        prompt_ev = {"id": "e1", "type": "awaiting_user_input", "payload": {"prompt": "go?"}}
+        events_path.write_text(json.dumps(prompt_ev) + "\n")
+        on_event(prompt_ev)
         gate_emitted.set()
         reply = await user_chat_input_fn("")
         got.append(reply)
@@ -89,7 +93,7 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
         # Wait until the gate event has been broadcast before connecting.
         with anyio.fail_after(5):
             await gate_emitted.wait()
-        await anyio.sleep(0.01)  # realistic post-broadcast delay; _pending_prompt already set
+        await anyio.sleep(0.01)  # realistic post-broadcast delay; event is on disk for replay
         client = SessionClient(sock, "c2", "T", on_event=on_event)
         await client.connect()
         return client
