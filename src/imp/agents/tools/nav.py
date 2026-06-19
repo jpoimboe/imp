@@ -13,7 +13,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +22,7 @@ import anyio
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import (
+    ARTIFACTS_REL,
     EXCLUDED_DIRS,
     EXTERNAL_WALK_FILE_CAP,
     OUTPUT_TRUNCATION_MARKER,
@@ -32,11 +33,17 @@ from imp.agents.tools.limits import (
     tool_checkpoint,
     within_artifacts,
 )
+from imp.agents.tools.ignore import (
+    is_ignored,
+    list_unignored,
+    repo_root,
+)
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
 
 def _iter_files(target: Path, policy: Any = None,
-                root: Path | None = None) -> Iterator[Path]:
+                root: Path | None = None,
+                excluded: frozenset[str] = EXCLUDED_DIRS) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
     (A3) — EXCEPT the per-change artifact subtree .imp/change/artifacts/, which is
     surfaced (passed via `root`, the worktree root, so the carve-out is anchored
@@ -62,7 +69,7 @@ def _iter_files(target: Path, policy: Any = None,
         # inside).
         keep: list[str] = []
         for d in sorted(dirnames):
-            if d in EXCLUDED_DIRS:
+            if d in excluded:
                 child = Path(dirpath) / d
                 if not (root is not None and child.is_relative_to(root)
                         and leads_to_or_within_artifacts(child.relative_to(root))):
@@ -87,12 +94,58 @@ def _iter_files(target: Path, policy: Any = None,
             # hidden even though the walk descended .imp to reach the artifact subtree.
             if root is not None and p.is_relative_to(root):
                 rel = p.relative_to(root)
-                if (any(part in EXCLUDED_DIRS for part in rel.parts)
+                if (any(part in excluded for part in rel.parts)
                         and not within_artifacts(rel)):
                     continue
             if masking and not policy.allows_read(p.resolve()):
                 continue
             yield p
+
+
+def _git_files(unignored: set[Path], target: Path, root: Path,
+               policy: Any) -> list[Path]:
+    """Normal in-worktree git path: the unignored set UNION the
+    .imp/change/artifacts/ carve-out portion under `target` (walked separately
+    since .imp is gitignored), restricted to regular files under `target`,
+    sandbox-masked, sorted (head_limit early-exit makes order observable)."""
+    masking = policy is not None and policy.active
+    candidates = set(unignored)
+    art = root / ARTIFACTS_REL
+    if art.is_dir() and (art.is_relative_to(target) or target.is_relative_to(art)):
+        for dirpath, _dirnames, filenames in os.walk(art):
+            base = Path(dirpath)
+            for name in filenames:
+                candidates.add(base / name)
+    files: list[Path] = []
+    for p in sorted(candidates):
+        if not p.is_relative_to(target):
+            continue
+        if not p.is_file():
+            continue
+        if masking and not policy.allows_read(p.resolve()):
+            continue
+        files.append(p)
+    return files
+
+
+async def _grep_file_source(target: Path, root: Path, inside: bool,
+                            policy: Any) -> Iterable[Path]:
+    """Choose grep's file enumeration per the decision tree. External,
+    file-target, no-repo, and escape-hatch cases return lazy iterators
+    (preserving the external walk cap and prompt pause checkpoints); the normal
+    in-worktree git case returns an eager, sorted list."""
+    if not inside or target.is_file():
+        return _iter_files(target, policy, root if inside else None)
+    gtarget = target.resolve()
+    repo = await repo_root(gtarget)
+    if repo is None:
+        return _iter_files(target, policy, root)
+    if await is_ignored(repo, gtarget):
+        return _iter_files(target, policy, root, excluded=frozenset({".git"}))
+    unignored = await list_unignored(repo, gtarget)
+    if unignored is None:
+        return _iter_files(target, policy, root)
+    return _git_files(unignored, gtarget, root, policy)
 
 
 @imp_tool(
@@ -276,9 +329,10 @@ async def grep(
             capped = True
         return capped
 
+    file_source = await _grep_file_source(target, root, inside, policy)
     files_scanned = 0
     walk_capped = False
-    for f in _iter_files(target, policy, root if inside else None):
+    for f in file_source:
         if capped or limit_hit:
             break
         if external and files_scanned >= EXTERNAL_WALK_FILE_CAP:
