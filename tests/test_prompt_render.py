@@ -191,3 +191,20 @@ def test_dunder_raises_attributeerror() -> None:
     ns = _ProjectNamespace({"a": "1", "guidance": ""})
     with pytest.raises(AttributeError):
         _ = ns.__html__
+
+
+def test_renders_change_home(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(
+        change_handle="my-change", change_title="My Change",
+        change_home="/ctl/.imp/changes/abc123", event_log=log,
+    )
+    assert render_prompt(
+        "spec at {{ change.home }}/artifacts/spec/{{ change.handle }}.md", ctx,
+    ) == "spec at /ctl/.imp/changes/abc123/artifacts/spec/my-change.md"
+
+
+def test_change_home_defaults_empty(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_handle="t", change_title="t", event_log=log)
+    assert render_prompt("{{ change.home }}", ctx) == ""

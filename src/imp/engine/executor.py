@@ -888,6 +888,7 @@ async def _run_agent_invocation(
         rendered = render_prompt(
             agent_def.prompt_template_source, build_context(
                 change_id=change.id, change_handle=change.handle, change_title=change.title,
+                change_home=str(change.change_dir),
                 event_log=log, vars=state.vars,
                 project_facts=project_facts, guidance=guidance,
             ),
@@ -926,6 +927,7 @@ async def _run_agent_invocation(
         initial_messages=initial_messages,
         change_context=ChangeContext(
             id=change.id, handle=change.handle, title=change.title,
+            change_home=str(change.change_dir),
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
         ),

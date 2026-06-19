@@ -73,6 +73,7 @@ class ChangeContext:
     workflow_dir: Path
     id: str = ""   # stable Change identity (spec §1). Defaulted so test
     # constructors stay green; production sites (executor, subagents) pass it.
+    change_home: str = ""
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = ""
 
