@@ -31,7 +31,9 @@ only if cheap; do NOT make code changes). Populate:
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md`, and surface ONLY the
-  `— needs-decision: <why>` items — one per line with its reason. Do **not** list
+  `— needs-decision: <why>` items — one per line with its reason. These include items
+  `spec-writer`/`plan-writer` appended directly in reader form (they reach you even on
+  a `fast_path` change where `deferred-sweep` never ran); present them identically. Do **not** list
   `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in `built`)
   and do **not** list `— dismissed: <why>` items (considered and judged not worth
   doing; never surfaced).

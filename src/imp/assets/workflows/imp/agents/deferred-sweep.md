@@ -38,6 +38,16 @@ Change) and `— ignored-at-gate` (dropped by a human). Like `— dismissed`, th
 are **inert** to this sweep — they sit on `- [x]` lines, so the `- [ ] DEFERRED `
 parse already skips them. Leave them untouched.
 
+## Pre-classified human-decision items — pass through untouched
+
+A `- [ ] DEFERRED ` line that already carries a `— needs-decision: <why>` marker is a
+**pre-classified human decision** — authored directly by `spec-writer`/`plan-writer`
+for a concern only a human can settle, or recorded by a prior sweep pass. Recognize
+the `— needs-decision:` marker and **leave the line exactly as-is**: do not
+re-evaluate it on the risk gate, do not fix it, and **never dismiss it**. It is a
+human-decision item, not a followup to maybe fix; it must survive verbatim to the
+`finalize` merge gate, which presents it in its per-item walk.
+
 ## Per item — gate on risk, not scope
 
 Load the receiving-code-review discipline
