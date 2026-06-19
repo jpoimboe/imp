@@ -599,6 +599,9 @@ def _parse_step(
     name = raw["name"]
     kind = _infer_kind(raw, source)
     quiet = _parse_bool_flag(raw, "quiet", source)
+    label = raw.get("label")
+    if label is not None and not isinstance(label, str):
+        raise LoadError("a step's `label:` must be a string", source)
 
     max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
     max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops
@@ -628,6 +631,7 @@ def _parse_step(
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
             quiet=quiet,
+            label=label,
         )
     elif kind == "script":
         step = Step(
@@ -637,18 +641,21 @@ def _parse_step(
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
             timeout_seconds=raw.get("timeout"),
             quiet=quiet,
+            label=label,
         )
     elif kind in ("merge", "wait_for_head", "dequeue_wake"):
         step = Step(
             name=name, phase=phase_name, kind=cast(Kind, kind), rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
             quiet=quiet,
+            label=label,
         )
     else:  # branch
         step = Step(
             name=name, phase=phase_name, kind="branch", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
             quiet=quiet,
+            label=label,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).
