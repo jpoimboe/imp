@@ -187,3 +187,13 @@ def test_baseline_verify_no_command_passes(tmp_path: Path) -> None:
     assert proc.returncode == 0
     assert not (project / ".imp" / "change" / "tolerated-failures.md").exists()
     assert "no verify_command" in proc.stdout.lower()
+
+
+def test_baseline_verify_timeout_exits_nonzero(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run("baseline-verify.sh", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_VERIFY_COMMAND": "sleep 60",
+        "IMP_VERIFY_TIMEOUT": "1"})
+    assert proc.returncode == 124
