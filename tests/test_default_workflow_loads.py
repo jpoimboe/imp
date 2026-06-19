@@ -136,6 +136,61 @@ def test_finalize_merge_route_is_labeled_integration_resolve_is_not() -> None:
     wf = _wf()
     steps = {s.name: s for s in wf.flat_steps()}
     fin = steps["finalize"].rules[0]
-    assert fin.label == "entering the merge queue"
+    assert fin.label == "preparing to merge"
     ir = steps["integration-resolver"].rules[0]
     assert ir.label is None
+
+
+def test_every_nonquiet_step_has_its_label() -> None:
+    wf = _wf()
+    by = {s.name: s for s in wf.flat_steps()}
+    expected = {
+        "spec-writer": "writing spec",
+        "spec-reviewer": "reviewing spec",
+        "plan-writer": "writing plan",
+        "plan-reviewer": "reviewing plan",
+        "task-lead": "implementing",
+        "verify": "testing",
+        "autosquash-resolve": "resolving fixups",
+        "plan-cycle-check": "checking plan coverage",
+        "code-reviewer": "reviewing code",
+        "deferred-sweep": "clearing deferred items",
+        "sweep-verify": "testing",
+        "finalize": "finalizing",
+        "wait-for-head": "waiting to merge",
+        "integrator": "integrating",
+        "integration-reviewer": "reviewing merge",
+        "integration-verify": "testing",
+        "integration-resolver": "resolving merge",
+        "merge-to-base": "merging",
+    }
+    for name, label in expected.items():
+        assert by[name].label == label, name
+    # Quiet plumbing steps stay label-free.
+    for name in ("spec-verify-commit", "plan-verify-commit", "commit-check",
+                 "autosquash", "review-base-init", "review-base-repin",
+                 "stamp-trailers", "integrate-rebase", "bypass-dequeue"):
+        assert by[name].label is None, name
+
+
+def test_route_labels_assigned() -> None:
+    wf = _wf()
+    by = {s.name: s for s in wf.flat_steps()}
+
+    # spec-reviewer: blocking -> feedback rework; minors -> integrate
+    assert by["spec-reviewer"].rules[0].label == "addressing review feedback"
+    assert by["spec-reviewer"].rules[1].label == "integrating minor improvements"
+    # plan-reviewer: blocking; minors (has_minor_findings rule)
+    assert by["plan-reviewer"].rules[0].label == "addressing review feedback"
+    assert by["plan-reviewer"].rules[2].label == "integrating minor improvements"
+    # task-lead deviation
+    assert by["task-lead"].rules[0].label == "plan didn't match the code"
+    # plan-cycle-check supercycle (the more_plans:true -> plan-writer rule)
+    assert by["plan-cycle-check"].rules[1].label == "more plans for this spec"
+    # code-reviewer task_gap -> task-lead
+    assert by["code-reviewer"].rules[0].label == "addressing review feedback"
+    # finalize: merge label + rework label
+    assert by["finalize"].rules[0].label == "preparing to merge"
+    assert by["finalize"].rules[1].label == "addressing review feedback"
+    # integration-resolver rework -> plan-writer (its merge rule stays unlabeled)
+    assert by["integration-resolver"].rules[1].label == "addressing review feedback"

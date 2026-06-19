@@ -34,6 +34,7 @@ phases:
       - name: spec-writer
         file: agents/spec-writer.md
         tier: high
+        label: writing spec
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: [".imp/change/artifacts/spec/**", ".imp/change/progress.md"], mode: allow}
@@ -51,6 +52,7 @@ phases:
       - name: spec-reviewer
         file: agents/spec-reviewer.md
         tier: high
+        label: reviewing spec
         # The reviewer gets the last word: the loop ends only on a clean review with
         # nothing left to integrate. spec_minors_integrated tracks whether the writer
         # has already spent its one minors-integration pass for the current settled
@@ -58,10 +60,10 @@ phases:
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
           - {if: {blocking: true}, set: {spec_minors_integrated: false},
-             resume: spec-writer, feedback: "Here's review feedback to address:"}
+             resume: spec-writer, label: "addressing review feedback", feedback: "Here's review feedback to address:"}
           # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
           - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
-             resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+             resume: spec-writer, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
           - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 
@@ -71,6 +73,7 @@ phases:
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
+        label: writing plan
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: [".imp/change/artifacts/plans/**", ".imp/change/progress.md"], mode: allow}
@@ -86,6 +89,7 @@ phases:
       - name: plan-reviewer
         file: agents/plan-reviewer.md
         tier: high
+        label: reviewing plan
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
         # engine routes its {status, findings, blocking, has_minor_findings} output
@@ -94,11 +98,11 @@ phases:
         # every rework/terminal branch. Mirrors the spec minors loop.
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
-          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, feedback: "Here's review feedback to address:"}
+          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing review feedback", feedback: "Here's review feedback to address:"}
           # Clean, and the writer already did its minors-integration pass -> stop.
           - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: task-lead}
           # Clean with actionable minors -> integrate them, then owe one more (verification) review.
-          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean, nothing to integrate -> stop.
           - {else: true, goto: task-lead}
 
@@ -107,11 +111,12 @@ phases:
       - name: task-lead
         file: agents/task-lead.md
         tier: medium
+        label: implementing
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {deviation: true}, resume: plan-writer, label: "plan didn't match the code", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
           - {if: {verify_tolerated: true}, set: {verify_tolerated_carry: true}, goto: verify}
           - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
@@ -125,6 +130,7 @@ phases:
 
       - name: verify
         command: ./scripts/run-verify.sh
+        label: testing
         max_loops: 5
         rules:
           - {if: {exit: 0}, set: {verify_tolerated_carry: false}, continue: true}
@@ -145,6 +151,7 @@ phases:
       - name: autosquash-resolve
         file: agents/autosquash-resolve.md
         tier: high
+        label: resolving fixups
         max_loops: 6
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
@@ -169,6 +176,7 @@ phases:
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
         tier: medium
+        label: checking plan coverage
         rules:
           # batch full (more scope remains AND counter crossed N) -> per-batch review.
           # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
@@ -178,7 +186,7 @@ phases:
              set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"}, goto: code-reviewer}
           # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
           - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
-             goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}
+             goto: plan-writer, label: "more plans for this spec", feedback: "More plans are needed for this spec. Coverage assessment:"}
           # coverage complete, trivial change -> no panel, straight to integration via stamp-trailers
           - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: stamp-trailers}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
@@ -196,18 +204,20 @@ phases:
       - name: code-reviewer
         file: agents/code-reviewer.md
         tier: high
+        label: reviewing code
         max_loops: 6
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations
         rules:
-          - {if: {verdict: task_gap}, goto: task-lead, feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
+          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
           - {else: true, continue: true}
 
       - name: deferred-sweep
         file: agents/deferred-sweep.md
         tier: medium
+        label: clearing deferred items
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
@@ -218,6 +228,7 @@ phases:
 
       - name: sweep-verify
         command: ./scripts/run-verify.sh
+        label: testing
         max_loops: 5
         rules:
           - {if: {exit: 0}, set: {sweep_tolerated_carry: false}, continue: true}
@@ -258,10 +269,11 @@ phases:
       - name: finalize
         file: agents/finalize.md
         tier: high
+        label: finalizing
         max_loops: 20
         rules:
-          - {if: {decision: merge},  goto: wait-for-head, label: "entering the merge queue"}
-          - {if: {decision: rework}, goto: plan-writer, feedback: "Here's the feedback to address:"}
+          - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}
+          - {if: {decision: rework}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── merge: the FIFO merge queue. Only the head touches the base. ───────
@@ -269,7 +281,7 @@ phases:
     steps:
       - name: wait-for-head
         kind: wait_for_head
-        quiet: true
+        label: waiting to merge
         rules:
           - {else: true, continue: true}
 
@@ -285,6 +297,7 @@ phases:
       - name: integrator
         file: agents/integrator.md
         tier: high
+        label: integrating
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
@@ -292,12 +305,14 @@ phases:
       - name: integration-reviewer
         file: agents/integration-review.md
         tier: high
+        label: reviewing merge
         rules:
           - {if: {verdict: breakage}, goto: bypass-dequeue}
           - {else: true, continue: true}
 
       - name: integration-verify
         command: ./scripts/run-verify.sh
+        label: testing
         rules:
           - {if: {exit: 0}, goto: merge-to-base}
           - {if: {exit: 124}, pause: true}
@@ -312,14 +327,16 @@ phases:
       - name: integration-resolver
         file: agents/integration-resolve.md
         tier: high
+        label: resolving merge
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: wait-for-head}
-          - {if: {decision: rework}, goto: plan-writer, feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
       - name: merge-to-base
         kind: merge
+        label: merging
         rules:
           - {if: {merge: MERGED}, continue: true}
           - {if: {merge: STALE}, pause: true}
