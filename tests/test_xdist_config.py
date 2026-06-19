@@ -43,8 +43,13 @@ def test_make_test_verbose_is_parallel_by_default() -> None:
     assert re.search(r"-n \S+", recipe), f"expected an -n worker flag in: {recipe!r}"
 
 
+def test_make_test_passes_xdist_flags_through() -> None:
+    recipe = _make_dry_run("test", "XDIST=-n auto --dist loadgroup")
+    assert "--dist loadgroup" in recipe
+    assert re.search(r"-n \S+", recipe), f"expected an -n worker flag in: {recipe!r}"
+
+
 def test_make_test_runs_serial_when_xdist_overridden_empty() -> None:
-    pytest.importorskip("xdist")
     recipe = _make_dry_run("test", "XDIST=")
     assert "--dist" not in recipe
     assert not re.search(r"-n \S+", recipe), f"expected no -n flag in: {recipe!r}"
