@@ -149,3 +149,47 @@ def test_verify_and_sweep_verify_share_tree_skip_cache(tmp_path: Path) -> None:
     assert sweep_verify.returncode == 0, sweep_verify.stderr
     assert "verify skipped — tree unchanged since last green run" in sweep_verify.stdout
     assert counter.read_text().count("x") == 1   # sweep-verify did NOT re-run
+
+
+# ── baseline-verify.sh: establish the change's baseline verification state ──
+
+
+def test_baseline_verify_clean_leaves_no_record(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    proc = _run("baseline-verify.sh", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": "true"})
+    assert proc.returncode == 0, proc.stderr
+    assert not (project / ".imp" / "change" / "tolerated-failures.md").exists()
+
+
+def test_baseline_verify_red_captures_baseline_entry(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    proc = _run("baseline-verify.sh", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_VERIFY_COMMAND": "sh -c 'echo FAILED_TEST_X; exit 1'"})
+    assert proc.returncode == 1
+    rec = (project / ".imp" / "change" / "tolerated-failures.md").read_text()
+    assert "[baseline]" in rec          # origin tag
+    assert "FAILED_TEST_X" in rec       # the captured failure output
+
+
+def test_baseline_verify_no_command_passes(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    env = os.environ.copy()
+    env.pop("IMP_VERIFY_COMMAND", None)
+    env["IMP_PROJECT_ROOT"] = str(project)
+    proc = subprocess.run(
+        [str(_scripts_dir() / "baseline-verify.sh")],
+        env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0
+    assert not (project / ".imp" / "change" / "tolerated-failures.md").exists()
+    assert "no verify_command" in proc.stdout.lower()
