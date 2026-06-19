@@ -1305,3 +1305,34 @@ def test_status_spine_phase_label_activity_elapsed() -> None:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
     assert qline.split(" ", 1)[1] == "implement · running · 4s"
+
+
+def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
+    # Tripwire: a streaming chunk must not resume-close sibling folds, freezing their elapsed.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("tk1", "tool_call", agent_id="a", id="b1", name="task",
+           input={"subagent_name": "reviewer"},
+           timestamp="2026-06-19T10:00:00+00:00"),
+        ev("tk2", "tool_call", agent_id="a", id="b2", name="task",
+           input={"subagent_name": "tester"},
+           timestamp="2026-06-19T10:00:01+00:00"),
+        ev("a1", "llm_response", agent_id="a", stop_reason=None, usage={},
+           raw={"content": [{"type": "text", "text": "still working"}]},
+           timestamp="2026-06-19T10:00:02+00:00"),
+        ev("r1", "tool_result", agent_id="a", id="b1", id_ns="block",
+           content="done", timestamp="2026-06-19T10:00:10+00:00"),
+        ev("r2", "tool_result", agent_id="a", id="b2", id_ns="block",
+           content="done", timestamp="2026-06-19T10:00:20+00:00"),
+        ev("sc", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={},
+           timestamp="2026-06-19T10:00:21+00:00"),
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("reviewer" in ln and "10s" in ln for ln in body)
+    assert any("tester" in ln and "19s" in ln for ln in body)
