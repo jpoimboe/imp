@@ -335,7 +335,7 @@ def test_plan_writer_rework_authors_corrective_n_plus_1() -> None:
     # A post-settlement rework authors a NEW corrective plan, never revises the
     # settled plan in place.
     assert "corrective plan" in low
-    assert "never revise the settled plan" in low
+    assert "never revise the settled plan" in " ".join(low.split())
     # The removed override no longer claims a rework reuses ("bounces") the same plan.
     assert "rework bounce" not in low
 
