@@ -23,7 +23,7 @@ from __future__ import annotations
 import contextlib
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,7 @@ from imp.agents.runner import AgentInvocation, ChangeContext, Message
 from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn, completion_instruction
-from imp.engine.types import AgentDef
+from imp.engine.types import AgentDef, OutputField
 
 # Injected into the system prompt of every agent that has the `bash` tool (see
 # build_agent_invocation). This is a PROPERTY OF HOLDING `bash`, not something
@@ -382,6 +382,25 @@ def drain_all_interjects_at_resume(
     return n
 
 
+_OUTCOME_GUIDANCE = (
+    "A one-line record of THIS attempt: what you did and where it goes next "
+    '(e.g. "wrote plan-1 (6 tasks), proceeding to review" or "found issues a, '
+    'b, c — reworking"). Future re-entries of this same step are shown your '
+    "recent outcomes; if you see the same problem recurring, escalate to the "
+    "human instead of silently retrying."
+)
+
+
+def with_outcome_field(agent_def: AgentDef) -> AgentDef:
+    schema = agent_def.output_schema
+    if any(f.name == "outcome" for f in schema.fields):
+        return agent_def
+    outcome = OutputField(name="outcome", type="string", required=True,
+                          description=_OUTCOME_GUIDANCE)
+    new_schema = replace(schema, fields=(*schema.fields, outcome))
+    return replace(agent_def, output_schema=new_schema)
+
+
 def build_agent_invocation(
     *,
     agent_def: AgentDef,
@@ -412,6 +431,7 @@ def build_agent_invocation(
     verify_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
+    inject_outcome_field: bool = False,
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
     that drifted between the two creation paths: append
@@ -422,6 +442,8 @@ def build_agent_invocation(
     own (provider, model) — the builder never branches on agent kind. `model`
     is a value, not a policy, here.
     """
+    if inject_outcome_field:
+        agent_def = with_outcome_field(agent_def)
     instruction = completion_instruction(agent_def.output_schema)
     if system_prompt_override is not None:
         # Resume-replay (Part B): the override IS the previously-assembled,
