@@ -135,6 +135,23 @@ def test_plain_output_has_no_sgr_and_expected_lines():
     ]
 
 
+def test_plain_multi_step_shows_column_padding():
+    rows = [
+        _row("plan", "plan-writer", 90),
+        _row("plan", "plan-review", 120),
+        _row("implement", "verify", 30),
+    ]
+    lines = render_summary(rows, header=_HDR, color=False, width=80)
+    assert lines == [
+        "feature  ·  abc  ·  merged  ·  39m02s",
+        "plan",
+        "  plan-writer  1m30s",
+        "  plan-review  2m00s",
+        "implement",
+        "  verify       0m30s",
+    ]
+
+
 def test_phase_hue_cycle_and_reset_at_phase_boundary():
     rows = [
         _row("plan", "plan-writer", 10),
