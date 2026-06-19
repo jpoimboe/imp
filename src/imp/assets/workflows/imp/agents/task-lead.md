@@ -32,10 +32,10 @@ re-open and fix the named task even if progress.md marks it done, then reconcile
 progress.md. Two feedback sources resume you here:
 - a gate failure (the `commit-check`/`verify` scripts `resume` you with their
   stderr — e.g. failing tests or an uncommitted file);
-- the review panel's `task_gap` — the whole-diff `review` step `goto`s you with the
-  preamble "The review panel found an implemented task needs rework. Findings:"
+- the code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
+  preamble "The code-reviewer found an implemented task needs rework. Findings:"
   when it adjudicated a blocking finding as a bounded fix. Re-open the task its
-  findings name, fix it, and let the loop carry the fix back through the panel.
+  findings name, fix it, and let the loop carry the fix back through review.
 
 (Otherwise progress.md is your guide.)
 
@@ -87,7 +87,7 @@ progress.md. Two feedback sources resume you here:
    **One reviewer.** Dispatch ONLY `quality-reviewer` at the **`medium` tier**:
    `task(subagent_name="quality-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
-   end-of-run spec coverage now lives in the whole-diff review panel.)
+   end-of-run spec coverage now lives in the whole-diff code-reviewer.)
    {% else %}
    Dispatch the `quality-reviewer` at the **`medium` tier**:
    `task(subagent_name="quality-reviewer", tier="medium", …)`.

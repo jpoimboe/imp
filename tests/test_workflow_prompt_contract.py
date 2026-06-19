@@ -80,9 +80,7 @@ def test_spec_writer_infers_intent_from_pasted_context() -> None:
 
 TURN_TERMINAL_REVIEWERS = [
     "code-reviewer.md", "quality-reviewer.md", "plan-reviewer.md",
-    "spec-reviewer.md", "completeness-slice.md",
-    "boundaries-slice.md", "spec-compliance-slice.md", "plan-cycle-check.md",
-    "review-panel.md",
+    "spec-reviewer.md", "plan-cycle-check.md",
 ]
 
 
@@ -301,16 +299,15 @@ def test_task_lead_documents_verify_triage() -> None:
     assert "non-converging" in low
 
 
-def test_code_reviewer_honors_dispatched_diff_range() -> None:
+def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
     low = CODE_REVIEWER.read_text().lower()
-    # The coordinator gives the diff range (a batch range or the whole change); the
-    # reviewer must use THAT range, not assume the whole change every time.
-    assert "diff range" in low
-    assert "named in your dispatch" in low
-    # Falls back to the whole change only when no range was given.
-    assert "git diff <base>..head" in low
-    # The frontmatter description must drop the stale "whole-change" framing so the
-    # coordinator/log surface no longer mislabels the now-per-batch reviewer.
+    # The reviewer resolves its own range from the review cadence, not from a
+    # coordinator dispatch: per-batch over review_base, end-of-change over merge-base.
+    assert "review_scope" in low
+    assert "review_base" in low                 # per-batch range
+    assert "git merge-base" in low              # end-of-change range
+    assert "base_branch" in low                 # <base> from change.json
+    assert "pure advisor" not in low            # it routes now
     assert "final whole-change review" not in low
 
 
@@ -380,3 +377,9 @@ def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
     low = text.lower()
     assert "spec-writer" in low and "plan-writer" in low
     assert "fast_path" in low or "fast path" in low
+
+
+def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
+    text = SWEEP.read_text()
+    assert "code-reviewer append it" in text
+    assert "review-panel" not in text

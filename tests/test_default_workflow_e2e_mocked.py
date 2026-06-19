@@ -216,7 +216,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     # the fix is to construct per-agent canned responses instead.
     #
     # Fields that drive workflow routing (must produce a single-pass run):
-    #   verdict:approve    review-panel / recheck → continue (not task_gap/plan_gap)
+    #   verdict:approve    review (code-reviewer) → continue (not task_gap)
     #   decision:merge     finalize  → goto merge
     #   phase:written      spec-writer   → not drafting, advances
     #   done:true          task-lead     → plan fully implemented
@@ -720,7 +720,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     # breadcrumb is exactly what the integrate-rebase regression produced
     # (`integrate-rebase complete · goto(summarizer)`). We check the block, NOT bare
     # name presence, because a LOUD step legitimately names a quiet step as a goto
-    # TARGET (`review-panel complete · goto(integrate-rebase)`) — and a loud agent
+    # TARGET (`review complete · goto(integrate-rebase)`) — and a loud agent
     # step showing its own routing breadcrumb is intended; humanize-routing is a
     # plumbing rule.
     quiet = {s.name for s in load_workflow(change.workflow_dir).flat_steps() if s.quiet}

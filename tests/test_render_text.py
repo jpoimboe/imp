@@ -1262,7 +1262,7 @@ def test_complete_step_findings_hidden_lean_visible_full() -> None:
     assert "Line 2 needs a guard." in full         # surfaced under --full
 
 
-def test_clean_review_panel_findings_hidden_by_default() -> None:
+def test_clean_review_findings_hidden_by_default() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),

@@ -48,11 +48,9 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change"}
     top_dispatcher = top_leaf | {"task"}
     subagents = {
-        "implementer", "quality-reviewer", "code-reviewer",
-        "completeness-slice", "spec-compliance-slice", "boundaries-slice",
-        "plan-reviewer",
+        "implementer", "quality-reviewer", "plan-reviewer",
     }
-    dispatchers = {"task-lead", "review-panel", "deferred-sweep",
+    dispatchers = {"task-lead", "deferred-sweep",
                    "plan-writer", "spec-writer", "plan-review-panel"}
 
     for name, agent in wf.agents.items():
@@ -113,12 +111,12 @@ def test_review_step_has_no_differ_from():
     assert by["review"].differ_from is None
 
 
-def test_review_step_declares_medium_tier():
+def test_review_step_declares_high_tier():
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["review"].tier == "medium"
+    assert by["review"].tier == "high"
 
 
 def test_default_workflow_loads() -> None:

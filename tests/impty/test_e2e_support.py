@@ -53,7 +53,7 @@ def test_default_workflow_script_covers_the_fast_path_agents() -> None:
     steps = script["steps"]
     # Every agent the trivial fast path invokes on the way to completion + merge.
     for agent in ("spec-writer", "plan-writer", "task-lead",
-                  "review-panel", "deferred-sweep", "plan-cycle-check", "finalize"):
+                  "code-reviewer", "deferred-sweep", "plan-cycle-check", "finalize"):
         assert agent in steps, f"{agent} missing from the default-workflow script"
 
     # spec-writer marks the change trivial → fast path; task-lead writes the sentinel.

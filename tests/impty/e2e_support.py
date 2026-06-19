@@ -125,7 +125,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 bash(lead_cmd),
                 done(done=True, deviation=False, verify_tolerated=False, summary="done"),
             ]}],
-            "review-panel": [{"text": "review", "tools": [
+            "code-reviewer": [{"text": "review", "tools": [
                 done(verdict="approve", findings=""),
             ]}],
             "deferred-sweep": [{"text": "sweep", "tools": [
