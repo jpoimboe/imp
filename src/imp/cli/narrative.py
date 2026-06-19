@@ -32,6 +32,13 @@ _TURN_END_STOP_REASONS: frozenset[str] = frozenset(
     {"end_turn", "stop_sequence", "max_tokens"})
 
 
+def _llm_response_is_turn_end(payload: dict[str, Any]) -> bool:
+    # load-bearing: codex None = turn-end; claude_code None = mid-stream fragment
+    if payload.get("provider") == "codex":
+        return True
+    return payload.get("stop_reason") in _TURN_END_STOP_REASONS
+
+
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
 @dataclass
 class TokenTotals:
@@ -531,7 +538,7 @@ class NarrativeBuilder:
             is_parent_mid_turn = (
                 etype == "thinking"
                 or (etype == "llm_response"
-                    and payload.get("stop_reason") not in _TURN_END_STOP_REASONS))
+                    and not _llm_response_is_turn_end(payload)))
             matched = (
                 etype == "tool_result"
                 and (rid_ in self._open_sub_by_block or rid_ in self._open_sub_by_event))

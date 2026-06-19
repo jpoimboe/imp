@@ -700,6 +700,52 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     assert "task → reviewer" not in act
 
 
+def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
+    # codex emits stop_reason=None once per turn at turn.completed. A parent
+    # llm_response after a task fold opened (with NO task tool_result arriving)
+    # means control returned, so the resume-close fallback must close the fold —
+    # without waiting for the step_completed backstop.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="codex"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="codex",
+              model="m", system_prompt="SYS", tools_schema=[], params={},
+              max_tool_calls=50))
+    step = b._step_stack[-1]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is True
+    assert "task → reviewer" in nv.activity_to_text(b.current_activity())
+    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="codex",
+              model="m", stop_reason=None, usage={}, raw={"content": [
+                  {"type": "text", "text": "parent resumes"}]}))
+    assert sub.running is False
+    assert "task → reviewer" not in nv.activity_to_text(b.current_activity())
+
+
+def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
+    # claude_code emits stop_reason=None on mid-stream fragments — value-identical
+    # to codex's turn-end None. The provider gate must keep claude_code fragments
+    # mid-turn: a fragment must NOT salvage-close an open task fold (it closes
+    # later via its canonical task tool_result or the step_completed backstop).
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="claude_code"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
+              model="m", system_prompt="SYS", tools_schema=[], params={},
+              max_tool_calls=50))
+    step = b._step_stack[-1]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is True
+    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="claude_code",
+              model="m", stop_reason=None, usage={}, raw={"content": [
+                  {"type": "text", "text": "still streaming"}]}))
+    assert sub.running is True
+
+
 def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     # Normal path: start_ts captured from the event's top-level timestamp.
     e1 = _ev("1", "step_started", step="spec", kind="agent", phase="design")
