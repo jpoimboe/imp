@@ -4,6 +4,7 @@ description: Drain the Deferred Followups list — re-evaluate each item on a ri
 subagents: [implementer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
+  sweep_tolerated: {type: bool}
   summary: {type: string}
 ---
 
