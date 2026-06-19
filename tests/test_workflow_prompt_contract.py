@@ -377,3 +377,9 @@ def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
     low = text.lower()
     assert "spec-writer" in low and "plan-writer" in low
     assert "fast_path" in low or "fast path" in low
+
+
+def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
+    text = SWEEP.read_text()
+    assert "code-reviewer append it" in text
+    assert "review-panel" not in text

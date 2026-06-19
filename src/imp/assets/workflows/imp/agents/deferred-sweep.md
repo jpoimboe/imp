@@ -22,7 +22,7 @@ Read first:
 ## The pinned line format
 
 Each deferred item is a Markdown task-list line under a `## Deferred Followups`
-heading, in this EXACT shape (task-lead and review-panel append it):
+heading, in this EXACT shape (task-lead and code-reviewer append it):
 
 `- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|change>]`
 
