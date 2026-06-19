@@ -434,7 +434,7 @@ def test_integration_resolve_discriminates_bypass_via_query_events() -> None:
     assert "action.target" in text
     assert "bypass-dequeue" in text
     assert "most recent" in low
-    assert "integration-review" in text          # breakage gate
+    assert "integration-reviewer" in text         # breakage gate
     assert "integration-verify" in text          # verify-fail gate
     # Ambiguous/indeterminate journal -> solicit, never auto-merge.
     assert "ambiguous" in low or "indeterminate" in low

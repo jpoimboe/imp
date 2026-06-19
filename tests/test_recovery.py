@@ -19,7 +19,7 @@ def test_gate_steps_in_span_merge_phase() -> None:
     # integrate-rebase (else pause), integration-verify (exit-124 pause),
     # integration-resolve (backward goto + pause), merge-to-base (pause).
     assert gate_steps_in_span(wf, 20, 27) == (
-        "integrate-rebase", "integration-verify", "integration-resolve", "merge-to-base",
+        "integrate-rebase", "integration-verify", "integration-resolver", "merge-to-base",
     )
 
 
@@ -50,20 +50,20 @@ def test_plan_rewind_unknown_target_lists_names() -> None:
     from imp.engine.recovery import RewindError, plan_rewind
 
     with pytest.raises(RewindError) as exc:
-        plan_rewind(_wf(), _state("review"), "no-such-step")
+        plan_rewind(_wf(), _state("code-reviewer"), "no-such-step")
     msg = str(exc.value)
     assert "no-such-step" in msg
-    assert "review" in msg                  # a valid step is listed
+    assert "code-reviewer" in msg           # a valid step is listed
     assert "merge" in msg                   # a valid phase is listed
 
 
 def test_plan_rewind_backward_to_step() -> None:
     from imp.engine.recovery import plan_rewind
 
-    plan = plan_rewind(_wf(), _state("review"), "review")
-    assert plan.to_step == "review"
+    plan = plan_rewind(_wf(), _state("code-reviewer"), "code-reviewer")
+    assert plan.to_step == "code-reviewer"
     assert plan.target_idx == 13
-    assert plan.from_step == "review"
+    assert plan.from_step == "code-reviewer"
 
 
 def test_plan_rewind_forward_to_merge_is_rejected() -> None:
@@ -72,7 +72,7 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("wait-for-head"), "merge-to-base")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integration-verify", "integration-resolve",
+        "integrate-rebase", "integration-verify", "integration-resolver",
     )
     msg = str(exc.value)
     assert "integrate-rebase" in msg
@@ -95,13 +95,13 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 
     wf = _wf()
     # review (13) maxed; task-lead (6) upstream; finalize (18) downstream.
-    st = _state("review",
-                loop_counts={"task-lead": 2, "review": 6, "finalize": 1})
+    st = _state("code-reviewer",
+                loop_counts={"task-lead": 2, "code-reviewer": 6, "finalize": 1})
     log = InMemoryEventLog()
-    plan = plan_rewind(wf, st, "review")
+    plan = plan_rewind(wf, st, "code-reviewer")
     apply_rewind(plan, wf, st, log)
 
-    assert st.step == "review"
+    assert st.step == "code-reviewer"
     assert st.step_attempt == 0
     assert st.resume_pending is None
     assert st.current_step is None
@@ -111,14 +111,14 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     assert "step_rewound" in types
     assert "gates_bypassed" not in types
     rewound = next(e for e in log.read() if e["type"] == "step_rewound")
-    assert rewound["payload"]["from_step"] == "review"
-    assert rewound["payload"]["to_target"] == "review"
+    assert rewound["payload"]["from_step"] == "code-reviewer"
+    assert rewound["payload"]["to_target"] == "code-reviewer"
 
 
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator (22) -> integration-review (23): span [22,22] = integrator,
+    # integrator (22) -> integration-reviewer (23): span [22,22] = integrator,
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
-    plan = plan_rewind(_wf(), _state("integrator"), "integration-review")
-    assert plan.to_step == "integration-review"
+    plan = plan_rewind(_wf(), _state("integrator"), "integration-reviewer")
+    assert plan.to_step == "integration-reviewer"

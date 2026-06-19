@@ -106,8 +106,8 @@ You still **decide the corrective's depth** yourself from the findings/`comments
   corrective plan with the new tasks needed, still scoped to the finding.
 
 Write `…-plan-(N+1).md`, run `imp artifact-commit plan`, then the corrective flows
-through `plan-review` → `task-lead` exactly like a first-time plan (a trivial
-corrective takes `fast_path` and skips `plan-review`). Code review of the corrective
+through `plan-reviewer` → `task-lead` exactly like a first-time plan (a trivial
+corrective takes `fast_path` and skips `plan-reviewer`). Code review of the corrective
 is scoped to its own `review_base..HEAD` diff; the settled work is neither re-planned
 nor re-reviewed.
 

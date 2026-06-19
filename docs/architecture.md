@@ -172,7 +172,7 @@ flowchart TD
   PW --> PVC{{"plan-verify-commit"}}
   PVC -. fail .-> PW
   PVC -->|fast_path| out([→ implement])
-  PVC --> PR["plan-review<br/>(plan-reviewer)"]
+  PVC --> PR["plan-reviewer"]
   PR -->|"Critical / Major"| PW
   PR -->|"minors: one pass"| PW
   PR -->|clean| out
@@ -273,6 +273,6 @@ All four live under `.imp/change/` (gitignored); spec/plan artifacts are committ
 | File | Written by | Read by |
 |---|---|---|
 | `.imp/change/artifacts/spec/{slug}.md` | spec-writer | all phases |
-| `.imp/change/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-review, plan-cycle-check, deferred-sweep, finalize |
+| `.imp/change/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
 | `.imp/change/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
 | `.imp/change/integration-notes.md` | integrator | finalize |

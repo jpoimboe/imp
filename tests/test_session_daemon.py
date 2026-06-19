@@ -713,9 +713,9 @@ async def test_resume_from_applies_rewind_under_the_daemon_lock(
     _seed_control_default(tmp_path)
     change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(change.state_dir)
-    st.step = "review"
+    st.step = "code-reviewer"
     st.status = "paused"
-    st.loop_counts = {"task-lead": 2, "review": 6}
+    st.loop_counts = {"task-lead": 2, "code-reviewer": 6}
     st.save(change.state_dir)
 
     async def fake_run(
@@ -728,7 +728,7 @@ async def test_resume_from_applies_rewind_under_the_daemon_lock(
     with anyio.fail_after(5):
         result = await serve_change_session(
             change, run_fn=fake_run, hibernate=False,
-            resume=True, from_target="review")
+            resume=True, from_target="code-reviewer")
 
     assert result is RunResult.COMPLETED
 

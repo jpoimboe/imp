@@ -1136,7 +1136,7 @@ def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
 
 
 _REVIEW_STEPS = frozenset({
-    "spec-reviewer", "plan-review", "review", "deferred-sweep",
+    "spec-reviewer", "plan-reviewer", "code-reviewer", "deferred-sweep",
     "plan-cycle-check", "finalize",
 })
 

@@ -1,15 +1,15 @@
 name: feature
 description: |
-  spec -> (plan -> implement*)* -> review -> merge
+  spec -> (plan -> implement*)* -> merge
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
 # reviewer judging the medium-tier implementer's work), not by vendor. Review fires on
 # an ACCUMULATED-TASK cadence decided by plan-cycle-check, the sole coverage guard: a
-# single `code-reviewer` runs as the `review` step directly — per batch
+# single `code-reviewer` runs as the `code-reviewer` step directly — per batch
 # (review_base..HEAD) when tasks_since_review crosses review_batch_size, and once over
 # the whole change at change end (review_scope=change, merge-base..HEAD). deferred-sweep
-# is paired with each review; verify and plan-review stay per-plan.
+# is paired with each review; verify and plan-reviewer stay per-plan.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -83,7 +83,7 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
-      - name: plan-review
+      - name: plan-reviewer
         file: agents/plan-reviewer.md
         tier: high
         # A single plan-reviewer runs directly as the step at its own high tier (the
@@ -175,7 +175,7 @@ phases:
           # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
           # per-batch review as the full panel.
           - {if: "output.more_plans and output.running_tasks >= review_batch_size",
-             set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"}, goto: review}
+             set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"}, goto: code-reviewer}
           # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
           - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
              goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}
@@ -184,16 +184,16 @@ phases:
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
           # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD diff
           # (review_scope='plan'), not a fresh whole-change panel each round.
-          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", tasks_since_review: "output.running_tasks"}, goto: review}
+          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", tasks_since_review: "output.running_tasks"}, goto: code-reviewer}
           # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
           # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
-          - {else: true, set: {review_scope: "'change'", change_panel_done: true, tasks_since_review: "output.running_tasks"}, goto: review}
+          - {else: true, set: {review_scope: "'change'", change_panel_done: true, tasks_since_review: "output.running_tasks"}, goto: code-reviewer}
 
       # The review step IS the code-reviewer (no coordinator/panel): per-batch it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
       # merge-base..HEAD. It routes — verdict is approve | task_gap only (coverage is
       # plan-cycle-check's call, never the reviewer's).
-      - name: review
+      - name: code-reviewer
         file: agents/code-reviewer.md
         tier: high
         max_loops: 6
@@ -227,7 +227,7 @@ phases:
 
       # After a batch's review + sweep settle, advance the diff base to HEAD and reset
       # the counter. The end-of-change pass (review_scope==change) is the last review,
-      # so route it to integration (via the review-phase stamp-trailers); a per-batch
+      # so route it to integration (via stamp-trailers); a per-batch
       # pass returns to plan-writer for the next plan.
       - name: review-base-repin
         quiet: true
@@ -278,7 +278,7 @@ phases:
         command: ./scripts/integrate-rebase.sh
         rules:
           - {if: {exit: 2}, goto: merge-to-base}
-          - {if: {exit: 0}, goto: integration-review}
+          - {if: {exit: 0}, goto: integration-reviewer}
           - {if: {exit: 6}, continue: true}
           - {else: true, pause: true}
 
@@ -289,7 +289,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
 
-      - name: integration-review
+      - name: integration-reviewer
         file: agents/integration-review.md
         tier: high
         rules:
@@ -309,7 +309,7 @@ phases:
         rules:
           - {else: true, continue: true}
 
-      - name: integration-resolve
+      - name: integration-resolver
         file: agents/integration-resolve.md
         tier: high
         max_loops: 20

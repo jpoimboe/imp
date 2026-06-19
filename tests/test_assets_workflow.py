@@ -91,16 +91,16 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["verify"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
-    assert by["review"].rules[0].action.target == "task-lead"     # task_gap -> implementer
-    assert by["review"].rules[0].action.resume is False           # cross-phase plain goto
+    assert by["code-reviewer"].rules[0].action.target == "task-lead"     # task_gap -> implementer
+    assert by["code-reviewer"].rules[0].action.resume is False           # cross-phase plain goto
     # else: approve -> continue (deferred-sweep); plan_gap route is removed
-    assert isinstance(by["review"].rules[-1].action, Continue)
+    assert isinstance(by["code-reviewer"].rules[-1].action, Continue)
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
     assert [s.name for s in wf.phases[-1].steps] == [
-        "wait-for-head", "integrate-rebase", "integrator", "integration-review",
-        "integration-verify", "bypass-dequeue", "integration-resolve", "merge-to-base"]
+        "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
+        "integration-verify", "bypass-dequeue", "integration-resolver", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge"
 
 
@@ -109,7 +109,7 @@ def test_review_step_has_no_differ_from():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["review"].differ_from is None
+    assert by["code-reviewer"].differ_from is None
 
 
 def test_review_step_declares_high_tier():
@@ -117,7 +117,7 @@ def test_review_step_declares_high_tier():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["review"].tier == "high"
+    assert by["code-reviewer"].tier == "high"
 
 
 def test_default_workflow_loads() -> None:
@@ -307,7 +307,7 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
 def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["plan-review"].rules
+    rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": True},
@@ -321,7 +321,7 @@ def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
 def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["plan-review"].rules
+    rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": False},
@@ -335,7 +335,7 @@ def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
 def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["plan-review"].rules
+    rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": True},
@@ -349,7 +349,7 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
 def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["plan-review"].rules
+    rules = _steps(wf)["plan-reviewer"].rules
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "plan_minors_integrated": False},
@@ -695,7 +695,7 @@ def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> Non
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": False},
         output={"more_plans": False, "running_tasks": 3, "rationale": "done"})
-    assert isinstance(m.action, Goto) and m.action.target == "review"
+    assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
     assert m.var_mutations["review_scope"] == "change"
     assert m.var_mutations["change_panel_done"] is True
 
@@ -709,7 +709,7 @@ def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": True},
         output={"more_plans": False, "running_tasks": 1, "rationale": "corrective"})
-    assert isinstance(m.action, Goto) and m.action.target == "review"
+    assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
     assert m.var_mutations["review_scope"] == "plan"
     assert "change_panel_done" not in m.var_mutations
 

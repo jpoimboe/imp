@@ -310,7 +310,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     cur_step: dict[str, str] = {"name": ""}
 
     def _scripted():
-        verdict = "ok" if cur_step["name"] == "integration-review" else "approve"
+        verdict = "ok" if cur_step["name"] == "integration-reviewer" else "approve"
         return [
             assistant(
                 text("ok"),
@@ -399,7 +399,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     # review after the writer integrates minors. The cycle does NOT loop a third
     # time even though the verification review still reports minors.
     assert started.count("spec-reviewer") == 2, started
-    assert started.count("plan-review") == 2, started
+    assert started.count("plan-reviewer") == 2, started
     # The writer ran twice per phase: the initial write + the one minors pass.
     assert started.count("spec-writer") == 2, started
     assert started.count("plan-writer") == 2, started
@@ -413,7 +413,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
         for s, a in completed
     ), completed
     assert any(
-        s == "plan-review"
+        s == "plan-reviewer"
         and a.get("verb") == "goto" and a.get("target") == "task-lead"
         for s, a in completed
     ), completed
@@ -454,8 +454,8 @@ async def test_fast_path_skips_reviewers_and_review(
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
     assert "spec-reviewer" not in started, started    # A.1: skipped on fast path
-    assert "plan-review" not in started, started       # plan-verify-commit fast-path rule
-    assert "review" not in started, started            # A.2: skipped on fast path
+    assert "plan-reviewer" not in started, started     # plan-verify-commit fast-path rule
+    assert "code-reviewer" not in started, started     # A.2: skipped on fast path
     assert "deferred-sweep" not in started, started    # A.2
     assert "sweep-verify" not in started, started      # A.2
     assert "plan-writer" in started, started           # planning still runs
@@ -478,20 +478,20 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
     # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
     st = State.load(change.state_dir)
-    st.step = "review"
+    st.step = "code-reviewer"
     st.status = "paused"
-    st.loop_counts = {"review": 6}
+    st.loop_counts = {"code-reviewer": 6}
     st.save(change.state_dir)
 
     wf = load_workflow(change.workflow_dir,
                        configured_tiers=load_effective_config(
                            project_root=tmp_path,
                            control_root=tmp_path).config.tier_names())
-    plan = recovery.plan_rewind(wf, st, "review")
+    plan = recovery.plan_rewind(wf, st, "code-reviewer")
     recovery.apply_rewind(plan, wf, st, change.event_log())
     st.status = "running"
     st.save(change.state_dir)
-    assert "review" not in st.loop_counts          # the load-bearing reset guard
+    assert "code-reviewer" not in st.loop_counts   # the load-bearing reset guard
 
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
@@ -563,7 +563,7 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
 async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None:
     """A clean rebase (the stubbed integrate-rebase.sh exits 0): the integrator is
     SKIPPED; the merge tail is finalize → wait-for-head → integrate-rebase →
-    integration-review → integration-verify → merge-to-base."""
+    integration-reviewer → integration-verify → merge-to-base."""
     change = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
@@ -579,13 +579,13 @@ async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     for name in ("finalize", "wait-for-head", "integrate-rebase",
-                 "integration-review", "integration-verify", "merge-to-base"):
+                 "integration-reviewer", "integration-verify", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert "integrator" not in steps, "clean rebase must not call the integrator"
     assert (steps.index("finalize")
             < steps.index("wait-for-head")
             < steps.index("integrate-rebase")
-            < steps.index("integration-review")
+            < steps.index("integration-reviewer")
             < steps.index("integration-verify")
             < steps.index("merge-to-base"))
 
@@ -593,7 +593,7 @@ async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None
 @pytest.mark.anyio
 async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None:
     """A conflict rebase (integrate-rebase.sh exits 6) routes through the
-    integrator before integration-review → integration-verify → merge-to-base."""
+    integrator before integration-reviewer → integration-verify → merge-to-base."""
     change = _seed_default_workflow(tmp_path)
     ir = (change.project_root / "imp" / "workflows" / "imp"
           / "scripts" / "integrate-rebase.sh")
@@ -612,12 +612,12 @@ async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("integrate-rebase", "integrator", "integration-review",
+    for name in ("integrate-rebase", "integrator", "integration-reviewer",
                  "integration-verify", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-rebase")
             < steps.index("integrator")
-            < steps.index("integration-review")
+            < steps.index("integration-reviewer")
             < steps.index("integration-verify")
             < steps.index("merge-to-base"))
 

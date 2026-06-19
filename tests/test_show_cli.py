@@ -71,14 +71,14 @@ def test_show_events_and_review_live(
     # Append a review-phase step event and a non-review one.
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "step_started", "agent_id": None,
-                             "payload": {"step": "plan-review", "phase": "plan"}}) + "\n")
+                             "payload": {"step": "plan-reviewer", "phase": "plan"}}) + "\n")
         fh.write(json.dumps({"type": "step_started", "agent_id": None,
                              "payload": {"step": "task-lead", "phase": "implement"}}) + "\n")
     # events: the raw line is present.
-    assert "plan-review" in _run(monkeypatch, tmp_path, "show", _ID, "events")
+    assert "plan-reviewer" in _run(monkeypatch, tmp_path, "show", _ID, "events")
     # review: only review-phase steps are listed.
     review_out = _run(monkeypatch, tmp_path, "show", _ID, "review")
-    assert "plan-review" in review_out
+    assert "plan-reviewer" in review_out
     assert "task-lead" not in review_out
 
 
@@ -95,7 +95,7 @@ def test_show_spec_falls_back_to_journal_after_merge(
     st.save(ch.state_dir)
     with ch.events_path.open("w", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "step_started", "agent_id": None,
-                             "payload": {"step": "plan-review", "phase": "plan"}}) + "\n")
+                             "payload": {"step": "plan-reviewer", "phase": "plan"}}) + "\n")
     worktree.fold_wip_into_journal(tmp_path, _ID, {
         "events.jsonl": ch.events_path,
         "change.json": ch.change_dir / "change.json",
@@ -107,7 +107,7 @@ def test_show_spec_falls_back_to_journal_after_merge(
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
     assert "PLAN TWO" in _run(monkeypatch, tmp_path, "show", _ID, "plan")
     assert "completed" in _run(monkeypatch, tmp_path, "show", _ID, "status")
-    assert "plan-review" in _run(monkeypatch, tmp_path, "show", _ID, "events")
+    assert "plan-reviewer" in _run(monkeypatch, tmp_path, "show", _ID, "events")
 
 
 def test_show_missing_change_returns_error(
