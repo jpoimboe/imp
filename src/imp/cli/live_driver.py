@@ -48,7 +48,7 @@ def compose_activity_status(
             head.append(pal.ansi(activity.step, enabled=color))
         if activity.detail:
             head.append(pal.ansi(activity.detail, "gray", enabled=color))
-        lead = " > ".join(head)
+        lead = " › ".join(head)
         segs = [pal.ansi(activity.count, enabled=color)]
         if activity.call_elapsed is not None:
             segs.append(pal.ansi(rt.fmt_seconds(activity.call_elapsed), enabled=color))
