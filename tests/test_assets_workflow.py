@@ -156,7 +156,6 @@ def test_minors_integrated_vars_declared_default_false() -> None:
     assert defaults["plan_minors_integrated"] is False
 
 
-
 def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
