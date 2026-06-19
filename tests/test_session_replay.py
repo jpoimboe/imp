@@ -157,12 +157,15 @@ async def test_resume_attach_replays_entire_prior_journal(tmp_path: Path) -> Non
     prior.append({"id": "wr", "type": "workflow_resumed", "payload": {}})
     _write_jsonl(events_path, prior)
     emitted = anyio.Event()
+    attached = anyio.Event()
     server = SessionServer(sock, events_path=events_path)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         on_event({"id": "n0", "type": "step_started", "payload": {"step": "plan"}})
         emitted.set()
-        await anyio.sleep(0.2)
+        await attached.wait()
+        on_event({"id": "n1", "type": "thinking", "payload": {"content": "live"}})
+        await anyio.sleep(0.1)
         return "ok"
 
     async with anyio.create_task_group() as tg:
@@ -177,5 +180,11 @@ async def test_resume_attach_replays_entire_prior_journal(tmp_path: Path) -> Non
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert [s["id"] for s in seen] == [f"p{i}" for i in range(20)] + ["wr"]
+        attached.set()
+        with anyio.fail_after(5):
+            seen.append(parse_event(
+                (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        assert seen[-1]["id"] == "n1"
+        assert [s["id"] for s in seen] == [f"p{i}" for i in range(20)] + ["wr", "n1"]
         await client.aclose()
         tg.cancel_scope.cancel()
