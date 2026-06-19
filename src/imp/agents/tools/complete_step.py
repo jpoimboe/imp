@@ -38,10 +38,11 @@ def _build_schema(output: OutputSchema) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     for f in output.fields:
         t = _py_type(f)
+        desc = f.description or None
         if f.required:
-            fields[f.name] = (t, Field(...))
+            fields[f.name] = (t, Field(..., description=desc))
         else:
-            fields[f.name] = (t | None, Field(default=None))
+            fields[f.name] = (t | None, Field(default=None, description=desc))
     model = create_model("CompleteStepArgs", **fields)
     return _normalize_anthropic_schema(model.model_json_schema())
 
