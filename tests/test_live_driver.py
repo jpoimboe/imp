@@ -954,6 +954,50 @@ def test_compose_status_returns_activity_content() -> None:
     assert "\x1b[90m" in result    # gray detail segment
 
 
+def test_compose_status_indented_to_frontier_depth_aligns_spinner_with_bullets() -> None:
+    """The transient status line is indented to the frontier depth so the spinner
+    glyph lands in the bullet column — the `• `/`▸ ` rows it sits beneath render
+    at this same depth. The indent lives in the driver, not the shared
+    compose_activity_status helper (so the --tui toolbar is unaffected)."""
+    from imp.cli import render_text as rt
+    from imp.cli.live_driver import compose_activity_status
+
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+
+    # During a streaming step the bullets render at the frontier depth.
+    assert drv._frontier_depth() == 1
+    indent = rt._gutter_indent(1, (), False)
+    raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
+    assert raw is not None and not raw.startswith(" ")   # helper itself is flush-left
+
+    result = drv.compose_status(0, 1.0)
+    assert result == indent + raw
+    # spinner glyph sits exactly in the bullet column (after the depth indent).
+    assert result[:len(indent)] == indent
+    assert result[len(indent)] == "⠋"
+
+
+def test_compose_status_unindented_at_root_depth() -> None:
+    """No active phase/step → frontier at root (depth 0) → no indent prefix."""
+    from imp.cli import render_text as rt
+
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    # The shared helper is unconditionally flush-left regardless of depth.
+    from imp.cli.live_driver import compose_activity_status
+    raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
+    assert raw is not None
+    # depth-0 indent is empty, so a root-depth status would be the bare line.
+    assert rt._gutter_indent(0, (), False) == ""
+
+
 def test_interrupt_breadcrumb_in_live_path() -> None:
     drv, out = _driver()
     for e in [
