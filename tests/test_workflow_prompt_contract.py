@@ -312,3 +312,15 @@ def test_code_reviewer_honors_dispatched_diff_range() -> None:
     # The frontmatter description must drop the stale "whole-change" framing so the
     # coordinator/log surface no longer mislabels the now-per-batch reviewer.
     assert "final whole-change review" not in low
+
+
+def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
+    text = (AGENTS_DIR / "finalize.md").read_text()
+    low = text.lower()
+    assert "tolerated-failures.md" in text          # the record it now reads
+    assert "[baseline]" in text                      # both entry kinds surfaced
+    assert "[flaky]" in text                         # ...
+    assert "as its own" in text  # each entry surfaced individually
+    # The max_loops pause meaning is documented (non-converging triage).
+    assert "max_loops" in text
+    assert "non-converging" in low

@@ -41,6 +41,25 @@ These four fields (`built` / `verify_status` / `open_items` / `next_steps`) are
 the **audit record** — emitted on `complete_step` and queryable via `imp log` —
 not the script you read at the gate. Present them as prose in §2.
 
+## Surface tolerated verification failures
+
+Besides the `— needs-decision:` lines the `deferred-sweep` left in
+`.imp/change/progress.md`, read the change-local tolerated-failures record
+`.imp/change/tolerated-failures.md` if it exists. It holds `[baseline]` entries
+(failures present before this change began) and `[flaky]` entries (failures
+`task-lead` judged non-deterministic during the run). Surface **every** such entry
+as its own **needs-decision** item in the per-item walk (§2): present the entry and
+its justification, give your recommendation, and take one of the three dispositions
+exactly as for a `progress.md` needs-decision item. A `[flaky]` declaration changed
+nothing about the merge — visibility, not reproduction, is the guard — so a human
+adjudicates each one before merge. If the record is absent or empty, there is
+nothing extra to surface.
+
+A **`max_loops` pause at the `verify` step** (capped at 5 fix laps) means the verify
+triage did **not converge** — an unrecognized flake or a hard regression that was
+neither fixed nor tolerated. Read it as a non-converging triage that needs a human,
+not a transient.
+
 ## Before/after UX capture — only when this change touched a UI surface
 
 This runs for ANY change (no playbook required) — the trigger is what the change
@@ -83,7 +102,7 @@ from the section above. Name genuinely controversial decisions **only when there
 were any** — do not manufacture controversy. The structured fields are the audit
 record (§1); your prose is what the human reads.
 
-Then walk the **needs-decision** items ONE AT A TIME — these are the
+Then walk the **needs-decision** items ONE AT A TIME — these include the
 `— needs-decision: <why>` lines the `deferred-sweep` left in
 `.imp/change/progress.md`. For EACH item, in its own `wait_for_user` turn (one
 item per turn):
