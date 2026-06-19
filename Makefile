@@ -14,7 +14,7 @@ PYTEST   ?= $(PYTHON) -m pytest
 RUFF     ?= $(PYTHON) -m ruff
 MYPY     ?= $(PYTHON) -m mypy
 # Empirical: serial ~282s -> parallel ~34s (-n auto, 12 workers); 20 runs identical; serial override: make test XDIST=
-XDIST    ?= $(shell python3 -c "import xdist" 2>/dev/null && echo "-n auto --dist loadgroup")
+XDIST    ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n auto --dist loadgroup")
 
 # Subprocess tests (`python -m imp ...`, cold-import checks) resolve `imp` via
 # the editable install — which inside a git worktree points at the MAIN checkout,
