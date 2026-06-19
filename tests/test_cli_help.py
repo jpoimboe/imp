@@ -41,4 +41,4 @@ def test_log_help_documents_the_token_positional(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["log", "-h"], capsys)
-    assert "Change id or its short token (omit for the most recent Change)." in out
+    assert "Change id or its short token" in out

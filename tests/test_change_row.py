@@ -84,3 +84,8 @@ def test_format_dim_wraps_whole_row():
     assert line.startswith("\x1b[2m")
     assert line.endswith("\x1b[0m")
     assert "\x1b[32m" not in line                          # no per-status color in dim mode
+
+
+def test_merged_status_renders_green():
+    line = format_change_line(**_row(status="merged"), color=True)
+    assert "\x1b[32mmerged\x1b[0m" in line

@@ -385,7 +385,7 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
         label += " (interrupted)"
     elif sub.is_error:
         label += " (failed)"
-    elapsed = nv._elapsed_seconds(sub.start_ts, sub.end_ts)
+    elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
     if not sub.running and elapsed is not None:
         label += f" · {fmt_seconds(elapsed)}"
     return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
@@ -699,7 +699,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)
     count = f"{n} call{'s' if n != 1 else ''}"
-    elapsed = nv._elapsed_seconds(burst.start_ts, burst.end_ts)
+    elapsed = nv.elapsed_seconds(burst.start_ts, burst.end_ts)
     secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
     # Count-first (§3): the count leads, then the distinct names, then duration.
     # No leading marker — a tool burst is sub-detail of the agent's turn and is
