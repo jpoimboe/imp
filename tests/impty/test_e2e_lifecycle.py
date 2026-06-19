@@ -24,6 +24,7 @@ def _wait_for(s: TerminalSession, needle: str, hard: float = 60.0) -> None:
     raise AssertionError(f"{needle!r} never appeared:\n" + "\n".join(s.lines(limit=s.rows)))
 
 
+@pytest.mark.timeout(180)
 def test_tui_lifecycle_renders_real_engine_tool_calls() -> None:
     with TerminalSession([sys.executable, _HARNESS, "run", "/dev/null"],
                          cols=80, rows=24) as s:
