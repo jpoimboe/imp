@@ -383,3 +383,34 @@ def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
     text = SWEEP.read_text()
     assert "code-reviewer append it" in text
     assert "review-panel" not in text
+
+
+def test_deferred_sweep_documents_verify_triage() -> None:
+    text = SWEEP.read_text()
+    low = text.lower()
+    # The change-local record and the signal it emits.
+    assert "tolerated-failures.md" in text
+    assert "sweep_tolerated: true" in text
+    assert "sweep_tolerated: false" in text
+    # Both tolerated entry kinds and the flaky justification bar (parity with task-lead).
+    assert "[baseline]" in text
+    assert "[flaky]" in text
+    assert "green at baseline" in low
+    assert "outside the diff" in low
+    # Feedback-gated: a fresh entry drains the list; a resumed (sweep-verify) entry
+    # does triage only and does NOT re-drain.
+    assert "injected feedback" in low
+    assert "triage only" in low
+    # A real regression is fixed with a PLAIN commit, never a --fixup (no autosquash
+    # runs after the sweep), so a fixup would leak unsquashed to merge.
+    assert 'git commit -m' in text
+    assert "--fixup=HEAD" in text
+    # The max_loops pause meaning is documented (non-converging triage).
+    assert "max_loops" in text
+    assert "non-converging" in low
+
+
+def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
+    marker = "SYNCED PAIR (task-lead ↔ deferred-sweep)"
+    assert marker in TASK_LEAD.read_text()
+    assert marker in SWEEP.read_text()

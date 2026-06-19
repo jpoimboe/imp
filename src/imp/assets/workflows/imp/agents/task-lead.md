@@ -174,6 +174,11 @@ progress.md. Two feedback sources resume you here:
 
 ## Verify triage — tolerated failures
 
+<!-- SYNCED PAIR (task-lead ↔ deferred-sweep): keep this Verify triage block in lockstep
+with deferred-sweep.md's identical block (and vice-versa). The toleration JUDGMENT is
+uniform; only the fix path differs (you fix in task context with a fixup; deferred-sweep
+fixes in sweep context with a plain commit). -->
+
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
 failure output AND the change-local tolerated-failures record
 `.imp/change/tolerated-failures.md` (passed even when it is absent/empty — the
