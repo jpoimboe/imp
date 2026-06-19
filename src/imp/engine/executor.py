@@ -75,8 +75,7 @@ OUTCOME_HISTORY_K = 4
 
 def _record_outcome(state: State, step_name: str, output: dict[str, Any]) -> None:
     outcome = output.get("outcome")
-    if not isinstance(outcome, str):
-        return
+    assert isinstance(outcome, str), f"outcome must be str; got {outcome!r}"
     hist = state.outcome_history.setdefault(step_name, [])
     next_lap = hist[-1]["lap"] + 1 if hist else 1
     hist.append({"lap": next_lap, "outcome": outcome})
