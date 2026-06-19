@@ -336,7 +336,8 @@ def _fake_change(tmp_path):
     (control / ".git").mkdir(parents=True, exist_ok=True)
     return _types.SimpleNamespace(
         project_root=wt, control_root=control, id="abc",
-        handle="abc-slug", title="Abc Title")
+        handle="abc-slug", title="Abc Title",
+        change_dir=wt / ".imp" / "change")
 
 
 def _fake_config(**over):

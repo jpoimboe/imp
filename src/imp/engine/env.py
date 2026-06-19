@@ -26,6 +26,7 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_CHANGE_ID",
     "IMP_CHANGE_HANDLE",
     "IMP_CHANGE_TITLE",
+    "IMP_CHANGE_DIR",
     "IMP_VERIFY_COMMAND",
     "IMP_VERIFY_TIMEOUT",
 })
@@ -64,6 +65,7 @@ def overlay_engine_env(
 
 def engine_env(
     *, project_root: Path, change_id: str, change_handle: str, change_title: str,
+    change_dir: Path | None = None,
     verify_command: str | None = None, verify_timeout: int | None = None,
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
@@ -76,6 +78,10 @@ def engine_env(
                             title rename. Do not key automation on it; use
                             IMP_CHANGE_ID.
         IMP_CHANGE_TITLE  — human-readable title for the change.
+        IMP_CHANGE_DIR    — absolute host path of the change state directory;
+                            injected only when change_dir is provided. Scripts
+                            anchor on this instead of a cwd-relative .imp/change/
+                            so the state directory survives worktree relocation.
         IMP_VERIFY_COMMAND — optional combined verify gate command (tests+lint+typecheck),
                             injected only when configured. A falsy command (None or
                             empty string) is treated as absent => no verify gate, so
@@ -101,6 +107,8 @@ def engine_env(
         "IMP_CHANGE_HANDLE": change_handle,
         "IMP_CHANGE_TITLE": change_title,
     }
+    if change_dir is not None:
+        env["IMP_CHANGE_DIR"] = str(change_dir)
     if verify_command:
         env["IMP_VERIFY_COMMAND"] = verify_command
     if verify_timeout is not None:

@@ -78,6 +78,7 @@ async def bash(
         change_id=src.id if src else "",
         change_handle=src.handle if src else "",
         change_title=src.title if src else "",
+        change_dir=getattr(src, "change_dir", None),
         verify_command=ctx.verify_command,
     )
     env = overlay_engine_env(os.environ, eng)

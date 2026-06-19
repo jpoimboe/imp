@@ -527,6 +527,7 @@ async def _route_script(
                                  change_id=change.id,
                                  change_handle=change.handle,
                                  change_title=change.title,
+                                 change_dir=change.change_dir,
                                  verify_command=verify_command,
                                  verify_timeout=verify_timeout),
             policy=sandbox_policy))
@@ -1000,6 +1001,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,
                    change_handle=change.handle, change_title=change.title,
+                   change_dir=change.change_dir,
                    verify_command=config.verify_command,
                    verify_timeout=config.verify_timeout),
     )
