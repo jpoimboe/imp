@@ -1013,3 +1013,46 @@ def test_resolution_nested_dispatcher_is_subagent(tmp_path: Path) -> None:
     assert w.agents["nested-mid"].tools == BASE_CAPS
     # nested-leaf is doubly-subagent; also BASE_CAPS
     assert w.agents["nested-leaf"].tools == BASE_CAPS
+
+
+def test_rule_label_parses_onto_rule(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          done: {type: bool, default: false}
+        phases:
+          - name: only
+            steps:
+              - name: route
+                rules:
+                  - {if: done, goto: tail, label: "heading to the tail"}
+                  - {else: true, continue: true}
+          - name: tail
+            steps: []
+        """)
+    wf_obj = load_workflow(wf)
+    route = next(s for s in wf_obj.flat_steps() if s.name == "route")
+    assert route.rules[0].label == "heading to the tail"
+    # A rule with no label: yields None.
+    assert route.rules[1].label is None
+
+
+def test_rule_label_non_string_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          done: {type: bool, default: false}
+        phases:
+          - name: only
+            steps:
+              - name: route
+                rules:
+                  - {if: done, goto: tail, label: 7}
+                  - {else: true, continue: true}
+          - name: tail
+            steps: []
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
