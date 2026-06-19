@@ -30,7 +30,7 @@ STATUS_W = 13   # widest status: len("merge_blocked")
 STEP_W = 20     # widest default-workflow step name
 AGE_W = 4
 
-_STATUS_COLORS: dict[str, tuple[str, ...]] = {
+STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("green",),
     "merged": ("green",),
     "paused": ("cyan",),
@@ -77,7 +77,7 @@ def format_change_line(*, handle: str, title: str, status: str, step: str,
         line = f"{handle_pad}  {title_pad}  {status_pad}  {step_pad}  {age_pad}"
         return pal.ansi(line, "dim", enabled=color)
     title_cell = pal.ansi(title_pad, "dim", enabled=color) if not raw else title_pad
-    codes = _STATUS_COLORS.get(status, ())
+    codes = STATUS_COLORS.get(status, ())
     if color and codes:
         status_cell = pal.ansi(status, *codes, enabled=True) + " " * (STATUS_W - len(status))
     else:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from imp.cli import palette as pal
-from imp.cli.change_row import _STATUS_COLORS
+from imp.cli.change_row import STATUS_COLORS
 from imp.cli.narrative import elapsed_seconds
 
 
@@ -96,7 +96,7 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
 
 def _header_line(h: SummaryHeader, *, color: bool) -> str:
     workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
-    status = pal.ansi(h.status, *_STATUS_COLORS.get(h.status, ()), enabled=color)
+    status = pal.ansi(h.status, *STATUS_COLORS.get(h.status, ()), enabled=color)
     total = "running" if h.total_seconds is None else _fmt_compact(h.total_seconds)
     return f"{workflow}  ·  {h.change_id}  ·  {status}  ·  {total}"
 
