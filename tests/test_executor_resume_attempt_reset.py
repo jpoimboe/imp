@@ -180,7 +180,7 @@ async def test_resume_edge_zeroes_step_attempt(tmp_path: Path) -> None:
             # Snapshot the live step_attempt at the moment this invocation runs.
             live = State.load(change.state_dir)
             seen_attempts.append(live.step_attempt)
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -271,7 +271,7 @@ async def test_resumed_step_persistent_error_still_terminates(
                 return
                 yield  # make async generator
             else:
-                yield {"type": "agent_output", "payload": {"status": "Success"}}
+                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass

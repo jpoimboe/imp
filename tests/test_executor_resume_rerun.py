@@ -124,7 +124,7 @@ async def test_resume_truncated_autonomous_replays_and_advances(
             # runner sees a non-empty transcript at entry.
             seen_nonempty.append(
                 Transcript(tdir / "transcript.jsonl").exists_and_nonempty())
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -167,7 +167,7 @@ async def test_resume_empty_transcript_seeds_fresh_and_advances(
             # The crux: a fresh re-run must hand the runner a non-empty seed so
             # the provider sends a real first query (no infinite receive_response).
             seen_initial_nonempty.append(len(inv.initial_messages) > 0)
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass

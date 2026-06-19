@@ -83,7 +83,7 @@ def _seed_run_repo(root: Path, script_path: Path) -> None:
         "  high: {scripted: x}\n"
         "sandbox:\n  enabled: false\n")
     tools = [{"name": "bash", "input": {"command": f"echo {i}"}} for i in range(40)]
-    tools.append({"name": "complete_step", "input": {"status": "Success"}})
+    tools.append({"name": "complete_step", "input": {"status": "Success", "outcome": "ok"}})
     script_path.write_text(json.dumps({"default": [{"text": "working", "tools": tools}]}))
     _git_q(root, "add", "-A")
     _git_q(root, "commit", "-qm", "imp setup")

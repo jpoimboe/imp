@@ -87,7 +87,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         return {"name": "bash", "input": {"command": cmd}}
 
     def done(**fields: Any) -> dict[str, Any]:
-        return {"name": "complete_step", "input": {"status": "Success", **fields}}
+        return {"name": "complete_step", "input": {"status": "Success", "outcome": "ok", **fields}}
 
     spec_cmd = (
         'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/spec && '

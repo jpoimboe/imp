@@ -341,7 +341,7 @@ async def test_anthropic_e2e_headless_pause_then_attended_resume(
     # next LLM call which completes the step.
     fake_resume = FakeAsyncAnthropic([
         response(
-            tool_use("c1", "complete_step", {"status": "Success"}),
+            tool_use("c1", "complete_step", {"outcome": "ok", "status": "Success"}),
             stop_reason="tool_use",
         ),
     ])
@@ -480,7 +480,7 @@ async def test_claude_code_e2e_headless_pause_then_attended_resume(
     scripted_resume = [
         assistant(
             text("done"),
-            tool_use("c1", "complete_step", {"status": "Success"}),
+            tool_use("c1", "complete_step", {"outcome": "ok", "status": "Success"}),
         ),
         result(),
     ]

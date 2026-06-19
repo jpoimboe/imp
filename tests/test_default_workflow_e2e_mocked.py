@@ -35,6 +35,7 @@ def _canned_anthropic(**overrides):
     """A single complete_step response carrying every field any agent needs.
     Override individual fields (e.g. complexity='trivial') per test."""
     fields = {
+        "outcome": "ok",
         "status": "Success",
         "verdict": "approve", "findings": "none",
         "decision": "merge", "comments": "",
@@ -74,6 +75,7 @@ def _openai_step_aware(**kwargs):
     instructions = kwargs.get("instructions", "")
     verdict = "ok" if _IR_SIG in instructions else "approve"
     fields = {
+        "outcome": "ok",
         "status": "Success",
         "verdict": verdict, "findings": "none",
         "decision": "merge", "comments": "",
@@ -311,6 +313,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
             assistant(
                 text("ok"),
                 cc_tool_use("c0", "complete_step", {
+                    "outcome": "ok",
                     "status": "Success",
                     "verdict": verdict, "findings": "none",
                     "decision": "merge", "comments": "",
@@ -523,7 +526,7 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
     )
     merge_response = response(
         tool_use("c1", "complete_step", {
-            "status": "Success", "decision": "merge", "comments": "user approved",
+            "outcome": "ok", "status": "Success", "decision": "merge", "comments": "user approved",
             "built": "stub", "verify_status": "ok", "open_items": "", "next_steps": "",
         }),
         stop_reason="tool_use",

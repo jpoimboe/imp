@@ -10,7 +10,7 @@ from tests.impty.e2e_support import clean_env, seed_minimal_repo
 def test_tui_falls_back_to_streaming_on_a_non_tty(tmp_path: Path) -> None:
     script = {"default": [{"text": "working", "tools": [
         {"name": "bash", "input": {"command": "echo hello-nontty"}},
-        {"name": "complete_step", "input": {"status": "Success"}},
+        {"name": "complete_step", "input": {"status": "Success", "outcome": "ok"}},
     ]}]}
     script_path = seed_minimal_repo(tmp_path, script=script)
 
