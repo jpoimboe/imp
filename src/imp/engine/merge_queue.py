@@ -77,6 +77,28 @@ def remove(control_root: Path, change_id: str) -> None:
         _write(control_root, entries)
 
 
+def ensure_head_driven(
+    control_root: Path, base_branch: str,
+    *, spawn_fn: Callable[..., Any] | None = None,
+) -> None:
+    """Spawn a live driver for this lane's current head; tolerant and never-raising."""
+    from imp.engine.change import Change
+    from imp.engine.errors import LoadError
+    with RepoGitLock(control_root).acquire():
+        lane = _lane(read(control_root), base_branch)
+        head_id = lane[0]["change_id"] if lane else None
+    if head_id is None:
+        return
+    try:
+        change = Change.load(control_root, head_id)
+    except (LoadError, OSError):
+        return
+    if spawn_fn is None:
+        from imp.remote.session.attach import spawn_session_daemon
+        spawn_fn = spawn_session_daemon
+    spawn_fn(change, resume=True)
+
+
 def pop_and_wake(
     control_root: Path, change_id: str, base_branch: str,
     *, spawn_fn: Callable[..., Any] | None = None,
@@ -91,14 +113,6 @@ def pop_and_wake(
             _write(control_root, new_entries)
         entries = new_entries
         lane_after = _lane(entries, base_branch)
-        next_id = lane_after[0]["change_id"] if (was_head and lane_after) else None
-    if next_id is not None:
-        _wake(control_root, next_id, spawn_fn)
-
-
-def _wake(control_root: Path, next_id: str, spawn_fn: Callable[..., Any] | None) -> None:
-    from imp.engine.change import Change
-    if spawn_fn is None:
-        from imp.remote.session.attach import spawn_session_daemon
-        spawn_fn = spawn_session_daemon
-    spawn_fn(Change.load(control_root, next_id), resume=True)
+        should_wake = was_head and bool(lane_after)
+    if should_wake:
+        ensure_head_driven(control_root, base_branch, spawn_fn=spawn_fn)
