@@ -105,3 +105,89 @@ def test_interrupt_config_error_does_not_mark_errored():
 ])
 def test_fmt_compact(seconds, expected):
     assert _fmt_compact(seconds) == expected
+
+
+from imp.cli.render_summary import SummaryHeader, render_summary, summary_total
+
+
+def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):
+    start = "2026-01-01T00:00:00+00:00"
+    end = None if open_ else f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00"
+    return StepRow(phase=phase, step=step, start_ts=start, end_ts=end,
+                   wait_seconds=wait, errored=errored)
+
+
+_HDR = SummaryHeader(workflow="feature", change_id="abc",
+                     status="merged", total_seconds=2342.0)
+
+
+def test_plain_output_has_no_sgr_and_expected_lines():
+    rows = [_row("plan", "plan-writer", 90)]
+    lines = render_summary(rows, header=_HDR, color=False, width=80)
+    assert lines == [
+        "feature  ·  abc  ·  merged  ·  39m02s",
+        "plan",
+        "  plan-writer  1m30s",
+    ]
+
+
+def test_phase_hue_cycle_and_reset_at_phase_boundary():
+    rows = [
+        _row("plan", "plan-writer", 10),
+        _row("plan", "plan-review", 20),
+        _row("plan", "plan-review", 30),
+        _row("implement", "task-lead", 40),
+        _row("implement", "verify", 50),
+    ]
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+
+    def line(name: str) -> str:
+        return next(ln for ln in out if name in ln)
+
+    assert "\x1b[34m" in line("plan-writer")          # 1st hue: step-blue
+    assert "\x1b[35m" in line("plan-review")          # 2nd hue: magenta
+    assert "\x1b[34m" in line("task-lead")            # rotation RESET at new phase
+    assert "\x1b[35m" in line("verify")               # 2nd hue again post-reset
+
+
+def test_repeat_reuses_its_phase_scoped_hue():
+    rows = [_row("plan", "plan-review", 20), _row("plan", "plan-review", 30)]
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+    review_lines = [ln for ln in out if "plan-review" in ln]
+    assert len(review_lines) == 2
+    assert all("\x1b[34m" in ln for ln in review_lines)  # both step-blue (1st hue when alone)
+
+
+def test_errored_step_renders_bold_red_overriding_hue():
+    rows = [_row("implement", "task-lead", 10, errored=True)]
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+    assert "\x1b[1m\x1b[31mtask-lead" in next(ln for ln in out if "task-lead" in ln)
+
+
+def test_wait_annotation_only_at_or_above_threshold():
+    rows = [_row("implement", "verify", 588, wait=330.0),
+            _row("implement", "task-lead", 60, wait=4.0)]
+    out = render_summary(rows, header=_HDR, color=False, width=80)
+    verify = next(ln for ln in out if "verify" in ln)
+    task = next(ln for ln in out if "task-lead" in ln)
+    assert "⏸ 5m30s wait" in verify
+    assert "wait" not in task                          # sub-5s wait is omitted
+
+
+def test_open_trailing_step_renders_running():
+    rows = [_row("implement", "task-lead", 0, open_=True)]
+    out = render_summary(rows, header=_HDR, color=False, width=80)
+    assert "  task-lead  running" in out[-1]
+
+
+def test_header_status_color_and_workflow_magenta():
+    out = render_summary([], header=_HDR, color=True, width=80)
+    assert "\x1b[1m\x1b[35mfeature\x1b[0m" in out[0]   # workflow bold magenta
+    assert "\x1b[32mmerged\x1b[0m" in out[0]           # merged status green
+
+
+def test_summary_total_is_first_to_last_timestamp():
+    events = [{"timestamp": "2026-01-01T00:00:00+00:00"},
+              {"timestamp": "2026-01-01T00:39:02+00:00"}]
+    assert summary_total(events) == 2342.0
+    assert summary_total([]) is None
