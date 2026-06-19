@@ -1,9 +1,10 @@
 """Change lifecycle (spec §3, §5): immutable id identity, derived handle, worktree
-creation, state home inside the worktree at <worktree>/.imp/change/."""
+creation, permanent state home at <control_root>/.imp/changes/<id>/."""
 
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ class Change:
     base_branch: str
     control_root: Path
     project_root: Path           # the worktree
-    change_dir: Path             # <worktree>/.imp/change
+    change_dir: Path             # permanent home <control_root>/.imp/changes/<id>
 
     @property
     def handle(self) -> str:
@@ -83,7 +84,7 @@ class Change:
         internal state inside the worktree. Raises worktree.BranchExists on the
         (effectively impossible) id collision — the caller reports a clean error."""
         wt_path = worktree.create_worktree(control_root, change_id, base_branch)
-        change_dir = wt_path / ".imp" / "change"
+        change_dir = control_root / ".imp" / "changes" / change_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
 
@@ -120,6 +121,7 @@ class Change:
             # default-workflow: value) would otherwise leak the just-created
             # branch+worktree. Roll both back so a failed create leaves nothing.
             worktree.destroy_worktree(control_root, change_id)
+            shutil.rmtree(change_dir, ignore_errors=True)
             raise
         flat = workflow.flat_steps()
         State(
@@ -141,14 +143,14 @@ class Change:
 
     @classmethod
     def load(cls, control_root: Path, change_id: str) -> Change:
-        # .resolve() to match create (create_worktree returns a resolved path).
-        wt_path = (control_root / ".imp" / "worktrees" / change_id).resolve()
-        change_dir = wt_path / ".imp" / "change"
+        change_dir = control_root / ".imp" / "changes" / change_id
         if not change_dir.is_dir():
             raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
-        project_root = (Path(meta["project_root"])
-                        if meta.get("project_root") else wt_path)
+        project_root = (
+            Path(meta["project_root"]) if meta.get("project_root")
+            else (control_root / ".imp" / "worktrees" / change_id).resolve()
+        )
         return cls(
             id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],
             control_root=control_root, project_root=project_root,

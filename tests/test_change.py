@@ -32,14 +32,24 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     assert ch.base_branch == "main"
     wtpath = tmp_path / ".imp" / "worktrees" / "abc123"
     assert ch.project_root == wtpath
-    assert (wtpath / ".imp" / "change" / "change.json").exists()
-    # create() does not take a snapshot; no .imp/change/workflow/ dir yet.
-    assert not (wtpath / ".imp" / "change" / "workflow").exists()
+    assert (ch.change_dir / "change.json").exists()
+    # create() does not take a snapshot; no workflow/ snapshot dir yet.
+    assert not (ch.change_dir / "workflow").exists()
     # workflow_dir IS the branch's own tracked workflow dir.
     assert ch.workflow_dir == wtpath / "imp" / "workflows" / "imp"
     assert (ch.workflow_dir / "workflow.yaml").exists()
-    state = State.load(wtpath / ".imp" / "change" / "state")
+    state = State.load(ch.change_dir / "state")
     assert state.id == "abc123" and state.step == "s" and state.status == "running"
+
+
+def test_change_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="hom123", base_branch="main")
+    assert ch.change_dir == tmp_path / ".imp" / "changes" / "hom123"
+    # The home is OUTSIDE the worktree: no inner .imp/change/ is created there.
+    assert not (ch.project_root / ".imp" / "change").exists()
+    assert (ch.change_dir / "change.json").exists()
+    assert (ch.change_dir / "state" / "state.json").exists()
 
 
 def test_load_change_by_id(tmp_path: Path) -> None:
@@ -75,6 +85,7 @@ def test_create_without_workflow_raises_and_leaves_no_orphan(tmp_path: Path) -> 
     # The branch+worktree created before validation must be torn down.
     assert not (tmp_path / ".imp" / "worktrees" / "nowf").exists()
     assert "imp/nowf" not in _git(tmp_path, "branch", "--list", "imp/nowf").stdout
+    assert not (tmp_path / ".imp" / "changes" / "nowf").exists()
 
 
 def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
@@ -102,6 +113,7 @@ def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
     # The branch+worktree created before validation must be torn down.
     assert not (tmp_path / ".imp" / "worktrees" / "badwf").exists()
     assert "imp/badwf" not in _git(tmp_path, "branch", "--list", "imp/badwf").stdout
+    assert not (tmp_path / ".imp" / "changes" / "badwf").exists()
 
 
 def test_workflow_dir_prefers_snapshot_when_present(tmp_path: Path) -> None:
