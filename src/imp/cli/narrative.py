@@ -407,7 +407,7 @@ class NarrativeBuilder:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} more {noun})"
             if self._step_stack:
-                label = f"{self._step_stack[-1].name} › {label}"
+                label = f"{self._step_stack[-1].name} › {label}"  # noqa: RUF001
             return Activity(label=label)
         burst = self._current_burst
         if burst is not None:
