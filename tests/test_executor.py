@@ -1678,3 +1678,67 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
     # The forward advance fired FROM the gate, popping its counter: the tolerated
     # cycle cost 0 of the gate's budget. The rejected design leaves this == 1.
     assert state.loop_counts.get("gate", 0) == 0
+
+
+# ── outcome_history capture ──────────────────────────────────────────────────
+
+
+def test_record_outcome_appends_and_bounds_to_k() -> None:
+    from imp.engine.executor import OUTCOME_HISTORY_K, _record_outcome
+
+    state = State(id="c1", step="writer", step_attempt=0, status="running")
+    for i in range(6):
+        _record_outcome(state, "writer", {"outcome": f"lap{i}"})
+    hist = state.outcome_history["writer"]
+    assert OUTCOME_HISTORY_K == 4
+    assert len(hist) == 4
+    # Oldest two evicted; laps stay monotonic across eviction.
+    assert [e["lap"] for e in hist] == [3, 4, 5, 6]
+    assert [e["outcome"] for e in hist] == ["lap2", "lap3", "lap4", "lap5"]
+
+
+@pytest.mark.anyio
+async def test_run_change_records_step_outcome(tmp_path: Path) -> None:
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success", "outcome": "did the thing"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    state = State.load(change.state_dir)
+    assert state.outcome_history["w"] == [{"lap": 1, "outcome": "did the thing"}]
+    # outcome is never promoted into the rule-evaluation var environment.
+    assert "outcome" not in state.vars
+
+
+@pytest.mark.anyio
+async def test_agent_step_without_outcome_fails_to_complete(tmp_path: Path) -> None:
+    # With the field required on the executor path, a complete_step payload that
+    # omits outcome fails validation, exhausts the single retry, and pauses —
+    # nothing is recorded.
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _NoOutcomeRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _NoOutcomeRunner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+
+    state = State.load(change.state_dir)
+    assert state.outcome_history == {}

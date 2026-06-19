@@ -70,6 +70,18 @@ from imp.providers.resolve import provider_from_model, resolve_run
 
 EventCallback = Callable[[dict[str, Any]], None]
 
+OUTCOME_HISTORY_K = 4
+
+
+def _record_outcome(state: State, step_name: str, output: dict[str, Any]) -> None:
+    outcome = output.get("outcome")
+    if not isinstance(outcome, str):
+        return
+    hist = state.outcome_history.setdefault(step_name, [])
+    next_lap = hist[-1]["lap"] + 1 if hist else 1
+    hist.append({"lap": next_lap, "outcome": outcome})
+    del hist[:-OUTCOME_HISTORY_K]
+
 
 class RunResult(Enum):
     COMPLETED = "completed"
@@ -779,6 +791,7 @@ async def _route_agent(
                                   project_facts=project_facts, guidance=guidance)
 
     state.step_attempt = 0
+    _record_outcome(state, step.name, result.output)
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
     state.vars.update(match.var_mutations)
     state.current_step = None
@@ -915,6 +928,7 @@ async def _run_agent_invocation(
         verify_command=verify_command,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
+        inject_outcome_field=True,
     )
 
     runner = provider.create_runner(invocation)
