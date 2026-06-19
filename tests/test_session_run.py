@@ -36,10 +36,20 @@ def _make_change(tmp_path: Path, change_id: str) -> Change:
     )
 
 
-def test_infer_session_result_completed_when_worktree_removed(tmp_path: Path) -> None:
-    # A merge-completing run removes the worktree (and the state dir inside it).
+def test_infer_session_result_completed_when_merged_no_worktree(tmp_path: Path) -> None:
+    # A merged change prunes the worktree but its state survives at the root home.
     change = _make_change(tmp_path, "2026-06-15-merged")
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
     assert infer_session_result(change) is RunResult.COMPLETED
+
+
+def test_infer_session_result_paused_for_parked_draft_no_worktree(tmp_path: Path) -> None:
+    # A parked draft: never materialized (no worktree), spec phase paused.
+    change = _make_change(tmp_path, "2026-06-15-draft")
+    State(id=change.id, step="spec-writer", step_attempt=0, status="paused").save(
+        change.state_dir)
+    assert infer_session_result(change) is RunResult.PAUSED
 
 
 def test_infer_session_result_completed_when_status_completed(tmp_path: Path) -> None:
@@ -424,8 +434,9 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
     import imp.cli.session_run as session_run
 
     change = _make_change(tmp_path, "fast-feat")
-    # No worktree → infer_session_result returns COMPLETED:
-    # the daemon finished so fast the client timed out connecting, but the run succeeded.
+    # State is completed but no worktree: daemon finished before the client connected.
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
 
     async def _boom(**_kwargs: Any) -> None:
         raise TimeoutError
