@@ -978,6 +978,9 @@ class ClaudeCodeAgentRunner:
         if self._client_factory is not None:
             return self._client_factory(opts)
         from claude_agent_sdk import ClaudeSDKClient
+
+        from imp.providers.claude_code_session import install_claude_session_isolation
+        install_claude_session_isolation()
         return ClaudeSDKClient(opts)
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
