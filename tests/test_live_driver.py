@@ -1160,12 +1160,12 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
-           model="m", provider="anthropic"),
+           model="m", provider="anthropic", label="reviewing plan"),
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert "plan-review · thinking" in line
+    assert "review · reviewing plan · thinking" in line
     assert "18s" in line
 
 
@@ -1244,7 +1244,7 @@ def test_current_activity_anchors_timer_to_in_flight_call() -> None:
     # Timer anchors to the running call (c2), not a resolved (c1) or killed (c3) call.
     clock = [50.0]
     b = nv.NarrativeBuilder(now=lambda: clock[0])
-    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p", label="searching"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="read_file",
             input={"p": "x"}))           # stamped at clock=50.0
     b.add(ev("r1", "tool_result", agent_id="a", id="c1", content="ok"))
@@ -1258,7 +1258,7 @@ def test_current_activity_anchors_timer_to_in_flight_call() -> None:
     clock[0] = 73.0
     act = b.current_activity()
     assert act is not None
-    assert act.step == "s"               # the open step name
+    assert act.step_label == "searching"  # the step display label
     assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
     assert act.count == "3 calls"        # retained Activity.count basis keeps killed
     assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0
@@ -1269,14 +1269,42 @@ def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
 
     clock = [100.0]
     b = nv.NarrativeBuilder(now=lambda: clock[0])
-    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl"))
+    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl",
+             label="implementing"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
             input={"command": "sleep 600"}))       # stamped at clock=100.0
     clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    assert "implement" in line          # open step name
+    assert "implementing" in line       # step display label
     assert "bash sleep 600" in line     # in-flight tool detail
     assert "1 call" in line             # retained Activity.count segment
     assert "5m 12s" in line             # per-call timer (the primary figure)
-    assert "(step 15m 0s)" in line      # session/step elapsed as the parenthetical
+    assert "15m 0s" in line             # session/step elapsed as trailing segment
+
+
+def test_status_spine_phase_label_activity_elapsed() -> None:
+    from imp.cli.live_driver import compose_activity_status
+
+    # labeled step, fallback (thinking) activity: phase · label · activity · elapsed.
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="plan-reviewer", kind="agent", phase="plan",
+           model="m", provider="anthropic", label="reviewing plan"),
+        ev("3", "thinking", agent_id="step:plan/plan-reviewer", content="hmm"),
+    ]:
+        b.add(e)
+    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
+    assert line.split(" ", 1)[1] == "plan · reviewing plan · thinking · 18s"
+
+    # quiet/unlabeled step: the step segment is dropped -> phase · activity · elapsed.
+    q = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="autosquash", kind="script", phase="implement",
+           quiet=True),
+    ]:
+        q.add(e)
+    qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
+    assert qline.split(" ", 1)[1] == "implement · running · 4s"

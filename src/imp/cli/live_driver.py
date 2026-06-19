@@ -40,26 +40,21 @@ def compose_activity_status(
     if activity is None:
         return None
     spin = pal.ansi(pal.spinner_frame(frame), "cyan", enabled=color)
+    parts: list[str] = []
+    if activity.phase:
+        parts.append(pal.ansi(activity.phase, enabled=color))
+    if activity.step_label:
+        parts.append(pal.ansi(activity.step_label, enabled=color))
     if activity.count is not None:
-        head: list[str] = []
-        if activity.step:
-            head.append(pal.ansi(activity.step, enabled=color))
+        parts.append(pal.ansi(activity.count, enabled=color))
         if activity.detail:
-            head.append(pal.ansi(activity.detail, "gray", enabled=color))
-        lead = " \u203a ".join(head)
-        segs = [pal.ansi(activity.count, enabled=color)]
+            parts.append(pal.ansi(activity.detail, "gray", enabled=color))
         if activity.call_elapsed is not None:
-            segs.append(pal.ansi(rt.fmt_seconds(activity.call_elapsed), enabled=color))
-        body = " · ".join([lead, *segs]) if lead else " · ".join(segs)
-        step_par = pal.ansi(
-            f"(step {rt.fmt_seconds(elapsed)})", "dim", enabled=color)
-        return f"{spin} {body} {step_par}"
-    segs = []
-    if activity.label:
-        segs.append(pal.ansi(activity.label, enabled=color))
-    body = " · ".join(segs)
-    tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=color)
-    return f"{spin} {body} {tail}"
+            parts.append(pal.ansi(rt.fmt_seconds(activity.call_elapsed), enabled=color))
+    elif activity.label:
+        parts.append(pal.ansi(activity.label, enabled=color))
+    parts.append(pal.ansi(rt.fmt_seconds(elapsed), "dim", enabled=color))
+    return f"{spin} " + " · ".join(parts)
 
 
 @dataclass

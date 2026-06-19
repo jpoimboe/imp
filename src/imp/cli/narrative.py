@@ -168,13 +168,14 @@ def display_tool_name(name: str) -> str:
 
 @dataclass
 class Activity:
-    """The structured live-status description (§3): count phrase, gray detail
-    (tool name + arg), and a fallback label. Any field may be None. Plain text —
-    the driver colors the segments (live_driver.compose_status)."""
+    """The structured live-status description (§3): phase + step display label spine,
+    a count phrase, gray detail (tool name + arg), and a fallback label. Any field may
+    be None. Plain text — the driver colors the segments (live_driver.compose_status)."""
     count: str | None = None
     detail: str | None = None
     label: str | None = None
-    step: str | None = None          # open step name (in-flight burst status)
+    phase: str | None = None         # current phase name (spine head)
+    step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
     call_elapsed: float | None = None  # monotonic seconds for the in-flight call
 
 
@@ -396,6 +397,8 @@ class NarrativeBuilder:
 
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
+        phase = self._current_phase.name if self._current_phase else None
+        step_label = self._step_stack[-1].label if self._step_stack else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -403,9 +406,7 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} more {noun})"
-            if self._step_stack:
-                label = f"{self._step_stack[-1].name} \u203a {label}"
-            return Activity(label=label)
+            return Activity(phase=phase, step_label=step_label, label=label)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
@@ -413,10 +414,8 @@ class NarrativeBuilder:
                 n = len(basis)
                 count = f"{n} call{'s' if n != 1 else ''}"
                 # In-flight = the call actually still running: no result AND not
-                # killed. A killed call keeps result is None (_h_tool_killed only
-                # sets killed=True), so it must be excluded or the timer would tick
-                # forever on a dead call. Anchors to the wedged call, not a resolved
-                # or killed one.
+                # killed (a killed call keeps result is None), so the timer anchors
+                # to the wedged call, not a resolved or killed one.
                 inflight = next(
                     (c for c in reversed(basis)
                      if c.result is None and not c.killed), None)
@@ -428,16 +427,15 @@ class NarrativeBuilder:
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
                     if inflight.call_started is not None:
                         call_elapsed = self._now() - inflight.call_started
-                step = self._step_stack[-1].name if self._step_stack else None
-                return Activity(count=count, detail=detail, step=step,
-                                call_elapsed=call_elapsed)
+                return Activity(count=count, detail=detail, phase=phase,
+                                step_label=step_label, call_elapsed=call_elapsed)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
             verb = "running" if top.kind in CHROME_KINDS else "thinking"
-            return Activity(label=f"{top.name} · {verb}")
+            return Activity(phase=phase, step_label=step_label, label=verb)
         if self._current_phase is not None:
-            return Activity(label=f"{self._current_phase.name} · working")
+            return Activity(phase=phase, label="working")
         return None
 
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:
