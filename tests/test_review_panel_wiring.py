@@ -295,7 +295,7 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
     # the task_gap rework is a recognized Step-0 feedback source, matching the exact
     # preamble workflow.yaml emits for verdict: task_gap (kept verbatim — task-lead.md
     # is out of scope for this change).
-    assert "The review panel found an implemented task needs rework." in text
+    assert "The code-reviewer found an implemented task needs rework." in text
     assert 'gate failure (the `commit-check`' in text
     assert "human finalize decision" not in text
 
