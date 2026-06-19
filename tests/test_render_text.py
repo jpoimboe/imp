@@ -36,7 +36,7 @@ def test_phase_step_outcome_render_without_header() -> None:
     assert "#add-auth-7" not in out
     assert "design" in out
     assert "spec" in out
-    assert "spec complete" in out          # merged breadcrumb (was: "continue" in out)
+    assert "spec · complete" in out          # merged breadcrumb (was: "continue" in out)
 
 
 def test_agent_text_rendered_in_full_not_truncated() -> None:
@@ -407,7 +407,7 @@ def test_chrome_step_collapses_to_single_breadcrumb() -> None:
             action={"verb": "continue"}),
     ]))
     assert "spec-verify-commit" in out
-    assert "spec-verify-commit complete" in out   # show_complete now unconditional
+    assert "spec-verify-commit · complete" in out   # show_complete now unconditional, dotted
 
 
 def test_open_chrome_step_shows_header() -> None:
@@ -444,13 +444,14 @@ def test_open_chrome_step_shows_header() -> None:
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
-    # the per-step completion line carries the step color (ties open+close);
-    # stray event (fallback) lines stay dark-gray chrome.
+    # the per-step completion line now recedes to chrome gray; stray event
+    # (fallback) lines stay dark-gray chrome too.
     crumb = next(iter(rt._render(
         nv.BreadcrumbLine(step_name="x", elapsed_s=3,
                           action={"verb": "goto", "target": "y"}),
         depth=0, full=False, color=True, width=80)))
-    assert pal._ANSI["step"] in crumb           # step color, not the goto accent
+    assert pal._ANSI["gray"] in crumb
+    assert pal._ANSI["step"] not in crumb       # no longer bold step-blue
     fallback = next(iter(rt._render(
         nv.FallbackLine(event_type="change_merged", payload={"id": "s"}),
         depth=0, full=False, color=True, width=80)))
@@ -604,41 +605,38 @@ def test_tiers_resolved_renders_constrained_and_unconstrained() -> None:
 
 
 def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
-    from imp.cli import narrative as nv
-    from imp.cli import render_text as rt
-    # plain continue: no "→ continue" suffix; elapsed is the only/last field.
+    # plain continue: gray "<name> · complete · <elapsed>", no verb suffix.
     bc = nv.BreadcrumbLine(step_name="spec", elapsed_s=12.4,
                            action={"verb": "continue"}, extras=[])
     line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert line == "  spec complete · 12s"
+    assert line == "  spec · complete · 12s"
     assert "→ continue" not in line
-    # goto with a resolved route: the humanized arrow, NOT goto(...), before elapsed.
-    bc2 = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=41.0,
+    # the DISPLAY label (step_label) replaces the raw id on the completion line.
+    bc_lbl = nv.BreadcrumbLine(step_name="plan-reviewer", step_label="reviewing plan",
+                               elapsed_s=5.0, action={"verb": "continue"}, extras=[])
+    assert "\n".join(rt._render(bc_lbl, depth=1, full=False, color=False, width=80)) \
+        == "  reviewing plan · complete · 5s"
+    # goto WITH a workflow route label: a SEPARATE non-bold yellow "→ <label>" line
+    # beneath the completion line; no inline arrow on the completion line.
+    bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "task-lead",
-                                    "resume": False, "rework": False},
-                            route="→ implement", extras=["status=Success"])
-    line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert line2 == "  plan-review complete · → implement · 41s"
-    assert "goto(" not in line2
-    # goto with an UNRESOLVED route (None): no suffix at all.
-    bc3 = nv.BreadcrumbLine(step_name="held", elapsed_s=2.0,
-                            action={"verb": "goto", "target": "x",
-                                    "resume": False, "rework": False},
-                            route=None)
-    line3 = "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80))
-    assert line3 == "  held complete · 2s"
-    # goto with a SILENT route (""): same-phase skip renders no suffix.
-    bc4 = nv.BreadcrumbLine(step_name="panel", elapsed_s=1.0,
-                            action={"verb": "goto", "target": "recheck",
-                                    "resume": False, "rework": False},
-                            route="")
-    line4 = "\n".join(rt._render(bc4, depth=1, full=False, color=False, width=80))
-    assert line4 == "  panel complete · 1s"
-    # a non-goto verb (pause) still renders its action_text.
+                                    "resume": False, "rework": True},
+                            label="addressing review feedback", extras=["status=Success"])
+    lines2 = list(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert lines2 == ["  code-reviewer · complete · 41s",
+                      "  → addressing review feedback"]
+    # goto WITHOUT a route label: only the completion line, no extra line, no empty gap.
+    bc3 = nv.BreadcrumbLine(step_name="spec-reviewer", elapsed_s=2.0,
+                            action={"verb": "goto", "target": "plan-writer",
+                                    "resume": False, "rework": False})
+    lines3 = list(rt._render(bc3, depth=1, full=False, color=False, width=80))
+    assert lines3 == ["  spec-reviewer · complete · 2s"]
+    assert not any(" ·  · " in ln for ln in lines3)
+    # a non-goto verb (pause) still renders its action_text after "complete".
     bc5 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
                             action={"verb": "pause"}, extras=[])
-    line5 = "\n".join(rt._render(bc5, depth=1, full=False, color=False, width=80))
-    assert line5 == "  autosquash complete · pause"
+    assert "\n".join(rt._render(bc5, depth=1, full=False, color=False, width=80)) \
+        == "  autosquash · complete · pause"
 
 
 def _sub(outcome=None, *, is_error=False, name="reviewer"):
@@ -938,7 +936,7 @@ def test_prose_then_structural_leaf_separated_by_blank() -> None:
             action={"verb": "continue"}, var_mutations={}),
     ])
     prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
-    bc_i = next(i for i, ln in enumerate(out) if "spec complete" in ln)
+    bc_i = next(i for i, ln in enumerate(out) if "spec · complete" in ln)
     assert bc_i > prose_i
     assert out[bc_i - 1].strip() == "", (
         "prose must be blank-separated from the following breadcrumb")
@@ -1179,7 +1177,7 @@ def test_chrome_step_prints_header_and_complete_breadcrumb() -> None:
             action={"verb": "continue"}, var_mutations={}),
     ]))
     assert "gate" in out
-    assert "gate complete" in out          # show_complete now unconditional
+    assert "gate · complete" in out          # show_complete now unconditional, dotted
 
 
 def test_is_chrome_step_is_deleted() -> None:
@@ -1237,7 +1235,7 @@ def test_intentional_pause_still_renders_complete_pause() -> None:
         _ev("2", "step_completed", step="spec-writer", kind="agent",
             action={"verb": "pause"}, var_mutations={}),
     ]))
-    assert "spec-writer complete · pause" in out
+    assert "spec-writer · complete · pause" in out
     assert "interrupted" not in out
 
 
@@ -1251,7 +1249,7 @@ def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
     bc2 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
                             action={"verb": "pause"}, extras=[], kind="script")
     line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert line2 == "  autosquash complete · pause"
+    assert line2 == "  autosquash · complete · pause"
 
 
 def test_merge_step_pause_breadcrumb_pipeline() -> None:
@@ -1434,28 +1432,28 @@ def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
     assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
 
 
-def test_breadcrumb_appends_label_after_route_arrow() -> None:
-    crumb = "\n".join(rt._render(
+def test_breadcrumb_renders_route_label_on_its_own_yellow_line() -> None:
+    lines = list(rt._render(
         nv.BreadcrumbLine(
             step_name="finalize", kind="agent", elapsed_s=2,
             action={"verb": "goto", "target": "wait-for-head",
                     "resume": False, "rework": False},
-            route="→ merge", label="entering the merge queue"),
+            label="entering the merge queue"),
         depth=0, full=False, color=False, width=80))
-    assert "finalize complete · → merge · entering the merge queue" in crumb
+    assert lines == ["finalize · complete · 2s", "→ entering the merge queue"]
 
 
-def test_breadcrumb_without_label_is_bare_arrow() -> None:
-    crumb = "\n".join(rt._render(
+def test_breadcrumb_without_label_has_no_route_line() -> None:
+    lines = list(rt._render(
         nv.BreadcrumbLine(
             step_name="finalize", kind="agent", elapsed_s=2,
             action={"verb": "goto", "target": "wait-for-head",
                     "resume": False, "rework": False},
-            route="→ merge", label=None),
+            label=None),
         depth=0, full=False, color=False, width=80))
-    assert "→ merge" in crumb
-    assert "entering the merge queue" not in crumb
-    assert " ·  · " not in crumb            # no empty segment when label absent
+    assert lines == ["finalize · complete · 2s"]
+    assert not any(ln.strip().startswith("→") for ln in lines)
+    assert not any(" ·  · " in ln for ln in lines)   # no empty segment
 
 
 def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
@@ -1473,4 +1471,5 @@ def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
             action={"verb": "continue"}, var_mutations={}, label=None),
     ]
     out = "\n".join(_lines(events))
-    assert "finalize complete · → merge · entering the merge queue" in out
+    assert "finalize · complete" in out
+    assert any(ln.strip() == "→ entering the merge queue" for ln in out.split("\n"))

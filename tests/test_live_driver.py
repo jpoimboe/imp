@@ -561,7 +561,7 @@ def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    bc_i = next(i for i, ln in enumerate(body) if "spec complete" in ln)
+    bc_i = next(i for i, ln in enumerate(body) if "spec · complete" in ln)
     assert body[bc_i - 1].strip() == ""
     assert body == _render_body(events)
 
@@ -753,7 +753,7 @@ def test_chrome_step_header_streams_live_and_matches_log() -> None:
     drv.finish()
     body = _body(out)
     assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
-    assert any("gate complete" in ln for ln in body)                    # breadcrumb
+    assert any("gate · complete" in ln for ln in body)                  # breadcrumb
     assert body == _render_body(events)                                 # live == imp log
 
 
@@ -863,7 +863,7 @@ def test_quiet_continue_is_silent_live_and_matches_log() -> None:
     assert _body(out) == _render_body(events)   # live == imp log, line for line
 
 
-def test_quiet_forward_goto_arrow_matches_log() -> None:
+def test_quiet_forward_goto_renders_nothing_matches_log() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -883,18 +883,16 @@ def test_quiet_forward_goto_arrow_matches_log() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "→ plan" for ln in body)
     assert not any("fast-path-spec-gate" in ln for ln in body)
-    assert body == _render_body(events)
+    assert not any(ln.strip().startswith("→") for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
 
 
-def test_is_final_resume_goto_quiet_step_is_emitted() -> None:
-    # A quiet step that closes on a backward rework edge (goto resume=True) sets
-    # quiet_line="→ reworking" and is FINAL immediately — the live cursor must not
-    # block on it the way it blocks an unresolved forward goto.
+def test_is_final_closed_quiet_goto_step_is_emitted() -> None:
+    # A closed quiet step (here a backward rework goto resume=True) is FINAL
+    # immediately — the live cursor must not block on it.
     drv, _ = _driver()
     node = nv.StepNode(name="spec-verify-commit", kind="script", quiet=True)
-    node.quiet_line = "→ reworking"
     node.closed = True
     node.outcome = nv.OutcomeLine(
         action={"verb": "goto", "target": "spec-writer", "resume": True})
@@ -975,11 +973,7 @@ def test_interrupt_breadcrumb_in_live_path() -> None:
     assert "error:" not in body
 
 
-def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
-    # A loud step (spec-reviewer) clean-approves with a plain forward goto to
-    # plan-writer. Its breadcrumb route ("→ plan") is unknown until plan-writer's
-    # step_started arrives, so the live driver must HOLD the breadcrumb and emit it
-    # just before the new phase — matching imp log line-for-line.
+def test_loud_forward_goto_breadcrumb_emits_immediately() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -997,27 +991,27 @@ def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
         ev("7", "step_completed", step="plan-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
     ]
-    # Before plan-writer's step_started, the breadcrumb is held: no arrow yet.
+    # The closed step's breadcrumb emits at step_completed (not held): the gray
+    # completion line is present before plan-writer's step_started arrives.
     for e in events[:4]:
         drv.on_event(e)
-    assert not any("→ plan" in ln for ln in _body(out))
+    assert any("spec-reviewer · complete" in ln for ln in _body(out))
     for e in events[4:]:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
+    assert not any(ln.strip().startswith("→") for ln in body)   # unlabeled goto: silent
     assert not any("goto(" in ln for ln in body)
     assert body == _render_body(events)   # live == imp log, line for line
 
 
-def test_is_final_loud_reworking_breadcrumb_is_emitted() -> None:
-    # A loud reviewer rework (goto + rework) is final immediately — the live cursor
-    # must not block on it the way it blocks an unresolved forward goto.
+def test_is_final_goto_breadcrumb_is_emitted() -> None:
+    # A loud reviewer rework (goto + rework) breadcrumb is final immediately — the
+    # route label rides it inline at completion, so the live cursor never holds it.
     drv, _ = _driver()
     bc = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=1.0,
                            action={"verb": "goto", "target": "plan-writer",
-                                   "resume": False, "rework": True},
-                           route=None)
+                                   "resume": False, "rework": True})
     assert drv._is_final(bc, container=None) is True
 
 
@@ -1140,7 +1134,7 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
     # NO finish(): assert the LIVE, mid-run state.
     body = out.getvalue()
     assert "First narration." in body          # the opener un-held and emitted
-    assert "spec-writer complete" in body       # step one concluded live
+    assert "spec-writer · complete" in body       # step one concluded live
     assert "plan-writer" in body                # step two rendered live (not frozen)
 
 
@@ -1176,32 +1170,25 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
 
 
 def test_labeled_forward_goto_label_in_both_paths() -> None:
-    # A labeled forward goto: the breadcrumb is held until the target's
-    # step_started resolves "→ merge", then both live and imp log emit the label
-    # segment after the arrow, byte-identical line-for-line.
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="finalize", kind="agent", phase="review",
+        ev("2", "step_started", step="finalize", kind="agent", phase="implement",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:review/finalize",
+        ev("3", "llm_response", agent_id="step:implement/finalize",
            raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
         ev("4", "step_completed", step="finalize", kind="agent",
            action={"verb": "goto", "target": "wait-for-head",
                    "resume": False, "rework": False},
            var_mutations={}, label="entering the merge queue"),
-        ev("5", "step_started", step="wait-for-head", kind="wait_for_head",
-           phase="merge", model="m", provider="anthropic"),
-        ev("6", "step_completed", step="wait-for-head", kind="wait_for_head",
-           action={"verb": "continue"}, var_mutations={}, label=None),
     ]
     for e in events:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("finalize complete" in ln and "→ merge" in ln
-               and "entering the merge queue" in ln for ln in body)
-    assert body == _render_body(events)   # live == imp log, line for line
+    assert any("finalize · complete" in ln for ln in body)
+    assert any(ln.strip() == "→ entering the merge queue" for ln in body)
+    assert body == _render_body(events)
 
 
 def test_held_narration_emits_before_open_burst_live() -> None:
@@ -1226,7 +1213,7 @@ def test_held_narration_emits_before_open_burst_live() -> None:
     assert "read_file" not in body  # open burst still withheld
 
 
-def test_unlabeled_forward_goto_has_no_label_segment() -> None:
+def test_quiet_goto_renders_nothing_in_live_path() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1247,9 +1234,10 @@ def test_unlabeled_forward_goto_has_no_label_segment() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
-    assert not any(" ·  · " in ln for ln in body)   # no empty segment
-    assert body == _render_body(events)
+    assert any("spec-reviewer · complete" in ln for ln in body)
+    assert not any(ln.strip().startswith("→") for ln in body)
+    assert not any("goto(" in ln for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
 
 
 def test_current_activity_anchors_timer_to_in_flight_call() -> None:

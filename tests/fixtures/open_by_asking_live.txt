@@ -66,15 +66,15 @@ spec
     PackageNotFoundError (still exit 0), and tests covering both the success and
     fallback paths.
   
-  spec-writer complete · 1m 44s
+  spec-writer · complete · 1m 44s
   
   spec-verify-commit
   
-  spec-verify-commit complete · 0s
+  spec-verify-commit · complete · 0s
   
   fast-path-spec-gate
   
-  fast-path-spec-gate complete · 0s
+  fast-path-spec-gate · complete · 0s
   
   spec-reviewer · opus
   
@@ -126,7 +126,7 @@ spec
     importlib.metadata.version to keep the fallback test patchable — an
     implementation detail, not a blocker.
   
-  spec-reviewer complete · → reworking · 1m 2s
+  spec-reviewer · complete · 1m 2s
   
   spec-writer · opus
   
@@ -148,11 +148,11 @@ spec
     eagerly, which keeps AC #6's fallback patch effective. Amended the spec
     commit and completed the written phase at standard complexity.
   
-  spec-writer complete · 22s
+  spec-writer · complete · 22s
   
   spec-verify-commit
   
-  spec-verify-commit complete · 0s
+  spec-verify-commit · complete · 0s
 
 spec complete · 3m 9s
 
@@ -184,15 +184,15 @@ plan
     sentinel values, not literals echoed by the implementation), and
     pyproject.toml is untouched.
   
-  plan-writer complete · 2m 16s
+  plan-writer · complete · 2m 16s
   
   plan-verify-commit
   
-  plan-verify-commit complete · 0s
+  plan-verify-commit · complete · 0s
   
   fast-path-plan-gate
   
-  fast-path-plan-gate complete · 0s
+  fast-path-plan-gate · complete · 0s
   
   plan-review · opus
   
@@ -250,7 +250,7 @@ plan
     --strict) isn't run by either task (though the code is fully annotated), and
     a Nit about PackageNotFoundError instantiation (which works fine in 3.11).
   
-  plan-review complete · → reworking · 1m 11s
+  plan-review · complete · 1m 11s
   
   plan-writer · opus
   
@@ -278,11 +278,11 @@ plan
     the Self-Review lint-scope note accordingly. The Nit required no action. The
     change was committed as a fixup onto the original plan-1 commit.
   
-  plan-writer complete · 39s
+  plan-writer · complete · 39s
   
   plan-verify-commit
   
-  plan-verify-commit complete · 0s
+  plan-verify-commit · complete · 0s
 
 plan complete · 4m 7s
 
@@ -360,19 +360,19 @@ implement
   
     1 call · complete_step · 0s
   
-  task-lead complete · 9m 36s
+  task-lead · complete · 9m 36s
   
   commit-check
   
-  commit-check complete · 0s
+  commit-check · complete · 0s
   
   run-tests
   
-  run-tests complete · 0s
+  run-tests · complete · 0s
   
   fast-path-cycle-gate
   
-  fast-path-cycle-gate complete · 0s
+  fast-path-cycle-gate · complete · 0s
   
   plan-cycle-check · sonnet
   
@@ -392,7 +392,7 @@ implement
   
     1 call · complete_step · 0s
   
-  plan-cycle-check complete · 41s
+  plan-cycle-check · complete · 41s
 
 implement complete · 10m 17s
 
@@ -400,17 +400,17 @@ review
   
   autosquash
   
-  autosquash complete · 0s
+  autosquash · complete · 0s
   
   stamp-trailers
   
-  stamp-trailers complete · 0s
+  stamp-trailers · complete · 0s
   
   code-reviewer · gpt-5.5
   
     13 calls · read_file · glob · bash · grep +1 · 40s
   
-  code-reviewer complete · 59s
+  code-reviewer · complete · 59s
   
   summarizer · opus
   
@@ -434,7 +434,7 @@ review
     (imp 0.0.1, exit 0), and all version tests, ruff, and mypy pass. Two
     non-blocking Minor/Nit followups remain noted for optional cleanup.
   
-  summarizer complete · 1m 15s
+  summarizer · complete · 1m 15s
   
   final-review · sonnet
   
@@ -499,4 +499,4 @@ review
   
   • Merged! The 2026-06-06-add-version-flag change is done. 🎉
   
-  final-review complete · 42s
+  final-review · complete · 42s

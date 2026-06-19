@@ -734,7 +734,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     for name in sorted(quiet):
         assert not any(ln.strip() == name for ln in body), (
             f"quiet step {name!r} rendered a header line:\n" + "\n".join(body))
-        assert not any(f"{name} complete" in ln for ln in body), (
+        assert not any(f"{name} · complete" in ln for ln in body), (
             f"quiet step {name!r} rendered a completion breadcrumb:\n" + "\n".join(body))
 
     # No raw control-flow leaks: humanize-routing replaces goto(<step>) / [resume]
@@ -743,8 +743,13 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
         "raw goto(...) leaked into the transcript:\n" + "\n".join(body))
     assert not any("[resume]" in ln for ln in body), (
         "raw [resume] annotation leaked into the transcript:\n" + "\n".join(body))
-    # A loud clean forward goto renders the humanized target-phase arrow on its
-    # own breadcrumb: spec-reviewer -> plan-writer resolves to "→ plan".
-    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body), (
-        "expected the humanized spec-reviewer → plan breadcrumb:\n" + "\n".join(body))
+    # A loud clean forward goto is UNLABELED -> silent: spec-reviewer (label:
+    # "reviewing spec") renders only its gray completion line, with no own-line "→ …".
+    spec_rev_i = next((i for i, ln in enumerate(body) if "reviewing spec · complete" in ln), None)
+    assert spec_rev_i is not None, (
+        "expected the spec-reviewer completion breadcrumb:\n" + "\n".join(body))
+    # The line after the spec-reviewer completion must not be an own-line route label.
+    if spec_rev_i + 1 < len(body):
+        assert not body[spec_rev_i + 1].strip().startswith("→"), (
+            "unlabeled spec-reviewer goto must not produce a route line:\n" + "\n".join(body))
 

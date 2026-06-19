@@ -184,16 +184,7 @@ class LiveDriver:
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if isinstance(node, nv.StepNode) and node.quiet:
-            if not node.closed:
-                return False
-            act = (node.outcome.action if node.outcome else None) or {}
-            if act.get("verb") == "goto" and not act.get("resume"):
-                # forward goto: hold until the target's step_started resolves the
-                # arrow's phase (quiet_line). A `continue` (quiet_line stays None,
-                # renders nothing) and a `resume` (quiet_line set at close) are
-                # final immediately.
-                return node.quiet_line is not None
-            return True
+            return node.closed
         if isinstance(node, nv.SubagentFold):
             # A subagent is a LEAF (Part D): final once it stops running, so the
             # status row resolves to its terminal status on close. While running it
@@ -206,14 +197,6 @@ class LiveDriver:
             # bursts reach the live walk, so the owning builder is always the main
             # one — no reliance on the A2 drop.
             return node is not self._builder.current_burst
-        if isinstance(node, nv.BreadcrumbLine):
-            act = node.action if isinstance(node.action, dict) else {}
-            if act.get("verb") == "goto" and not (act.get("resume") or act.get("rework")):
-                # forward goto: hold until the next step_started resolves the
-                # target phase (route). reworking / continue / other verbs are
-                # final immediately.
-                return node.route is not None
-            return True
         # A held AgentTextNode is settled narration: it emits immediately and is
         # never withheld behind an in-flight tool call. `held` still drives
         # `imp log`'s static fold rendering; only the live cursor ignores it.

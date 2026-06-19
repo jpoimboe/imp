@@ -108,7 +108,7 @@ def test_no_completed_step_is_withheld_from_live_view(path: Path) -> None:
     expect = {n for n in completed_before_open if n in non_quiet}
 
     body = _live_no_finish(events)
-    withheld = sorted(n for n in expect if f"{n} complete" not in body)
+    withheld = sorted(n for n in expect if f"{n} · complete" not in body)
     assert not withheld, (
         f"{path.name}: live view (no finish) withheld completed steps "
         f"{withheld} — the emit cursor is stalled. Rendered body:\n{body[:600]}"
@@ -161,7 +161,7 @@ def test_dropped_first_step_started_still_renders_later_headers(path: Path) -> N
     assert expect, f"{path.name}: need a later completed step to test"
 
     body = _live_no_finish(skip)
-    withheld = sorted(n for n in expect if f"{n} complete" not in body)
+    withheld = sorted(n for n in expect if f"{n} · complete" not in body)
     assert not withheld, (
         f"{path.name}: after dropping the first step_started, the live view "
         f"withheld later completed steps {withheld} — the cursor stalled."
