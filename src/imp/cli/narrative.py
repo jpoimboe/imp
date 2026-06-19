@@ -86,6 +86,8 @@ class StepNode:
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
+    label: str | None = None           # step display label (step_started.payload.label)
+    resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     quiet_line: str | None = None      # resolved routing line (`→ reworking` /
                                        # `→ <phase>`); None for a linear continue
     closed: bool = False
@@ -284,6 +286,7 @@ class BreadcrumbLine:
     output fields and a `· → <action>` suffix (omitted for a plain `continue`).
     Replaces the rendered OutcomeLine at step completion (issue 3)."""
     step_name: str
+    step_label: str | None = None      # step DISPLAY label for the completion line
     kind: str | None = None
     elapsed_s: float | None = None
     action: Any = None                 # dict {verb, target?} from step_completed
@@ -734,6 +737,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.interactive = False
             existing.start_ts = event.get("timestamp")
             existing.agent_output = None
+            existing.label = p.get("label")
+            existing.resumed = bool(p.get("resumed", False))
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase)
@@ -743,7 +748,9 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
-                    quiet=bool(p.get("quiet", False)))
+                    quiet=bool(p.get("quiet", False)),
+                    label=p.get("label"),
+                    resumed=bool(p.get("resumed", False)))
     self._append(node)
     self._step_stack.append(node)
 
@@ -766,6 +773,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
+            step_label=node.label,
             label=p.get("label"),
             interrupted=node.interrupted)
         node.children.append(breadcrumb)

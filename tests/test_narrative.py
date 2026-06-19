@@ -1715,3 +1715,38 @@ def test_current_activity_prefixes_step_name_for_subagent() -> None:
     ]:
         b.add(e)
     assert b.current_activity().label == "plan-review \u203a task → plan-reviewer · 1 events"
+
+
+def test_step_label_and_resumed_land_on_step_and_breadcrumb() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="code-reviewer", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           label="reviewing code", resumed=True),
+        ev("3", "step_completed", step="code-reviewer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                for c in p.children if isinstance(c, nv.StepNode))
+    assert step.label == "reviewing code"
+    assert step.resumed is True
+    bc = next(c for c in step.children if isinstance(c, nv.BreadcrumbLine))
+    assert bc.step_label == "reviewing code"
+
+
+def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="code-reviewer", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           label="reviewing code", resumed=False),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        ev("5", "step_started", step="code-reviewer", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           label="reviewing code", resumed=True),
+    ])
+    step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                for c in p.children if isinstance(c, nv.StepNode))
+    assert step.label == "reviewing code"
+    assert step.resumed is True
