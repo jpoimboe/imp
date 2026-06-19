@@ -114,3 +114,29 @@ def test_partition_ignored_empty_input_returns_empty_set(tmp_path: Path) -> None
 
 def test_partition_ignored_none_when_not_a_repo(tmp_path: Path) -> None:
     assert anyio.run(partition_ignored, tmp_path, {tmp_path / "x"}) is None
+
+
+def test_git_oserror_causes_repo_root_to_return_none(
+        tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.ignore as ignore_mod
+
+    async def _raise_oserror(*args: object, **kwargs: object) -> object:
+        raise OSError("no git binary")
+    monkeypatch.setattr(ignore_mod.anyio, "run_process", _raise_oserror)
+    assert anyio.run(repo_root, tmp_path) is None
+
+
+def test_list_unignored_with_subdir_target(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)  # .gitignore has "build/\n*.log\n.mypy_cache/\n"
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "keep.py").write_text("x")
+    (sub / "skip.log").write_text("x")    # ignored by *.log in root .gitignore
+    (tmp_path / "outside.py").write_text("x")  # outside the sub target
+
+    result = anyio.run(list_unignored, tmp_path, sub)
+    assert result is not None
+    names = {p.name for p in result}
+    assert "keep.py" in names
+    assert "skip.log" not in names
+    assert "outside.py" not in names      # target is sub, not root
