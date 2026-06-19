@@ -194,7 +194,8 @@ Reason over the OPAQUE failure text against that tolerated set (`baseline ∪ fl
 - **A failure outside the set** → decide which it is:
   - a **real regression this change introduced** → fix it as usual (dispatch the
     implementer, `git commit --fixup=HEAD`) and return `verify_tolerated: false`;
-    the loop re-verifies.
+    set `done` following the normal rule — `done: true` only if the plan is fully
+    implemented after the fix, `done: false` if tasks remain.
   - the failing test was **green at baseline, is unrelated to the diff, and reads
     as non-deterministic/environmental** → append a `flaky` entry to
     `.imp/change/tolerated-failures.md` (create the file with a `# Tolerated
