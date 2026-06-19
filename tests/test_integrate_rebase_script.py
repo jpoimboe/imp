@@ -8,12 +8,17 @@ from pathlib import Path
 SCRIPT = Path("src/imp/assets/workflows/imp/scripts/integrate-rebase.sh").resolve()
 
 
+def _home(project_root: Path) -> Path:
+    return project_root.parent / ".imp" / "changes" / "x"
+
+
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
 
 
 def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root)}
+    env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root),
+           "IMP_CHANGE_DIR": str(_home(project_root))}
     return subprocess.run(["bash", str(SCRIPT)], cwd=project_root.parent,
                           env=env, capture_output=True, text=True, check=False)
 
@@ -44,7 +49,7 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
             (project_root / "f.txt").write_text("branch-side conflicting\n")
             _git(project_root, "add", "f.txt")
             _git(project_root, "commit", "-m", "branch edits f")
-    cd = project_root / ".imp" / "change"
+    cd = _home(project_root)
     cd.mkdir(parents=True, exist_ok=True)
     (cd / "change.json").write_text(json.dumps({"id": "x", "title": "t", "base_branch": "main"}))
 
@@ -59,7 +64,7 @@ def test_base_unmoved_exits_2(tmp_path: Path) -> None:
 def test_bad_base_ref_exits_3(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
-    cd = pr / ".imp" / "change"
+    cd = _home(pr)
     (cd / "change.json").write_text(
         json.dumps({"id": "x", "title": "t", "base_branch": "nonexistent"}))
     r = _run(pr)

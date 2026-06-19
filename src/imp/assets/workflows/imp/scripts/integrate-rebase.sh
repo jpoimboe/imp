@@ -10,7 +10,8 @@
 #   6  -> rebase stopped on a conflict (left in progress) -> integrator
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 5
-BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])") || exit 5
+CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
+BASE=$(python3 -c "import json;print(json.load(open('$CHANGE_DIR/change.json'))['base_branch'])") || exit 5
 [ -n "$BASE" ] || exit 5
 
 # A bad base_branch makes `--is-ancestor` exit 128; verify the ref up front.
@@ -30,7 +31,6 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 5
 fi
 
-CHANGE_DIR=".imp/change"
 MB=$(git merge-base "$BASE" HEAD) || exit 5
 
 # Base-side incoming diff: what base added since the fork point. Empty => base
