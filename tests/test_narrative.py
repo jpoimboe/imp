@@ -1711,4 +1711,4 @@ def test_current_activity_prefixes_step_name_for_subagent() -> None:
         ev("s1", "thinking", agent_id="sub:tk1", content="reviewing"),
     ]:
         b.add(e)
-    assert b.current_activity().label == "plan-review › task → plan-reviewer · 1 events"
+    assert b.current_activity().label == "plan-review \u203a task → plan-reviewer · 1 events"
