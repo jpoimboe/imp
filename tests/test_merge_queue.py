@@ -1,7 +1,9 @@
+import shutil
 import threading
 from pathlib import Path
 
 from imp.engine import merge_queue as mq
+from imp.engine.change import Change
 from tests.conftest import _seed_control
 
 
@@ -143,3 +145,37 @@ def test_pop_and_wake_absent_noop(tmp_path: Path) -> None:
     lane_ids = [e["change_id"] for e in mq.read(tmp_path) if e["base_branch"] == "main"]
     assert lane_ids == ["a", "b"]
     spawn_mock.assert_not_called()
+
+
+def test_ensure_head_driven_spawns_current_head_with_resume(tmp_path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
+    Change.create(tmp_path, title="b", change_id="b", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    mq.enqueue_if_absent(tmp_path, "b", "main")
+    spawned: list = []
+    mq.ensure_head_driven(
+        tmp_path, "main",
+        spawn_fn=lambda change, **kw: spawned.append((change.id, kw.get("resume"))),
+    )
+    assert spawned == [("a", True)]        # current head, woken with resume
+
+
+def test_ensure_head_driven_empty_lane_is_noop(tmp_path) -> None:
+    _seed_control(tmp_path)
+    spawned: list = []
+    mq.ensure_head_driven(
+        tmp_path, "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
+    assert spawned == []                   # nothing to drive
+
+
+def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "a", "main")
+    shutil.rmtree(tmp_path / ".imp" / "worktrees" / "a")   # records gone → load fails
+    spawned: list = []
+    # Must not raise; the unloadable head is skipped silently.
+    mq.ensure_head_driven(
+        tmp_path, "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
+    assert spawned == []

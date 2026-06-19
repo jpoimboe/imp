@@ -77,6 +77,28 @@ def remove(control_root: Path, change_id: str) -> None:
         _write(control_root, entries)
 
 
+def ensure_head_driven(
+    control_root: Path, base_branch: str,
+    *, spawn_fn: Callable[..., Any] | None = None,
+) -> None:
+    """Spawn a live driver for this lane's current head; tolerant and never-raising."""
+    from imp.engine.change import Change
+    from imp.engine.errors import LoadError
+    with RepoGitLock(control_root).acquire():
+        lane = _lane(read(control_root), base_branch)
+        head_id = lane[0]["change_id"] if lane else None
+    if head_id is None:
+        return
+    try:
+        change = Change.load(control_root, head_id)
+    except (LoadError, OSError):
+        return
+    if spawn_fn is None:
+        from imp.remote.session.attach import spawn_session_daemon
+        spawn_fn = spawn_session_daemon
+    spawn_fn(change, resume=True)
+
+
 def pop_and_wake(
     control_root: Path, change_id: str, base_branch: str,
     *, spawn_fn: Callable[..., Any] | None = None,
