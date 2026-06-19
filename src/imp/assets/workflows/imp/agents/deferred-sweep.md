@@ -4,6 +4,7 @@ description: Drain the Deferred Followups list — re-evaluate each item on a ri
 subagents: [implementer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
+  sweep_tolerated: {type: bool}
   summary: {type: string}
 ---
 
@@ -143,16 +144,72 @@ re-raises a dismissed item.
 Do **not** mark the run degraded — improvement and polish are not correctness
 (consistent with the existing nit-only-fixup rule).
 
+## Verify triage — tolerated failures
+
+<!-- SYNCED PAIR (task-lead ↔ deferred-sweep): keep this Verify triage block in lockstep
+with task-lead.md's identical block (and vice-versa). The toleration JUDGMENT is uniform;
+only the fix path differs (task-lead fixes in task context with a fixup; you fix in sweep
+context with a plain commit). -->
+
+**Feedback-gated, like the list drain above.** A **fresh** entry (no injected feedback)
+drains the Deferred Followups list as described above and does NOT perform triage — return
+`sweep_tolerated: false`. Only a **resumed** entry that began with injected feedback — the
+`sweep-verify` gate `resume`d you with the verify failure output — performs **triage only**:
+do NOT re-drain the Deferred Followups list, just adjudicate the failures.
+
+On a triage entry, the engine also makes the change-local tolerated record
+`.imp/change/tolerated-failures.md` available (it may be absent/empty — the common case). It
+holds two entry kinds, each tagged with its origin and a one-line justification:
+
+- `[baseline]` — failures captured at the change's baseline (present before any task ran).
+- `[flaky]` — failures judged non-deterministic/environmental during the run.
+
+Reason over the OPAQUE failure text against that tolerated set (`baseline ∪ flaky`) — pure
+judgment, you never re-run a single test:
+
+- **All current failures are within the tolerated set** → do nothing, make NO commit, and
+  return `sweep_tolerated: true`. The workflow forward-advances past `sweep-verify` instead
+  of re-looping. This holds for a `[baseline]` entry and a previously-recorded `[flaky]`
+  entry alike.
+- **A failure outside the set** → decide which it is:
+  - the failing test was **green at baseline, is unrelated to the diff, and reads as
+    non-deterministic/environmental** → append a `flaky` entry to
+    `.imp/change/tolerated-failures.md` (create the file with a `# Tolerated failures`
+    heading if absent) in this shape:
+    `- [flaky] <test id>: green at baseline, outside the diff — <why it reads as flaky>`,
+    then return `sweep_tolerated: true`. A `flaky` declaration is **visibility, not
+    reproduction**: it changes nothing about the merge — `finalize` surfaces it to a human
+    before merge (`sweep-verify` runs before `finalize`).
+  - a **real regression this change introduced** → fix it via the implementer and return
+    `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the implementer to make
+    a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
+    `git commit --fixup=HEAD`. `task-lead` uses `--fixup=HEAD` only because `autosquash` runs
+    after the per-task `verify` gate; **no `autosquash` runs after `deferred-sweep`/
+    `sweep-verify`**, so a fixup commit would leak unsquashed to merge. This matches the
+    "Commit granularity" discipline above.
+
+Emit `sweep_tolerated: true` ONLY on the all-tolerated / new-flaky cases above. On EVERY
+other return — a fresh list-drain entry, a real-regression fix — emit `sweep_tolerated:
+false`.
+
+A **`max_loops` pause at `sweep-verify`** (the gate is capped at 5 fix laps) means the
+triage is **non-converging** — an unrecognized flake or a hard regression you could not fix
+in the budget. It escalates to a human; it is not a transient to retry. The
+`sweep_tolerated` forward advance is not a fix lap and does not consume the budget.
+
 ## Finish
+
+Always return `sweep_tolerated`: it is `true` only on the all-tolerated / new-flaky triage
+outcomes above, and `false` on every list-drain entry and every real-regression fix.
 
 If there is no `## Deferred Followups` section, or it has no parsable items, that is
 a normal, common outcome — there is simply nothing to drain. Make no commits and
-call `complete_step` with `status: Success` and a `summary` saying the list was
-empty.
+call `complete_step` with `status: Success`, `sweep_tolerated: false`, and a `summary`
+saying the list was empty.
 
 When the list is drained (every parsable item has a disposition recorded; malformed
-lines left untouched), call `complete_step` with `status: Success` and a `summary`
-naming how many were fixed / needs-decision / dismissed. When a subagent returns
+lines left untouched), call `complete_step` with `status: Success`, `sweep_tolerated: false`,
+and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
 `task(...)` dispatch and re-dispatch — the next subagent inherits only what you
 write.

@@ -13,6 +13,61 @@ head. The change has already removed itself from the queue and woken the next he
 so the lane keeps moving — you are not blocking anyone. Re-approving re-enqueues
 this change at the BACK of its lane with a fresh timestamp.
 
+## First: discriminate WHY you were invoked
+
+Two distinct gates converge on you through `bypass-dequeue`, and the convergent routing
+carries **no in-context signal** for which one fired. Determine it from the event journal
+before anything else, with `query_events(type="step_completed")`. Each `step_completed`
+event carries `{step, kind, action, var_mutations}`, where a routing `Goto` serializes as
+`action == {verb: goto, target, resume, rework}`. The discriminator is the **routing
+`action.target`**, never a verdict or exit field (those are not on these events):
+
+- Find the **most recent** `step_completed` whose `action.target == "bypass-dequeue"`.
+- If that event's `step == "integration-review"` (and no later `integration-verify`
+  `step_completed` exists), this is a **breakage bypass** — the at-head semantic review
+  flagged breakage.
+- If that event's `step == "integration-verify"`, this is a **verify-fail bypass** — the
+  at-head verify gate exited non-zero.
+- If you cannot determine the reason unambiguously from the journal (no qualifying event,
+  or it is **ambiguous/indeterminate**), treat it as a solicit case below — **never
+  auto-merge on ambiguity.**
+
+### Breakage bypass → ALWAYS solicit
+
+A breakage bypass is a hard invariant: **ALWAYS** solicit the human (the
+`## Review the integration` / `## Present and decide` flow below) and **never auto-merge**,
+regardless of verify state — even when verify is green or every current failure would be
+tolerated. Visibility-before-merge still requires a human for a semantic breakage.
+
+### Verify-fail bypass → honor the already-recorded tolerated set
+
+The verify gate's output did not survive to you, and its relative `./scripts/run-verify.sh`
+path does not resolve from your project-root cwd. So reproduce the authoritative current
+failure set yourself, in `bash`, by running the injected combined verify command (read-only,
+writes nothing):
+
+```bash
+sh -c "$IMP_VERIFY_COMMAND"
+```
+
+Then read `.imp/change/tolerated-failures.md` (the `[baseline]` and `[flaky]` entries —
+the set `baseline ∪ flaky`):
+
+- **Every current failure is within `baseline ∪ flaky`** → decide `merge` **directly,
+  WITHOUT** calling `wait_for_user`:
+  `complete_step(status="Success", decision="merge", comments="<note that the bypass reason
+  was a verify failure and every current failure was already in the recorded
+  baseline ∪ flaky tolerated set>")`. This honor-existing check is the ONLY path that may
+  auto-merge.
+- **Any current failure is NOT in the tolerated set** → solicit the human exactly as today
+  (the flow below).
+
+**You may NEVER write a new tolerated-failures entry.** This gate runs **after**
+`finalize`, the last human-visibility gate, so inventing a new toleration here would merge a
+never-surfaced red test to the shared base. You only ever *honor the already-recorded* set;
+declaring a new `[flaky]` is `task-lead`'s and `deferred-sweep`'s job, both of which run
+before `finalize`.
+
 ## Review the integration
 
 In `bash`:

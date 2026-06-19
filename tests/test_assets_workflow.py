@@ -6,7 +6,7 @@ from pathlib import Path
 
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Continue, Goto
+from imp.engine.types import Continue, Goto, Pause
 
 
 def _steps(wf):
@@ -20,6 +20,7 @@ _BASE_VARS = {
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
     "verify_tolerated_carry": False,
+    "sweep_tolerated_carry": False,
     "change_panel_done": False,
 }
 
@@ -771,4 +772,98 @@ def test_plan_writer_can_write_progress(tmp_path: Path) -> None:
     assert ".imp/change/progress.md" in write_paths
     assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
     assert "**" not in write_paths
+
+
+def test_sweep_tolerated_carry_var_declared_default_false() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.vars.defaults()["sweep_tolerated_carry"] is False
+
+
+def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert "sweep_tolerated" in wf.agents["deferred-sweep"].output_schema.field_names()
+
+
+def test_deferred_sweep_tolerated_routes_through_sweep_verify() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["deferred-sweep"].rules
+    # All sweep-verify failures tolerated (or a new flaky declared): deferred-sweep made
+    # NO regression fix and hands the carry signal to sweep-verify so that step performs
+    # the budget-resetting forward advance on its next pass.
+    m = evaluate_rules(
+        rules, vars=_BASE_VARS,
+        output={"status": "Success", "sweep_tolerated": True, "summary": "tolerated"},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "sweep-verify" and m.action.resume is False
+    assert m.var_mutations["sweep_tolerated_carry"] is True
+
+
+def test_deferred_sweep_normal_return_continues_without_carry() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["deferred-sweep"].rules
+    # A normal sweep entry (no toleration) continues to sweep-verify and sets no carry.
+    m = evaluate_rules(
+        rules, vars=_BASE_VARS,
+        output={"status": "Success", "sweep_tolerated": False, "summary": "drained"},
+    )
+    assert isinstance(m.action, Continue)
+    assert "sweep_tolerated_carry" not in m.var_mutations
+
+
+def test_sweep_verify_has_max_loops_5() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert _steps(wf)["sweep-verify"].max_loops == 5
+
+
+def test_sweep_verify_carry_continues_forward_and_clears_carry() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["sweep-verify"].rules
+    # A red suite (exit 1) whose failures deferred-sweep already tolerated (carry set):
+    # forward-continue past sweep-verify -- the advance that resets sweep-verify's OWN
+    # loop counter -- and clear the carry so a later batch starts fresh.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
+                       output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["sweep_tolerated_carry"] is False
+
+
+def test_sweep_verify_red_without_carry_resumes_deferred_sweep() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["sweep-verify"].rules
+    # A red suite with no tolerated-carry resumes deferred-sweep for triage -- the
+    # backward edge that increments sweep-verify's loop counter.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": False},
+                       output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "deferred-sweep" and m.action.resume is True
+
+
+def test_sweep_verify_green_clears_stale_carry() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["sweep-verify"].rules
+    # A green suite (exit 0) clears a stale carry too, so a carry set in a prior batch
+    # can never leak forward and mask a real regression.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
+                       output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["sweep_tolerated_carry"] is False
+
+
+def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["sweep-verify"].rules
+    # exit:124 precedes the carry rule; timeout pauses even when carry is True.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
+                       output={"exit": 124, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Pause)
 

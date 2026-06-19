@@ -383,3 +383,78 @@ def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
     text = SWEEP.read_text()
     assert "code-reviewer append it" in text
     assert "review-panel" not in text
+
+
+def test_deferred_sweep_documents_verify_triage() -> None:
+    text = SWEEP.read_text()
+    low = text.lower()
+    # The change-local record and the signal it emits.
+    assert "tolerated-failures.md" in text
+    assert "sweep_tolerated: true" in text
+    assert "sweep_tolerated: false" in text
+    # Both tolerated entry kinds and the flaky justification bar (parity with task-lead).
+    assert "[baseline]" in text
+    assert "[flaky]" in text
+    assert "green at baseline" in low
+    assert "outside the diff" in low
+    # Feedback-gated: a fresh entry drains the list; a resumed (sweep-verify) entry
+    # does triage only and does NOT re-drain.
+    assert "injected feedback" in low
+    assert "triage only" in low
+    # A real regression is fixed with a PLAIN commit, never a --fixup (no autosquash
+    # runs after the sweep), so a fixup would leak unsquashed to merge.
+    assert 'git commit -m' in text
+    assert "--fixup=HEAD" in text
+    # The max_loops pause meaning is documented (non-converging triage).
+    assert "max_loops" in text
+    assert "non-converging" in low
+
+
+def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
+    marker = "SYNCED PAIR (task-lead ↔ deferred-sweep)"
+    assert marker in TASK_LEAD.read_text()
+    assert marker in SWEEP.read_text()
+
+
+INTEGRATION_RESOLVE = AGENTS_DIR / "integration-resolve.md"
+
+
+def test_integration_resolve_discriminates_bypass_via_query_events() -> None:
+    text = INTEGRATION_RESOLVE.read_text()
+    low = text.lower()
+    # Discriminate the two bypass reasons from the journal, keyed on the routing
+    # action.target == "bypass-dequeue" (the events carry no verdict/exit field).
+    assert "query_events" in text
+    assert "step_completed" in text
+    assert "action.target" in text
+    assert "bypass-dequeue" in text
+    assert "most recent" in low
+    assert "integration-review" in text          # breakage gate
+    assert "integration-verify" in text          # verify-fail gate
+    # Ambiguous/indeterminate journal -> solicit, never auto-merge.
+    assert "ambiguous" in low or "indeterminate" in low
+
+
+def test_integration_resolve_breakage_always_solicits() -> None:
+    low = INTEGRATION_RESOLVE.read_text().lower()
+    # A breakage bypass ALWAYS solicits and is never auto-merged, regardless of verify state.
+    assert "breakage" in low
+    assert "always" in low
+    assert "never auto-merge" in low or "never auto-merged" in low
+
+
+def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
+    text = INTEGRATION_RESOLVE.read_text()
+    low = text.lower()
+    # On a verify-fail bypass, reproduce the failure set by running the injected
+    # $IMP_VERIFY_COMMAND (the gate output does not survive; its relative
+    # ./scripts/run-verify.sh path does not resolve from the agent's project-root cwd).
+    assert "IMP_VERIFY_COMMAND" in text
+    assert "tolerated-failures.md" in text
+    # All current failures within baseline+flaky -> decide merge WITHOUT wait_for_user.
+    assert "WITHOUT" in text and "wait_for_user" in text
+    # It honors only the EXISTING set; it never writes a new tolerated entry.
+    assert "never write" in low or "never writes" in low
+    assert "new tolerated" in low
+    # Else branch: any failure outside the tolerated set -> solicit the human.
+    assert "solicit" in low
