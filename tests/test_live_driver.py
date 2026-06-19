@@ -1144,12 +1144,10 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
     assert "plan-writer" in body                # step two rendered live (not frozen)
 
 
-def test_status_spinner_is_render_safe_ascii() -> None:
-    from imp.cli.live_driver import _SPINNER, compose_activity_status
+def test_status_spinner_uses_braille_glyph() -> None:
+    from imp.cli.live_driver import compose_activity_status
     from imp.cli.narrative import NarrativeBuilder
     from tests._event_fixtures import ev
-
-    assert all(ord(c) < 128 for c in _SPINNER)   # no braille/tofu glyphs
 
     builder = NarrativeBuilder()
     builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
@@ -1157,7 +1155,8 @@ def test_status_spinner_is_render_safe_ascii() -> None:
                    input={"command": "ls"}))
     status = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
     assert status is not None
-    assert status[0] == _SPINNER[0]              # the rendered spinner glyph is ASCII
+    assert status[0] == "⠋"          # braille frame 0, not the old ASCII spinner
+    assert "|" not in status          # the "|/-\\" cycle is gone
 
 
 def test_status_line_shows_step_then_activity_then_elapsed() -> None:

@@ -32,8 +32,6 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus
 
-_SPINNER = "|/-\\"
-
 
 def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
@@ -41,7 +39,7 @@ def compose_activity_status(
     activity = builder.current_activity()
     if activity is None:
         return None
-    spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=color)
+    spin = pal.ansi(pal.spinner_frame(frame), "cyan", enabled=color)
     if activity.count is not None:
         head: list[str] = []
         if activity.step:
