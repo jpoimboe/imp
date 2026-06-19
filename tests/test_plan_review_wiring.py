@@ -25,7 +25,7 @@ def _steps(wf):
 
 
 def test_plan_review_step_runs_single_reviewer_at_high_tier() -> None:
-    step = _steps(_wf())["plan-review"]
+    step = _steps(_wf())["plan-reviewer"]
     assert step.kind == "agent" and step.tier == "high"
     assert step.file.name == "plan-reviewer.md"
 
@@ -37,7 +37,7 @@ def test_panel_agent_and_panel_var_are_gone() -> None:
 
 
 def test_plan_review_rules_thread_minors_without_panel_var() -> None:
-    rules = _steps(_wf())["plan-review"].rules
+    rules = _steps(_wf())["plan-reviewer"].rules
     # blocking -> rework to plan-writer; clears the minors flag, no panel var.
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"blocking": True, "has_minor_findings": False})
