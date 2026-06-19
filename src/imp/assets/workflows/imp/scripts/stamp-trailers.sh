@@ -8,7 +8,8 @@
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 HANDLE="${IMP_CHANGE_HANDLE:?IMP_CHANGE_HANDLE not set by engine}"   # empty HANDLE → fail fast
-BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")
+: "${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
+BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])")
 FORK=$(git merge-base "$BASE" HEAD)
 
 # Empty-range guard: a change always has spec+plan commits; an empty range means

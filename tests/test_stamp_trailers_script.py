@@ -25,7 +25,8 @@ def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
         ["bash", str(STAMP)],
         cwd=project_root.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(project_root),
-             "IMP_CHANGE_HANDLE": SLUG},
+             "IMP_CHANGE_HANDLE": SLUG,
+             "IMP_CHANGE_DIR": str(project_root / ".imp" / "change")},
         capture_output=True, text=True, check=False,
     )
 
@@ -85,4 +86,25 @@ def test_stamp_trailers_stamps_linear_range(tmp_path: Path) -> None:
     # Stamping rebases the range, so reference the rewritten commits by position.
     assert _change(pr, "HEAD~1") == SLUG   # docs: spec
     assert _change(pr, "HEAD") == SLUG     # feat: work
+
+
+def test_stamp_reads_base_branch_from_change_dir(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _init(pr)
+    # change.json lives at a standalone change-home, NOT under the project tree.
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "change.json").write_text(json.dumps(
+        {"id": "x", "title": "t", "base_branch": "main"}))
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("work\n")
+    _git(pr, "add", "g.txt")
+    _commit(pr, "feat: work")
+    res = subprocess.run(
+        ["bash", str(STAMP)], cwd=pr.parent,
+        env={**os.environ, "IMP_PROJECT_ROOT": str(pr),
+             "IMP_CHANGE_HANDLE": SLUG, "IMP_CHANGE_DIR": str(home)},
+        capture_output=True, text=True, check=False)
+    assert res.returncode == 0, res.stderr
+    assert _change(pr, "HEAD") == SLUG
 
