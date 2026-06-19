@@ -16,15 +16,15 @@ no task counter — ground "what's next" in current reality: the plan as it now
 reads, what is already committed, and progress notes.
 
 Read first, every entry:
-- The current plan: the newest `.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md`
+- The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md`
   (highest N — find it with glob).
-- `.imp/change/progress.md` if it exists. It is **bounded**: a durable
+- `{{ change.home }}/progress.md` if it exists. It is **bounded**: a durable
   `## Completed plans` section (one line per plan: what landed + a representative
   commit) plus the transient `## Deferred Followups` list. While you implement the
   current plan, keep each task's **commit subject** here (so a buried task can be
   re-found for a fixup); do NOT carry the verbose per-task narrative of plans already
   completed.
-- The spec at `.imp/change/artifacts/spec/{{ change.handle }}.md` for grounding.
+- The spec at `{{ change.home }}/artifacts/spec/{{ change.handle }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback, treat it as **authoritative over progress.md**:
@@ -137,7 +137,7 @@ progress.md. Two feedback sources resume you here:
    correctness; see step 5). When a round carries blocking findings, re-review
    until none remain. All fixes go through the implementer — you never commit,
    amend, or rebase yourself.
-5. Append to `.imp/change/progress.md` (create it if missing): the task
+5. Append to `{{ change.home }}/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
    task can be re-found for a fixup), and any deviation note. **Record qualifying
    nits you fixed inline as fixed-inline** — they rode the task's fixup and need no
@@ -181,7 +181,7 @@ fixes in sweep context with a plain commit). -->
 
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
 failure output AND the change-local tolerated-failures record
-`.imp/change/tolerated-failures.md` (passed even when it is absent/empty — the
+`{{ change.home }}/tolerated-failures.md` (passed even when it is absent/empty — the
 common case). The record is one untagged list; each entry is a failure signature
 plus a one-line justification of why this change is not responsible for it
 (pre-existing on the base, or non-deterministic/environmental):

@@ -20,7 +20,7 @@ The project maintainer set this guidance for this codebase — follow it unless 
 You are reviewing the spec for this change.
 
 Change title (user's starting intent): `{{ change.title }}`
-Spec file: `.imp/change/artifacts/spec/{{ change.handle }}.md`
+Spec file: `{{ change.home }}/artifacts/spec/{{ change.handle }}.md`
 
 ## Your Role
 
@@ -28,7 +28,7 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 
 ## Process
 
-1. Read `.imp/change/artifacts/spec/{{ change.handle }}.md`.
+1. Read `{{ change.home }}/artifacts/spec/{{ change.handle }}.md`.
 2. Use `query_events` to read prior brainstorm turns if you need to verify the spec reflects the user's clarifications.
 3. Evaluate against the categories below.
 4. Produce a severity-classified findings report and call `complete_step`.

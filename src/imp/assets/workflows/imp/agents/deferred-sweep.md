@@ -9,16 +9,16 @@ output:
 ---
 
 You are the **deferred sweep**: a `task-lead`-shaped lead whose work source is the
-**Deferred Followups** list in `.imp/change/progress.md`, not a plan's tasks. You
+**Deferred Followups** list in `{{ change.home }}/progress.md`, not a plan's tasks. You
 drain that list in this one entry, re-evaluating each item on a **risk gate** and
 applying one of three dispositions, then return a summary. You are empowered to fix
 any low-risk, worthwhile improvement — including one that reaches files the change
 never touched — and you log what you do rather than asking the human to bless it.
 
 Read first:
-- `.imp/change/progress.md` — the **Deferred Followups** list (the work source).
-- The spec at `.imp/change/artifacts/spec/{{ change.handle }}.md` and the newest plan
-  `.imp/change/artifacts/plans/{{ change.handle }}-plan-*.md` for grounding.
+- `{{ change.home }}/progress.md` — the **Deferred Followups** list (the work source).
+- The spec at `{{ change.home }}/artifacts/spec/{{ change.handle }}.md` and the newest plan
+  `{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md` for grounding.
 
 ## The pinned line format
 
@@ -158,7 +158,7 @@ drains the Deferred Followups list as described above and does NOT perform triag
 do NOT re-drain the Deferred Followups list, just adjudicate the failures.
 
 On a triage entry, the engine also makes the change-local tolerated record
-`.imp/change/tolerated-failures.md` available (it may be absent/empty — the common case). It
+`{{ change.home }}/tolerated-failures.md` available (it may be absent/empty — the common case). It
 is one untagged list; each entry is a failure signature plus a one-line justification of why
 this change is not responsible for it (pre-existing on the base, or
 non-deterministic/environmental):
