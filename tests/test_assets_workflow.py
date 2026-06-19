@@ -20,6 +20,7 @@ _BASE_VARS = {
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
     "baseline_dirty": False, "verify_tolerated_carry": False,
+    "change_panel_done": False,
 }
 
 
@@ -709,4 +710,62 @@ def test_verify_green_clears_stale_carry() -> None:
                        output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Continue)
     assert m.var_mutations["verify_tolerated_carry"] is False
+
+
+def test_change_panel_done_var_declared_default_false() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.vars.defaults()["change_panel_done"] is False
+
+
+def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["plan-cycle-check"].rules
+    # Coverage completes for the first time (panel not yet run): the full whole-change
+    # panel fires (review_scope=change) and the once-only guard is latched true.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "change_panel_done": False},
+        output={"more_plans": False, "running_tasks": 3, "rationale": "done"})
+    assert isinstance(m.action, Goto) and m.action.target == "review"
+    assert m.var_mutations["review_scope"] == "change"
+    assert m.var_mutations["change_panel_done"] is True
+
+
+def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["plan-cycle-check"].rules
+    # The panel already ran once (guard latched): a corrective plan completing after a
+    # rework is reviewed as a per-batch diff (review_scope=plan), NOT a fresh full panel.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "change_panel_done": True},
+        output={"more_plans": False, "running_tasks": 1, "rationale": "corrective"})
+    assert isinstance(m.action, Goto) and m.action.target == "review"
+    assert m.var_mutations["review_scope"] == "plan"
+    assert "change_panel_done" not in m.var_mutations
+
+
+def test_review_base_repin_corrective_batch_routes_to_finalize() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["review-base-repin"].rules
+    # A per-batch review settling AFTER the full panel (guard latched) means coverage
+    # is complete: route to stamp-trailers -> finalize, NOT back to plan-writer.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": True},
+        output={"exit": 0, "stdout": "abc123", "stderr": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "stamp-trailers"
+
+
+def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["review-base-repin"].rules
+    # A normal mid-change per-batch review (panel not yet run) loops back to plan-writer
+    # for the next plan -- unchanged behavior, guarded against regression.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": False},
+        output={"exit": 0, "stdout": "abc123", "stderr": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
 
