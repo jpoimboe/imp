@@ -561,7 +561,7 @@ def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    bc_i = next(i for i, ln in enumerate(body) if "spec complete" in ln)
+    bc_i = next(i for i, ln in enumerate(body) if "spec · complete" in ln)
     assert body[bc_i - 1].strip() == ""
     assert body == _render_body(events)
 
@@ -753,7 +753,7 @@ def test_chrome_step_header_streams_live_and_matches_log() -> None:
     drv.finish()
     body = _body(out)
     assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
-    assert any("gate complete" in ln for ln in body)                    # breadcrumb
+    assert any("gate · complete" in ln for ln in body)                  # breadcrumb
     assert body == _render_body(events)                                 # live == imp log
 
 
@@ -863,7 +863,7 @@ def test_quiet_continue_is_silent_live_and_matches_log() -> None:
     assert _body(out) == _render_body(events)   # live == imp log, line for line
 
 
-def test_quiet_forward_goto_arrow_matches_log() -> None:
+def test_quiet_forward_goto_renders_nothing_matches_log() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -883,18 +883,16 @@ def test_quiet_forward_goto_arrow_matches_log() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "→ plan" for ln in body)
     assert not any("fast-path-spec-gate" in ln for ln in body)
-    assert body == _render_body(events)
+    assert not any(ln.strip().startswith("→") for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
 
 
-def test_is_final_resume_goto_quiet_step_is_emitted() -> None:
-    # A quiet step that closes on a backward rework edge (goto resume=True) sets
-    # quiet_line="→ reworking" and is FINAL immediately — the live cursor must not
-    # block on it the way it blocks an unresolved forward goto.
+def test_is_final_closed_quiet_goto_step_is_emitted() -> None:
+    # A closed quiet step (here a backward rework goto resume=True) is FINAL
+    # immediately — the live cursor must not block on it.
     drv, _ = _driver()
     node = nv.StepNode(name="spec-verify-commit", kind="script", quiet=True)
-    node.quiet_line = "→ reworking"
     node.closed = True
     node.outcome = nv.OutcomeLine(
         action={"verb": "goto", "target": "spec-writer", "resume": True})
@@ -975,11 +973,7 @@ def test_interrupt_breadcrumb_in_live_path() -> None:
     assert "error:" not in body
 
 
-def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
-    # A loud step (spec-reviewer) clean-approves with a plain forward goto to
-    # plan-writer. Its breadcrumb route ("→ plan") is unknown until plan-writer's
-    # step_started arrives, so the live driver must HOLD the breadcrumb and emit it
-    # just before the new phase — matching imp log line-for-line.
+def test_loud_forward_goto_breadcrumb_emits_immediately() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -997,27 +991,27 @@ def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
         ev("7", "step_completed", step="plan-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
     ]
-    # Before plan-writer's step_started, the breadcrumb is held: no arrow yet.
+    # The closed step's breadcrumb emits at step_completed (not held): the gray
+    # completion line is present before plan-writer's step_started arrives.
     for e in events[:4]:
         drv.on_event(e)
-    assert not any("→ plan" in ln for ln in _body(out))
+    assert any("spec-reviewer · complete" in ln for ln in _body(out))
     for e in events[4:]:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
+    assert not any(ln.strip().startswith("→") for ln in body)   # unlabeled goto: silent
     assert not any("goto(" in ln for ln in body)
     assert body == _render_body(events)   # live == imp log, line for line
 
 
-def test_is_final_loud_reworking_breadcrumb_is_emitted() -> None:
-    # A loud reviewer rework (goto + rework) is final immediately — the live cursor
-    # must not block on it the way it blocks an unresolved forward goto.
+def test_is_final_goto_breadcrumb_is_emitted() -> None:
+    # A loud reviewer rework (goto + rework) breadcrumb is final immediately — the
+    # route label rides it inline at completion, so the live cursor never holds it.
     drv, _ = _driver()
     bc = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=1.0,
                            action={"verb": "goto", "target": "plan-writer",
-                                   "resume": False, "rework": True},
-                           route=None)
+                                   "resume": False, "rework": True})
     assert drv._is_final(bc, container=None) is True
 
 
@@ -1140,16 +1134,14 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
     # NO finish(): assert the LIVE, mid-run state.
     body = out.getvalue()
     assert "First narration." in body          # the opener un-held and emitted
-    assert "spec-writer complete" in body       # step one concluded live
+    assert "spec-writer · complete" in body       # step one concluded live
     assert "plan-writer" in body                # step two rendered live (not frozen)
 
 
-def test_status_spinner_is_render_safe_ascii() -> None:
-    from imp.cli.live_driver import _SPINNER, compose_activity_status
+def test_status_spinner_uses_braille_glyph() -> None:
+    from imp.cli.live_driver import compose_activity_status
     from imp.cli.narrative import NarrativeBuilder
     from tests._event_fixtures import ev
-
-    assert all(ord(c) < 128 for c in _SPINNER)   # no braille/tofu glyphs
 
     builder = NarrativeBuilder()
     builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
@@ -1157,7 +1149,8 @@ def test_status_spinner_is_render_safe_ascii() -> None:
                    input={"command": "ls"}))
     status = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
     assert status is not None
-    assert status[0] == _SPINNER[0]              # the rendered spinner glyph is ASCII
+    assert status[0] == "⠋"          # braille frame 0, not the old ASCII spinner
+    assert "|" not in status          # the "|/-\\" cycle is gone
 
 
 def test_status_line_shows_step_then_activity_then_elapsed() -> None:
@@ -1167,42 +1160,35 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
-           model="m", provider="anthropic"),
+           model="m", provider="anthropic", label="reviewing plan"),
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert "plan-review · thinking" in line
+    assert "review · reviewing plan · thinking" in line
     assert "18s" in line
 
 
 def test_labeled_forward_goto_label_in_both_paths() -> None:
-    # A labeled forward goto: the breadcrumb is held until the target's
-    # step_started resolves "→ merge", then both live and imp log emit the label
-    # segment after the arrow, byte-identical line-for-line.
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="finalize", kind="agent", phase="review",
+        ev("2", "step_started", step="finalize", kind="agent", phase="implement",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:review/finalize",
+        ev("3", "llm_response", agent_id="step:implement/finalize",
            raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
         ev("4", "step_completed", step="finalize", kind="agent",
            action={"verb": "goto", "target": "wait-for-head",
                    "resume": False, "rework": False},
            var_mutations={}, label="entering the merge queue"),
-        ev("5", "step_started", step="wait-for-head", kind="wait_for_head",
-           phase="merge", model="m", provider="anthropic"),
-        ev("6", "step_completed", step="wait-for-head", kind="wait_for_head",
-           action={"verb": "continue"}, var_mutations={}, label=None),
     ]
     for e in events:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("finalize complete" in ln and "→ merge" in ln
-               and "entering the merge queue" in ln for ln in body)
-    assert body == _render_body(events)   # live == imp log, line for line
+    assert any("finalize · complete" in ln for ln in body)
+    assert any(ln.strip() == "→ entering the merge queue" for ln in body)
+    assert body == _render_body(events)
 
 
 def test_held_narration_emits_before_open_burst_live() -> None:
@@ -1227,7 +1213,7 @@ def test_held_narration_emits_before_open_burst_live() -> None:
     assert "read_file" not in body  # open burst still withheld
 
 
-def test_unlabeled_forward_goto_has_no_label_segment() -> None:
+def test_quiet_goto_renders_nothing_in_live_path() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1248,16 +1234,17 @@ def test_unlabeled_forward_goto_has_no_label_segment() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
-    assert not any(" ·  · " in ln for ln in body)   # no empty segment
-    assert body == _render_body(events)
+    assert any("spec-reviewer · complete" in ln for ln in body)
+    assert not any(ln.strip().startswith("→") for ln in body)
+    assert not any("goto(" in ln for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
 
 
 def test_current_activity_anchors_timer_to_in_flight_call() -> None:
     # Timer anchors to the running call (c2), not a resolved (c1) or killed (c3) call.
     clock = [50.0]
     b = nv.NarrativeBuilder(now=lambda: clock[0])
-    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p", label="searching"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="read_file",
             input={"p": "x"}))           # stamped at clock=50.0
     b.add(ev("r1", "tool_result", agent_id="a", id="c1", content="ok"))
@@ -1271,7 +1258,7 @@ def test_current_activity_anchors_timer_to_in_flight_call() -> None:
     clock[0] = 73.0
     act = b.current_activity()
     assert act is not None
-    assert act.step == "s"               # the open step name
+    assert act.step_label == "searching"  # the step display label
     assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
     assert act.count == "3 calls"        # retained Activity.count basis keeps killed
     assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0
@@ -1282,14 +1269,39 @@ def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
 
     clock = [100.0]
     b = nv.NarrativeBuilder(now=lambda: clock[0])
-    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl"))
+    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl",
+             label="implementing"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
             input={"command": "sleep 600"}))       # stamped at clock=100.0
     clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    assert "implement" in line          # open step name
-    assert "bash sleep 600" in line     # in-flight tool detail
-    assert "1 call" in line             # retained Activity.count segment
-    assert "5m 12s" in line             # per-call timer (the primary figure)
-    assert "(step 15m 0s)" in line      # session/step elapsed as the parenthetical
+    expected = "impl · implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
+    assert line.split(" ", 1)[1] == expected
+
+
+def test_status_spine_phase_label_activity_elapsed() -> None:
+    from imp.cli.live_driver import compose_activity_status
+
+    # labeled step, fallback (thinking) activity: phase · label · activity · elapsed.
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="plan-reviewer", kind="agent", phase="plan",
+           model="m", provider="anthropic", label="reviewing plan"),
+        ev("3", "thinking", agent_id="step:plan/plan-reviewer", content="hmm"),
+    ]:
+        b.add(e)
+    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
+    assert line.split(" ", 1)[1] == "plan · reviewing plan · thinking · 18s"
+
+    # quiet/unlabeled step: the step segment is dropped -> phase · activity · elapsed.
+    q = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="autosquash", kind="script", phase="implement",
+           quiet=True),
+    ]:
+        q.add(e)
+    qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
+    assert qline.split(" ", 1)[1] == "implement · running · 4s"

@@ -36,7 +36,7 @@ design
   
   > Please add a section on token expiry.
   
-  spec complete · status=Success · summary=Spec drafted
+  spec · complete · status=Success · summary=Spec drafted
 
 implement
   

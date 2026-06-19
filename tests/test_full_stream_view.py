@@ -88,7 +88,7 @@ def test_no_stall_invariant_final_breadcrumb_present() -> None:
     # The final step "final-review" completes with a breadcrumb like
     # "final-review complete · 2983s · ..."; we check the step name prefix only so the
     # test is robust to timing changes in future replays.
-    assert f"{last_step} complete" in live, (
+    assert f"{last_step} · complete" in live, (
         f"final step '{last_step}' completion breadcrumb missing from live output "
         f"— the live cursor may be wedged mid-stream (§11 stall regression)"
     )

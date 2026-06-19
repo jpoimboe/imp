@@ -1056,3 +1056,44 @@ def test_rule_label_non_string_is_load_error(tmp_path: Path) -> None:
         """)
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
+
+
+def test_step_label_parses_and_defaults_to_none(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          done: {type: bool, default: false}
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                label: writing spec
+              - name: spec-reviewer
+                file: agents/spec-reviewer.md
+                rules:
+                  - {else: true, continue: true}
+          - name: merge
+            steps: []
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].label == "writing spec"
+    assert by["spec-reviewer"].label is None
+
+
+def test_step_label_must_be_a_string(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                label: 42
+          - name: merge
+            steps: []
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)

@@ -86,8 +86,8 @@ class StepNode:
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
-    quiet_line: str | None = None      # resolved routing line (`→ reworking` /
-                                       # `→ <phase>`); None for a linear continue
+    label: str | None = None           # step display label (step_started.payload.label)
+    resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     closed: bool = False
     interrupted: bool = False
     collapsible = False
@@ -168,13 +168,14 @@ def display_tool_name(name: str) -> str:
 
 @dataclass
 class Activity:
-    """The structured live-status description (§3): count phrase, gray detail
-    (tool name + arg), and a fallback label. Any field may be None. Plain text —
-    the driver colors the segments (live_driver.compose_status)."""
+    """The structured live-status description (§3): phase + step display label spine,
+    a count phrase, gray detail (tool name + arg), and a fallback label. Any field may
+    be None. Plain text — the driver colors the segments (live_driver.compose_status)."""
     count: str | None = None
     detail: str | None = None
     label: str | None = None
-    step: str | None = None          # open step name (in-flight burst status)
+    phase: str | None = None         # current phase name (spine head)
+    step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
     call_elapsed: float | None = None  # monotonic seconds for the in-flight call
 
 
@@ -284,14 +285,10 @@ class BreadcrumbLine:
     output fields and a `· → <action>` suffix (omitted for a plain `continue`).
     Replaces the rendered OutcomeLine at step completion (issue 3)."""
     step_name: str
+    step_label: str | None = None      # step DISPLAY label for the completion line
     kind: str | None = None
     elapsed_s: float | None = None
     action: Any = None                 # dict {verb, target?} from step_completed
-    route: str | None = None           # resolved routing suffix, same semantics as
-                                       # StepNode.quiet_line: None = unresolved,
-                                       # "" = resolved-but-silent (same-phase skip),
-                                       # "→ …" = a rendered arrow. Read by the loud
-                                       # render/live paths (the goto breadcrumb).
     extras: list[str] = field(default_factory=list)
     show_complete: bool = True         # always True (§4): chrome steps now print
                                        # a start header, so the breadcrumb always
@@ -379,12 +376,6 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
-        # A step whose forward goto's target phase is not known until the
-        # target's step_started arrives (the arrow names the target PHASE). Holds
-        # (step_node, breadcrumb, target_step_name, gate_phase) between the two
-        # events; gate_phase lets a SAME-phase forward goto resolve to silence.
-        # Serves loud steps (breadcrumb.route) and quiet steps (quiet_line) alike.
-        self._pending_quiet: tuple[StepNode, BreadcrumbLine, str, str | None] | None = None
         # True between an awaiting_user_input event and the user_message that
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
@@ -406,6 +397,8 @@ class NarrativeBuilder:
 
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
+        phase = self._current_phase.name if self._current_phase else None
+        step_label = self._step_stack[-1].label if self._step_stack else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -413,9 +406,7 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} more {noun})"
-            if self._step_stack:
-                label = f"{self._step_stack[-1].name} \u203a {label}"
-            return Activity(label=label)
+            return Activity(phase=phase, step_label=step_label, label=label)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
@@ -423,10 +414,8 @@ class NarrativeBuilder:
                 n = len(basis)
                 count = f"{n} call{'s' if n != 1 else ''}"
                 # In-flight = the call actually still running: no result AND not
-                # killed. A killed call keeps result is None (_h_tool_killed only
-                # sets killed=True), so it must be excluded or the timer would tick
-                # forever on a dead call. Anchors to the wedged call, not a resolved
-                # or killed one.
+                # killed (a killed call keeps result is None), so the timer anchors
+                # to the wedged call, not a resolved or killed one.
                 inflight = next(
                     (c for c in reversed(basis)
                      if c.result is None and not c.killed), None)
@@ -438,16 +427,15 @@ class NarrativeBuilder:
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
                     if inflight.call_started is not None:
                         call_elapsed = self._now() - inflight.call_started
-                step = self._step_stack[-1].name if self._step_stack else None
-                return Activity(count=count, detail=detail, step=step,
-                                call_elapsed=call_elapsed)
+                return Activity(count=count, detail=detail, phase=phase,
+                                step_label=step_label, call_elapsed=call_elapsed)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
             verb = "running" if top.kind in CHROME_KINDS else "thinking"
-            return Activity(label=f"{top.name} · {verb}")
+            return Activity(phase=phase, step_label=step_label, label=verb)
         if self._current_phase is not None:
-            return Activity(label=f"{self._current_phase.name} · working")
+            return Activity(phase=phase, label="working")
         return None
 
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:
@@ -659,32 +647,11 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     self._step_stack.clear()
 
 
-def _apply_route(node: StepNode, breadcrumb: BreadcrumbLine, suffix: str) -> None:
-    if node.quiet:
-        node.quiet_line = suffix
-    breadcrumb.route = suffix
-
-
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
-    if self._pending_quiet is not None:
-        qnode, breadcrumb, target, gate_phase = self._pending_quiet
-        if phase == gate_phase:
-            # SAME-phase forward goto (e.g. panel-gate → recheck, both in review):
-            # an internal skip, not a phase transition — render nothing. "" is the
-            # resolved-but-silent sentinel, distinct from None (= unresolved, which
-            # holds the live cursor in live_driver._is_final).
-            _apply_route(qnode, breadcrumb, "")
-        else:
-            # Cross-phase: the forward goto runs its target next, so this step IS
-            # the target and its phase is the arrow's phase. Fall back to the raw
-            # target name if a different step somehow intervenes (defensive; never
-            # the shipped path).
-            _apply_route(qnode, breadcrumb, f"→ {phase if name == target else target}")
-        self._pending_quiet = None
     # Retry re-entry: the executor's transient-error retry loop re-emits
     # step_started on every iteration WITHOUT a prior step_completed for that
     # step, so the same StepNode is still on the stack. Reuse it in place —
@@ -734,6 +701,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.interactive = False
             existing.start_ts = event.get("timestamp")
             existing.agent_output = None
+            existing.label = p.get("label")
+            existing.resumed = bool(p.get("resumed", False))
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase)
@@ -743,7 +712,9 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
-                    quiet=bool(p.get("quiet", False)))
+                    quiet=bool(p.get("quiet", False)),
+                    label=p.get("label"),
+                    resumed=bool(p.get("resumed", False)))
     self._append(node)
     self._step_stack.append(node)
 
@@ -766,21 +737,11 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
+            step_label=node.label,
             label=p.get("label"),
             interrupted=node.interrupted)
         node.children.append(breadcrumb)
         node.closed = True
-        if isinstance(action, dict) and action.get("verb") == "goto":
-            if action.get("resume") or action.get("rework"):
-                # resume edge OR a backward goto carrying feedback: a rejection.
-                _apply_route(node, breadcrumb, "→ reworking")
-            else:
-                # forward goto: the arrow names the TARGET phase, known only once
-                # the target's step_started arrives (resolved there). Capture the
-                # gate's own phase so a same-phase skip resolves silent.
-                gate_phase = self._current_phase.name if self._current_phase else None
-                self._pending_quiet = (node, breadcrumb,
-                                       str(action.get("target", "")), gate_phase)
 
 
 NarrativeBuilder._HANDLERS["step_started"] = _h_step_started

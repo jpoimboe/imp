@@ -11,20 +11,19 @@ def _phase(wf, name):
     return next(p for p in wf.phases if p.name == name)
 
 
-def test_review_phase_is_stamp_then_finalize() -> None:
-    # Trailers are stamped once (before the change enters the queue), then finalize
-    # takes the human merge approval on the change's own diff. Integration moved to
-    # the at-head merge phase, so no integrate-rebase/integrator lives here.
+def test_stamp_and_finalize_tail_the_implement_phase() -> None:
     wf = load_workflow(WF)
-    assert [s.name for s in _phase(wf, "review").steps] == ["stamp-trailers", "finalize"]
+    impl = [s.name for s in _phase(wf, "implement").steps]
+    assert impl[-2:] == ["stamp-trailers", "finalize"]
+    assert not any(p.name == "review" for p in wf.phases)
 
 
 def test_merge_phase_linear_queue_flow() -> None:
     wf = load_workflow(WF)
     names = [s.name for s in _phase(wf, "merge").steps]
     assert names == [
-        "wait-for-head", "integrate-rebase", "integrator", "integration-review",
-        "integration-verify", "bypass-dequeue", "integration-resolve", "merge-to-base",
+        "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
+        "integration-verify", "bypass-dequeue", "integration-resolver", "merge-to-base",
     ]
     kinds = {s.name: s.kind for s in _phase(wf, "merge").steps}
     assert kinds["wait-for-head"] == "wait_for_head"
@@ -49,7 +48,7 @@ def test_integrate_rebase_routing() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "merge-to-base"
     # exit 0 -> semantic review
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 0})
-    assert isinstance(m.action, Goto) and m.action.target == "integration-review"
+    assert isinstance(m.action, Goto) and m.action.target == "integration-reviewer"
     # exit 6 -> integrator (continue)
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 6})
     assert isinstance(m.action, Continue)
@@ -60,7 +59,7 @@ def test_integrate_rebase_routing() -> None:
 
 def test_integration_review_routing() -> None:
     wf = load_workflow(WF)
-    rules = next(s for s in wf.flat_steps() if s.name == "integration-review").rules
+    rules = next(s for s in wf.flat_steps() if s.name == "integration-reviewer").rules
     _BASE = {}
     out = {"verdict": "breakage", "status": "Success", "summary": ""}
     m = evaluate_rules(rules, vars=_BASE, output=out)
@@ -84,7 +83,7 @@ def test_integration_verify_routing() -> None:
 
 def test_integration_resolve_routing() -> None:
     wf = load_workflow(WF)
-    rules = next(s for s in wf.flat_steps() if s.name == "integration-resolve").rules
+    rules = next(s for s in wf.flat_steps() if s.name == "integration-resolver").rules
     _BASE = {}
     base = {"status": "Success", "comments": ""}
     m = evaluate_rules(rules, vars=_BASE, output={**base, "decision": "merge"})

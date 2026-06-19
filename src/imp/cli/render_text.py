@@ -206,23 +206,14 @@ def render_question_block(text: str, width: int, depth: int, color: bool,
 
 
 def quiet_step_is_silent(node: nv.StepNode) -> bool:
-    """Whether a quiet step keeps its quiet treatment (hidden, or a one-line
-    routing arrow) rather than rendering its full block.
-
-    Spec §4.1: a quiet step hides on the happy path but "yields to any
-    non-linear outcome". A clean linear `continue` (or a still-open step) stays
-    silent; a resolved routing edge (`quiet_line`, set for a forward/rework
-    goto) renders its single arrow. But a quiet step that PAUSES — merge_blocked,
-    retry_ceiling, a max-retries Pause (executor emits step_completed with
-    verb="pause") — or ends on any other non-linear verb must surface: it falls
-    through to the full loud-step block so the failure and its error children are
-    not swallowed. Shared by `imp log` and the live driver (which renders a quiet
-    step as a leaf through this same `_render`), so both paths agree."""
-    if node.quiet_line is not None:
-        return True                          # resolved routing arrow → one line
+    """A quiet step stays hidden on the happy path (open, a clean linear continue, or
+    a silent routing goto) and surfaces its full block only on a non-linear outcome
+    (a pause: merge_blocked / retry_ceiling / a max-retries Pause — executor emits
+    step_completed with verb="pause"). Shared by `imp log` and the live driver (which
+    renders a quiet step as a leaf through this same `_render`), so both paths agree."""
     act = node.outcome.action if (node.outcome and isinstance(node.outcome.action, dict)) else None
     verb = act.get("verb") if act else None
-    return verb in (None, "continue")        # open, or a clean linear continue
+    return verb in (None, "continue", "goto")
 
 
 def is_prose_leaf(node: Any) -> bool:
@@ -326,17 +317,17 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    label = node.name
+    label = node.label or node.name
+    if not node.resumed:
+        text = f"{label} · {node.model}" if node.model else label
+        return _line(text, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
+    # Resumed re-entry: a gray " (resume)" after the label, before the model suffix.
+    indent = _gutter_indent(depth, gutters, color)
+    parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
+             pal.ansi(" (resume)", "gray", enabled=color)]
     if node.model:
-        # The model rides on the step line itself (design: drop the separate
-        # `▸ context · provider/model · N tools` line from the lean view — it
-        # survives only in `imp log --full`). Same gray as the rest of the step
-        # chrome, one space around the `·` to match every other dotted line; the
-        # provider and tool count are detail that the full view owns. An
-        # interactive step carries no `(interactive)` tag — its blank-line lead-in
-        # (spaces_before) is the only marker it needs.
-        label += f" · {node.model}"
-    return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
+        parts.append(pal.ansi(f" · {node.model}", *pal.NODE_COLORS["step"], enabled=color))
+    return indent + "".join(parts)
 
 
 def _subagent_model(sub: nv.SubagentFold) -> str | None:
@@ -449,9 +440,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.StepNode):
         if node.quiet and quiet_step_is_silent(node):
-            if node.quiet_line:
-                yield _line(node.quiet_line, depth, color,
-                            *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
             return
         # A quiet step that yielded to a non-linear outcome (a pause/error) falls
         # through here and renders its full block, just like a loud step.
@@ -554,33 +542,29 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.BreadcrumbLine):
+        name = node.step_label or node.step_name
         act = node.action if isinstance(node.action, dict) else None
         blocked = (node.kind == "merge" and act is not None
                    and act.get("verb") == "pause")
         if node.interrupted:
-            parts = [f"{node.step_name} interrupted"]
+            parts = [f"{name} interrupted"]
         elif blocked:
-            parts = [f"{node.step_name} blocked"]
+            parts = [f"{name} blocked"]
         else:
-            parts = [f"{node.step_name} complete" if node.show_complete
-                     else node.step_name]
+            parts = [f"{name} · complete" if node.show_complete else name]
         if full:
             parts.extend(node.extras)
-        if node.interrupted or blocked:
-            pass                          # no routing/verb suffix on these
-        elif act is not None and act.get("verb") == "goto":
-            if node.route:                # skip "" (same-phase) and None (unresolved)
-                parts.append(node.route)
-                if node.label:
-                    parts.append(node.label)
-        else:
+        if not (node.interrupted or blocked) and (act is None or act.get("verb") != "goto"):
             verb_text = pal.action_text(node.action) if node.action is not None else None
             if verb_text and verb_text != "continue":
                 parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
-        yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["step"],
-                    gutters=gutters)
+        yield _line(" · ".join(parts), depth, color,
+                    *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+        if node.label and not (node.interrupted or blocked):
+            yield _line(f"→ {node.label}", depth, color,
+                        *pal.NODE_COLORS["warning"], gutters=gutters)
         return
 
     if isinstance(node, nv.PauseNode):

@@ -211,3 +211,13 @@ def test_light_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
     # inverted: step was darker than blue.)
     light = pal._LIGHT_RGB
     assert _lum(light["blue"]) < _lum(light["step"]) < _lum(light["gray"])
+
+
+def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
+    braille = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    assert pal.spinner_frame(0) == "⠋"
+    assert pal.spinner_frame(3) == "⠸"
+    assert pal.spinner_frame(len(braille)) == "⠋"        # wraps at frame % len
+    assert pal.spinner_frame(0, unicode=False) == "|"
+    assert pal.spinner_frame(1, unicode=False) == "/"
+    assert pal.spinner_frame(4, unicode=False) == "|"    # 4 % 4 == 0

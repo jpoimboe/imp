@@ -1,9 +1,9 @@
 """Per-batch review cadence: autosquash + review-base-init runs INSIDE the
 per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
-single `code-reviewer` runs as the `review` step directly, over review_base..HEAD
+single `code-reviewer` runs as the `code-reviewer` step directly, over review_base..HEAD
 per batch and over merge-base..HEAD once at change end (review_scope=change).
 deferred-sweep + sweep-verify + review-base-repin trail each review batch.
-stamp-trailers is the first step of the review phase."""
+stamp-trailers and finalize tail the implement phase (no separate review phase)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -45,14 +45,17 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
         "task-lead", "commit-check", "verify",
         "autosquash", "autosquash-resolve",
         "review-base-init", "plan-cycle-check",
-        "review", "deferred-sweep", "sweep-verify", "review-base-repin",
+        "code-reviewer", "deferred-sweep", "sweep-verify", "review-base-repin",
+        "stamp-trailers", "finalize",
     ]
 
 
-def test_review_phase_is_stamp_trailers_then_finalize() -> None:
-    review = next(p for p in _wf().phases if p.name == "review")
-    assert [s.name for s in review.steps] == ["stamp-trailers", "finalize"]
-    names = {s.name for s in _wf().flat_steps()}
+def test_no_separate_review_phase_stamp_and_finalize_tail_implement() -> None:
+    wf = _wf()
+    assert not any(p.name == "review" for p in wf.phases)
+    impl = next(p for p in wf.phases if p.name == "implement")
+    assert [s.name for s in impl.steps][-2:] == ["stamp-trailers", "finalize"]
+    names = {s.name for s in wf.flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers",
                  "repin-after-rebase", "base-fresh-check"):
@@ -65,14 +68,14 @@ def test_standalone_panel_gate_and_recheck_are_gone() -> None:
 
 
 def test_review_step_uses_code_reviewer_at_high_tier() -> None:
-    review = _steps(_wf())["review"]
+    review = _steps(_wf())["code-reviewer"]
     assert review.kind == "agent" and review.tier == "high"
     assert review.file.name == "code-reviewer.md"
     assert review.differ_from is None
 
 
 def test_review_step_routes_two_way_no_plan_gap() -> None:
-    rules = _steps(_wf())["review"].rules
+    rules = _steps(_wf())["code-reviewer"].rules
     m_task = evaluate_rules(rules, vars=_BASE_VARS,
                             output={"status": "Success", "verdict": "task_gap", "findings": "x"})
     assert isinstance(m_task.action, Goto) and m_task.action.target == "task-lead"
@@ -88,7 +91,7 @@ def test_review_step_routes_two_way_no_plan_gap() -> None:
 def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["code-reviewer"].output_schema
-    rules = _steps(wf)["review"].rules
+    rules = _steps(wf)["code-reviewer"].rules
     for verdict in ("approve", "task_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)
@@ -137,7 +140,7 @@ def test_workflow_comment_describes_single_reviewer() -> None:
 def test_review_step_can_write_progress_md() -> None:
     wf = _wf()
     assert "write_file" in wf.agents["code-reviewer"].tools
-    review = _steps(wf)["review"]
+    review = _steps(wf)["code-reviewer"]
     assert any(r.mode == "allow" and "write" in r.operations
                for r in review.fs_permissions)
 
@@ -165,7 +168,7 @@ def test_plan_cycle_check_routes_cadence_and_coverage() -> None:
     m_batch = evaluate_rules(rules, vars=_BASE_VARS,
                              output={"status": "Success", "more_plans": True,
                                      "running_tasks": 7, "rationale": "x"})
-    assert isinstance(m_batch.action, Goto) and m_batch.action.target == "review"
+    assert isinstance(m_batch.action, Goto) and m_batch.action.target == "code-reviewer"
     assert m_batch.var_mutations["tasks_since_review"] == 7
     assert m_batch.var_mutations["review_scope"] == "plan"
     m_super = evaluate_rules(rules, vars=_BASE_VARS,
@@ -182,12 +185,12 @@ def test_plan_cycle_check_routes_cadence_and_coverage() -> None:
     m_cov = evaluate_rules(rules, vars=_BASE_VARS,
                            output={"status": "Success", "more_plans": False,
                                    "running_tasks": 3, "rationale": "x"})
-    assert isinstance(m_cov.action, Goto) and m_cov.action.target == "review"
+    assert isinstance(m_cov.action, Goto) and m_cov.action.target == "code-reviewer"
     assert m_cov.var_mutations["review_scope"] == "change"
     m_final = evaluate_rules(rules, vars=_BASE_VARS,
                              output={"status": "Success", "more_plans": False,
                                      "running_tasks": 99, "rationale": "x"})
-    assert isinstance(m_final.action, Goto) and m_final.action.target == "review"
+    assert isinstance(m_final.action, Goto) and m_final.action.target == "code-reviewer"
     assert m_final.var_mutations["review_scope"] == "change"
 
 
@@ -265,7 +268,7 @@ def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
-    review_fb = by["review"].rules[0].action.feedback        # task_gap -> task-lead
+    review_fb = by["code-reviewer"].rules[0].action.feedback  # task_gap -> task-lead
     assert finalize_fb and review_fb
     text = (AGENTS / "plan-writer.md").read_text()
     assert finalize_fb in text
@@ -302,7 +305,7 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
 
 def test_rework_path_loop_budgets_unchanged() -> None:
     steps = _steps(_wf())
-    assert steps["review"].max_loops == 6
+    assert steps["code-reviewer"].max_loops == 6
     assert steps["finalize"].max_loops == 20
 
 

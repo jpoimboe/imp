@@ -10,7 +10,7 @@ from imp.engine.types import Goto
 
 FINDINGS_TARGETS = {
     ("spec-reviewer", "spec-writer"),
-    ("plan-review", "plan-writer"),
+    ("plan-reviewer", "plan-writer"),
     ("task-lead", "plan-writer"),
     ("plan-cycle-check", "plan-writer"),
     ("finalize", "plan-writer"),

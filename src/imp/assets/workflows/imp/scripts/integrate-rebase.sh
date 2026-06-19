@@ -6,7 +6,7 @@
 #   3  -> bad/missing base ref -> pause
 #   5  -> dirty entry tree / leftover rebase / git refused to start -> pause
 #   2  -> base unmoved (empty base-side incoming diff): merge directly, NO review
-#   0  -> clean rebase (base moved, no conflict) -> integration-review
+#   0  -> clean rebase (base moved, no conflict) -> integration-reviewer
 #   6  -> rebase stopped on a conflict (left in progress) -> integrator
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 5
@@ -45,7 +45,7 @@ fi
 # --empty=drop drops a change commit base already contains.
 rm -f "$CHANGE_DIR/integration-notes.md"
 if git -c rerere.enabled=true -c rerere.autoupdate=true rebase --empty=drop "$BASE"; then
-  echo "clean rebase onto $BASE (no conflicts); handing to integration-review"
+  echo "clean rebase onto $BASE (no conflicts); handing to integration-reviewer"
   exit 0
 fi
 if [ -d "$(git rev-parse --git-path rebase-merge)" ] \

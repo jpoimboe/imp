@@ -280,3 +280,12 @@ _FOLD_ASCII = {"collapsed": ">", "expanded": "v"}
 def fold_glyph(*, expanded: bool, unicode: bool = True) -> str:
     table = _FOLD_UNICODE if unicode else _FOLD_ASCII
     return table["expanded" if expanded else "collapsed"]
+
+
+_SPINNER_UNICODE = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_SPINNER_ASCII = "|/-\\"
+
+
+def spinner_frame(frame: int, *, unicode: bool = True) -> str:
+    table = _SPINNER_UNICODE if unicode else _SPINNER_ASCII
+    return table[frame % len(table)]

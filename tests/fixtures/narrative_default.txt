@@ -11,7 +11,7 @@ design
   
   > Please add a section on token expiry.
   
-  spec complete
+  spec · complete
 
 implement
   

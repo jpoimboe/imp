@@ -64,7 +64,7 @@ def test_exit_restores_screen_and_prints_collapsed_transcript() -> None:
         s.run_to_completion(hard=8.0)                      # past app.exit() + transcript print
         assert s.regime() is Regime.SCROLL                 # alt screen restored (criterion 8)
         body = "\n".join(s.lines())
-        assert "spec complete" in body                     # collapsed transcript in scrollback
+        assert "spec · complete" in body                     # collapsed transcript in scrollback
         assert "command=echo" not in body         # transcript is lean (full=False) (criterion 8)
 
 

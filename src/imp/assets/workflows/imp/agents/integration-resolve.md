@@ -23,7 +23,7 @@ event carries `{step, kind, action, var_mutations}`, where a routing `Goto` seri
 `action.target`**, never a verdict or exit field (those are not on these events):
 
 - Find the **most recent** `step_completed` whose `action.target == "bypass-dequeue"`.
-- If that event's `step == "integration-review"` (and no later `integration-verify`
+- If that event's `step == "integration-reviewer"` (and no later `integration-verify`
   `step_completed` exists), this is a **breakage bypass** — the at-head semantic review
   flagged breakage.
 - If that event's `step == "integration-verify"`, this is a **verify-fail bypass** — the
