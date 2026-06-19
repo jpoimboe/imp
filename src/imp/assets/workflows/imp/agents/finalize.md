@@ -85,8 +85,8 @@ record (§1); your prose is what the human reads.
 
 Then walk the **needs-decision** items ONE AT A TIME — these are the
 `— needs-decision: <why>` lines the `deferred-sweep` left in
-`.imp/change/progress.md`. For EACH item, in its own `wait_for_user` solicit (one
-item per solicit):
+`.imp/change/progress.md`. For EACH item, in its own `wait_for_user` turn (one
+item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.
@@ -108,13 +108,16 @@ Both `seeded <id>` and `ignored-at-gate` are **terminal**: a later
 re-raises them, so a rework pass re-surfaces only the fix-now work — no
 double-seeding, no re-asking.
 
-If there are no needs-decision items, present the prose summary and solicit a
-single decision via `wait_for_user`: reply **merge** to merge into the base
-branch, or describe the **rework** to send the change back for re-planning.
+If there are no needs-decision items, present the prose summary and end with the
+ask itself, e.g. **"Merge this into the base branch, or send it back for rework?
+Reply `merge`, or describe the rework."**, then call `wait_for_user`. The human
+reads only your prose (`wait_for_user` shows no prompt), so ask the question —
+never announce it ("I'll solicit the merge decision"). Applies to every
+`wait_for_user` here, including the per-item walk above.
 
 When a human-requested rework is underspecified, settle the details first (a
 brainstorming-like posture) — use `wait_for_user` to clarify the desired outcome and scope before returning a rework decision — then hand a crisp brief to the
-plan-writer. An agent-detected `review` rework does NOT solicit here. Separate
+plan-writer. An agent-detected `review` rework does NOT ask the human here. Separate
 sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). Do not end your turn with plain text and no tool call. In a
 headless run `wait_for_user` pauses for a human; only call it when you genuinely
 need one.

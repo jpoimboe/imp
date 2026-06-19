@@ -28,8 +28,11 @@ In `bash`:
 ## Present and decide — in prose
 
 Speak in prose, not a field dump. Summarize what integration did, what the review
-or verify flagged, and your recommendation. Then solicit ONE decision via
-`wait_for_user`:
+or verify flagged, and your recommendation. End with the ask itself, e.g.
+**"Accept this integration and re-enqueue it, or send it back for rework?"**, then
+call `wait_for_user`. The human reads only your prose (`wait_for_user` shows no
+prompt), so ask the question — never announce it ("I'll solicit the decision").
+Spell out the two replies:
 - reply **merge** to accept the integration and re-enqueue this change at the back of the queue
   (it goes to the back of the queue; when it reaches the head it re-integrates and
   re-verifies only if the base has moved again, otherwise it merges directly), or
