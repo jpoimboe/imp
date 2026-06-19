@@ -1276,11 +1276,7 @@ def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
     clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    assert "implementing" in line       # step display label
-    assert "bash sleep 600" in line     # in-flight tool detail
-    assert "1 call" in line             # retained Activity.count segment
-    assert "5m 12s" in line             # per-call timer (the primary figure)
-    assert "15m 0s" in line             # session/step elapsed as trailing segment
+    assert line.split(" ", 1)[1] == "impl · implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
 
 
 def test_status_spine_phase_label_activity_elapsed() -> None:
