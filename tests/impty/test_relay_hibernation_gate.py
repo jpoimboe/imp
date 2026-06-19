@@ -38,22 +38,38 @@ from tests.test_relay_hibernation_live import _event_types, _flock_free, _poll
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 
-# Bounded poll (~20s ceiling, then exit 0) on the change's events.jsonl for the
-# daemon's cli_attached marker. cwd is the change worktree root, so the journal
-# is at .imp/change/events.jsonl. Match the serialized JSON field
-# `"type": "cli_attached"` (unescaped quotes) and NOT the bare word: the executor
+# Bounded poll (~20s ceiling, then exit 0) on the change's events.jsonl for a
+# cli_attached marker that is FRESH for the current daemon instance. cwd is the
+# change worktree root, so the journal is at .imp/change/events.jsonl.
+#
+# cli_attached is written to the PERSISTENT journal and survives hibernation, so
+# the first-run marker is still present on the resume leg. The SAME scripted
+# script runs on BOTH legs, so a naive `grep cli_attached` matches the STALE
+# first-run marker on resume and short-circuits before the resume CLI has
+# attached; the gate then sees attached_count == 0 and the fresh daemon
+# hibernates instead of holding the flock. To distinguish the current instance's
+# attach, anchor the search to the last workflow_resumed: the daemon appends
+# workflow_resumed synchronously at _bound entry, BEFORE the socket starts
+# accepting (its start_soon tasks only run once _bound first awaits), so the
+# resume-leg cli_attached is guaranteed to land AFTER it. On the first leg there
+# is no workflow_resumed, base stays 0, and the whole file is scanned.
+#
+# Match the serialized JSON field `"type": "cli_attached"` / `"type":
+# "workflow_resumed"` (unescaped quotes) and NOT the bare word: the executor
 # journals THIS bash command's own tool_call event -- command text and all --
 # BEFORE running it (dispatch.py's append_tool_call precedes the tool
 # invocation), and the same command text is echoed in the preceding llm_response
 # raw payload. In both, json.dumps backslash-escapes the embedded quotes
 # (\"type\": \"cli_attached\"), so a pattern with literal unescaped quotes
-# matches only the real daemon event record and never this command's self-echo.
-# A bare-word `grep cli_attached` would self-match on the first iteration and
-# never wait for the real attach. `: ?` tolerates either json separator spacing.
+# matches only the real daemon event records and never this command's self-echo.
+# `: ?` tolerates either json separator spacing.
 _ATTACH_POLL = (
+    "J=.imp/change/events.jsonl; "
     "for _ in $(seq 200); do "
-    "grep -qE '\"type\": ?\"cli_attached\"' .imp/change/events.jsonl "
-    "2>/dev/null && break; "
+    "base=$(grep -nE '\"type\": ?\"workflow_resumed\"' \"$J\" 2>/dev/null "
+    "| tail -1 | cut -d: -f1); base=${base:-0}; "
+    "tail -n +$((base + 1)) \"$J\" 2>/dev/null "
+    "| grep -qE '\"type\": ?\"cli_attached\"' && break; "
     "sleep 0.1; done; true"
 )
 
