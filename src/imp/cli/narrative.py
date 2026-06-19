@@ -28,6 +28,9 @@ _OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge"})
 
+_TURN_END_STOP_REASONS: frozenset[str] = frozenset(
+    {"end_turn", "stop_sequence", "max_tokens"})
+
 
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
 @dataclass
@@ -464,6 +467,15 @@ class NarrativeBuilder:
             self._closed_sub_by_block[fold.block_id] = fold
         self._closed_sub_by_event[fold.event_id] = fold
 
+    def _close_open_folds_at_step_end(self, ts: str | None) -> None:
+        for fold in list(self._open_sub_by_event.values()):
+            if not fold.running:
+                continue
+            self._open_sub_by_block.pop(fold.block_id, None)
+            self._open_sub_by_event.pop(fold.event_id, None)
+            self._remember_salvage_closed(fold)
+            _close_subagent_fold(fold, {}, ts)
+
     def add(self, event: Any) -> None:
         if not isinstance(event, dict) or "type" not in event:
             self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
@@ -516,10 +528,14 @@ class NarrativeBuilder:
             # A `task` tool_call is a concurrent sibling dispatch in a batch, not
             # a signal that control returned — it must NOT resume-close siblings.
             is_task_call = etype == "tool_call" and payload.get("name") == "task"
+            is_parent_mid_turn = (
+                etype == "thinking"
+                or (etype == "llm_response"
+                    and payload.get("stop_reason") not in _TURN_END_STOP_REASONS))
             matched = (
                 etype == "tool_result"
                 and (rid_ in self._open_sub_by_block or rid_ in self._open_sub_by_event))
-            if not matched and not is_task_call:
+            if not matched and not is_task_call and not is_parent_mid_turn:
                 self._resume_close_folds(agent_id, event)
 
         # 2. dispatch by type.
@@ -721,6 +737,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    self._close_open_folds_at_step_end(event.get("timestamp"))
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
     if node is not None:
