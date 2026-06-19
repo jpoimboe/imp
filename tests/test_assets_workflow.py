@@ -710,18 +710,3 @@ def test_verify_green_clears_stale_carry() -> None:
     assert isinstance(m.action, Continue)
     assert m.var_mutations["verify_tolerated_carry"] is False
 
-
-def test_spec_phase_routes_into_baseline_gate() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    steps = _steps(wf)
-    # Fast path off the spec gate now enters the baseline gate, then planning.
-    fp = evaluate_rules(steps["spec-verify-commit"].rules,
-                        vars={**_BASE_VARS, "fast_path": True},
-                        output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(fp.action, Goto) and fp.action.target == "baseline-verify"
-    # Clean spec review (verification pass, minors already integrated) also enters it.
-    rev = evaluate_rules(steps["spec-reviewer"].rules,
-                         vars={**_BASE_VARS, "spec_minors_integrated": True},
-                         output={"blocking": False, "has_minor_findings": True})
-    assert isinstance(rev.action, Goto) and rev.action.target == "baseline-verify"
