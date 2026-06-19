@@ -534,6 +534,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         elif act is not None and act.get("verb") == "goto":
             if node.route:                # skip "" (same-phase) and None (unresolved)
                 parts.append(node.route)
+                if node.label:
+                    parts.append(node.label)
         else:
             verb_text = pal.action_text(node.action) if node.action is not None else None
             if verb_text and verb_text != "continue":

@@ -1402,3 +1402,27 @@ def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
     live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
                                  width=80, live_viewer=True))
     assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
+
+
+def test_breadcrumb_appends_label_after_route_arrow() -> None:
+    crumb = "\n".join(rt._render(
+        nv.BreadcrumbLine(
+            step_name="finalize", kind="agent", elapsed_s=2,
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            route="→ merge", label="entering the merge queue"),
+        depth=0, full=False, color=False, width=80))
+    assert "finalize complete · → merge · entering the merge queue" in crumb
+
+
+def test_breadcrumb_without_label_is_bare_arrow() -> None:
+    crumb = "\n".join(rt._render(
+        nv.BreadcrumbLine(
+            step_name="finalize", kind="agent", elapsed_s=2,
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            route="→ merge", label=None),
+        depth=0, full=False, color=False, width=80))
+    assert "→ merge" in crumb
+    assert "entering the merge queue" not in crumb
+    assert " ·  · " not in crumb            # no empty segment when label absent
