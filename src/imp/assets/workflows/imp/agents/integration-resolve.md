@@ -50,22 +50,21 @@ writes nothing):
 sh -c "$IMP_VERIFY_COMMAND"
 ```
 
-Then read `.imp/change/tolerated-failures.md` (the `[baseline]` and `[flaky]` entries —
-the set `baseline ∪ flaky`):
+Then read `.imp/change/tolerated-failures.md` (the recorded tolerated set — each entry a
+failure signature plus its one-line justification):
 
-- **Every current failure is within `baseline ∪ flaky`** → decide `merge` **directly,
+- **Every current failure is within the recorded tolerated set** → decide `merge` **directly,
   WITHOUT** calling `wait_for_user`:
   `complete_step(status="Success", decision="merge", comments="<note that the bypass reason
-  was a verify failure and every current failure was already in the recorded
-  baseline ∪ flaky tolerated set>")`. This honor-existing check is the ONLY path that may
-  auto-merge.
-- **Any current failure is NOT in the tolerated set** → solicit the human exactly as today
-  (the flow below).
+  was a verify failure and every current failure was already in the recorded tolerated
+  set>")`. This honor-existing check is the ONLY path that may auto-merge.
+- **Any current failure is NOT in the recorded tolerated set** → solicit the human exactly as
+  today (the flow below).
 
 **You may NEVER write a new tolerated-failures entry.** This gate runs **after**
 `finalize`, the last human-visibility gate, so inventing a new toleration here would merge a
 never-surfaced red test to the shared base. You only ever *honor the already-recorded* set;
-declaring a new `[flaky]` is `task-lead`'s and `deferred-sweep`'s job, both of which run
+declaring a new toleration is `task-lead`'s and `deferred-sweep`'s job, both of which run
 before `finalize`.
 
 ## Review the integration

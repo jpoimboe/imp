@@ -159,36 +159,31 @@ do NOT re-drain the Deferred Followups list, just adjudicate the failures.
 
 On a triage entry, the engine also makes the change-local tolerated record
 `.imp/change/tolerated-failures.md` available (it may be absent/empty — the common case). It
-holds two entry kinds, each tagged with its origin and a one-line justification:
+is one untagged list; each entry is a failure signature plus a one-line justification of why
+this change is not responsible for it (pre-existing on the base, or
+non-deterministic/environmental):
 
-- `[baseline]` — failures captured at the change's baseline (present before any task ran).
-- `[flaky]` — failures judged non-deterministic/environmental during the run.
+`- <test id / failure signature>: <why this change is not responsible>`
 
-Reason over the OPAQUE failure text against that tolerated set (`baseline ∪ flaky`) — pure
-judgment, you never re-run a single test:
+Reason over the OPAQUE failure text against the diff (`review_base..HEAD`) — pure judgment,
+you never re-run a single test:
 
-- **All current failures are within the tolerated set** → do nothing, make NO commit, and
-  return `sweep_tolerated: true`. The workflow forward-advances past `sweep-verify` instead
-  of re-looping. This holds for a `[baseline]` entry and a previously-recorded `[flaky]`
-  entry alike.
-- **A failure outside the set** → decide which it is:
-  - the failing test was **green at baseline, is unrelated to the diff, and reads as
-    non-deterministic/environmental** → append a `flaky` entry to
-    `.imp/change/tolerated-failures.md` (create the file with a `# Tolerated failures`
-    heading if absent) in this shape:
-    `- [flaky] <test id>: green at baseline, outside the diff — <why it reads as flaky>`,
-    then return `sweep_tolerated: true`. A `flaky` declaration is **visibility, not
-    reproduction**: it changes nothing about the merge — `finalize` surfaces it to a human
-    before merge (`sweep-verify` runs before `finalize`).
-  - a **real regression this change introduced** → fix it via the implementer and return
-    `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the implementer to make
-    a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
-    `git commit --fixup=HEAD`. `task-lead` uses `--fixup=HEAD` only because `autosquash` runs
-    after the per-task `verify` gate; **no `autosquash` runs after `deferred-sweep`/
-    `sweep-verify`**, so a fixup commit would leak unsquashed to merge. This matches the
-    "Commit granularity" discipline above.
+- **Every current failure is already recorded in `tolerated-failures.md`, or is plainly not
+  attributable to the diff** → append any not-yet-listed such failure (create the file with a
+  `# Tolerated failures` heading if absent) in the shape above, make NO commit, and return
+  `sweep_tolerated: true`. The workflow forward-advances past `sweep-verify` instead of
+  re-looping. A toleration is **visibility, not reproduction**: it changes nothing about the
+  merge — `finalize` surfaces it to a human before merge (`sweep-verify` runs before
+  `finalize`).
+- **A failure attributable to the diff** → fix it via the implementer and return
+  `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the implementer to make
+  a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
+  `git commit --fixup=HEAD`. `task-lead` uses `--fixup=HEAD` only because `autosquash` runs
+  after the per-task `verify` gate; **no `autosquash` runs after `deferred-sweep`/
+  `sweep-verify`**, so a fixup commit would leak unsquashed to merge. This matches the
+  "Commit granularity" discipline above.
 
-Emit `sweep_tolerated: true` ONLY on the all-tolerated / new-flaky cases above. On EVERY
+Emit `sweep_tolerated: true` ONLY on the all-tolerated case above. On EVERY
 other return — a fresh list-drain entry, a real-regression fix — emit `sweep_tolerated:
 false`.
 
@@ -199,8 +194,8 @@ in the budget. It escalates to a human; it is not a transient to retry. The
 
 ## Finish
 
-Always return `sweep_tolerated`: it is `true` only on the all-tolerated / new-flaky triage
-outcomes above, and `false` on every list-drain entry and every real-regression fix.
+Always return `sweep_tolerated`: it is `true` only on the all-tolerated triage outcome
+above, and `false` on every list-drain entry and every real-regression fix.
 
 If there is no `## Deferred Followups` section, or it has no parsable items, that is
 a normal, common outcome — there is simply nothing to drain. Make no commits and

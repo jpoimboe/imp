@@ -290,10 +290,12 @@ def test_task_lead_documents_verify_triage() -> None:
     low = text.lower()
     assert "tolerated-failures.md" in text          # the change-local record path
     assert "verify_tolerated" in text               # the signal it emits
-    assert "[baseline]" in text                      # the two entry kinds
-    assert "[flaky]" in text                         # ... both entry kinds documented
-    assert "green at baseline" in low                # the flaky justification bar
-    assert "outside the diff" in low                 # the full flaky justification bar
+    assert "attributable" in low                     # the single attributability judgment
+    assert "review_base..HEAD" in text               # judged against the diff
+    # The two-category taxonomy is gone — no tags, no "green at baseline", no union set.
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
+    assert "green at baseline" not in low
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
@@ -314,10 +316,11 @@ def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
 def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     text = (AGENTS_DIR / "finalize.md").read_text()
     low = text.lower()
-    assert "tolerated-failures.md" in text          # the record it now reads
-    assert "[baseline]" in text                      # both entry kinds surfaced
-    assert "[flaky]" in text                         # ...
+    assert "tolerated-failures.md" in text
+    assert "<signature>: <justification>" in text    # the untagged entry shape
     assert "as its own" in text  # each entry surfaced individually
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
@@ -392,11 +395,13 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "tolerated-failures.md" in text
     assert "sweep_tolerated: true" in text
     assert "sweep_tolerated: false" in text
-    # Both tolerated entry kinds and the flaky justification bar (parity with task-lead).
-    assert "[baseline]" in text
-    assert "[flaky]" in text
-    assert "green at baseline" in low
-    assert "outside the diff" in low
+    # The single attributability judgment, against the diff.
+    assert "attributable" in low
+    assert "review_base..HEAD" in text
+    # The two-category taxonomy is gone.
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
+    assert "green at baseline" not in low
     # Feedback-gated: a fresh entry drains the list; a resumed (sweep-verify) entry
     # does triage only and does NOT re-drain.
     assert "injected feedback" in low
@@ -458,3 +463,7 @@ def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
     assert "new tolerated" in low
     # Else branch: any failure outside the tolerated set -> solicit the human.
     assert "solicit" in low
+    # It now refers to "the recorded tolerated set", not the old two-category union notation.
+    assert "recorded tolerated set" in low
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text

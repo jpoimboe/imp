@@ -47,12 +47,13 @@ not the script you read at the gate. Present them as prose in §2.
 
 Besides the `— needs-decision:` lines the `deferred-sweep` left in
 `.imp/change/progress.md`, read the change-local tolerated-failures record
-`.imp/change/tolerated-failures.md` if it exists. It holds `[baseline]` entries
-(failures present before this change began) and `[flaky]` entries (failures
-`task-lead` judged non-deterministic during the run). Surface **every** such entry
+`.imp/change/tolerated-failures.md` if it exists. Each entry reads as
+`<signature>: <justification>` — a failure the responsible agent judged not
+attributable to this change's diff (pre-existing on the base, or
+non-deterministic/environmental). Surface **every** such entry
 as its own **needs-decision** item in the per-item walk (§2): present the entry and
 its justification, give your recommendation, and take one of the three dispositions
-exactly as for a `progress.md` needs-decision item. A `[flaky]` declaration changed
+exactly as for a `progress.md` needs-decision item. A toleration changed
 nothing about the merge — visibility, not reproduction, is the guard — so a human
 adjudicates each one before merge. If the record is absent or empty, there is
 nothing extra to surface.
