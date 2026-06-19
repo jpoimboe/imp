@@ -1041,6 +1041,9 @@ def _resolve_id(control: Path, token: str) -> str:
     unambiguous substring of exactly one change's LIVE handle (recomputed from the
     current title). The id is always a substring of its own handle, so a bare id
     always resolves. Multiple matches exit non-zero listing candidates; none errors."""
+    if not token.strip():
+        print(f"imp: no Change matches {token!r}", file=sys.stderr)
+        raise SystemExit(2)
     ids = _iter_change_ids(control)
     matches = [cid for cid in ids
                if token in derive_handle(_title_for_id(control, cid) or "", cid)]

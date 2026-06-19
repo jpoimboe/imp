@@ -54,3 +54,12 @@ def test_no_match_exits(tmp_path: Path) -> None:
     _mk(tmp_path, "abc123", "One")
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "zzzzzz")
+
+
+@pytest.mark.parametrize("token", ["", "  "])
+def test_empty_token_does_not_resolve_sole_change(tmp_path: Path, token: str) -> None:
+    _seed_control(tmp_path)
+    _mk(tmp_path, "abc123", "One")  # exactly one live change
+    with pytest.raises(SystemExit) as exc:
+        _resolve_id(tmp_path, token)
+    assert exc.value.code != 0
