@@ -16,7 +16,7 @@ if [[ -z "${IMP_VERIFY_COMMAND:-}" ]]; then
 fi
 
 verify_timeout="${IMP_VERIFY_TIMEOUT:-600}"
-out="$(timeout -k 30 "$verify_timeout" bash -c "$IMP_VERIFY_COMMAND" 2>&1)"
+out=$(timeout -k 30 "$verify_timeout" bash -c "$IMP_VERIFY_COMMAND" 2>&1 | tee /dev/stderr)
 rc=$?
 if (( rc == 0 )); then
   echo "baseline verification clean"
