@@ -287,6 +287,20 @@ def test_plan_writer_states_soft_task_size_target() -> None:
     assert "not lines of code" in low
 
 
+def test_task_lead_documents_verify_triage() -> None:
+    text = (AGENTS_DIR / "task-lead.md").read_text()
+    low = text.lower()
+    assert "tolerated-failures.md" in text          # the change-local record path
+    assert "verify_tolerated" in text               # the signal it emits
+    assert "[baseline]" in text                      # the two entry kinds
+    assert "[flaky]" in text                         # ... both entry kinds documented
+    assert "green at baseline" in low                # the flaky justification bar
+    assert "outside the diff" in low                 # the full flaky justification bar
+    # The max_loops pause meaning is documented (non-converging triage).
+    assert "max_loops" in text
+    assert "non-converging" in low
+
+
 def test_code_reviewer_honors_dispatched_diff_range() -> None:
     low = CODE_REVIEWER.read_text().lower()
     # The coordinator gives the diff range (a batch range or the whole change); the

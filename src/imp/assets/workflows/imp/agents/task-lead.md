@@ -172,6 +172,48 @@ progress.md. Two feedback sources resume you here:
 7. Return: `done: true` only when the plan is fully implemented; otherwise
    `done: false` (the engine re-enters you fresh for the next task).
 
+## Verify triage — tolerated failures
+
+When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
+failure output AND the change-local tolerated-failures record
+`.imp/change/tolerated-failures.md` (passed even when it is absent/empty — the
+common case). The record holds two entry kinds, each tagged with its origin and a
+one-line justification:
+
+- `[baseline]` — failures captured at the change's baseline (present before any
+  task ran), written by the baseline gate. Their presence sets `baseline_dirty`.
+- `[flaky]` — failures you judged non-deterministic/environmental during the run.
+
+Reason over the OPAQUE failure text against that tolerated set (`baseline ∪ flaky`)
+— you never re-run a single test; this is pure judgment:
+
+- **All current failures are within the tolerated set** → do nothing, make NO
+  commit, and return `verify_tolerated: true`. The workflow advances past `verify`
+  instead of re-looping. This holds for a `[baseline]` entry and for a
+  previously-recorded `[flaky]` entry alike.
+- **A failure outside the set** → decide which it is:
+  - a **real regression this change introduced** → fix it as usual (dispatch the
+    implementer, `git commit --fixup=HEAD`) and return `verify_tolerated: false`;
+    the loop re-verifies.
+  - the failing test was **green at baseline, is unrelated to the diff, and reads
+    as non-deterministic/environmental** → append a `flaky` entry to
+    `.imp/change/tolerated-failures.md` (create the file with a `# Tolerated
+    failures` heading if absent) in this shape:
+    `- [flaky] <test id>: green at baseline, outside the diff — <why it reads as
+    flaky>`, then return `verify_tolerated: true`. A recurrence of that same
+    failure is thereafter auto-tolerated. A `flaky` declaration is **visibility,
+    not reproduction**: it changes nothing about the merge — `finalize` surfaces it
+    to a human before merge.
+
+Emit `verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other
+return — a normal task entry, a real-regression fix, a deviation — emit
+`verify_tolerated: false`.
+
+A **`max_loops` pause at `verify`** (the gate is capped at 5 fix laps) means the
+triage is **non-converging** — an unrecognized flake or a hard regression you could
+not fix in the budget. It escalates to a human; it is not a transient to retry. The
+`verify_tolerated` forward advance is not a fix lap and does not consume the budget.
+
 Discipline: never dispatch two implementers in parallel; never skip the
 `quality-reviewer`; never move on with blocking findings open. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
