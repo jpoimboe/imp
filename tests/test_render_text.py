@@ -873,6 +873,36 @@ def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
     assert "\x1b[36m" in joined             # still cyan foreground
 
 
+def test_markdown_headers_are_cyan_underlined_not_magenta() -> None:
+    # rich's defaults paint headers magenta (h2 underline / h3 bold). We recolor
+    # every level to the same cyan as inline `code`, keeping bold+underline, so
+    # headers wear imp's accent rather than rich's magenta. Rendered at depth=0
+    # with no gutter so the only color in play is the heading itself.
+    from imp.cli.render_text import _render_markdown_block
+    for header in ("# Title", "## Section", "### Sub"):
+        lines = _render_markdown_block(header, width=44, depth=0, color=True,
+                                       gutters=())
+        joined = "\n".join(lines)
+        assert "36m" in joined, f"{header!r} should be cyan"      # cyan foreground
+        assert "35m" not in joined, f"{header!r} should not be magenta"
+        # underline is param 4 inside the combined SGR (e.g. \x1b[1;4;36m)
+        assert _re.search(r"[\[;]4[;m]", joined), f"{header!r} should stay underlined"
+
+
+def test_markdown_fenced_code_block_has_no_background_fill() -> None:
+    # The fenced block renders syntax-highlighted tokens on the terminal's own
+    # background (no full-width dark bar), the same calm treatment inline `code`
+    # gets — so the block reads as indented colored code, not a bleeding box.
+    from imp.cli.render_text import _render_markdown_block
+    lines = _render_markdown_block(
+        "```python\ndef hi():\n    return 1\n```", width=44, depth=0, color=True,
+        gutters=())
+    joined = "\n".join(lines)
+    assert "\x1b[40m" not in joined          # no dark default-bg fill
+    assert "def hi():" in _visible(joined)   # code survives rendering
+    assert "return 1" in _visible(joined)
+
+
 def test_markdown_block_blank_line_inside_prose_carries_magenta_gutter() -> None:
     """Two paragraphs (blank line between) rendered with a subagent gutter level
     must emit the bare gutter-indent on the blank line — keeping the magenta │

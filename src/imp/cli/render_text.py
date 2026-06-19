@@ -11,6 +11,7 @@ expand-all.
 """
 from __future__ import annotations
 
+import functools
 import json
 import textwrap
 from collections.abc import Iterator
@@ -107,6 +108,38 @@ def _line(text: str, depth: int, color: bool, *codes: str,
     return _gutter_indent(depth, gutters, color) + pal.ansi(text, *codes, enabled=color)
 
 
+@functools.cache
+def _no_bg_code_block_cls() -> type:
+    """A `CodeBlock` element that renders fenced code with NO background fill.
+
+    rich's default paints the monokai background across the full block width, so
+    the bar bleeds to the right edge while the left is indented — asymmetric. We
+    render the same syntax-highlighted tokens on the terminal's own background
+    (`background_color="default"`, `padding=0`), the same calm treatment inline
+    `code` already gets, so a block just reads as indented colored code."""
+    from rich.markdown import CodeBlock
+    from rich.syntax import Syntax
+
+    class _NoBgCodeBlock(CodeBlock):
+        def __rich_console__(self, console, options):  # type: ignore[no-untyped-def]
+            code = str(self.text).rstrip()
+            yield from console.render(
+                Syntax(code, self.lexer_name, theme=self.theme, word_wrap=True,
+                       padding=0, background_color="default"), options)
+
+    return _NoBgCodeBlock
+
+
+# Headers match inline `code`: rich's defaults give them underlined magenta (h2)
+# / bold magenta (h3) etc.; we recolor every level to the same cyan, keeping
+# bold+underline so headers stay emphasized but in imp's accent rather than
+# rich's magenta.
+_MD_THEME = {
+    "markdown.code": "cyan",
+    **{f"markdown.h{n}": "bold underline cyan" for n in range(1, 8)},
+}
+
+
 def _markdown_to_ansi(text: str, width: int, color: bool) -> str:
     import io
 
@@ -114,10 +147,14 @@ def _markdown_to_ansi(text: str, width: int, color: bool) -> str:
     from rich.markdown import Markdown
     from rich.theme import Theme
     buf = io.StringIO()
+    md = Markdown(text)
+    no_bg = _no_bg_code_block_cls()
+    md.elements["fence"] = no_bg
+    md.elements["code_block"] = no_bg
     Console(file=buf, width=width, no_color=not color,
             color_system="standard" if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
-            theme=Theme({"markdown.code": "cyan"})).print(Markdown(text))
+            theme=Theme(_MD_THEME)).print(md)
     return buf.getvalue()
 
 
@@ -130,8 +167,8 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
 
     Theme override: rich's default `markdown.code` is bold+cyan+black-bg. We
     drop the bold and dark bg by setting it to plain `cyan` so inline `code`
-    sits calmly in the prose. Fenced blocks (`markdown.code_block`) keep
-    rich's default formatting."""
+    sits calmly in the prose. Headers are recolored to the same cyan, and
+    fenced blocks render with no background fill — see `_markdown_to_ansi`."""
     # An agent turn is marked with a leading bold "• " bullet and hang-indented:
     # the bullet sits at the base column and every wrapped/continuation line aligns
     # 2 cols in, under the first word. (A bold dot — heavier than the small
