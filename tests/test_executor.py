@@ -1830,3 +1830,84 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
     assert "Prior attempts at this step:" in writer_openings[1]
     assert "WROTE THE PLAN" in writer_openings[1]
     assert "lap 1" in writer_openings[1]
+
+
+@pytest.mark.anyio
+async def test_step_completed_payload_carries_rule_label(tmp_path: Path) -> None:
+    """A rule-matched (branch goto) completion emits the rule's label verbatim."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: gate\n"
+        "        rules:\n"
+        '          - {else: true, goto: done, label: "heading out"}\n'
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    completed = next(
+        e for e in events
+        if e["type"] == "step_completed" and e["payload"]["step"] == "gate"
+    )
+    assert completed["payload"]["action"]["verb"] == "goto"
+    assert completed["payload"]["label"] == "heading out"
+
+
+@pytest.mark.anyio
+async def test_step_completed_continue_default_label_is_none(tmp_path: Path) -> None:
+    """The continue-on-success default (match.rule is None) emits label: None."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    completed = next(e for e in events if e["type"] == "step_completed")
+    assert completed["payload"]["action"] == {"verb": "continue"}
+    assert completed["payload"]["label"] is None
+
+
+@pytest.mark.anyio
+async def test_step_completed_unlabeled_rule_emits_none(tmp_path: Path) -> None:
+    """A rule that fires but carries no label emits label: None."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: gate\n"
+        "        rules:\n"
+        "          - {else: true, goto: done}\n"
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    completed = next(
+        e for e in events
+        if e["type"] == "step_completed" and e["payload"]["step"] == "gate"
+    )
+    assert completed["payload"]["action"]["verb"] == "goto"
+    assert completed["payload"]["label"] is None
