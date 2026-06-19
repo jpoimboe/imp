@@ -1751,3 +1751,52 @@ def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
                 for c in p.children if isinstance(c, nv.StepNode))
     assert step.label == "reviewing code"
     assert step.resumed is True
+
+
+def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
+    # Regression: a parallel `task` batch dispatches two subagents BEFORE any
+    # result. Between the dispatch and the results the parent streams its own
+    # mid-turn chunks (a stop_reason=None llm_response and a thinking event).
+    # Those chunks must NOT resume-close either still-open sibling fold; each fold
+    # closes exactly once, on its OWN task result, stamping its own end_ts.
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+             input={"subagent_name": "reviewer", "task_description": "go"},
+             timestamp="2026-06-19T10:00:00+00:00"))
+    b.add(ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="task",
+             input={"subagent_name": "tester", "task_description": "go"},
+             timestamp="2026-06-19T10:00:01+00:00"))
+    step = b._step_stack[-1]
+    folds = {f.subagent_name: f for f in step.children
+             if isinstance(f, nv.SubagentFold)}
+    assert folds["reviewer"].running is True and folds["tester"].running is True
+    # Parent mid-turn streaming chunks -- must NOT close either sibling.
+    b.add(ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="m", stop_reason=None, usage={},
+             raw={"content": [{"type": "text", "text": "still working"}]},
+             timestamp="2026-06-19T10:00:02+00:00"))
+    b.add(ev("a2", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="m", stop_reason="tool_use", usage={},
+             raw={"content": []},
+             timestamp="2026-06-19T10:00:02.500000+00:00"))
+    b.add(ev("th1", "thinking", agent_id="step:p/s", content="pondering",
+             timestamp="2026-06-19T10:00:03+00:00"))
+    assert folds["reviewer"].running is True and folds["tester"].running is True
+    # Each task result closes only its own fold.
+    b.add(ev("r1", "tool_result", agent_id="step:p/s", id="b1", id_ns="block",
+             content='{"status":"Success"}', error=False,
+             timestamp="2026-06-19T10:00:10+00:00"))
+    assert folds["reviewer"].running is False and folds["tester"].running is True
+    b.add(ev("r2", "tool_result", agent_id="step:p/s", id="b2", id_ns="block",
+             content='{"status":"Success"}', error=False,
+             timestamp="2026-06-19T10:00:20+00:00"))
+    assert folds["tester"].running is False
+    # Durations span each fold's own task-call -> own-result, never a parent chunk.
+    assert folds["reviewer"].end_ts == "2026-06-19T10:00:10+00:00"
+    assert folds["tester"].end_ts == "2026-06-19T10:00:20+00:00"
+    assert nv.elapsed_seconds(
+        folds["reviewer"].start_ts, folds["reviewer"].end_ts) == 10.0
+    assert nv.elapsed_seconds(
+        folds["tester"].start_ts, folds["tester"].end_ts) == 19.0

@@ -28,6 +28,9 @@ _OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge"})
 
+_TURN_END_STOP_REASONS: frozenset[str] = frozenset(
+    {"end_turn", "stop_sequence", "max_tokens"})
+
 
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
 @dataclass
@@ -516,10 +519,14 @@ class NarrativeBuilder:
             # A `task` tool_call is a concurrent sibling dispatch in a batch, not
             # a signal that control returned — it must NOT resume-close siblings.
             is_task_call = etype == "tool_call" and payload.get("name") == "task"
+            is_streaming_chunk = (
+                etype == "thinking"
+                or (etype == "llm_response"
+                    and payload.get("stop_reason") not in _TURN_END_STOP_REASONS))
             matched = (
                 etype == "tool_result"
                 and (rid_ in self._open_sub_by_block or rid_ in self._open_sub_by_event))
-            if not matched and not is_task_call:
+            if not matched and not is_task_call and not is_streaming_chunk:
                 self._resume_close_folds(agent_id, event)
 
         # 2. dispatch by type.
