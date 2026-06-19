@@ -245,6 +245,7 @@ class _BaseEventLog:
             "type": type,
             "payload": payload,
         }
+        # persist before broadcast with no await; replay uses disk-before-live as partition
         self._persist(record)
         if agent_id is not None:
             self._last[agent_id] = new_id
