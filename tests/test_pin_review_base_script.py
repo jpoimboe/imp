@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -16,7 +17,8 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _run(project_root: Path, mode: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root)}
+    env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root),
+           "IMP_CHANGE_DIR": str(project_root / ".imp" / "change")}
     return subprocess.run(["bash", str(SCRIPT), mode], cwd=project_root.parent,
                           env=env, capture_output=True, text=True, check=False)
 
@@ -63,6 +65,24 @@ def test_unknown_mode_exits_2(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr)
     assert _run(pr, "bogus").returncode == 2
+
+
+def test_fork_mode_reads_base_branch_from_change_dir(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr)
+    expected = _git(pr, "merge-base", "main", "HEAD").stdout.strip()
+    # Move change.json out of the project tree into a standalone change-home.
+    shutil.rmtree(pr / ".imp" / "change")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "change.json").write_text(json.dumps(
+        {"id": "x", "title": "t", "base_branch": "main"}))
+    env = {**os.environ, "IMP_PROJECT_ROOT": str(pr),
+           "IMP_CHANGE_DIR": str(home)}
+    res = subprocess.run(["bash", str(SCRIPT), "fork"], cwd=pr.parent,
+                         env=env, capture_output=True, text=True, check=False)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == expected
 
 
 def test_captured_sha_still_diffs_after_history_rewrite(tmp_path: Path) -> None:
