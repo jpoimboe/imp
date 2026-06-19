@@ -1,8 +1,7 @@
 """rename_change tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
-tool call and returns the settled handle so the agent uses it in-band, same turn
-(write .imp/change/artifacts/spec/<handle>.md). Content-only: rewrites the
-gitignored change.json, touches no git. Top-level only — raises for subagents
-(no change_state)."""
+tool call and returns the settled handle so the agent uses it in-band, same turn.
+Content-only: rewrites the gitignored change.json, touches no git. Top-level
+only — raises for subagents (no change_state)."""
 
 from __future__ import annotations
 
@@ -18,7 +17,8 @@ from imp.engine.state import JsonlEventLog
     description=(
         "Rename this Change to a meaningful name once you understand the work. "
         "Applies immediately and returns the new handle; use that handle to write "
-        "and commit .imp/change/artifacts/spec/<handle>.md this same turn."
+        "and commit the spec at the change-home's artifacts/spec/<handle>.md this "
+        "same turn."
     ),
 )
 def rename_change(ctx: Any, name: str) -> str:
@@ -34,4 +34,4 @@ def rename_change(ctx: Any, name: str) -> str:
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     change.rename(name, log=log)
     return (f"renamed to {new_handle}; use "
-            f".imp/change/artifacts/spec/{new_handle}.md for the spec")
+            f"{change.change_dir}/artifacts/spec/{new_handle}.md for the spec")

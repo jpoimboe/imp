@@ -34,7 +34,7 @@ def test_rename_applies_immediately_and_returns_handle(tmp_path: Path) -> None:
     assert ch.title == "Add OAuth"
     assert ch.handle == "add-oauth-bbb111"
     assert "add-oauth-bbb111" in msg
-    assert ".imp/change/artifacts/spec/add-oauth-bbb111.md" in msg
+    assert f"{ch.change_dir}/artifacts/spec/add-oauth-bbb111.md" in msg
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert meta["title"] == "Add OAuth"
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
@@ -67,6 +67,11 @@ def test_rename_rejects_empty(tmp_path: Path) -> None:
     tool = get_registry()["rename_change"]
     with pytest.raises(ValueError):
         tool.invoke(_ctx(ch, state), {"name": "!!!"})
+
+
+def test_rename_description_drops_hardcoded_change_dir() -> None:
+    tool = get_registry()["rename_change"]
+    assert ".imp/change" not in tool.description
 
 
 def test_rename_from_subagent_raises(tmp_path: Path) -> None:
