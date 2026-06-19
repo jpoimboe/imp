@@ -26,12 +26,11 @@ def test_replay_current_step_removed() -> None:
 
 def _make_change_worktree(control: Path, change_id: str, title: str,
                            status: str = "paused") -> Path:
-    """Create a minimal on-disk worktree for a Change (no real git worktree
-    needed — Change.load only reads the .imp/change/ directory)."""
+    """Create a minimal on-disk Change home (no real git worktree needed —
+    Change.load only reads the permanent .imp/changes/<id>/ directory)."""
     from imp.engine.state import State
 
-    wt = control / ".imp" / "worktrees" / change_id
-    change_dir = wt / ".imp" / "change"
+    change_dir = control / ".imp" / "changes" / change_id
     change_dir.mkdir(parents=True)
     (change_dir / "state").mkdir()
     (change_dir / "change.json").write_text(
@@ -40,7 +39,7 @@ def _make_change_worktree(control: Path, change_id: str, title: str,
     (change_dir / "events.jsonl").write_text("")
     state = State(id=change_id, status=status, step="spec", step_attempt=0)
     state.save(change_dir / "state")
-    return wt
+    return change_dir
 
 
 def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
@@ -117,8 +116,7 @@ def test_cli_log_pipes_through_narrative(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    wt = tmp_path / ".imp" / "worktrees" / slug
-    change_dir = wt / ".imp" / "change"
+    change_dir = tmp_path / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
@@ -161,8 +159,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    wt = tmp_path / ".imp" / "worktrees" / slug
-    change_dir = wt / ".imp" / "change"
+    change_dir = tmp_path / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
@@ -210,8 +207,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 
     slug = "my-sub"
-    wt = tmp_path / ".imp" / "worktrees" / slug
-    change_dir = wt / ".imp" / "change"
+    change_dir = tmp_path / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": "sub", "base_branch": "main"}),
@@ -302,8 +298,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
     slugs_titles = [("first-change", "first"), ("second-change", "second"),
                     ("tenth-change", "tenth")]
     for slug, title in slugs_titles:
-        wt = tmp_path / ".imp" / "worktrees" / slug
-        change_dir = wt / ".imp" / "change"
+        change_dir = tmp_path / ".imp" / "changes" / slug
         change_dir.mkdir(parents=True)
         (change_dir / "change.json").write_text(
             json.dumps({"id": slug, "title": title, "base_branch": "main"}),

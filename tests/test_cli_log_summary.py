@@ -12,7 +12,7 @@ from imp.cli.main import main
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     from imp.engine.state import State
 
-    change_dir = control / ".imp" / "worktrees" / slug / ".imp" / "change"
+    change_dir = control / ".imp" / "changes" / slug
     (change_dir / "state").mkdir(parents=True)
     (change_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
