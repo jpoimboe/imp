@@ -349,3 +349,19 @@ def test_plan_writer_deviation_bounded_to_pending_tasks() -> None:
     assert "completion boundary" in low
     # A deviation implicating an already-implemented task escalates to append-N+1.
     assert "escalate to the append-n+1 path" in low
+
+
+def test_spec_writer_surfaces_needs_decision_in_reader_form() -> None:
+    text = _read("spec-writer.md")
+    assert "Deferred Followups" in text
+    assert "— needs-decision:" in text          # finalize's reader-form marker (em dash U+2014)
+    assert "DEFERRED spec-writer:" in text       # tagged with its own source
+    assert "fast_path" in text
+
+
+def test_plan_writer_surfaces_needs_decision_in_reader_form() -> None:
+    text = PLAN_WRITER.read_text()
+    assert "Deferred Followups" in text
+    assert "— needs-decision:" in text
+    assert "DEFERRED plan-writer:" in text
+    assert "fast_path" in text

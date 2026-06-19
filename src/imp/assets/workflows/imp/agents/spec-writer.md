@@ -262,6 +262,24 @@ This policy does **not** loosen the two kept bans: the pre-commit
 self-review still fixes issues inline without soliciting, and the
 minors-integration pass still asks the user nothing.
 
+## Surfacing a decision you cannot resolve
+
+When a concern is genuinely the human's call and you cannot settle it from the spec,
+the brainstorm, or the codebase — an ambiguity you had to assume past, or a risk
+worth a human decision before merge — do not bury it in prose. Append it to the
+**Deferred Followups** list in `.imp/change/progress.md` (create the
+`## Deferred Followups` heading if absent) in `finalize`'s exact reader form, the same
+`— needs-decision:` line shape the merge gate already walks:
+
+`- [ ] DEFERRED spec-writer: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
+
+Writing it in this reader form is **load-bearing**: on a trivial `fast_path` change
+the `deferred-sweep` step never runs, so an item not already in `— needs-decision:`
+form would be silently dropped before the merge gate. Authoring it in reader form
+means it reaches `finalize` whether or not `deferred-sweep` runs. This is for genuine
+human-decision items only — keep deciding the technical calls yourself and recording
+them in the Decisions summary (see "Ask vs. decide").
+
 ## Minors-integration pass (a review follows)
 
 A minors resume is recognized by its preamble — "No blocking issues — integrate
