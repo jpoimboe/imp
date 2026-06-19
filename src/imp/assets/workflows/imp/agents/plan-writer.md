@@ -61,11 +61,11 @@ non-soliciting exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Revise per `progress.md`. |
+| Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Deviation revise mode (below): revise only pending tasks; escalate to a corrective N+1 if it implicates an already-implemented task. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
-| Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): findings are requirements; decide depth, then revise/extend per `progress.md`. |
-| Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): treat `comments` as the brief; decide depth, then revise/extend per `progress.md`. |
-| Integration-pass plan gap | goto (fresh session) | "The integration pass found the plan needs revision. Findings:" | Revise/extend per `progress.md`; findings are requirements. |
+| Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
+| Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): author a new corrective plan N+1 from `comments`; never revise the settled plan. |
+| Integration-pass plan gap | goto (fresh session) | "The integration pass found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
 
 Do NOT key any goto on the *absence* of a `blocking:` line — that is a schema
 coincidence pinned by no test; the preamble plus the missing synthesized
@@ -85,20 +85,48 @@ disappear.
 
 ## Rework mode
 
-A `review` rework ("The review found the plan needs revision. Findings:") or a
-`finalize` human rework ("Here's the feedback to address:") routes the change back
-to YOU — no rework reaches a coder without an opus plan in front of it. You read the
-findings/`comments` and **decide the re-plan depth yourself**:
+A `review` rework ("The review found the plan needs revision. Findings:"), a
+`finalize` human rework ("Here's the feedback to address:"), or an integration-pass
+plan gap ("The integration pass found the plan needs revision. Findings:") routes the
+change back to YOU — no rework reaches a coder without an opus plan in front of it.
+These are **post-settlement** reworks: plan N has already been fully implemented and
+`progress.md` marks it complete, so the "Which Plan to Write" disambiguation lands on
+the **author-N+1** row. **Author a new focused corrective plan `…-plan-(N+1).md`**
+addressing **only** the finding, reusing the supercycle author-N+1 path. **Never
+revise the settled plan N in place** — its tasks are committed and `task-lead` skips
+them, and their diff is outside the corrective `review_base..HEAD` review scope, so
+editing the settled plan text is cosmetic at best and a lie about what shipped at
+worst.
 
-- **Targeted fix** — the findings name a specific defect or missing step. Add or
-  revise the minimal task(s) that close the gap; do not re-architect the plan.
-- **Approach change** — the findings show the plan's approach is wrong. Replan the
-  affected portion with new tasks.
+You still **decide the corrective's depth** yourself from the findings/`comments`:
 
-Produce a focused plan and follow the same revise-N-vs-author-N+1 `progress.md`
-disambiguation above: a rework bounce is the **same plan**, so `progress.md` does
-not mark it complete and you revise plan N in place, then run `imp artifact-commit plan`.
-Then the plan flows back through `plan-review` → `task-lead` exactly like a first-time plan.
+- **Targeted fix** — the findings name a specific defect or missing step. Author a
+  minimal corrective plan (often a single task) that closes only that gap.
+- **Approach change** — the findings show the prior approach is wrong. Author a
+  corrective plan with the new tasks needed, still scoped to the finding.
+
+Write `…-plan-(N+1).md`, run `imp artifact-commit plan`, then the corrective flows
+through `plan-review` → `task-lead` exactly like a first-time plan (a trivial
+corrective takes `fast_path` and skips `plan-review`). Code review of the corrective
+is scoped to its own `review_base..HEAD` diff; the settled work is neither re-planned
+nor re-reviewed.
+
+## Deviation revise mode (task-lead deviation, resume)
+
+A `task-lead` **deviation** ("The plan didn't match the codebase. Here's what the
+implementer found:") is a **resume** mid-implementation: plan N is **not** yet
+complete, so the disambiguation revises plan N in place. Your revise is **strictly
+bounded to pending tasks** — tasks below the `progress.md` **completion boundary**
+(those not yet recorded complete). Read `.imp/change/progress.md` to find that
+boundary and **preserve every completed task entry verbatim**; edit only the pending
+tasks the deviation actually touches.
+
+If the deviation implicates a task that is **already implemented** (at or above the
+completion boundary), do **not** edit that settled task. **Escalate to the append-N+1 path** instead: leave plan N's completed tasks untouched and author a new
+corrective plan `…-plan-(N+1).md` (exactly as in Rework mode above) that addresses
+the already-shipped work as a forward correction. Settled, committed work is
+immutable; it is corrected by a new plan, never by rewriting the plan that produced
+it.
 
 Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
 
@@ -363,9 +391,10 @@ the same single step.
 imp artifact-commit plan
 ```
 
-This is identical for a fresh plan N and a revision of an existing plan N (a
-rework bounce, a deviation, or a minors-integration pass): re-write
-`.imp/change/artifacts/plans/{{ change.handle }}-plan-N.md`, then run the command.
+This is identical for a fresh plan (plan N, or a corrective `…-plan-(N+1).md`
+authored on a post-settlement rework) and an in-place revision of an existing plan N
+(a deviation-bounded revise or a minors-integration pass): re-write the relevant plan
+file under `.imp/change/artifacts/plans/`, then run the command.
 
 ## Minors-integration pass (a review follows)
 
@@ -382,9 +411,9 @@ was not accepted" even on this clean resume — **ignore that framing and trust 
 false` means the plan already passed; the reviewer's Minor/Nit `findings:` are
 advisory, not a rejection.
 
-You are revising the existing plan N (the same disambiguation as a rework: the
-newest plan exists and `progress.md` does not mark it complete, so you revise N in
-place). On this pass:
+You are revising the existing plan N in place (a minors pass is a resume on a
+not-yet-complete plan: the newest plan exists and `progress.md` does not mark it
+complete, so you revise N in place). On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
    `findings:` to plan N, re-write `.imp/change/artifacts/plans/{{ change.handle }}-plan-N.md`,

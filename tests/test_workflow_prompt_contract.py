@@ -324,3 +324,28 @@ def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
+
+
+PLAN_WRITER = AGENTS_DIR / "plan-writer.md"
+
+
+def test_plan_writer_rework_authors_corrective_n_plus_1() -> None:
+    text = PLAN_WRITER.read_text()
+    low = text.lower()
+    # A post-settlement rework authors a NEW corrective plan, never revises the
+    # settled plan in place.
+    assert "corrective plan" in low
+    assert "never revise the settled plan" in low
+    # The removed override no longer claims a rework reuses ("bounces") the same plan.
+    assert "rework bounce" not in low
+
+
+def test_plan_writer_deviation_bounded_to_pending_tasks() -> None:
+    text = PLAN_WRITER.read_text()
+    low = text.lower()
+    assert "deviation revise mode" in low
+    # A deviation revise touches only pending tasks, below the progress.md boundary.
+    assert "bounded to pending tasks" in low
+    assert "completion boundary" in low
+    # A deviation implicating an already-implemented task escalates to append-N+1.
+    assert "escalate to the append-n+1 path" in low
