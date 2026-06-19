@@ -769,3 +769,28 @@ def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
 
+
+def test_spec_writer_can_write_progress(tmp_path: Path) -> None:
+    asset = Path("src/imp/assets/workflows/imp").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    perms = _steps(wf)["spec-writer"].fs_permissions
+    write_paths = [p for perm in perms for p in perm.paths
+                   if "write" in perm.operations]
+    assert ".imp/change/progress.md" in write_paths
+    # still scoped to its own artifact dir, not the whole tree
+    assert any(".imp/change/artifacts/spec/" in p for p in write_paths)
+    assert "**" not in write_paths
+
+
+def test_plan_writer_can_write_progress(tmp_path: Path) -> None:
+    asset = Path("src/imp/assets/workflows/imp").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    perms = _steps(wf)["plan-writer"].fs_permissions
+    write_paths = [p for perm in perms for p in perm.paths
+                   if "write" in perm.operations]
+    assert ".imp/change/progress.md" in write_paths
+    assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
+    assert "**" not in write_paths
+

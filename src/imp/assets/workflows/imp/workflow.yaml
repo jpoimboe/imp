@@ -37,7 +37,7 @@ phases:
         tier: high
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/artifacts/spec/**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/artifacts/spec/**", ".imp/change/progress.md"], mode: allow}
         rules:
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
@@ -80,7 +80,7 @@ phases:
         tier: high
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/artifacts/plans/**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/artifacts/plans/**", ".imp/change/progress.md"], mode: allow}
 
       - name: plan-verify-commit
         quiet: true
