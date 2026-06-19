@@ -6,6 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
   done: {type: bool}
   deviation: {type: bool}
+  verify_tolerated: {type: bool}
   summary: {type: string}
 ---
 

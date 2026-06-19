@@ -21,6 +21,7 @@ vars:
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
   baseline_dirty:         {type: bool, default: false}   # red baseline captured to the tolerated-failures record; surfaced at finalize
+  verify_tolerated_carry: {type: bool, default: false}   # task-lead -> verify hand-off: all failures tolerated, so verify forward-advances (resetting its own max_loops budget)
 
 defaults:
   max_retries: 3
@@ -116,6 +117,7 @@ phases:
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {verify_tolerated: true}, set: {verify_tolerated_carry: true}, goto: verify}
           - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
 
@@ -128,9 +130,11 @@ phases:
 
       - name: verify
         command: ./scripts/run-verify.sh
+        max_loops: 5
         rules:
-          - {if: {exit: 0}, continue: true}
-          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human, don't loop task-lead
+          - {if: {exit: 0}, set: {verify_tolerated_carry: false}, continue: true}
+          - {if: {exit: 124}, pause: true}
+          - {if: {verify_tolerated_carry: true}, set: {verify_tolerated_carry: false}, continue: true}
           - {else: true, resume: task-lead}
 
       # autosquash folds this plan's fixup chain into one-commit-per-task BEFORE any

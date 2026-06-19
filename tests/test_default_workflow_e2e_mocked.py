@@ -41,7 +41,7 @@ def _canned_anthropic(**overrides):
         "phase": "written", "spec_path": "stub-spec.md",
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
-        "done": True, "deviation": False, "summary": "ok",
+        "done": True, "deviation": False, "verify_tolerated": False, "summary": "ok",
         "more_plans": False, "running_tasks": 0, "rationale": "ok",
         "blocking": False, "has_minor_findings": False,
         "built": "stub", "verify_status": "ok",
@@ -80,7 +80,7 @@ def _openai_step_aware(**kwargs):
         "phase": "written", "spec_path": "stub-spec.md",
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
-        "done": True, "deviation": False, "summary": "ok",
+        "done": True, "deviation": False, "verify_tolerated": False, "summary": "ok",
         "more_plans": False, "running_tasks": 0, "rationale": "ok",
         "blocking": False, "has_minor_findings": False,
         "built": "stub", "verify_status": "ok",
@@ -317,7 +317,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "phase": "written", "spec_path": "stub-spec.md",
                     "complexity": "standard",
                     "plan_path": "stub-plan.md", "plan_number": 1,
-                    "done": True, "deviation": False, "summary": "ok",
+                    "done": True, "deviation": False, "verify_tolerated": False, "summary": "ok",
                     "more_plans": False, "running_tasks": 0, "rationale": "ok",
                     "blocking": False, "has_minor_findings": False,
                     "built": "stub", "verify_status": "ok",
@@ -400,10 +400,10 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
     # Termination is the REVIEWER's goto on the verification pass (minors-integrated
     # already set), not a separate gate: the second spec-reviewer jumps to
-    # plan-writer, the second plan-review jumps to task-lead.
+    # baseline-verify, the second plan-review jumps to task-lead.
     assert any(
         s == "spec-reviewer"
-        and a.get("verb") == "goto" and a.get("target") == "plan-writer"
+        and a.get("verb") == "goto" and a.get("target") == "baseline-verify"
         for s, a in completed
     ), completed
     assert any(
