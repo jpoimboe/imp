@@ -296,7 +296,6 @@ def test_task_lead_documents_verify_triage() -> None:
     assert "[baseline]" not in text
     assert "[flaky]" not in text
     assert "green at baseline" not in low
-    assert "baseline ∪ flaky" not in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
@@ -318,9 +317,10 @@ def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     text = (AGENTS_DIR / "finalize.md").read_text()
     low = text.lower()
     assert "tolerated-failures.md" in text          # the record it now reads
-    assert "[baseline]" in text                      # both entry kinds surfaced
-    assert "[flaky]" in text                         # ...
+    assert "<signature>: <justification>" in text    # the untagged entry shape
     assert "as its own" in text  # each entry surfaced individually
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
@@ -402,7 +402,6 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "[baseline]" not in text
     assert "[flaky]" not in text
     assert "green at baseline" not in low
-    assert "baseline ∪ flaky" not in text
     # Feedback-gated: a fresh entry drains the list; a resumed (sweep-verify) entry
     # does triage only and does NOT re-drain.
     assert "injected feedback" in low
@@ -464,8 +463,7 @@ def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
     assert "new tolerated" in low
     # Else branch: any failure outside the tolerated set -> solicit the human.
     assert "solicit" in low
-    # It now refers to "the recorded tolerated set", not the old baseline ∪ flaky union.
+    # It now refers to "the recorded tolerated set", not the old two-category union notation.
     assert "recorded tolerated set" in low
-    assert "baseline ∪ flaky" not in text
     assert "[baseline]" not in text
     assert "[flaky]" not in text
