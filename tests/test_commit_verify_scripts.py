@@ -32,16 +32,6 @@ def _run(script: str, root: Path, slug: str) -> int:
     ).returncode
 
 
-def _run_id(script: str, root: Path, slug: str, change_id: str) -> int:
-    return subprocess.run(
-        ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
-             "IMP_CHANGE_ID": change_id,
-             "PATH": __import__("os").environ["PATH"]},
-        capture_output=True, text=True,
-    ).returncode
-
-
 def _wip_commit(root: Path, change_id: str, rel: str, body: str) -> None:
     """Write .imp/change/artifacts/<rel> and snapshot to refs/imp/journal-wip/<id>."""
     from imp.engine import worktree
@@ -51,6 +41,20 @@ def _wip_commit(root: Path, change_id: str, rel: str, body: str) -> None:
     dest.write_text(body)
     files = {str(p.relative_to(art)): p for p in sorted(art.rglob("*")) if p.is_file()}
     worktree.artifact_commit(root, change_id, files, message="artifact: test")
+
+
+def _run_id_capture(script: str, root: Path, slug: str, change_id: str):
+    return subprocess.run(
+        ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
+             "IMP_CHANGE_ID": change_id,
+             "PATH": __import__("os").environ["PATH"]},
+        capture_output=True, text=True,
+    )
+
+
+def _run_id(script: str, root: Path, slug: str, change_id: str) -> int:
+    return _run_id_capture(script, root, slug, change_id).returncode
 
 
 def test_spec_verify_passes_when_wip_matches_live(tmp_path: Path) -> None:
@@ -304,3 +308,48 @@ def test_stamp_trailers_fails_on_empty_range(tmp_path: Path) -> None:
     # merge-base(main, HEAD) == HEAD, so the range main..HEAD is empty.
     # (HEAD is already on main, so no force-update needed.)
     assert _run("stamp-trailers.sh", root, "2026-06-01-x") != 0
+
+
+def test_plan_verify_rejects_plan_over_task_ceiling(tmp_path: Path) -> None:
+    # A plan with 13 `## Task` headings (above the ~12 ceiling) is rejected with a
+    # "split this" message that resumes plan-writer (non-zero exit).
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    body = "# plan 1\n\n" + "".join(
+        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 14))   # 13 tasks
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    assert proc.returncode != 0
+    assert "split" in proc.stderr.lower()
+    assert "13" in proc.stderr
+
+
+def test_plan_verify_passes_plan_within_task_ceiling(tmp_path: Path) -> None:
+    # A coherent 8-task plan passes the gate.
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    body = "# plan 1\n\n" + "".join(
+        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 9))    # 8 tasks
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    assert proc.returncode == 0
+
+
+def test_plan_verify_passes_plan_at_task_ceiling(tmp_path: Path) -> None:
+    # Exactly at the ceiling (12 tasks): the guard uses > so 12 must pass.
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    body = "# plan 1\n\n" + "".join(
+        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 13))    # 12 tasks
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    assert proc.returncode == 0

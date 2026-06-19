@@ -1600,3 +1600,81 @@ def test_change_context_defaults_empty_facts() -> None:
         handle="s", title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
     assert cc.guidance == ""
+
+
+@pytest.mark.anyio
+async def test_tolerated_forward_advance_resets_gate_loop_counter(
+    tmp_path: Path,
+) -> None:
+    """Forward-continue from the gate (not task-lead) resets the gate's own loop counter.
+
+    A tolerated cycle costs 0 of the gate's max_loops budget.
+    """
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "lead.md").write_text(
+        "---\nname: lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  tol: {type: bool}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars:\n  carry: {type: bool, default: false}\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: lead\n"
+        "        file: agents/lead.md\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {if: {tol: true}, set: {carry: true}, goto: gate}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: gate\n"
+        "        command: 'exit 1'\n"
+        "        max_loops: 2\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {if: {carry: true}, set: {carry: false}, continue: true}\n"
+        "          - {else: true, resume: lead}\n"
+    )
+    _write_fake_config(tmp_path)
+    # git init: the sandbox policy binds control_root/.git.
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            # Gate resumes have empty initial_messages; those tolerate.
+            tol = not invocation.initial_messages
+            _persist_initial(invocation)
+            yield {"type": "agent_output",
+                   "payload": {"status": "Success", "tol": tol}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    # No max_loops pause: the tolerated cycle completed.
+    assert result is RunResult.COMPLETED
+    state = State.load(change.state_dir)
+    # The forward advance fired FROM the gate, popping its counter: the tolerated
+    # cycle cost 0 of the gate's budget. The rejected design leaves this == 1.
+    assert state.loop_counts.get("gate", 0) == 0

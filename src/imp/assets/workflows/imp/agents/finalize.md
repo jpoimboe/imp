@@ -31,7 +31,9 @@ only if cheap; do NOT make code changes). Populate:
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md`, and surface ONLY the
-  `— needs-decision: <why>` items — one per line with its reason. Do **not** list
+  `— needs-decision: <why>` items — one per line with its reason. These include items
+  `spec-writer`/`plan-writer` appended directly in reader form (they reach you even on
+  a `fast_path` change where `deferred-sweep` never ran); present them identically. Do **not** list
   `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in `built`)
   and do **not** list `— dismissed: <why>` items (considered and judged not worth
   doing; never surfaced).
@@ -40,6 +42,25 @@ only if cheap; do NOT make code changes). Populate:
 These four fields (`built` / `verify_status` / `open_items` / `next_steps`) are
 the **audit record** — emitted on `complete_step` and queryable via `imp log` —
 not the script you read at the gate. Present them as prose in §2.
+
+## Surface tolerated verification failures
+
+Besides the `— needs-decision:` lines the `deferred-sweep` left in
+`.imp/change/progress.md`, read the change-local tolerated-failures record
+`.imp/change/tolerated-failures.md` if it exists. It holds `[baseline]` entries
+(failures present before this change began) and `[flaky]` entries (failures
+`task-lead` judged non-deterministic during the run). Surface **every** such entry
+as its own **needs-decision** item in the per-item walk (§2): present the entry and
+its justification, give your recommendation, and take one of the three dispositions
+exactly as for a `progress.md` needs-decision item. A `[flaky]` declaration changed
+nothing about the merge — visibility, not reproduction, is the guard — so a human
+adjudicates each one before merge. If the record is absent or empty, there is
+nothing extra to surface.
+
+A **`max_loops` pause at the `verify` step** (capped at 5 fix laps) means the verify
+triage did **not converge** — an unrecognized flake or a hard regression that was
+neither fixed nor tolerated. Read it as a non-converging triage that needs a human,
+not a transient.
 
 ## Before/after UX capture — only when this change touched a UI surface
 
@@ -83,7 +104,7 @@ from the section above. Name genuinely controversial decisions **only when there
 were any** — do not manufacture controversy. The structured fields are the audit
 record (§1); your prose is what the human reads.
 
-Then walk the **needs-decision** items ONE AT A TIME — these are the
+Then walk the **needs-decision** items ONE AT A TIME — these include the
 `— needs-decision: <why>` lines the `deferred-sweep` left in
 `.imp/change/progress.md`. For EACH item, in its own `wait_for_user` turn (one
 item per turn):

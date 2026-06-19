@@ -19,6 +19,8 @@ _BASE_VARS = {
     "plan_minors_integrated": False, "plan_panel_done": False,
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
+    "verify_tolerated_carry": False,
+    "change_panel_done": False,
 }
 
 
@@ -206,7 +208,7 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
     )
     assert m.var_mutations["spec_minors_integrated"] is False
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.action.target == "baseline-verify" and m.action.resume is False
 
 
 def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
@@ -220,7 +222,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
         output={"blocking": False, "has_minor_findings": False},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.action.target == "baseline-verify" and m.action.resume is False
     assert m.var_mutations == {"spec_minors_integrated": False}
 
 
@@ -300,6 +302,13 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         assert not isinstance(failed.action, Pause), (
             f"{name} must NOT pause on an ordinary failure"
         )
+
+    # Timeout pauses regardless of carry state (rule ordering: exit:124 precedes
+    # the carry rule, so a timeout with carry=True still pauses).
+    with_carry = evaluate_rules(steps["verify"].rules,
+                                vars={**_BASE_VARS, "verify_tolerated_carry": True},
+                                output={"exit": 124, "stdout": "", "stderr": ""})
+    assert isinstance(with_carry.action, Pause)
 
 
 def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
@@ -515,18 +524,18 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     )
 
 
-def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
+def test_spec_verify_commit_fast_path_skips_to_baseline_verify() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-verify-commit"].rules
-    # Clean commit on the fast path -> straight to planning, skipping spec-reviewer.
+    # Clean commit on the fast path -> baseline gate, skipping spec-reviewer.
     m = evaluate_rules(
         rules,
         vars={**_BASE_VARS, "fast_path": True},
         output={"exit": 0, "stdout": "", "stderr": ""},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.action.target == "baseline-verify" and m.action.resume is False
 
 
 def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
@@ -582,3 +591,186 @@ def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
                    if "write" in perm.operations]
     assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
     assert all("imp/plans/" not in p for p in write_paths)
+
+
+def test_baseline_verify_is_first_plan_phase_step() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    plan_phase = next(p for p in wf.phases if p.name == "plan")
+    assert plan_phase.steps[0].name == "baseline-verify"
+    assert plan_phase.steps[1].name == "plan-writer"
+    assert _steps(wf)["baseline-verify"].command == "./scripts/baseline-verify.sh"
+
+
+def test_verify_step_has_max_loops_5() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    # A non-converging verify -> task-lead cycle pauses in minutes, overriding the
+    # workflow default of 1000.
+    assert _steps(wf)["verify"].max_loops == 5
+
+
+def test_task_lead_declares_verify_tolerated_output() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert "verify_tolerated" in wf.agents["task-lead"].output_schema.field_names()
+
+
+def test_verify_tolerated_carry_var_declared_default_false() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.vars.defaults()["verify_tolerated_carry"] is False
+
+
+def test_task_lead_tolerated_routes_back_through_verify() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["task-lead"].rules
+    # All current failures tolerated: task-lead made NO change and routes BACK to
+    # verify carrying the signal (NOT forward to autosquash). The engine resets a
+    # step's loop counter only when THAT step forward-advances, so routing back lets
+    # the *verify* step perform the budget-resetting forward advance on its next pass.
+    m = evaluate_rules(
+        rules, vars=_BASE_VARS,
+        output={"status": "Success", "done": True, "deviation": False,
+                "verify_tolerated": True, "summary": "tolerated"},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "verify" and m.action.resume is False
+    assert m.var_mutations["verify_tolerated_carry"] is True
+
+
+def test_task_lead_normal_return_does_not_route_to_verify() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["task-lead"].rules
+    # A normal "more tasks remain" return loops back to task-lead, untouched by the
+    # verify_tolerated rule, and sets no carry.
+    m = evaluate_rules(
+        rules, vars=_BASE_VARS,
+        output={"status": "Success", "done": False, "deviation": False,
+                "verify_tolerated": False, "summary": "next"},
+    )
+    assert isinstance(m.action, Goto) and m.action.target == "task-lead"
+    assert "verify_tolerated_carry" not in m.var_mutations
+
+
+def test_verify_carry_continues_forward_and_clears_carry() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["verify"].rules
+    # A red suite (exit 1) whose failures task-lead already tolerated (carry set):
+    # forward-continue past verify -- the advance that resets verify's OWN loop
+    # counter -- and clear the carry so the next batch's first verify starts fresh.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "verify_tolerated_carry": True},
+                       output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["verify_tolerated_carry"] is False
+
+
+def test_verify_red_without_carry_resumes_task_lead() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["verify"].rules
+    # A red suite with no tolerated-carry resumes task-lead for triage -- the
+    # backward edge that increments verify's loop counter.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "verify_tolerated_carry": False},
+                       output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "task-lead" and m.action.resume is True
+
+
+def test_verify_green_clears_stale_carry() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["verify"].rules
+    # A green suite (exit 0) clears a stale carry too, so a carry set in a prior
+    # batch can never leak forward and mask a real regression.
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "verify_tolerated_carry": True},
+                       output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["verify_tolerated_carry"] is False
+
+
+def test_change_panel_done_var_declared_default_false() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.vars.defaults()["change_panel_done"] is False
+
+
+def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["plan-cycle-check"].rules
+    # Coverage completes for the first time (panel not yet run): the full whole-change
+    # panel fires (review_scope=change) and the once-only guard is latched true.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "change_panel_done": False},
+        output={"more_plans": False, "running_tasks": 3, "rationale": "done"})
+    assert isinstance(m.action, Goto) and m.action.target == "review"
+    assert m.var_mutations["review_scope"] == "change"
+    assert m.var_mutations["change_panel_done"] is True
+
+
+def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["plan-cycle-check"].rules
+    # The panel already ran once (guard latched): a corrective plan completing after a
+    # rework is reviewed as a per-batch diff (review_scope=plan), NOT a fresh full panel.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "change_panel_done": True},
+        output={"more_plans": False, "running_tasks": 1, "rationale": "corrective"})
+    assert isinstance(m.action, Goto) and m.action.target == "review"
+    assert m.var_mutations["review_scope"] == "plan"
+    assert "change_panel_done" not in m.var_mutations
+
+
+def test_review_base_repin_corrective_batch_routes_to_finalize() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["review-base-repin"].rules
+    # A per-batch review settling AFTER the full panel (guard latched) means coverage
+    # is complete: route to stamp-trailers -> finalize, NOT back to plan-writer.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": True},
+        output={"exit": 0, "stdout": "abc123", "stderr": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "stamp-trailers"
+
+
+def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["review-base-repin"].rules
+    # A normal mid-change per-batch review (panel not yet run) loops back to plan-writer
+    # for the next plan -- unchanged behavior, guarded against regression.
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": False},
+        output={"exit": 0, "stdout": "abc123", "stderr": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+
+
+def test_spec_writer_can_write_progress(tmp_path: Path) -> None:
+    asset = Path("src/imp/assets/workflows/imp").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    perms = _steps(wf)["spec-writer"].fs_permissions
+    write_paths = [p for perm in perms for p in perm.paths
+                   if "write" in perm.operations]
+    assert ".imp/change/progress.md" in write_paths
+    # still scoped to its own artifact dir, not the whole tree
+    assert any(".imp/change/artifacts/spec/" in p for p in write_paths)
+    assert "**" not in write_paths
+
+
+def test_plan_writer_can_write_progress(tmp_path: Path) -> None:
+    asset = Path("src/imp/assets/workflows/imp").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    perms = _steps(wf)["plan-writer"].fs_permissions
+    write_paths = [p for perm in perms for p in perm.paths
+                   if "write" in perm.operations]
+    assert ".imp/change/progress.md" in write_paths
+    assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
+    assert "**" not in write_paths
+

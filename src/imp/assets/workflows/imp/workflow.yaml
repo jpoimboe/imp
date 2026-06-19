@@ -20,6 +20,8 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
+  verify_tolerated_carry: {type: bool, default: false}   # task-lead -> verify hand-off: all failures tolerated, so verify forward-advances (resetting its own max_loops budget)
+  change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-batch, not re-paneled
 
 defaults:
   max_retries: 3
@@ -34,7 +36,7 @@ phases:
         tier: high
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/artifacts/spec/**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/artifacts/spec/**", ".imp/change/progress.md"], mode: allow}
         rules:
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
@@ -42,7 +44,7 @@ phases:
         quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: plan-writer}   # trivial fast path: skip spec-reviewer
+          - {if: {exit: 0, fast_path: true}, goto: baseline-verify}   # trivial fast path: skip spec-reviewer; baseline gate then planning
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
@@ -61,16 +63,23 @@ phases:
           - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
              resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
-          - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
+          - {else: true, set: {spec_minors_integrated: false}, goto: baseline-verify}
 
   - name: plan
     steps:
+      # Runs exactly once per change: spec phase routes here; supercycle/rework goto plan-writer directly.
+      - name: baseline-verify
+        command: ./scripts/baseline-verify.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, continue: true}
+
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/artifacts/plans/**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/artifacts/plans/**", ".imp/change/progress.md"], mode: allow}
 
       - name: plan-verify-commit
         quiet: true
@@ -108,6 +117,7 @@ phases:
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {verify_tolerated: true}, set: {verify_tolerated_carry: true}, goto: verify}
           - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
 
@@ -120,9 +130,11 @@ phases:
 
       - name: verify
         command: ./scripts/run-verify.sh
+        max_loops: 5
         rules:
-          - {if: {exit: 0}, continue: true}
-          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human, don't loop task-lead
+          - {if: {exit: 0}, set: {verify_tolerated_carry: false}, continue: true}
+          - {if: {exit: 124}, pause: true}
+          - {if: {verify_tolerated_carry: true}, set: {verify_tolerated_carry: false}, continue: true}
           - {else: true, resume: task-lead}
 
       # autosquash folds this plan's fixup chain into one-commit-per-task BEFORE any
@@ -174,8 +186,13 @@ phases:
              goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}
           # coverage complete, trivial change -> no panel, straight to integration via stamp-trailers
           - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: stamp-trailers}
-          # coverage complete -> end-of-change FULL panel over the whole-change diff
-          - {else: true, set: {review_scope: "'change'", tasks_since_review: "output.running_tasks"}, goto: review}
+          # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
+          # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD diff
+          # (review_scope='plan'), not a fresh whole-change panel each round.
+          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", tasks_since_review: "output.running_tasks"}, goto: review}
+          # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
+          # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
+          - {else: true, set: {review_scope: "'change'", change_panel_done: true, tasks_since_review: "output.running_tasks"}, goto: review}
 
       # Per-batch = single code-reviewer over review_base..HEAD; end-of-change
       # (review_scope==change) = the full 4-member opus panel over merge-base..HEAD.
@@ -214,6 +231,13 @@ phases:
         command: ./scripts/pin-review-base.sh head
         rules:
           - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
+          # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
+          # never re-enters with more_plans:true; every post-panel per-batch settle is therefore
+          # terminal -> route a corrective/gap-fix batch to finalize, not the next plan. (This keys
+          # solely on change_panel_done; it is correct only while more_plans means uncovered SPEC
+          # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
+          # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
+          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
           - {if: {exit: 0}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: plan-writer}
           - {else: true, pause: true}
 

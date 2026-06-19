@@ -25,6 +25,7 @@ _TIERS = frozenset({"low", "medium", "high"})
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "plan_panel_done": False,
+    "change_panel_done": False,
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
 }

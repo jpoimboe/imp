@@ -275,6 +275,32 @@ def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
     assert "commit subject" in low
 
 
+def test_plan_writer_states_soft_task_size_target() -> None:
+    text = (AGENTS_DIR / "plan-writer.md").read_text()
+    low = text.lower()
+    # The soft target is stated in TASKS (not lines of code), with the split-and-
+    # supercycle guidance, and explicitly cross-references the hard ceiling gate.
+    assert "5\u20138 tasks" in text
+    assert "natural dependency boundaries" in low
+    assert "supercycle" in low
+    assert "task headings" in low
+    assert "not lines of code" in low
+
+
+def test_task_lead_documents_verify_triage() -> None:
+    text = (AGENTS_DIR / "task-lead.md").read_text()
+    low = text.lower()
+    assert "tolerated-failures.md" in text          # the change-local record path
+    assert "verify_tolerated" in text               # the signal it emits
+    assert "[baseline]" in text                      # the two entry kinds
+    assert "[flaky]" in text                         # ... both entry kinds documented
+    assert "green at baseline" in low                # the flaky justification bar
+    assert "outside the diff" in low                 # the full flaky justification bar
+    # The max_loops pause meaning is documented (non-converging triage).
+    assert "max_loops" in text
+    assert "non-converging" in low
+
+
 def test_code_reviewer_honors_dispatched_diff_range() -> None:
     low = CODE_REVIEWER.read_text().lower()
     # The coordinator gives the diff range (a batch range or the whole change); the
@@ -286,3 +312,71 @@ def test_code_reviewer_honors_dispatched_diff_range() -> None:
     # The frontmatter description must drop the stale "whole-change" framing so the
     # coordinator/log surface no longer mislabels the now-per-batch reviewer.
     assert "final whole-change review" not in low
+
+
+def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
+    text = (AGENTS_DIR / "finalize.md").read_text()
+    low = text.lower()
+    assert "tolerated-failures.md" in text          # the record it now reads
+    assert "[baseline]" in text                      # both entry kinds surfaced
+    assert "[flaky]" in text                         # ...
+    assert "as its own" in text  # each entry surfaced individually
+    # The max_loops pause meaning is documented (non-converging triage).
+    assert "max_loops" in text
+    assert "non-converging" in low
+
+
+PLAN_WRITER = AGENTS_DIR / "plan-writer.md"
+
+
+def test_plan_writer_rework_authors_corrective_n_plus_1() -> None:
+    text = PLAN_WRITER.read_text()
+    low = text.lower()
+    # A post-settlement rework authors a NEW corrective plan, never revises the
+    # settled plan in place.
+    assert "corrective plan" in low
+    assert "never revise the settled plan" in " ".join(low.split())
+    # The removed override no longer claims a rework reuses ("bounces") the same plan.
+    assert "rework bounce" not in low
+
+
+def test_plan_writer_deviation_bounded_to_pending_tasks() -> None:
+    text = PLAN_WRITER.read_text()
+    low = text.lower()
+    assert "deviation revise mode" in low
+    # A deviation revise touches only pending tasks, below the progress.md boundary.
+    assert "bounded to pending tasks" in low
+    assert "completion boundary" in low
+    # A deviation implicating an already-implemented task escalates to append-N+1.
+    assert "escalate to the append-n+1 path" in low
+
+
+def test_spec_writer_surfaces_needs_decision_in_reader_form() -> None:
+    text = _read("spec-writer.md")
+    assert "Deferred Followups" in text
+    assert "— needs-decision:" in text          # finalize's reader-form marker (em dash U+2014)
+    assert "DEFERRED spec-writer:" in text       # tagged with its own source
+    assert "fast_path" in text
+
+
+def test_plan_writer_surfaces_needs_decision_in_reader_form() -> None:
+    text = PLAN_WRITER.read_text()
+    assert "Deferred Followups" in text
+    assert "— needs-decision:" in text
+    assert "DEFERRED plan-writer:" in text
+    assert "fast_path" in text
+
+
+def test_deferred_sweep_passes_through_pre_classified_needs_decision() -> None:
+    text = (AGENTS_DIR / "deferred-sweep.md").read_text()
+    low = text.lower()
+    assert "pre-classified human" in low       # recognizes the spec/plan-authored marker
+    assert "leave the line exactly as-is" in low  # the pass-through instruction
+    assert "never dismiss it" in low            # passed through, not risk-dismissed
+
+
+def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
+    text = (AGENTS_DIR / "finalize.md").read_text()
+    low = text.lower()
+    assert "spec-writer" in low and "plan-writer" in low
+    assert "fast_path" in low or "fast path" in low
