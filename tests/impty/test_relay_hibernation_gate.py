@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -33,17 +32,12 @@ import pytest
 from imp.engine.change import Change
 from impty import TerminalSession
 from tests._live import _await_worktree
-from tests.impty.e2e_support import can_pty, clean_env
+from tests.impty.e2e_support import _MINIMAL_CONFIG, _git, can_pty, clean_env
 from tests.test_relay_hibernation_live import _event_types, _flock_free, _poll
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
-
-
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args],
-                   check=True, capture_output=True, text=True)
 
 
 def _seed_scripted_gate_project(root: Path) -> Path:
@@ -70,13 +64,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
         "          - {operations: [write], paths: [\"**\"], mode: allow}\n")
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
-        "providers: [scripted]\n"
-        "tiers:\n"
-        "  low: {scripted: x}\n"
-        "  medium: {scripted: x}\n"
-        "  high: {scripted: x}\n"
-        "sandbox:\n  enabled: false\n")
+    (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
     script_path.write_text(json.dumps(
         {"default": [
