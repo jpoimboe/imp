@@ -1402,3 +1402,45 @@ def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
     live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
                                  width=80, live_viewer=True))
     assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
+
+
+def test_breadcrumb_appends_label_after_route_arrow() -> None:
+    crumb = "\n".join(rt._render(
+        nv.BreadcrumbLine(
+            step_name="finalize", kind="agent", elapsed_s=2,
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            route="→ merge", label="entering the merge queue"),
+        depth=0, full=False, color=False, width=80))
+    assert "finalize complete · → merge · entering the merge queue" in crumb
+
+
+def test_breadcrumb_without_label_is_bare_arrow() -> None:
+    crumb = "\n".join(rt._render(
+        nv.BreadcrumbLine(
+            step_name="finalize", kind="agent", elapsed_s=2,
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            route="→ merge", label=None),
+        depth=0, full=False, color=False, width=80))
+    assert "→ merge" in crumb
+    assert "entering the merge queue" not in crumb
+    assert " ·  · " not in crumb            # no empty segment when label absent
+
+
+def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
+    events = [
+        _ev("1", "change_created", change_id=1, title="x"),
+        _ev("2", "step_started", step="finalize", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("3", "step_completed", step="finalize", kind="agent",
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            var_mutations={}, label="entering the merge queue"),
+        _ev("4", "step_started", step="wait-for-head", kind="wait_for_head",
+            phase="merge", model="m", provider="anthropic"),
+        _ev("5", "step_completed", step="wait-for-head", kind="wait_for_head",
+            action={"verb": "continue"}, var_mutations={}, label=None),
+    ]
+    out = "\n".join(_lines(events))
+    assert "finalize complete · → merge · entering the merge queue" in out

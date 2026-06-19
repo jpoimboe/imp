@@ -1174,3 +1174,58 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
     assert "plan-review · thinking" in line
     assert "18s" in line
+
+
+def test_labeled_forward_goto_label_in_both_paths() -> None:
+    # A labeled forward goto: the breadcrumb is held until the target's
+    # step_started resolves "→ merge", then both live and imp log emit the label
+    # segment after the arrow, byte-identical line-for-line.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="finalize", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:review/finalize",
+           raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
+        ev("4", "step_completed", step="finalize", kind="agent",
+           action={"verb": "goto", "target": "wait-for-head",
+                   "resume": False, "rework": False},
+           var_mutations={}, label="entering the merge queue"),
+        ev("5", "step_started", step="wait-for-head", kind="wait_for_head",
+           phase="merge", model="m", provider="anthropic"),
+        ev("6", "step_completed", step="wait-for-head", kind="wait_for_head",
+           action={"verb": "continue"}, var_mutations={}, label=None),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("finalize complete" in ln and "→ merge" in ln
+               and "entering the merge queue" in ln for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
+
+
+def test_unlabeled_forward_goto_has_no_label_segment() -> None:
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+           raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
+        ev("4", "step_completed", step="spec-reviewer", kind="agent",
+           action={"verb": "goto", "target": "plan-writer",
+                   "resume": False, "rework": False},
+           var_mutations={}, label=None),
+        ev("5", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("6", "step_completed", step="plan-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}, label=None),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
+    assert not any(" ·  · " in ln for ln in body)   # no empty segment
+    assert body == _render_body(events)

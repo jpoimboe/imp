@@ -67,6 +67,7 @@ class Rule:
     action: Action
     mutations: Mutation
     source: SourceLoc
+    label: str | None = None        # workflow-authored route reason; engine-opaque
 
     @property
     def is_else(self) -> bool:

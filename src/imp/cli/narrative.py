@@ -292,6 +292,8 @@ class BreadcrumbLine:
     show_complete: bool = True         # always True (§4): chrome steps now print
                                        # a start header, so the breadcrumb always
                                        # carries the word "complete".
+    label: str | None = None           # workflow-authored route reason, appended
+                                       # after the arrow when present
     interrupted: bool = False
     collapsible = False
 
@@ -747,6 +749,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
+            label=p.get("label"),
             interrupted=node.interrupted)
         node.children.append(breadcrumb)
         node.closed = True

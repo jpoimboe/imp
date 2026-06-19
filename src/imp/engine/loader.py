@@ -388,8 +388,11 @@ def _parse_rules(
             condition = _parse_if(entry["if"], rsrc)
         else:
             raise LoadError("a rule needs `if:` or `else: true`", rsrc)
+        label = entry.get("label")
+        if label is not None and not isinstance(label, str):
+            raise LoadError("a rule's `label:` must be a string", rsrc)
         rules.append(Rule(condition=condition, action=action,
-                          mutations=mutations, source=rsrc))
+                          mutations=mutations, source=rsrc, label=label))
     return tuple(rules)
 
 

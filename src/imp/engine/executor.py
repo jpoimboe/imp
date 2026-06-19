@@ -489,6 +489,7 @@ def _finish(
         "step": step.name, "kind": step.kind,
         "action": _action_payload(match.action),
         "var_mutations": match.var_mutations,
+        "label": match.rule.label if match.rule is not None else None,
     })
     return match.action, None, match.var_mutations
 

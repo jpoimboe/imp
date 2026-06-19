@@ -268,7 +268,7 @@ phases:
         tier: high
         max_loops: 20
         rules:
-          - {if: {decision: merge},  goto: wait-for-head}
+          - {if: {decision: merge},  goto: wait-for-head, label: "entering the merge queue"}
           - {if: {decision: rework}, goto: plan-writer, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
