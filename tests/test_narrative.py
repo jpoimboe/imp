@@ -513,7 +513,10 @@ def test_current_activity_reports_open_burst() -> None:
         b.add(e)
     assert b.current_burst is not None
     act = b.current_activity()
-    assert act == nv.Activity(count="1 call", detail="read_file config.py")
+    assert act.count == "1 call"
+    assert act.detail == "read_file config.py"
+    assert act.step == "spec"
+    assert act.call_elapsed is not None
 
 
 def test_current_activity_idle_gap_between_nodes() -> None:

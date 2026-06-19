@@ -1205,6 +1205,28 @@ def test_labeled_forward_goto_label_in_both_paths() -> None:
     assert body == _render_body(events)   # live == imp log, line for line
 
 
+def test_held_narration_emits_before_open_burst_live() -> None:
+    # A trailing narration is created held=True so it can fold into a step
+    # conclusion. With eager emission it must still emit immediately; only the
+    # OPEN tool burst that follows it may be withheld. Replays WITHOUT finish() —
+    # the real, mid-run state a watching human sees.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Reading the files now."}]},
+           usage={}),
+        ev("4", "tool_call", agent_id="a", id="b1", name="read_file",
+           input={"p": "x"}),
+    ]:
+        drv.on_event(e)
+    body = out.getvalue()
+    assert "Reading the files now." in body          # held narration emits live
+    assert "read_file" not in body  # open burst still withheld
+
+
 def test_unlabeled_forward_goto_has_no_label_segment() -> None:
     drv, out = _driver()
     events = [
@@ -1229,3 +1251,45 @@ def test_unlabeled_forward_goto_has_no_label_segment() -> None:
     assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
     assert not any(" ·  · " in ln for ln in body)   # no empty segment
     assert body == _render_body(events)
+
+
+def test_current_activity_anchors_timer_to_in_flight_call() -> None:
+    # Timer anchors to the running call (c2), not a resolved (c1) or killed (c3) call.
+    clock = [50.0]
+    b = nv.NarrativeBuilder(now=lambda: clock[0])
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="read_file",
+            input={"p": "x"}))           # stamped at clock=50.0
+    b.add(ev("r1", "tool_result", agent_id="a", id="c1", content="ok"))
+    clock[0] = 70.0
+    b.add(ev("t2", "tool_call", agent_id="a", id="c2", name="bash",
+            input={"command": "ls"}))    # stamped at clock=70.0, still running
+    clock[0] = 71.0
+    b.add(ev("t3", "tool_call", agent_id="a", id="c3", name="grep",
+            input={"q": "y"}))           # stamped at clock=71.0
+    b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))  # c3 killed
+    clock[0] = 73.0
+    act = b.current_activity()
+    assert act is not None
+    assert act.step == "s"               # the open step name
+    assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
+    assert act.count == "3 calls"        # retained Activity.count basis keeps killed
+    assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0
+
+
+def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
+    from imp.cli.live_driver import compose_activity_status
+
+    clock = [100.0]
+    b = nv.NarrativeBuilder(now=lambda: clock[0])
+    b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+            input={"command": "sleep 600"}))       # stamped at clock=100.0
+    clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
+    line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
+    assert line is not None
+    assert "implement" in line          # open step name
+    assert "bash sleep 600" in line     # in-flight tool detail
+    assert "1 call" in line             # retained Activity.count segment
+    assert "5m 12s" in line             # per-call timer (the primary figure)
+    assert "(step 15m 0s)" in line      # session/step elapsed as the parenthetical

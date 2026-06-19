@@ -42,11 +42,21 @@ def compose_activity_status(
     if activity is None:
         return None
     spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=color)
-    segs: list[str] = []
-    if activity.count:
-        segs.append(pal.ansi(activity.count, enabled=color))
-    if activity.detail:
-        segs.append(pal.ansi(activity.detail, "gray", enabled=color))
+    if activity.count is not None:
+        head: list[str] = []
+        if activity.step:
+            head.append(pal.ansi(activity.step, enabled=color))
+        if activity.detail:
+            head.append(pal.ansi(activity.detail, "gray", enabled=color))
+        lead = " \u203a ".join(head)
+        segs = [pal.ansi(activity.count, enabled=color)]
+        if activity.call_elapsed is not None:
+            segs.append(pal.ansi(rt.fmt_seconds(activity.call_elapsed), enabled=color))
+        body = " · ".join([lead, *segs]) if lead else " · ".join(segs)
+        step_par = pal.ansi(
+            f"(step {rt.fmt_seconds(elapsed)})", "dim", enabled=color)
+        return f"{spin} {body} {step_par}"
+    segs = []
     if activity.label:
         segs.append(pal.ansi(activity.label, enabled=color))
     body = " · ".join(segs)
@@ -206,7 +216,10 @@ class LiveDriver:
                 # final immediately.
                 return node.route is not None
             return True
-        return not (isinstance(node, nv.AgentTextNode) and node.held)
+        # A held AgentTextNode is settled narration: it emits immediately and is
+        # never withheld behind an in-flight tool call. `held` still drives
+        # `imp log`'s static fold rendering; only the live cursor ignores it.
+        return True
 
     def _gutters(self) -> tuple[int, ...]:
         """Subagent boundary columns for the shared render helpers.

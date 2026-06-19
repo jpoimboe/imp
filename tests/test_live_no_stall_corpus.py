@@ -37,6 +37,7 @@ import pytest
 from imp.cli import narrative as nv
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
+from tests._event_fixtures import ev
 from tests.conftest import FIXTURES
 
 _CORPUS = sorted((FIXTURES / "live_corpus").glob("*.jsonl.gz"))
@@ -165,3 +166,78 @@ def test_dropped_first_step_started_still_renders_later_headers(path: Path) -> N
         f"{path.name}: after dropping the first step_started, the live view "
         f"withheld later completed steps {withheld} — the cursor stalled."
     )
+
+
+_SEED_TRIGGERS: dict[str, list[dict]] = {
+    # (1) 6b86caec: step-1's opening narration is held, then an interleaving
+    # thinking/tool turn appends nodes AFTER it. On master the held narration
+    # stays non-final and is no longer the trailing node → a settled node is
+    # withheld behind it.
+    "step1_stale_narration": [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "I'll start by asking."}]},
+           usage={}),
+        ev("4", "thinking", agent_id="a", content="considering the structure"),
+        ev("5", "tool_call", agent_id="a", id="b1", name="grep",
+           input={"q": "x"}),
+        ev("6", "tool_result", agent_id="a", id="b1", content="ok"),
+        ev("7", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Now drafting."}]},
+           usage={}),
+    ],
+    # (2) d488ef2c: a dropped step opener leaves prose held under the workflow
+    # ROOT; a following tool call opens a root-level burst after it. On master the
+    # held root prose blocks while the burst is appended behind it.
+    "root_orphaned_prose": [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text",
+                             "text": "Orphan prose with no step opener."}]},
+           usage={}),
+        ev("3", "tool_call", agent_id="a", id="b1", name="bash",
+           input={"command": "ls"}),
+    ],
+    # (3) g8acjo: a long open burst with NO following result/boundary event. The
+    # preceding narration must emit while only the open burst is withheld.
+    "long_open_burst": [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="implement", kind="agent", phase="impl",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Running the build now."}]},
+           usage={}),
+        ev("4", "tool_call", agent_id="a", id="b1", name="bash",
+           input={"command": "make build"}),
+    ],
+}
+
+
+def _dfs(root: object) -> list[object]:
+    """Every descendant node of `root` in DFS pre-order (each node then its
+    children); the root itself is excluded."""
+    out: list[object] = []
+    for child in getattr(root, "children", []):
+        out.append(child)
+        out.extend(_dfs(child))
+    return out
+
+
+@pytest.mark.parametrize("label", sorted(_SEED_TRIGGERS))
+def test_settled_prefix_complete_after_every_event(label: str) -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in _SEED_TRIGGERS[label]:
+        drv.on_event(e)
+        nodes = _dfs(drv._builder.tree.root)
+        not_final = [
+            i for i, n in enumerate(nodes)
+            if not drv._is_final(n, container=None)
+        ]
+        assert not_final == [] or not_final == [len(nodes) - 1], (
+            f"{label}: after a {e.get('type')} event the live walk withheld a "
+            f"settled node — not-final indices {not_final} of {len(nodes)} nodes; "
+            f"only the single trailing not-final node may be withheld."
+        )
