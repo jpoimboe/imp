@@ -29,12 +29,15 @@ class SessionServer:
         lock: Any = None,
         hibernate: bool = False,
         events_path: Path | None = None,
+        on_first_attach: Callable[[], None] | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
         self._lock = lock
         self._hibernate = hibernate
         self._events_path = events_path
+        self._on_first_attach = on_first_attach
+        self._first_attach_fired: bool = False
         self.abandoned = False
         self._abandon_requested = False
         self._serve_scope: anyio.CancelScope | None = None
@@ -162,6 +165,13 @@ class SessionServer:
             if self._events_path is not None else None)
         if self._pending_prompt is not None:
             send_one(self._pending_prompt)
+        # Fire after snapshot capture so the marker is never replayed to the
+        # attaching client; emit only on the fresh 0 -> 1 attach.
+        if (self._socket.attached_count == 1
+                and self._on_first_attach is not None
+                and not self._first_attach_fired):
+            self._first_attach_fired = True
+            self._on_first_attach()
         return snapshot
 
     def _on_detach_pulse(self) -> None:
