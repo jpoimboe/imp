@@ -12,10 +12,11 @@
 #   1 -> hard failure / verify bound exhausted (branch restored pristine) -> pause
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
-BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")
+CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
+BASE=$(python3 -c "import json;print(json.load(open('$CHANGE_DIR/change.json'))['base_branch'])")
 # Rebase onto the FORK POINT, not the base tip — fold only this change's own commits.
 FORK=$(git merge-base "$BASE" HEAD)
-STATE=".imp/change/state"
+STATE="$CHANGE_DIR/state"
 
 # grep -q in a pipeline with pipefail is unreliable: grep exits on first match, git log
 # gets SIGPIPE and exits non-zero, making the pipeline fail even when matches exist.
@@ -113,10 +114,10 @@ else
   if [ -d "$(git rev-parse --git-path rebase-merge)" ] && [ -n "$(git ls-files -u)" ]; then
     # Fold conflict: hand off. Do NOT --abort; leave the rebase in progress with the
     # conflict markers for autosquash-resolve.
-    mkdir -p .imp/change/state
-    rm -f .imp/change/state/autosquash-resolve-attempts
-    printf '%s\n' "$BEFORE_TREE" > .imp/change/state/autosquash-before-tree
-    printf '%s\n' "$BEFORE" > .imp/change/state/autosquash-before-head
+    mkdir -p "$STATE"
+    rm -f "$STATE/autosquash-resolve-attempts"
+    printf '%s\n' "$BEFORE_TREE" > "$STATE/autosquash-before-tree"
+    printf '%s\n' "$BEFORE" > "$STATE/autosquash-before-head"
     echo "autosquash: fixup fold conflicted; handing to autosquash-resolve (rebase left in progress)" >&2
     exit 2
   fi
