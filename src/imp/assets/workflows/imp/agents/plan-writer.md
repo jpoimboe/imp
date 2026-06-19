@@ -186,6 +186,17 @@ you do emit more than one task, confirm each is a real, independently-committabl
 unit — not a step dressed up as a task.
 {% endif %}
 
+## Plan sizing
+
+Aim for **~5–8 tasks per plan**, split at **natural dependency boundaries**.
+When the spec is larger than that, do **not** cram it into one giant plan: emit the
+first coherent chunk — a runnable, independently-reviewable slice — and rely on the
+existing `plan-cycle-check` **supercycle** to author the remaining plans. There is no
+new control flow to add; `plan-cycle-check` is the sole coverage guard and loops back
+to you for the next plan. Size in **tasks**, not lines of code. A generous hard
+ceiling (~12 **task headings**) is enforced by `plan-commit-verify.sh` and sits well
+above this target, so treat ~5–8 as the working aim, not the limit.
+
 ## Plan Document Format
 
 Every plan MUST start with this header:

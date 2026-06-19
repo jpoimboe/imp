@@ -275,6 +275,18 @@ def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
     assert "commit subject" in low
 
 
+def test_plan_writer_states_soft_task_size_target() -> None:
+    text = (AGENTS_DIR / "plan-writer.md").read_text()
+    low = text.lower()
+    # The soft target is stated in TASKS (not lines of code), with the split-and-
+    # supercycle guidance, and explicitly cross-references the hard ceiling gate.
+    assert "5\u20138 tasks" in text
+    assert "natural dependency boundaries" in low
+    assert "supercycle" in low
+    assert "task headings" in low
+    assert "not lines of code" in low
+
+
 def test_code_reviewer_honors_dispatched_diff_range() -> None:
     low = CODE_REVIEWER.read_text().lower()
     # The coordinator gives the diff range (a batch range or the whole change); the
