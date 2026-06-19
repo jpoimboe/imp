@@ -9,6 +9,7 @@ behavior — this layer never makes a search *fail*.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from subprocess import PIPE
 
@@ -49,10 +50,28 @@ async def is_ignored(root: Path, path: Path) -> bool:
 
 
 async def list_unignored(root: Path, target: Path) -> set[Path] | None:
-    """Placeholder filled in Task 2."""
-    raise NotImplementedError
+    """Absolute paths of files under `target` that git does NOT ignore (tracked
+    + untracked, minus ignored). None on any git failure so the caller falls back.
+    `root` must be the worktree toplevel (the result of `repo_root()`);
+    `--full-name` yields repo-root-relative paths resolved against `root`."""
+    rc, out = await _git(
+        root, "ls-files", "-z", "--full-name",
+        "--cached", "--others", "--exclude-standard", "--", str(target),
+    )
+    if rc != 0:
+        return None
+    return {root / os.fsdecode(seg) for seg in out.split(b"\x00") if seg}
 
 
 async def partition_ignored(root: Path, paths: set[Path]) -> set[Path] | None:
-    """Placeholder filled in Task 2."""
-    raise NotImplementedError
+    """The subset of `paths` git ignores, via one batched `check-ignore --stdin -z`.
+    None on git failure (rc not in {0, 1}); empty set when nothing is ignored or
+    `paths` is empty."""
+    if not paths:
+        return set()
+    payload = b"\x00".join(os.fsencode(str(p)) for p in paths)
+    rc, out = await _git(root, "check-ignore", "--stdin", "-z", stdin=payload)
+    if rc not in (0, 1):
+        return None
+    echoed = {Path(os.fsdecode(seg)) for seg in out.split(b"\x00") if seg}
+    return echoed & paths
