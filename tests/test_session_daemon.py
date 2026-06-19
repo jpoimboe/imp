@@ -907,3 +907,47 @@ def test_append_workflow_resumed_appends_after_a_real_event(tmp_path: Path) -> N
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
     daemon._append_workflow_resumed(log)   # real event between → a second marker
     assert [e["type"] for e in log.read()].count("workflow_resumed") == 2
+
+
+def test_last_pause_was_awaiting_turn_true_for_awaiting_turn(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
+    assert daemon._last_pause_was_awaiting_turn(change) is True
+
+
+def test_last_pause_was_awaiting_turn_false_for_other_reason(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
+    assert daemon._last_pause_was_awaiting_turn(change) is False
+
+
+def test_last_pause_was_awaiting_turn_false_after_resume(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    log.append(agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
+    log.append(agent_id=None, type="workflow_resumed", payload={})
+    assert daemon._last_pause_was_awaiting_turn(change) is False   # pause is closed
+
+
+def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    # No events at all — the fallback must be False
+    assert daemon._last_pause_was_awaiting_turn(change) is False

@@ -40,6 +40,16 @@ def _append_workflow_resumed(log: EventLog) -> None:
         log.append(agent_id=None, type="workflow_resumed", payload={})
 
 
+def _last_pause_was_awaiting_turn(change: Change) -> bool:
+    for event in reversed(list(change.event_log().read())):
+        etype = event.get("type")
+        if etype == "workflow_paused":
+            return (event.get("payload") or {}).get("reason") == "awaiting_turn"
+        if etype == "workflow_resumed":
+            return False
+    return False
+
+
 async def serve_change_session(
     change: Change,
     *,
