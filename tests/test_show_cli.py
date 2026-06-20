@@ -159,6 +159,51 @@ def test_show_backlog_spec_errors(
     assert rc == 2
 
 
+def test_backlog_card_omits_depends_on_when_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.main import _backlog_card
+    from datetime import datetime, UTC
+    _seed_control(tmp_path)
+    rec = {
+        "id": "bk001", "title": "Do X", "description": "",
+        "depends_on": [], "created_at": None,
+    }
+    lines = _backlog_card(rec, tmp_path, now=datetime.now(UTC))
+    joined = "\n".join(lines)
+    assert "depends_on" not in joined
+
+
+def test_backlog_card_omits_description_section_when_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.main import _backlog_card
+    from datetime import datetime, UTC
+    _seed_control(tmp_path)
+    rec = {
+        "id": "bk001", "title": "Do X", "description": "",
+        "depends_on": [], "created_at": None,
+    }
+    lines = _backlog_card(rec, tmp_path, now=datetime.now(UTC))
+    # no blank separator line and no description text
+    assert "" not in lines
+
+
+def test_backlog_card_includes_depends_on_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.main import _backlog_card
+    from datetime import datetime, UTC
+    _seed_control(tmp_path)
+    rec = {
+        "id": "bk001", "title": "Do X", "description": "",
+        "depends_on": ["dep001"], "created_at": None,
+    }
+    lines = _backlog_card(rec, tmp_path, now=datetime.now(UTC))
+    assert any("depends_on" in line for line in lines)
+    assert any("dep001" in line for line in lines)
+
+
 def test_show_live_default_renders_card(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
