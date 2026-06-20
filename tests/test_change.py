@@ -245,6 +245,36 @@ def test_create_draft_refuses_bad_workflow_and_leaves_no_home(tmp_path: Path) ->
     assert not (tmp_path / ".imp" / "changes" / "drf3").exists()
 
 
+def test_create_draft_refuses_invalid_workflow_and_leaves_no_home(
+    tmp_path: Path,
+) -> None:
+    """A workflow that PARSES but fails validators raises LoadErrors. The
+    just-created change home must be cleaned up (no orphan)."""
+    _seed_control(tmp_path)
+    workflow_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    workflow_yaml.write_text(
+        "name: t\ndescription: \"\"\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/stub.md, tier: nonexistent_tier}\n"
+    )
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "break tier")
+    with pytest.raises(LoadErrors):
+        Change.create_draft(tmp_path, title="X", change_id="drf4", base_branch="main")
+    assert not (tmp_path / ".imp" / "changes" / "drf4").exists()
+
+
+def test_create_draft_refuses_bad_branch_and_leaves_no_home(tmp_path: Path) -> None:
+    """If the base branch does not exist, head_of raises RuntimeError. The
+    just-created change home must be cleaned up (no orphan)."""
+    _seed_control(tmp_path)
+    with pytest.raises(RuntimeError):
+        Change.create_draft(
+            tmp_path, title="X", change_id="drf5", base_branch="nonexistent-branch"
+        )
+    assert not (tmp_path / ".imp" / "changes" / "drf5").exists()
+
+
 def test_materialize_forks_worktree_and_flips_root(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="X", change_id="mz1", base_branch="main")

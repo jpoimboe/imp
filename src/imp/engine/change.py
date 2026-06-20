@@ -178,7 +178,11 @@ class Change:
         change_dir = control_root / ".imp" / "changes" / change_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
-        base_head = worktree.head_of(control_root, base_branch)
+        try:
+            base_head = worktree.head_of(control_root, base_branch)
+        except RuntimeError:
+            shutil.rmtree(change_dir, ignore_errors=True)
+            raise
 
         (change_dir / "change.json").write_text(json.dumps({
             "id": change_id, "title": title, "base_branch": base_branch,
