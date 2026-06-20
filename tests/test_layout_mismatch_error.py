@@ -19,7 +19,7 @@ def test_message_carries_versions_commit_dir_and_recipe() -> None:
     assert "cafef00d" in msg                               # imp_commit breadcrumb
     assert "/ctl/.imp/changes/abc" in msg                  # change_dir
     assert "abandon" in msg                                # recovery recipe
-    assert "refs/imp/journal" in msg                       # journal recovery pointer
+    assert "imp log" in msg
     assert not msg.startswith("imp:")                      # caller adds the imp: prefix
 
 
