@@ -42,26 +42,46 @@ def test_build_session_vi_mode() -> None:
 
 
 def test_build_session_applies_no_style_override() -> None:
-    """The input region keeps the terminal default — user-turn identity now
-    lives in the caret/rules, not a PromptSession bg fill. So no style override
-    is set (the field never paints its own background again)."""
+    """With color off (the default), the input region keeps the terminal default —
+    no PromptSession bg fill. The live slate is opt-in: it paints only under
+    color + a truecolor theme (see the two tests below)."""
     from imp.cli.prompt import _build_session
     assert _build_session(None).style is None
 
 
-def test_default_caret_is_empty() -> None:
-    """The default caret is empty — the ┃ bar (added by the caller as the gutter)
-    is the sole user-turn marker — so _message(None) carries no caret text or
-    escapes in either color mode. An explicit prompt_text is still styled."""
+def test_build_session_paints_slate_field_under_truecolor() -> None:
+    from prompt_toolkit.output import ColorDepth
+
+    from imp.cli import palette as pal
+    from imp.cli.prompt import _build_session
+
+    pal.set_theme("dark")
+    try:
+        s = _build_session(None, color=True)
+    finally:
+        pal.set_theme("ansi")
+    assert s.style.style_rules == [("", "bg:#2b2f3a")]   # default selector fills line
+    assert s.color_depth == ColorDepth.TRUE_COLOR
+
+
+def test_build_session_no_slate_under_ansi_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.prompt import _build_session
+
+    pal.set_theme("ansi")
+    s = _build_session(None, color=True)
+    assert s.style is None and s.color_depth is None
+
+
+def test_default_caret_is_the_blue_arrow() -> None:
+    """The default caret is the `> ` arrow: bright-blue under color, plain `> `
+    otherwise. _message(None) emits it; an explicit prompt_text is still styled."""
     from prompt_toolkit.formatted_text import ANSI
 
     on = Prompt(color=True)._message(None)
     assert isinstance(on, ANSI)
-    assert on.value == ""
-    assert Prompt(color=False)._message(None) == ""
-    # An explicit prompt_text is still rendered bright-blue under color.
-    styled = Prompt(color=True)._message("> ")
-    assert "\x1b[94m" in styled.value and ">" in styled.value
+    assert "\x1b[94m" in on.value and "> " in on.value
+    assert Prompt(color=False)._message(None) == "> "
 
 
 class _FakeSession:
@@ -94,26 +114,22 @@ class _FakeHistory:
 
 
 def test_message_is_bare_caret_without_a_question_plain() -> None:
-    # No question and an empty caret → the message line is empty (the caller's
-    # ┃ gutter is the only marker).
-    assert _prompt_message_text("", color=False) == ""
+    assert _prompt_message_text("", color=False) == "> "
 
 
 def test_message_puts_the_question_above_the_caret_plain() -> None:
-    # The question sits on its own line; the input line below it is the bare
-    # (now empty) caret.
-    assert _prompt_message_text("Pick A or B?", color=False) == "Pick A or B?\n"
+    assert _prompt_message_text("Pick A or B?", color=False) == "Pick A or B?\n> "
 
 
 def test_message_strips_question_whitespace_plain() -> None:
-    assert _prompt_message_text("  Pick A or B?  ", color=False) == "Pick A or B?\n"
+    assert _prompt_message_text("  Pick A or B?  ", color=False) == "Pick A or B?\n> "
 
 
 def test_message_renders_markdown_question_above_the_caret() -> None:
     msg = _prompt_message_text("Reply **merge** to merge.", color=True, width=80)
     assert "\x1b[1m" in msg                          # bold for **merge**
     assert "**" not in msg                           # asterisks consumed
-    assert msg.endswith("\n")                         # empty caret line last
+    assert msg.endswith("\x1b[94m> \x1b[0m")          # styled `> ` caret line last
 
 
 def test_message_no_color_renders_markdown_without_ansi() -> None:
@@ -121,12 +137,12 @@ def test_message_no_color_renders_markdown_without_ansi() -> None:
     assert "**" not in msg      # asterisks consumed by markdown
     assert "\x1b[" not in msg   # no ANSI codes on the no-color path
     assert "merge" in msg       # content present
-    assert msg.endswith("\n")   # empty caret line last (no `> `)
+    assert msg.endswith("> ")                          # plain `> ` caret line last
 
 
 def test_message_plain_question_still_sits_above_the_caret() -> None:
     assert _prompt_message_text("Pick A or B?", color=False, width=80) \
-        == "Pick A or B?\n"   # input line below is the now-empty caret
+        == "Pick A or B?\n> "
 
 
 def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
@@ -140,7 +156,7 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_ask_async_caret_at_content_column_with_gutter() -> None:
+async def test_ask_async_caret_prefix_with_indent() -> None:
     captured: dict[str, object] = {}
 
     class _SpySession:
@@ -152,17 +168,15 @@ async def test_ask_async_caret_at_content_column_with_gutter() -> None:
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     line = await prompt.ask_async(indent="  ")
     assert line == "ok"
-    # indent (2) + 2-col gutter (two spaces, color off) → body text at column 4
-    # (empty caret).
-    assert captured["msg"] == "    "
+    # indent (2) + `> ` caret -> body text at column 4.
+    assert captured["msg"] == "  > "
     cont = captured["prompt_continuation"]
-    # Pad = len(indent)+2 (gutter) +len(CARET)=0 → 4 cols, so continuation text
-    # lands under the first line's body (no shift on submit).
+    # Pad = len(indent)=2 + len(CARET)=2 -> 4 cols, under the first line's body.
     assert cont(80, 1, False) == "    "
 
 
 @pytest.mark.anyio
-async def test_ask_async_gutter_at_root_when_no_indent() -> None:
+async def test_ask_async_caret_prefix_at_root() -> None:
     captured: dict[str, object] = {}
 
     class _SpySession:
@@ -173,9 +187,10 @@ async def test_ask_async_gutter_at_root_when_no_indent() -> None:
 
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     await prompt.ask_async()
-    assert captured["msg"] == "  "                         # 2-col gutter, body at col 2
-    # Pad = len(indent)=0 +2 (gutter) +len(CARET)=0 → 2 cols, under the body.
+    assert captured["msg"] == "> "                        # `> ` caret, body at col 2
     assert captured["prompt_continuation"](80, 1, False) == "  "
+    # The plain hint must still render (not None) even with color off.
+    assert captured["placeholder"] == "type your reply"
 
 
 @pytest.mark.anyio
@@ -190,8 +205,6 @@ async def test_ask_async_question_path_caret_at_content_column() -> None:
 
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     await prompt.ask_async(question="Merge it?", indent="  ")
-    # The question block and the (empty) caret line are both prefixed with
-    # indent + gutter.
-    assert captured["msg"] == "    Merge it?\n    "
-    # Pad = len(indent)=2 +2 (gutter) +len(CARET)=0 → 4 cols, under the body.
+    # The question block and the `> ` caret line are both prefixed with the indent.
+    assert captured["msg"] == "  Merge it?\n  > "
     assert captured["prompt_continuation"](80, 1, False) == "    "

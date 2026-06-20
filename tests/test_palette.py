@@ -130,14 +130,17 @@ def test_user_color_is_bright_blue_foreground() -> None:
     assert pal._ANSI["bright_blue"] == "\x1b[94m"
 
 
-def test_caret_and_rule_helpers() -> None:
-    # The input-field chrome: the caret is empty (the ┃ bar is the sole user-turn
-    # marker), so caret() is "" with no stray escapes regardless of color. The
-    # gray rule's dashes are structural, kept regardless.
-    assert pal.caret(enabled=True) == ""
-    assert pal.caret(enabled=False) == ""
+def test_caret_constant_and_helper_are_the_blue_arrow() -> None:
+    assert pal.CARET == "> "
+    assert pal.caret(enabled=True) == "\x1b[94m> \x1b[0m"   # ansi theme bright_blue
+    assert pal.caret(enabled=False) == "> "
     assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
     assert pal.rule(4, enabled=False) == "────"
+
+
+def test_bar_and_user_bar_are_retired() -> None:
+    assert not hasattr(pal, "BAR")
+    assert not hasattr(pal, "user_bar")
 
 
 def test_clip_display_returns_fitting_frame_byte_identical() -> None:
@@ -197,10 +200,6 @@ def test_light_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
     light = pal._LIGHT_RGB
     assert _lum(light["blue"]) < _lum(light["step"]) < _lum(light["gray"])
 
-
-def test_user_bar_is_blue_glyph_under_color_and_space_off() -> None:
-    assert pal.user_bar(enabled=True) == "\x1b[94m┃\x1b[0m"
-    assert pal.user_bar(enabled=False) == " "   # blank gutter when color is off
 
 
 def test_lifecycle_role_is_nonbold_yellow_in_all_themes() -> None:
