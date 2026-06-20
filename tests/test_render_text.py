@@ -1719,3 +1719,60 @@ def test_step_context_content_control_bytes_escaped() -> None:
     assert "\x00" not in out
     assert "\x1b" not in out
     assert "^G" in out and "^@" in out and "^[" in out
+
+
+def test_fmt_seconds_done_suppresses_sub_second_keeps_whole() -> None:
+    # Under one second renders nothing (no lying "0s"); one second and up
+    # delegates to fmt_seconds (Ns / Mm Ss).
+    assert rt.fmt_seconds_done(0) == ""
+    assert rt.fmt_seconds_done(0.4) == ""
+    assert rt.fmt_seconds_done(0.999) == ""
+    assert rt.fmt_seconds_done(None) == ""
+    assert rt.fmt_seconds_done(1) == "1s"
+    assert rt.fmt_seconds_done(12.4) == "12s"
+    assert rt.fmt_seconds_done(336) == "5m 36s"
+    # fmt_seconds itself is unchanged: the live clock still shows 0s.
+    assert rt.fmt_seconds(0.4) == "0s"
+
+
+def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
+    # 1) phase-complete line: phase duration DERIVES from its child steps'
+    # timestamps (PhaseNode carries no start/end of its own); a sub-second span
+    # drops " · <secs>" entirely.
+    pn = nv.PhaseNode(name="design", closed=True)
+    pn.children.append(nv.StepNode(
+        name="spec", start_ts="2024-01-01T00:00:00",
+        end_ts="2024-01-01T00:00:00.500000"))
+    line = rt.phase_breadcrumb_line(pn, depth=0, color=False)
+    assert line == "design complete"
+    assert " · " not in line
+
+    # 2) step breadcrumb: sub-second elapsed drops the duration, no dangling sep.
+    bc = nv.BreadcrumbLine(step_name="spec", elapsed_s=0.4,
+                           action={"verb": "continue"}, extras=[])
+    bc_line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert bc_line == "  spec · complete"
+    assert not bc_line.rstrip().endswith("·")
+    # a one-second-plus step still shows its duration.
+    bc2 = nv.BreadcrumbLine(step_name="spec", elapsed_s=12.4,
+                            action={"verb": "continue"}, extras=[])
+    assert "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80)) \
+        == "  spec · complete · 12s"
+
+    # 3) finished subagent (running=False): sub-second run drops " · <secs>".
+    sub = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                          nested=nv.NarrativeBuilder(), running=False,
+                          start_ts="2024-01-01T00:00:00",
+                          end_ts="2024-01-01T00:00:00.500000")
+    row = rt.subagent_status_row(sub, depth=0, color=False)
+    assert row == "  reviewer"
+    assert "·" not in row
+
+
+def test_burst_summary_drops_sub_second_duration() -> None:
+    burst = nv.ToolBurstFold(
+        start_ts="2024-01-01T00:00:00", end_ts="2024-01-01T00:00:00.500000")
+    burst.calls.append(
+        nv.ToolCall(call_id="b1", name="read_file", input={"p": "1"}))
+    summary = rt._burst_summary(burst)
+    assert summary == "1 call · read_file"

@@ -60,6 +60,12 @@ def fmt_seconds(seconds: float | int | None) -> str:
     return f"{total // 60}m {total % 60}s"
 
 
+def fmt_seconds_done(seconds: float | int | None) -> str:
+    if seconds is None or seconds < 1:
+        return ""
+    return fmt_seconds(seconds)
+
+
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80, live_viewer: bool = False) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
@@ -316,7 +322,8 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     children of the root (single-level invariant) and would break if phases
     ever nested inside SubagentFolds."""
     elapsed = nv.phase_elapsed(node)
-    secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
+    done = fmt_seconds_done(elapsed)
+    secs = f" · {done}" if done else ""
     # No checkmark, and dark gray (the breadcrumb color) — identical treatment to
     # the step-completion line, so the whole family of `<name> complete · …` lines
     # reads consistently as quiet chrome rather than the bold blue of a phase header.
@@ -398,8 +405,9 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     elif sub.is_error:
         label += " (failed)"
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
-    if not sub.running and elapsed is not None:
-        label += f" · {fmt_seconds(elapsed)}"
+    done = "" if sub.running else fmt_seconds_done(elapsed)
+    if done:
+        label += f" · {done}"
     return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
 
 
@@ -581,8 +589,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             verb_text = pal.action_text(node.action) if node.action is not None else None
             if verb_text and verb_text != "continue":
                 parts.append(verb_text)
-        if node.elapsed_s is not None:
-            parts.append(fmt_seconds(node.elapsed_s))
+        done = fmt_seconds_done(node.elapsed_s)
+        if done:
+            parts.append(done)
         # The completion body recedes in gray; a workflow route label rides
         # inline after it, keeping its own non-bold yellow. Each segment is
         # colored before joining so both hues coexist on the one shared line
@@ -712,7 +721,8 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     n = len(calls)
     count = f"{n} call{'s' if n != 1 else ''}"
     elapsed = nv.elapsed_seconds(burst.start_ts, burst.end_ts)
-    secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
+    done = fmt_seconds_done(elapsed)
+    secs = f" · {done}" if done else ""
     # Count-first (§3): the count leads, then the distinct names, then duration.
     # No leading marker — a tool burst is sub-detail of the agent's turn and is
     # indented (by _render_burst) under the turn's words. Internal `·` stay.
