@@ -16,15 +16,15 @@ spec
   
   • Let me explore the CLI structure.
   
-    2 calls · grep · glob · 0s
+    2 calls · grep · glob
   
   • Let me look at the main parser setup and how the package is named.
   
-    1 call · read_file · 0s
+    1 call · read_file
   
   • Let me check the package metadata and any existing version handling/tests.
   
-    2 calls · read_file · grep · 0s
+    2 calls · read_file · grep
   
   • The codebase is clear. The package is named imp (version 0.0.1 in
     pyproject.toml), and the CLI is a single argparse parser in
@@ -70,11 +70,11 @@ spec
   
   spec-verify-commit
   
-  spec-verify-commit · complete · 0s
+  spec-verify-commit · complete
   
   fast-path-spec-gate
   
-  fast-path-spec-gate · complete · 0s
+  fast-path-spec-gate · complete
   
   spec-reviewer · opus
   
@@ -83,7 +83,7 @@ spec
   • The events file is large and the spec's factual claims are already verified
     against source. Let me check for the relevant brainstorm turn type.
   
-    1 call · query_events · 0s
+    1 call · query_events
   
   • I have verified all of the spec's load-bearing claims against the actual
     source. Findings:
@@ -108,7 +108,7 @@ spec
     over-engineering (the PackageNotFoundError fallback is a justified
     robustness requirement, not smuggled scope).
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   • Spec review complete. The add-version-flag spec is approved (non-blocking).
   
@@ -152,7 +152,7 @@ spec
   
   spec-verify-commit
   
-  spec-verify-commit · complete · 0s
+  spec-verify-commit · complete
 
 spec complete · 3m 9s
 
@@ -188,11 +188,11 @@ plan
   
   plan-verify-commit
   
-  plan-verify-commit · complete · 0s
+  plan-verify-commit · complete
   
   fast-path-plan-gate
   
-  fast-path-plan-gate · complete · 0s
+  fast-path-plan-gate · complete
   
   plan-review · opus
   
@@ -231,7 +231,7 @@ plan
   
     Recording findings.
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   • Plan review complete. The plan is approved (non-blocking).
   
@@ -269,7 +269,7 @@ plan
     step to both tasks (and updated Self-Review §5), then folded the edit into
     the plan commit via fixup.
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   • Final advisory polish pass complete. The plan was already approved
     (blocking: False); I integrated the single actionable Minor finding by
@@ -282,7 +282,7 @@ plan
   
   plan-verify-commit
   
-  plan-verify-commit · complete · 0s
+  plan-verify-commit · complete
 
 plan complete · 4m 7s
 
@@ -303,7 +303,7 @@ implement
   
   • Tests are green at 0e1b4c2. Now dispatching both reviewers.
   
-    2 calls · read_file · 0s
+    2 calls · read_file
   
   • Now dispatching both reviewers for Task 1.
   
@@ -335,7 +335,7 @@ implement
   • All 5 tests green at 7dd20b8. Now reading the updated main.py diff for
     reviewers.
   
-    1 call · bash · 0s
+    1 call · bash
   
     spec-task-reviewer · sonnet · 59s
   
@@ -347,7 +347,7 @@ implement
   
     Let me update progress.md and verify completeness.
   
-    1 call · write_file · 0s
+    1 call · write_file
   
   • Now load the verification skill and confirm all tasks are done.
   
@@ -358,21 +358,21 @@ implement
   • All 5 tests pass. Both plan tasks are committed and verified. The plan is
     fully implemented.
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   task-lead · complete · 9m 36s
   
   commit-check
   
-  commit-check · complete · 0s
+  commit-check · complete
   
   run-tests
   
-  run-tests · complete · 0s
+  run-tests · complete
   
   fast-path-cycle-gate
   
-  fast-path-cycle-gate · complete · 0s
+  fast-path-cycle-gate · complete
   
   plan-cycle-check · sonnet
   
@@ -390,7 +390,7 @@ implement
     the success path (--version, -V) and the PackageNotFoundError fallback, and
     pyproject.toml is untouched. The spec scope is fully covered by plan-1.
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   plan-cycle-check · complete · 41s
 
@@ -400,11 +400,11 @@ review
   
   autosquash
   
-  autosquash · complete · 0s
+  autosquash · complete
   
   stamp-trailers
   
-  stamp-trailers · complete · 0s
+  stamp-trailers · complete
   
   code-reviewer · gpt-5.5
   
@@ -418,7 +418,7 @@ review
   
   • Now let me inspect the actual diff and the test state.
   
-    2 calls · bash · 0s
+    2 calls · bash
   
   • Now let me run the test suite for the version tests (cheap, no code
     changes).
@@ -427,7 +427,7 @@ review
   
   • Everything verifies. Let me complete.
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   • Summary recorded. The change 2026-06-06-add-version-flag is complete: both
     planned tasks landed cleanly on HEAD, the --version/-V flag works end-to-end
@@ -495,7 +495,7 @@ review
   
   > Merge it. The two items are non-blocking nits and the change is clean.
   
-    1 call · complete_step · 0s
+    1 call · complete_step
   
   • Merged! The 2026-06-06-add-version-flag change is done. 🎉
   

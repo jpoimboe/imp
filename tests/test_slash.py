@@ -86,7 +86,7 @@ class _FakePrompt:
         self.questions: list[str] = []
 
     async def ask_async(self, prompt_text: str | None = None, *,
-                        question: str = "", width: int = 80) -> str:
+                        question: str = "", width: int = 80, indent: str = "") -> str:
         self.questions.append(question)
         return self._lines.pop(0)
 
@@ -201,6 +201,9 @@ class _RecDriver:
 
     def flush_deferred(self) -> None:
         self.events.append("flush")
+
+    def prompt_indent(self) -> str:
+        return ""
 
 
 class _CountStatus:

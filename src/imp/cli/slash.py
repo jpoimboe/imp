@@ -94,7 +94,7 @@ def _help(out: Callable[[str], None]) -> None:
 
 
 async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
-                       width: int = 80) -> str:
+                       width: int = 80, indent: str = "") -> str:
     """Read a line, but cancel the prompt if the coordinator exit event fires
     (SIGTERM / out-of-band SIGINT / escalation). On cancellation, raise
     KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
@@ -121,7 +121,8 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
                 tg.cancel_scope.cancel()
 
             async def _read() -> None:
-                result["line"] = await prompt.ask_async(question=question, width=width)
+                result["line"] = await prompt.ask_async(
+                    question=question, width=width, indent=indent)
                 tg.cancel_scope.cancel()
 
             tg.start_soon(_watch)
@@ -192,6 +193,7 @@ async def ask_line_with_slash(
             # display must stay suspended while they do, or it interleaves/clobbers
             # them before the loop re-prompts.
             with status.suspend():
+                indent = driver.prompt_indent() if driver is not None else ""
                 try:
                     while True:
                         if driver is not None:
@@ -201,10 +203,11 @@ async def ask_line_with_slash(
                         exit_evt = getattr(coord, "_exit_event", None) if coord else None
                         try:
                             if exit_evt is None:
-                                line: str = await prompt.ask_async(width=width)
+                                line: str = await prompt.ask_async(
+                                    width=width, indent=indent)
                             else:
                                 line = await _ask_or_exit(
-                                    prompt, exit_evt, width=width)
+                                    prompt, exit_evt, width=width, indent=indent)
                         except KeyboardInterrupt:
                             # A KeyboardInterrupt reaching here is normally the
                             # exit-event-won synthesis from _ask_or_exit: an out-of-band

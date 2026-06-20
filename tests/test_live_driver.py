@@ -1380,3 +1380,24 @@ def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
     body = _body(out)
     assert any("reviewer" in ln and "10s" in ln for ln in body)
     assert any("tester" in ln and "19s" in ln for ln in body)
+
+
+def test_prompt_indent_matches_open_step_frontier_depth() -> None:
+    drv, _out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "thinking", agent_id="step:design/spec", content="hmm"),
+    ]
+    for e in events:
+        drv.on_event(e)
+    # A step under a phase renders its content at depth 1, so the solicit caret
+    # indents two columns — the same column its echoed reply renders at.
+    assert drv.prompt_indent() == "  "
+
+
+def test_prompt_indent_empty_when_no_open_step() -> None:
+    drv, _out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    assert drv.prompt_indent() == ""
