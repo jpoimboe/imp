@@ -253,19 +253,18 @@ def test_status_precondition_error_prints_no_changes(
     assert capsys.readouterr().out == "No changes.\n"
 
 
-def test_status_column_alignment_under_long_slug(
+def test_status_column_alignment_short_ids(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A 28-char slug widens SLUG without shifting STATUS off the header's
-    STATUS column position in any data row."""
+    """IDs are always 6 chars (ID_W=6). Verify STATUS column is aligned with
+    the header across all data rows."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    long_slug = "2026-06-04-kelp-hazel-heath0"  # 28 chars
-    assert len(long_slug) == 28
-    Change.create(tmp_path, title="Long Slug", change_id=long_slug, base_branch="main")
-    Change.create(tmp_path, title="Short",     change_id="short",   base_branch="main")
+    Change.create(tmp_path, title="Long Title That Gets Truncated",
+                  change_id="abc123", base_branch="main")
+    Change.create(tmp_path, title="Short", change_id="xyz789", base_branch="main")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -401,7 +400,7 @@ def test_status_default_inflight_columns_and_color(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Default view: header leads with HANDLE, then TITLE, STATUS with color."""
+    """Default view: header leads with ID, then TITLE, STATUS with color."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -417,13 +416,13 @@ def test_status_default_inflight_columns_and_color(
     out = capsys.readouterr().out
     lines = out.splitlines()
     plain_header = re.sub(r"\x1b\[[0-9;]*m", "", lines[0])
-    assert plain_header.startswith("HANDLE")
+    assert plain_header.startswith("ID")
     assert "TITLE" in plain_header
     assert "STATUS" in plain_header
     assert "Add version flag" in out
     assert "\x1b[32mrunning\x1b[0m" in out
-    # handle leads the row
-    assert lines[1].startswith("add-version-flag-yaitd7")
+    # id leads the row
+    assert lines[1].startswith("yaitd7")
 
 
 def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:

@@ -24,7 +24,7 @@ def relative_age(then_iso: str | None, *, now: datetime) -> str:
     return f"{hours // 24}d"
 
 
-HANDLE_W = 28
+ID_W = 6        # bare 6-char Change id; the "ID" header also fits in 6 cols
 TITLE_W = 24
 STATUS_W = 13   # widest status: len("merge_blocked")
 STEP_W = 20     # widest default-workflow step name
@@ -46,36 +46,24 @@ def _truncate(text: str, width: int) -> str:
     return text[: width - 1] + "…"
 
 
-def _truncate_handle(handle: str, width: int) -> str:
-    """Ellipsize the NAME part of `<name>-<id>` but always keep the `-<id>` tail
-    visible, so the id stays copy/paste-reachable from `imp status`."""
-    if len(handle) <= width:
-        return handle
-    head, sep, tail = handle.rpartition("-")
-    keep = width - 2 - len(tail)   # name… + "-" + id == width
-    if not sep or keep < 1:        # bare id or pathologically long id: plain cut
-        return _truncate(handle, width)
-    return f"{head[:keep]}…-{tail}"
-
-
 def header_line(*, color: bool) -> str:
-    text = (f"{'HANDLE':<{HANDLE_W}}  {'TITLE':<{TITLE_W}}  {'STATUS':<{STATUS_W}}  "
+    text = (f"{'ID':<{ID_W}}  {'TITLE':<{TITLE_W}}  {'STATUS':<{STATUS_W}}  "
             f"{'STEP':<{STEP_W}}  {'AGE':<{AGE_W}}")
     return pal.ansi(text, "dim", enabled=color)
 
 
-def format_change_line(*, handle: str, title: str, status: str, step: str,
+def format_change_line(*, change_id: str, title: str, status: str, step: str,
                        last_iso: str | None, now: datetime,
                        color: bool, dim: bool = False) -> str:
     raw = title.strip()
-    handle_pad = f"{_truncate_handle(handle, HANDLE_W):<{HANDLE_W}}"
+    id_pad = f"{change_id:<{ID_W}}"
     title_text = "(unnamed)" if not raw else _truncate(raw, TITLE_W)
     title_pad = f"{title_text:<{TITLE_W}}"
     status_pad = f"{status:<{STATUS_W}}"
     step_pad = f"{(step or '-'):<{STEP_W}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
     if dim:
-        line = f"{handle_pad}  {title_pad}  {status_pad}  {step_pad}  {age_pad}"
+        line = f"{id_pad}  {title_pad}  {status_pad}  {step_pad}  {age_pad}"
         return pal.ansi(line, "dim", enabled=color)
     title_cell = pal.ansi(title_pad, "dim", enabled=color) if not raw else title_pad
     codes = STATUS_COLORS.get(status, ())
@@ -83,4 +71,4 @@ def format_change_line(*, handle: str, title: str, status: str, step: str,
         status_cell = pal.ansi(status, *codes, enabled=True) + " " * (STATUS_W - len(status))
     else:
         status_cell = status_pad
-    return f"{handle_pad}  {title_cell}  {status_cell}  {step_pad}  {age_pad}"
+    return f"{id_pad}  {title_cell}  {status_cell}  {step_pad}  {age_pad}"

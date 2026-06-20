@@ -1076,7 +1076,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             print(f"  {cid}", file=sys.stderr)
             continue
         print(change_row.format_change_line(
-            handle=derive_handle(row[4], row[0]), title=row[4], status=row[1], step=row[2],
+            change_id=row[0], title=row[4], status=row[1], step=row[2],
             last_iso=row[3], now=now, color=color), file=sys.stderr)
     raise SystemExit(2)
 
@@ -1568,7 +1568,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     print(change_row.header_line(color=color), file=sys.stderr)
     for r in rows:
         print(change_row.format_change_line(
-            handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color), file=sys.stderr)
     return 2
 
@@ -1836,14 +1836,14 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     print(change_row.header_line(color=color))
     for r in inflight:
         print(change_row.format_change_line(
-            handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color))
     if past:
         if inflight:
             print()
         for r in past:
             print(change_row.format_change_line(
-                handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, dim=True))
     if backlog_lines:
         if inflight or past:
