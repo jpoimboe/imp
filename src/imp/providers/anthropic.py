@@ -40,7 +40,7 @@ from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ToolContext, change_home_path
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
 from imp.agents.transcript import (
@@ -466,6 +466,7 @@ class AnthropicAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
+            change_home=change_home_path(invocation.change_context.change_home),
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.change_state = invocation.change_state

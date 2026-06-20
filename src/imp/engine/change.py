@@ -18,6 +18,35 @@ from imp.engine.types import SourceLoc
 LAYOUT_VERSION = 1  # bump in the SAME commit as any breaking change-home layout/schema change
 
 
+def _fold_phantom(phantom: Path, home: Path) -> None:
+    """Move phantom-only files into home; home wins on collision."""
+    for src in phantom.rglob("*"):
+        if src.is_dir():
+            continue
+        dest = home / src.relative_to(phantom)
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(src, dest)
+
+
+def link_change_home(worktree_path: Path, change_dir: Path) -> None:
+    """Create idempotent id-scoped symlink <worktree>/.imp/changes/<id> → change_dir."""
+    link = worktree_path / ".imp" / "changes" / change_dir.name
+    target = change_dir.resolve()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink():
+        if link.resolve() == target:
+            return
+        link.unlink()
+    elif link.is_dir():
+        _fold_phantom(link, change_dir)
+        shutil.rmtree(link)
+    elif link.exists():
+        link.unlink()
+    link.symlink_to(target)
+
+
 def _imp_commit(control_root: Path) -> str:
     """For the refusal breadcrumb; empty string when git is absent or not a repo."""
     proc = worktree._git(control_root, "rev-parse", "HEAD")
@@ -88,7 +117,13 @@ class Change:
         meta["project_root"] = str(wt_path)
         meta["materialized"] = True
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        link_change_home(wt_path, self.change_dir)
         return head_changed
+
+    def relink_home(self) -> None:
+        if not self.materialized or self.project_root == self.control_root:
+            return
+        link_change_home(self.project_root, self.change_dir)
 
     @property
     def live_workflow_dir(self) -> Path:
@@ -172,6 +207,7 @@ class Change:
             loop_counts={},
         ).save(change_dir / "state")
 
+        link_change_home(wt_path, change_dir)
         change = cls(
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,

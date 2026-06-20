@@ -33,7 +33,7 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools import bg as _bg
-from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.agents.tools.context import ToolContext, change_home_path, terminate_running_processes
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.schema import validate_agent_output
@@ -252,6 +252,7 @@ class CodexAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
+            change_home=change_home_path(invocation.change_context.change_home),
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state

@@ -205,6 +205,7 @@ async def run_change(
             project_root=change.project_root, control_root=change.control_root,
         ).config
         state = State.load(change.state_dir)
+        change.relink_home()
         # Freeze once per Change: resume reuses the facts/guidance the first run saw.
         if state.project_facts is None:
             state.project_facts = config.project_facts

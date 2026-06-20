@@ -345,3 +345,100 @@ def test_terminate_reaps_regrouped_descendant(tmp_path):
         assert gone, "re-grouped descendant survived the reaping path"
 
     anyio.run(go)
+
+
+def test_change_home_path_maps_empty_to_none() -> None:
+    from imp.agents.tools.context import change_home_path
+    assert change_home_path("") is None
+    assert change_home_path(None) is None
+    assert change_home_path("/c/.imp/changes/abc") == Path("/c/.imp/changes/abc")
+
+
+def test_tool_context_change_home_defaults_none(tmp_path: Path) -> None:
+    from imp.agents.tools.context import ToolContext
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "e.jsonl")
+    assert ctx.change_home is None
+    ctx.change_home = tmp_path / ".imp" / "changes" / "abc"
+    assert ctx.change_home == tmp_path / ".imp" / "changes" / "abc"
+    assert ToolContext(project_root=tmp_path, fs_permissions=(),
+                       events_path=tmp_path / "e.jsonl",
+                       change_home=tmp_path).change_home == tmp_path
+
+
+def _home_ctx(project_root: Path, change_dir: Path) -> ToolContext:
+    rule = _allow(("write",), (".imp/changes/*/artifacts/spec/**",))
+    ctx = ToolContext(project_root=project_root, fs_permissions=(rule,),
+                      events_path=project_root / "e.jsonl")
+    ctx.change_home = change_dir
+    return ctx
+
+
+def _seed_home_with_symlink(tmp_path: Path) -> tuple[Path, Path]:
+    control = tmp_path
+    change_dir = control / ".imp" / "changes" / "abc"
+    (change_dir / "artifacts" / "spec").mkdir(parents=True)
+    (change_dir / "artifacts" / "plans").mkdir(parents=True)
+    worktree = control / ".imp" / "worktrees" / "abc"
+    (worktree / ".imp" / "changes").mkdir(parents=True)
+    (worktree / ".imp" / "changes" / "abc").symlink_to(change_dir)
+    return control, change_dir
+
+
+def test_authorize_fs_home_absolute_spec_allowed_plans_denied(tmp_path: Path) -> None:
+    control, change_dir = _seed_home_with_symlink(tmp_path)
+    worktree = control / ".imp" / "worktrees" / "abc"
+    ctx = _home_ctx(worktree, change_dir)
+    out = ctx.authorize_fs(("write",), str(change_dir / "artifacts" / "spec" / "x.md"))
+    assert out == (change_dir / "artifacts" / "spec" / "x.md").resolve()
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), str(change_dir / "artifacts" / "plans" / "y.md"))
+
+
+def test_authorize_fs_home_relative_through_symlink(tmp_path: Path) -> None:
+    control, change_dir = _seed_home_with_symlink(tmp_path)
+    worktree = control / ".imp" / "worktrees" / "abc"
+    ctx = _home_ctx(worktree, change_dir)
+    # Relative path resolves through the worktree symlink to the real home; the
+    # returned path is the symlink-followed real location.
+    out = ctx.authorize_fs(("write",), ".imp/changes/abc/artifacts/spec/x.md")
+    assert out == (change_dir / "artifacts" / "spec" / "x.md").resolve()
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), ".imp/changes/abc/artifacts/plans/y.md")
+
+
+def test_authorize_fs_home_draft_direct(tmp_path: Path) -> None:
+    control, change_dir = _seed_home_with_symlink(tmp_path)
+    # Draft phase: project_root IS the control root; the same virtual key applies.
+    ctx = _home_ctx(control, change_dir)
+    out = ctx.authorize_fs(("write",), ".imp/changes/abc/artifacts/spec/x.md")
+    assert out == (change_dir / "artifacts" / "spec" / "x.md").resolve()
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), ".imp/changes/abc/artifacts/plans/y.md")
+
+
+def test_authorize_fs_non_home_path_falls_through_when_change_home_set(tmp_path: Path) -> None:
+    control, change_dir = _seed_home_with_symlink(tmp_path)
+    worktree = control / ".imp" / "worktrees" / "abc"
+    # A file in the worktree itself (not under change_home) should use normal
+    # in-worktree permission rules, not the home branch.
+    rule = _allow(("read",), ("src/**",))
+    ctx = ToolContext(project_root=worktree, fs_permissions=(rule,),
+                      events_path=worktree / "e.jsonl")
+    ctx.change_home = change_dir
+    (worktree / "src").mkdir(parents=True, exist_ok=True)
+    (worktree / "src" / "foo.py").write_text("x = 1\n")
+    out = ctx.authorize_fs(("read",), "src/foo.py")
+    assert out == (worktree / "src" / "foo.py").resolve()
+
+
+def test_authorize_fs_home_root_itself_uses_virtual_key(tmp_path: Path) -> None:
+    control, change_dir = _seed_home_with_symlink(tmp_path)
+    worktree = control / ".imp" / "worktrees" / "abc"
+    # Accessing the home root directory itself should use virtual key ".imp/changes/abc"
+    rule = _allow(("read",), (".imp/changes/abc",))
+    ctx = ToolContext(project_root=worktree, fs_permissions=(rule,),
+                      events_path=worktree / "e.jsonl")
+    ctx.change_home = change_dir
+    out = ctx.authorize_fs(("read",), str(change_dir))
+    assert out == change_dir.resolve()

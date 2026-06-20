@@ -60,6 +60,7 @@ class ToolContext:
     # rename_change tool mutates change.title + rewrites change.json through it.
     # Distinct from change_context, which is the FROZEN render-time snapshot.
     change: Any = None
+    change_home: Path | None = None
     # The runner injects this callable as the wait_for_user / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
@@ -159,6 +160,16 @@ class ToolContext:
         denied op; returns the resolved Path.
         """
         resolved = self.resolve_path(path)
+        home = self.change_home
+        if home is not None:
+            home = home.resolve()
+            if resolved == home or resolved.is_relative_to(home):
+                virtual = f".imp/changes/{home.name}"
+                if resolved != home:
+                    virtual = f"{virtual}/{resolved.relative_to(home).as_posix()}"
+                for op in ops:
+                    self.check_fs_permission(op, virtual)
+                return resolved
         root = self.project_root.resolve()
         if resolved == root or resolved.is_relative_to(root):
             virtual = "." if resolved == root else resolved.relative_to(root).as_posix()
@@ -181,6 +192,10 @@ class ToolContext:
 
     def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:
         check_permission(self.fs_permissions, op, virtual)
+
+
+def change_home_path(change_home: str | None) -> Path | None:
+    return Path(change_home) if change_home else None
 
 
 def _supports_killpg() -> bool:
