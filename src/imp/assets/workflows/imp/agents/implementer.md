@@ -1,5 +1,6 @@
 ---
 name: implementer
+label: implementing task
 description: Implement one task; apply the task-lead's directed fixes; commit the task with git.
 output:
   status: {type: enum, values: [Success, Error]}

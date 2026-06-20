@@ -150,6 +150,10 @@ def parse_agent_file(path: Path) -> AgentDef:
     tier_raw = fm.get("tier")
     tier = str(tier_raw) if tier_raw is not None else None
 
+    label_raw = fm.get("label")
+    if label_raw is not None and not isinstance(label_raw, str):
+        raise LoadError("an agent's `label:` must be a string", source)
+
     return AgentDef(
         name=str(fm["name"]),
         description=str(fm.get("description", "")),
@@ -164,6 +168,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         explicit_tools=explicit_tools,
         deny_tools=deny_tools,
         drivers=drivers,
+        label=label_raw,
     )
 
 
@@ -603,6 +608,10 @@ def _parse_step(
     label = raw.get("label")
     if label is not None and not isinstance(label, str):
         raise LoadError("a step's `label:` must be a string", source)
+    if label is None and kind == "agent" and raw.get("file"):
+        agent_def = agents.get(Path(raw["file"]).stem)
+        if agent_def is not None:
+            label = agent_def.label
 
     max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
     max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops

@@ -1,5 +1,6 @@
 ---
 name: integration-resolve
+label: resolving merge
 description: Bypass resolution gate — the at-head semantic review flagged breakage or verify failed. Present the integration to a human, take a re-approve (merge) or rework decision. The change is already out of the queue and the next head is moving.
 output:
   status: {type: enum, values: [Success, Error]}

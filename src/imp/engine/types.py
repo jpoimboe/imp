@@ -154,6 +154,7 @@ class AgentDef:
     explicit_tools: bool = False
     deny_tools: frozenset[str] = frozenset()
     drivers: frozenset[str] = frozenset()
+    label: str | None = None
 
 
 # ── Steps & phases ────────────────────────────────────────────────────────────

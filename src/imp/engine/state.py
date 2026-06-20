@@ -189,7 +189,7 @@ class EventLog(Protocol):
                             stop_reason: Any,
                             auth_mode: str | None = None) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
-                         block: Any) -> dict[str, Any]: ...
+                         block: Any, label: str | None = None) -> dict[str, Any]: ...
     def append_tool_result(self, *, agent_id: str | None,
                            block: Any,
                            citations: list[dict[str, Any]] | None = None,
@@ -312,10 +312,12 @@ class _BaseEventLog:
             agent_id=agent_id, type="llm_response", payload=payload)
 
     def append_tool_call(self, *, agent_id: str | None,
-                         block: Any) -> dict[str, Any]:
-        return self._emit(
-            agent_id=agent_id, type="tool_call",
-            payload={"id": block.id, "name": block.name, "input": block.input})
+                         block: Any, label: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": block.id, "name": block.name, "input": block.input}
+        if label is not None:
+            payload["label"] = label
+        return self._emit(agent_id=agent_id, type="tool_call", payload=payload)
 
     def append_tool_result(self, *, agent_id: str | None,
                            block: Any,

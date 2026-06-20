@@ -1,5 +1,6 @@
 ---
 name: plan-reviewer
+label: reviewing plan
 description: Review the newest plan's prescribed code like a diff for correctness, with a short doc-integrity tail; severity-classified; blocking iff Critical/Major.
 output:
   status: {type: enum, values: [Success, Error]}

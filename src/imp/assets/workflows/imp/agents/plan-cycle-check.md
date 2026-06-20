@@ -1,5 +1,6 @@
 ---
 name: plan-cycle-check
+label: checking plan coverage
 description: Decide whether the spec needs another plan (supercycle) or is fully covered by the plans implemented so far.
 output:
   status: {type: enum, values: [Success, Error]}

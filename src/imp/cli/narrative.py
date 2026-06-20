@@ -236,6 +236,7 @@ class SubagentFold:
                                        # now emit it via kind= or [bracket]); else None
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
+    label: str | None = None
     collapsible = True
 
     @property
@@ -245,7 +246,8 @@ class SubagentFold:
     def current_activity(self) -> str:
         detail = activity_to_text(self.nested.current_activity())
         tail = f" · {detail}" if detail else ""
-        return f"task → {self.subagent_name} · {self.event_count} events{tail}"
+        head = self.label if self.label else f"subagent({self.subagent_name})"
+        return f"{head} · {self.event_count} events{tail}"
 
 
 @dataclass
@@ -1409,7 +1411,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         subagent_name=str(inp.get("subagent_name", "?")),
         event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
-        start_ts=event.get("timestamp"))
+        start_ts=event.get("timestamp"),
+        label=p.get("label"))
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     # Register in both dicts: always by event id (unique per mint), by block id

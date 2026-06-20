@@ -1098,3 +1098,86 @@ def test_step_label_must_be_a_string(tmp_path: Path) -> None:
         """, agents={"spec-writer": _WRITER})
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
+
+
+def test_parse_agent_file_label_absent_is_none(tmp_path):
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter="name: x\noutput:\n  status: {type: enum, values: [Success, Error]}",
+    )
+    agent = parse_agent_file(p)
+    assert agent.label is None
+
+
+def test_parse_agent_file_label_present(tmp_path):
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\nlabel: exploring codebase\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.label == "exploring codebase"
+
+
+def test_parse_agent_file_non_string_label_raises_with_source(tmp_path):
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter="name: x\nlabel: 42\noutput:\n  status: {type: enum, values: [Success, Error]}",
+    )
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "label" in str(ei.value)
+    assert ei.value.source is not None and ei.value.source.file == p
+
+
+def test_step_inherits_agent_label_when_step_omits_it(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    write_agent_md(
+        wf_dir / "agents" / "a.md",
+        frontmatter=(
+            "name: a\nlabel: writing spec\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md}\n")    # no label: on the step
+    wf = load_workflow(wf_dir)
+    assert wf.flat_steps()[0].label == "writing spec"
+
+
+def test_step_label_overrides_agent_label(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    write_agent_md(
+        wf_dir / "agents" / "a.md",
+        frontmatter=(
+            "name: a\nlabel: writing spec\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md, label: drafting}\n")
+    wf = load_workflow(wf_dir)
+    assert wf.flat_steps()[0].label == "drafting"
+
+
+def test_step_label_none_when_neither_present(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    write_agent_md(
+        wf_dir / "agents" / "a.md",
+        frontmatter="name: a\noutput:\n  status: {type: enum, values: [Success, Error]}",
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md}\n")
+    wf = load_workflow(wf_dir)
+    assert wf.flat_steps()[0].label is None

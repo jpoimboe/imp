@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import anyio
 import pytest
 
 import imp.agents.dispatch as dispatch_mod
-from imp.agents.dispatch import TurnState, dispatch_task_batch
+from imp.agents.dispatch import TurnState, _dispatch_one_task_inline, dispatch_task_batch
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext, ToolUseBlock
 from imp.agents.subagents import SubagentSuspended
@@ -509,3 +510,55 @@ async def test_depth2_nested_dispatch_uses_fresh_limiters_no_deadlock(
     finally:
         monkeypatch.undo()
         reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_stamps_subagent_label_on_task_tool_call(tmp_path: Path) -> None:
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        ctx.subagent_defs = {
+            "explorer": dataclasses.replace(_agent("explorer"),
+                                            label="exploring codebase"),
+            "reviewer": _agent("reviewer"),   # no label
+        }
+        elog = InMemoryEventLog()
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("t1", "explorer"), _task_tu("t2", "reviewer"), _task_tu("t3", "ghost")]
+        [ev async for ev in dispatch_task_batch(
+            ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+            tool_results=[], state=state, ceiling=None)]
+        calls = {e["payload"]["id"]: e["payload"]
+                 for e in elog.read() if e["type"] == "tool_call"}
+        assert calls["t1"]["label"] == "exploring codebase"
+        assert "label" not in calls["t2"]            # unlabeled agent: omitted
+        assert "label" not in calls["t3"]            # unknown agent name: omitted
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+
+
+@pytest.mark.anyio
+async def test_inline_stamps_subagent_label_on_task_tool_call(tmp_path: Path) -> None:
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        ctx.subagent_defs = {
+            "explorer": dataclasses.replace(_agent("explorer"),
+                                            label="exploring codebase"),
+        }
+        elog = InMemoryEventLog()
+        await _dispatch_one_task_inline(
+            ctx=ctx, elog=elog, aid="step:p/s", tu=_task_tu("t1", "explorer"),
+            tool_results=[], state=TurnState(tool_calls_used=0), ceiling=None)
+        call = next(e["payload"] for e in elog.read() if e["type"] == "tool_call")
+        assert call["label"] == "exploring codebase"
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]

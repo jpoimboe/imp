@@ -132,6 +132,25 @@ def test_inmemory_matches_jsonl_shape(tmp_path: Path) -> None:
     assert mem_ev["type"] == jl_ev["type"] == "step_context"
 
 
+def test_append_tool_call_stamps_label_as_sibling(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    c = log.append_tool_call(
+        agent_id="A",
+        block=ToolUseBlock(id="t1", name="task",
+                           input={"subagent_name": "explorer"}),
+        label="exploring codebase")
+    assert c["payload"]["label"] == "exploring codebase"
+    # input stays the pure model arguments — no label folded in
+    assert c["payload"]["input"] == {"subagent_name": "explorer"}
+
+
+def test_append_tool_call_omits_label_when_none(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    c = log.append_tool_call(
+        agent_id="A", block=ToolUseBlock(id="t1", name="read_file", input={"p": 1}))
+    assert "label" not in c["payload"]
+
+
 def test_append_tool_result_stamps_id_ns_when_provided() -> None:
     # AC38 (plumbing): the optional id_ns keyword stamps the tool_result payload;
     # omitting it leaves the payload shape unchanged (no "id_ns" key) so legacy

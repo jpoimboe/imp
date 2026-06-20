@@ -38,6 +38,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
+from imp.engine.types import AgentDef
 from imp.providers import errors as perr
 from imp.providers.codex_config import (
     AuthMode,
@@ -592,7 +593,8 @@ class CodexAgentRunner:
                 etype = getattr(event, "type", None)
                 process_event(event, elog=elog, agent_id=aid, state=proc_state,
                               provider=invocation.provider_name,
-                              model=self.model, run_state=state)
+                              model=self.model, run_state=state,
+                              subagent_defs=invocation.subagent_defs)
 
                 # Cap trip from inside the MCP wrapper → abort the SDK + bail.
                 if state.abort_requested:
@@ -1006,6 +1008,7 @@ def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str, run_state: Any = None,
+    subagent_defs: dict[str, AgentDef] | None = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
 
@@ -1033,9 +1036,25 @@ def process_event(
         if getattr(item, "type", None) == "mcp_tool_call" and name == "task":
             sdk_id = getattr(item, "id", "") or ""
             args = getattr(item, "arguments", None) or {}
+            # `arguments` may be a JSON string; mirror the item.completed guard.
+            if isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                except (ValueError, TypeError):
+                    parsed = None
+                lookup = parsed if isinstance(parsed, dict) else {}
+            elif isinstance(args, dict):
+                lookup = args
+            else:
+                lookup = {}
+            defs = subagent_defs or {}
+            sn = lookup.get("subagent_name")
+            sub_def = defs.get(sn) if isinstance(sn, str) else None
+            label = sub_def.label if sub_def is not None else None
             elog.append_tool_call(
                 agent_id=agent_id,
-                block=ToolUseBlock(id=sdk_id, name="task", input=args))
+                block=ToolUseBlock(id=sdk_id, name="task", input=args),
+                label=label)
         return
 
     # `item.completed` — dispatch on the item's own type.

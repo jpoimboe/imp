@@ -1,5 +1,6 @@
 ---
 name: spec-writer
+label: writing spec
 description: Interactively brainstorm with the user, name the change once intent is clear, then write and commit the spec.
 subagents: [explorer, researcher]
 drivers: [impty]

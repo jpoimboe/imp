@@ -17,7 +17,7 @@ Not-final children (the only things that block a cursor):
   - an open ToolBurstFold (still its owning builder's current_burst; for a
     nested burst the owner is the subagent's nested builder, not the main one).
 Everything else is final on append. A SubagentFold is a LEAF (Part D): it
-collapses to a single `↳ task → {name} ⟨status⟩` status row emitted once the
+collapses to a single `↳ subagent({name}) · N events ⟨status⟩` status row emitted once the
 subagent stops running — its streamed children and structured return value are
 never rendered in the live/lean views (this structurally eliminates the SDK
 cancellation-sentinel leak).

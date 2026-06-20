@@ -570,7 +570,44 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
         b.add(e)
     act = b.current_activity()
     assert act is not None and act.label is not None
-    assert "task → coder" in act.label and "executor.py" in act.label
+    assert "subagent(coder)" in act.label and "executor.py" in act.label
+
+
+def test_subagent_activity_uses_label_when_present() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
+            name="task", input={"subagent_name": "explorer"},
+            label="exploring codebase"),
+        ev("5", "tool_call", agent_id="sub:4", id="n1",
+           name="edit_file", input={"path": "executor.py"}),
+    ]:
+        b.add(e)
+    act = b.current_activity()
+    assert act is not None and act.label is not None
+    assert "exploring codebase" in act.label
+    assert "executor.py" in act.label
+    assert "task →" not in act.label
+    assert "subagent(" not in act.label
+
+
+def test_subagent_activity_falls_back_to_subagent_name() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
+            name="task", input={"subagent_name": "explorer"}),
+    ]:
+        b.add(e)
+    act = b.current_activity()
+    assert act is not None and act.label is not None
+    assert "subagent(explorer)" in act.label
+    assert "task →" not in act.label
 
 
 def test_summarize_result_flattens_text_block_list_in_burst() -> None:
@@ -688,7 +725,7 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     # current_activity sits on the running subagent before the parent resumes.
-    assert "task → reviewer" in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" in nv.activity_to_text(b.current_activity())
     # Parent resumes (same agent_id) with NO task tool_result — resume-close fires.
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn", usage={}, raw={"content": [
@@ -696,7 +733,7 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     assert sub.running is False
     # Status line advanced off the subagent (no running fold left).
     act = nv.activity_to_text(b.current_activity())
-    assert "task → reviewer" not in act
+    assert "subagent(reviewer)" not in act
 
 
 def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
@@ -715,12 +752,12 @@ def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    assert "task → reviewer" in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" in nv.activity_to_text(b.current_activity())
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="codex",
               model="m", stop_reason=None, usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
-    assert "task → reviewer" not in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
 
 
 def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
@@ -760,12 +797,12 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    assert "task → reviewer" in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" in nv.activity_to_text(b.current_activity())
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="openai",
               model="m", stop_reason="completed", usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
-    assert "task → reviewer" not in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
 
 
 def test_openai_non_terminal_status_does_not_salvage_close() -> None:
@@ -1564,7 +1601,7 @@ def test_workflow_resumed_finalizes_dangling_folds_as_interrupted() -> None:
     assert dangling.running is False
     assert dangling.terminal_state == "interrupted"
     # current_activity no longer shadowed by the dangling fold.
-    assert "task → reviewer" not in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
 
     # Resumed turn re-enters the step and opens a fresh running fold.
     b.add(_ev("st2", "step_started", step="s", kind="agent", phase="p",
@@ -1613,12 +1650,12 @@ def test_current_activity_suffix_counts_extra_running_subagents() -> None:
               model="m", provider="anthropic"))
     b.add(_task("tk1", "b1", "reviewer"))
     one = nv.activity_to_text(b.current_activity())
-    assert "task → reviewer" in one
+    assert "subagent(reviewer)" in one
     assert "more subagent" not in one                    # single fold: no suffix
 
     b.add(_task("tk2", "b2", "tester"))
     two = nv.activity_to_text(b.current_activity())
-    assert "task → reviewer" in two                      # first running fold's detail
+    assert "subagent(reviewer)" in two                   # first running fold's detail
     assert "(+1 more subagent)" in two                   # singular
     assert "(+1 more subagents)" not in two
 
@@ -1829,7 +1866,7 @@ def test_subagent_activity_has_no_step_prefix() -> None:
         ev("s1", "thinking", agent_id="sub:tk1", content="reviewing"),
     ]:
         b.add(e)
-    assert b.current_activity().label == "task → plan-reviewer · 1 events"
+    assert b.current_activity().label == "subagent(plan-reviewer) · 1 events"
 
 
 def test_step_label_and_resumed_land_on_step_and_breadcrumb() -> None:

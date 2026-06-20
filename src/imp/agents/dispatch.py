@@ -192,7 +192,9 @@ async def dispatch_task_batch(
             state.ceiling_tripped = True
         else:
             state.tool_calls_used += 1
-            tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
+            sub_def = ctx.subagent_defs.get(tu.input["subagent_name"])
+            label = sub_def.label if sub_def is not None else None
+            tc_ev = elog.append_tool_call(agent_id=aid, block=tu, label=label)
             dispatched.append((tu, tc_ev["id"]))
 
     async def _run_child(tu: ToolUseBlock, tcid: str) -> None:
@@ -281,7 +283,9 @@ async def _dispatch_one_task_inline(
         state.ceiling_tripped = True
         return
     state.tool_calls_used += 1
-    tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
+    sub_def = ctx.subagent_defs.get(tu.input["subagent_name"])
+    label = sub_def.label if sub_def is not None else None
+    tc_ev = elog.append_tool_call(agent_id=aid, block=tu, label=label)
     try:
         result_str = await dispatch_task(
             ctx, tu.input["subagent_name"], tu.input["task_description"],

@@ -1,5 +1,6 @@
 ---
 name: finalize
+label: finalizing
 description: Final gate before the merge queue — summarize the whole change on its own diff and take the human merge approval (merge / rework / pause). Integration review happens later, at the head of the queue.
 drivers: [impty]
 output:
