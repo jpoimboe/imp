@@ -696,11 +696,10 @@ def test_refresh_status_no_output_on_non_tty() -> None:
     assert drv._prev_prose is True   # untouched
 
 
-def test_user_message_resets_status_span() -> None:
-    """The status-line elapsed timer measures 'time the agent has been working
-    since the last user reply' — across tools, thinks, and multiple
-    llm_responses within one interactive turn. So `restart_span()` fires on
-    `step_started` AND on `user_message`."""
+def test_status_span_restarts_on_prose_turns_steps_and_user_replies() -> None:
+    """The status timer measures the agent's working burst since it last spoke.
+    restart_span() fires on step_started, user_message, AND a genuine prose
+    llm_response — but NOT on an empty-text (tool-use-carrier) llm_response."""
     calls: list[str] = []
 
     class _CountingStatus(LiveStatus):
@@ -714,19 +713,20 @@ def test_user_message_resets_status_span() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),
-        ev("3", "tool_call", agent_id="a", id="b1", name="bash", input={}),
-        ev("4", "tool_result", agent_id="a", id="b1", content="ok"),
-        ev("5", "thinking", agent_id="a", content="hmm"),
+           model="m", provider="anthropic"),                              # restart
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "tool_use", "id": "t", "name": "bash",
+                             "input": {}}]}, usage={}),                    # NO restart (no prose)
+        ev("4", "tool_call", agent_id="a", id="t", name="bash", input={}),
+        ev("5", "tool_result", agent_id="a", id="t", content="ok"),
         ev("6", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),
-        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),
+           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),  # restart (prose)
+        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),  # restart
         ev("8", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),
+           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),  # restart (prose)
     ]:
         drv.on_event(e)
-    # restart_span fired exactly at step_started (e2) and user_message (e7).
-    assert calls == ["restart", "restart"]
+    assert calls == ["restart", "restart", "restart", "restart"]
 
 
 def test_compose_status_colors_count_detail_label() -> None:

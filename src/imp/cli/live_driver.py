@@ -100,15 +100,20 @@ class LiveDriver:
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
-        if isinstance(event, dict) and event.get("type") in (
-                "step_started", "user_message"):
-            # §7: time-the-agent-working-since-the-last-user-reply. Reset on
-            # step_started AND user_message so the elapsed counter measures
-            # the current burst between user inputs (across tools, thinks, and
-            # multiple llm_response blocks within one interactive turn). Non-
-            # interactive runs never fire user_message, so today's per-step
-            # reset behavior is preserved as a side effect.
-            self._status.restart_span()
+        if isinstance(event, dict):
+            etype = event.get("type")
+            if etype in ("step_started", "user_message"):
+                # §7: time-the-agent-working-since-the-last-user-reply. Reset on
+                # step_started AND user_message so the elapsed counter measures
+                # the current burst between user inputs (across tools, thinks, and
+                # multiple llm_response blocks within one interactive turn). Non-
+                # interactive runs never fire user_message, so today's per-step
+                # reset behavior is preserved as a side effect.
+                self._status.restart_span()
+            elif etype == "llm_response":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and nv.llm_response_has_prose(payload):
+                    self._status.restart_span()
         self._walk()
         self._refresh_status()
 
