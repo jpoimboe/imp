@@ -1,7 +1,8 @@
-"""imp log / imp status against a journaled (merged, worktree-removed) Change.
+"""imp log / imp status / imp show against an ARCHIVED (merged,
+worktree-removed) Change.
 
-Mirrors executor._complete's journal-then-remove sequence by hand, then drives
-the CLI. No live providers needed.
+Seeds the per-Change archive directly (the sole read source for completed
+Changes), then drives the CLI. No live providers needed.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
 import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -16,50 +18,48 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.engine import worktree
+from imp.engine import archive, worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
-# A phase that renders through the narrative — the proof the journal was read.
+# A phase that renders through the narrative — the proof the archive was read.
 # (change_created emits no line now that the slug/title banner is gone, so we
 # need a real rendered node to assert on.)
-_JOURNAL_MARKER_PHASE = "summary"
+_MARKER_PHASE = "summary"
 
 
 def _seed_marker_phase(control: Path, slug: str) -> None:
     """Append a step_started event so the change has a node that renders through
-    the narrative — change_created emits no line now that the slug/title banner
-    is gone, so a log test needs a real rendered marker to assert on. Reuses the
-    change's own first-event timestamp so it never perturbs last-activity sorting.
-    Call BEFORE _complete_and_journal."""
+    the narrative. Reuses the change's own first-event timestamp so it never
+    perturbs last-activity sorting. Call BEFORE _complete_and_archive."""
     ch = Change.load(control, slug)
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "id": "marker", "agent_id": None,
             "timestamp": "2026-05-27T10:00:01+00:00",
             "type": "step_started",
-            "payload": {"step": "s", "kind": "agent", "phase": _JOURNAL_MARKER_PHASE,
+            "payload": {"step": "s", "kind": "agent", "phase": _MARKER_PHASE,
                         "model": "m", "provider": "anthropic"},
         }) + "\n")
 
 
-def _complete_and_journal(control: Path, slug: str) -> None:
-    """Flip the Change to completed, journal the three files, remove the
-    worktree — the exact set executor._complete writes on the merge path."""
+def _complete_and_archive(control: Path, slug: str, status: str = "completed") -> None:
+    """Flip the Change to <status>, archive its runtime snapshot, then remove the
+    worktree — the exact post-merge state imp log/status/show read from."""
     ch = Change.load(control, slug)
     st = State.load(ch.state_dir)
-    st.status = "completed"
+    st.status = status
     st.save(ch.state_dir)
-    worktree.journal_commit(control, slug, {
-        "events.jsonl": ch.events_path,
-        "change.json": ch.change_dir / "change.json",
-        "state.json": ch.state_dir / "state.json",
-    })
+    archive.archive_change(
+        control, slug,
+        events_path=ch.events_path,
+        change_json_path=ch.change_dir / "change.json",
+        state_json_path=ch.state_dir / "state.json")
     worktree.remove_worktree(control, slug)
 
 
-def test_log_falls_back_to_journal_after_merge(
+def test_log_reads_from_archive_after_merge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
@@ -67,8 +67,8 @@ def test_log_falls_back_to_journal_after_merge(
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Done Thing", change_id="done-thing", base_branch="main")
     _seed_marker_phase(tmp_path, "done-thing")
-    _complete_and_journal(tmp_path, "done-thing")
-    # Worktree is gone: Change.load now raises; log must use the journal.
+    _complete_and_archive(tmp_path, "done-thing")
+    # Worktree is gone: Change.load now raises; log must use the archive.
     assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
 
     monkeypatch.chdir(tmp_path)
@@ -79,7 +79,7 @@ def test_log_falls_back_to_journal_after_merge(
     with redirect_stdout(buf):
         rc = main(["log", "done-thing"])
     assert rc == 0
-    assert _JOURNAL_MARKER_PHASE in buf.getvalue()
+    assert _MARKER_PHASE in buf.getvalue()
 
 
 def test_log_unknown_slug_returns_rc_2(
@@ -97,7 +97,7 @@ def test_log_unknown_slug_returns_rc_2(
     assert "ghost" in capsys.readouterr().err
 
 
-def test_log_no_slug_falls_through_to_journal(
+def test_log_no_slug_resolves_archived(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
@@ -105,7 +105,7 @@ def test_log_no_slug_falls_through_to_journal(
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Only One", change_id="only-one", base_branch="main")
     _seed_marker_phase(tmp_path, "only-one")
-    _complete_and_journal(tmp_path, "only-one")
+    _complete_and_archive(tmp_path, "only-one")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -115,20 +115,20 @@ def test_log_no_slug_falls_through_to_journal(
     with redirect_stdout(buf):
         rc = main(["log"])  # no slug, no in-flight worktrees
     assert rc == 0
-    assert _JOURNAL_MARKER_PHASE in buf.getvalue()
+    assert _MARKER_PHASE in buf.getvalue()
 
 
-def test_status_shows_completed_section_from_journal(
+def test_status_shows_completed_section_from_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    # One in-flight, one merged-and-journaled.
+    # One in-flight, one merged-and-archived.
     Change.create(tmp_path, title="Live One", change_id="live-one", base_branch="main")
     Change.create(tmp_path, title="Gone One", change_id="gone-one", base_branch="main")
-    _complete_and_journal(tmp_path, "gone-one")
+    _complete_and_archive(tmp_path, "gone-one")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -144,22 +144,22 @@ def test_status_shows_completed_section_from_journal(
     assert "completed" in out
 
 
-def test_status_inflight_takes_precedence_over_journal(
+def test_status_inflight_takes_precedence_over_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """If a slug is BOTH a live worktree and in the journal (crash between
-    journal and remove), the completed section must not double-list it."""
+    """If a slug is BOTH a live worktree and archived (crash between archive and
+    worktree removal), the completed section must not double-list it."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Both", change_id="both", base_branch="main")
-    # Journal it but DON'T remove the worktree (simulates the crash window).
-    worktree.journal_commit(tmp_path, "both", {
-        "events.jsonl": ch.events_path,
-        "change.json": ch.change_dir / "change.json",
-        "state.json": ch.state_dir / "state.json",
-    })
+    # Archive it but DON'T remove the worktree (simulates the crash window).
+    archive.archive_change(
+        tmp_path, "both",
+        events_path=ch.events_path,
+        change_json_path=ch.change_dir / "change.json",
+        state_json_path=ch.state_dir / "state.json")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -172,39 +172,6 @@ def test_status_inflight_takes_precedence_over_journal(
     # The change appears only once (in-flight section wins; no duplicate in past).
     data_rows = [ln for ln in out.splitlines() if "both" in ln and "HANDLE" not in ln]
     assert len(data_rows) == 1
-
-
-def test_status_skips_malformed_journal_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A corrupt journaled state.json (valid otherwise-unreachable on-disk
-    corruption) must be skipped, not crash the whole `imp status` listing."""
-    import imp.cli.main as m
-
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="Good", change_id="good", base_branch="main")
-    _complete_and_journal(tmp_path, "good")
-    # A second journaled slug whose state.json is not valid JSON.
-    bad = tmp_path / ".imp" / "bad-state.json"
-    bad.write_text("{ not json")
-    good_change = tmp_path / ".imp" / "bad-change.json"
-    good_change.write_text('{"slug":"broken","title":"Broken"}')
-    worktree.journal_commit(tmp_path, "broken", {
-        "state.json": bad,
-        "change.json": good_change,
-    })
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-
-    completed = m._completed_rows(tmp_path)
-    assert [r[0] for r in completed] == ["good"]  # broken entry skipped
-    rc = m._cmd_status(type("NS", (), {"all": True})())
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "good" in out
-    assert "broken" not in out
 
 
 def test_sort_rows_newest_first() -> None:
@@ -222,7 +189,7 @@ def test_status_empty_prints_no_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """No in-flight worktrees + empty journal → exactly `No changes.\\n`."""
+    """No in-flight worktrees + empty archive → exactly `No changes.\n`."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -290,7 +257,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Gone", change_id="gone", base_branch="main")
-    _complete_and_journal(tmp_path, "gone")
+    _complete_and_archive(tmp_path, "gone")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -315,7 +282,7 @@ def test_status_all_dims_completed_section(
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Gone", change_id="gone", base_branch="main")
-    _complete_and_journal(tmp_path, "gone")
+    _complete_and_archive(tmp_path, "gone")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -329,35 +296,20 @@ def test_status_all_dims_completed_section(
     assert row.startswith("\x1b[2m") and row.endswith("\x1b[0m")
 
 
-def _abandon_and_journal(control: Path, slug: str) -> None:
-    """Flip the Change to abandoned + journal it, the way _abandon does (minus
-    the worktree teardown, which we trigger via remove_worktree below)."""
-    ch = Change.load(control, slug)
-    st = State.load(ch.state_dir)
-    st.status = "abandoned"
-    st.save(ch.state_dir)
-    worktree.journal_commit(control, slug, {
-        "events.jsonl": ch.events_path,
-        "change.json": ch.change_dir / "change.json",
-        "state.json": ch.state_dir / "state.json",
-    })
-    worktree.remove_worktree(control, slug)
-
-
 def test_status_hides_completed_and_abandoned_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Without --all, only in-flight Changes list; completed/abandoned Changes
-    (journal-backed history) are suppressed."""
+    (archive-backed history) are suppressed."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Live", change_id="live", base_branch="main")
     Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
     Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
-    _complete_and_journal(tmp_path, "done")
-    _abandon_and_journal(tmp_path, "dead")
+    _complete_and_archive(tmp_path, "done")
+    _complete_and_archive(tmp_path, "dead", status="abandoned")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -382,7 +334,7 @@ def test_status_all_dims_abandoned_section(
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
-    _abandon_and_journal(tmp_path, "dead")
+    _complete_and_archive(tmp_path, "dead", status="abandoned")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -470,13 +422,7 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
 
 
 def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
-    import io
-    import json as _json
-    import subprocess
-    from contextlib import redirect_stdout
-
     import imp.cli.main as m
-    from imp.engine import archive, worktree
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
@@ -488,25 +434,14 @@ def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
         '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
         '"payload":{"id":"arch01"}}\n')
     cj = tmp_path / "c.json"
-    cj.write_text(_json.dumps({
+    cj.write_text(json.dumps({
         "id": "arch01", "title": "Arch", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(_json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
     archive.archive_change(
         tmp_path, "arch01", events_path=events,
         change_json_path=cj, state_json_path=sj)
-
-    # Seed a DECOY journal entry with divergent status and NO events.jsonl so
-    # _resolve_id finds the id while the archive supplies the real bytes.
-    # If the journal were preferred, status would be "running" (not "completed"),
-    # and events would be absent.
-    decoy_state = tmp_path / "decoy-state.json"
-    decoy_state.write_text(_json.dumps({"id": "arch01", "status": "running"}))
-    decoy_change = tmp_path / "decoy-change.json"
-    decoy_change.write_text(_json.dumps({"id": "arch01", "title": "Arch"}))
-    worktree.journal_commit(tmp_path, "arch01", {
-        "state.json": decoy_state, "change.json": decoy_change})
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
@@ -554,13 +489,8 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
 
 
 def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None:
-    import json as _json
-    import subprocess
-
     import imp.cli.main as m
-    from imp.engine import archive
 
-    # Set up a minimal git repo (not via _seed_control — no conftest dep needed).
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
@@ -575,25 +505,14 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
         '"payload":{"step":"plan-writer","phase":"plan"}}\n'
     )
     cj = tmp_path / "c.json"
-    cj.write_text(_json.dumps({
+    cj.write_text(json.dumps({
         "id": "logtest", "title": "Log Test", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(_json.dumps({"id": "logtest", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "logtest", "status": "completed", "step": None}))
     archive.archive_change(
         tmp_path, "logtest", events_path=events,
         change_json_path=cj, state_json_path=sj)
-
-    # Seed a decoy journal entry with a different event type so we can tell which
-    # source _load_events_for_id prefers. If the journal were preferred, the output
-    # would mention "abandoned" instead of "plan-writer".
-    decoy = tmp_path / "decoy.jsonl"
-    decoy.write_text(
-        '{"id":"d-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_abandoned",'
-        '"payload":{}}\n'
-    )
-    worktree.journal_commit(tmp_path, "logtest", {"events.jsonl": decoy})
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
@@ -601,18 +520,32 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
         rc = m.main(["log", "logtest"])
     out = buf.getvalue()
     assert rc == 0, out
-    assert "plan-writer" in out    # from archive blob, not from decoy journal
-    assert "abandoned" not in out  # decoy journal event must NOT appear
+    assert "plan-writer" in out    # rendered from the archive events blob
 
 
-def test_status_all_lists_archived_and_legacy(tmp_path, monkeypatch) -> None:
-    import io
-    import json as _json
-    from contextlib import redirect_stdout
-
+def test_change_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
+    """After abandon (permanent change home rmtree'd, worktree gone), _change_meta
+    resolves the Change's metadata from the archive record, not the retired journal."""
     import imp.cli.main as m
-    from imp.engine import archive, worktree
-    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Meta One", change_id="meta-one",
+                  base_branch="main")
+    home = tmp_path / ".imp" / "changes" / "meta-one"
+    assert (home / "change.json").exists()
+    _complete_and_archive(tmp_path, "meta-one")
+    shutil.rmtree(home)                       # abandon path: permanent home gone
+    assert not home.exists()
+    assert not (tmp_path / ".imp" / "worktrees" / "meta-one").exists()
+
+    meta = m._change_meta(tmp_path, "meta-one")
+    assert meta is not None
+    assert meta["base_branch"] == "main"
+    assert meta["title"] == "Meta One"
+
+
+def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
+    import imp.cli.main as m
 
     _seed_control(tmp_path)
 
@@ -622,28 +555,14 @@ def test_status_all_lists_archived_and_legacy(tmp_path, monkeypatch) -> None:
         '{"id":"x-e0","timestamp":"2026-06-02T00:00:00+00:00",'
         '"type":"change_created","payload":{}}\n')
     cj = tmp_path / "c.json"
-    cj.write_text(_json.dumps({
+    cj.write_text(json.dumps({
         "id": "arch01", "title": "Archived One", "base_branch": "main",
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(_json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
     archive.archive_change(
         tmp_path, "arch01", events_path=events,
         change_json_path=cj, state_json_path=sj)
-
-    # A legacy journaled completed Change (transition window).
-    levents = tmp_path / "le.jsonl"
-    levents.write_text(
-        '{"id":"l-e0","timestamp":"2026-06-01T00:00:00+00:00",'
-        '"type":"change_created","payload":{}}\n')
-    lcj = tmp_path / "lc.json"
-    lcj.write_text(_json.dumps({
-        "id": "leg01", "title": "Legacy One", "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    lsj = tmp_path / "ls.json"
-    lsj.write_text(_json.dumps({"id": "leg01", "status": "completed", "step": None}))
-    worktree.journal_commit(tmp_path, "leg01", {
-        "events.jsonl": levents, "change.json": lcj, "state.json": lsj})
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
@@ -651,6 +570,4 @@ def test_status_all_lists_archived_and_legacy(tmp_path, monkeypatch) -> None:
         assert m.main(["status", "--all"]) == 0
     out = buf.getvalue()
     assert "arch01" in out
-    assert "leg01" in out
     assert "Archived One" in out
-    assert "Legacy One" in out

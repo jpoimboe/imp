@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine import backlog, journal
+from imp.engine import backlog
 
 
 def test_write_read_roundtrip(tmp_path: Path) -> None:
@@ -48,24 +48,6 @@ def test_remove_record(tmp_path: Path) -> None:
 
 def test_remove_record_nonexistent_is_safe(tmp_path: Path) -> None:
     backlog.remove_record(tmp_path, "nope00")  # must not raise
-
-
-def test_readiness_all_deps_merged(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        journal, "journal_ids",
-        lambda cr: ["dep001", "dep002"])
-    ready, unmerged = backlog.readiness(
-        tmp_path, ["dep001", "dep002"])
-    assert ready is True
-    assert unmerged == []
-
-
-def test_readiness_blocked_names_absent_deps(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(journal, "journal_ids", lambda cr: ["dep001"])
-    ready, unmerged = backlog.readiness(
-        tmp_path, ["dep001", "missing"])
-    assert ready is False
-    assert unmerged == ["missing"]
 
 
 def test_readiness_no_deps_is_ready(tmp_path: Path) -> None:

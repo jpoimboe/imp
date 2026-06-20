@@ -71,8 +71,7 @@ def remove_record(control_root: Path, change_id: str) -> None:
 
 def readiness(control_root: Path, depends_on: list[str]) -> tuple[bool, list[str]]:
     """Returns (ready, unmerged_ids). Ready iff every dep id is present in the
-    archive (the index `changes` table, unioned with the legacy refs/imp/journal
-    during the transition window)."""
+    archive (the index `changes` table)."""
     unmerged = [d for d in depends_on
                 if not archive_read.is_archived(control_root, d)]
     return (not unmerged, unmerged)

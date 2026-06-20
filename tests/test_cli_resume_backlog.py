@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main
-from imp.engine import backlog, journal
+from imp.engine import backlog
 from tests.conftest import _seed_control
 
 
@@ -68,8 +68,6 @@ async def test_resume_backlog_warns_on_blocked(
     backlog.write_record(tmp_path, change_id="2026-06-16-bkg333", title="X",
                          description="b", depends_on=["2026-06-16-missing"],
                          created_by="human")
-    monkeypatch.setattr(journal, "journal_ids", lambda cr: [])
-
     async def _fake_run(change, *, args, seed_opening):
         return 0
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import imp.cli.main as m
+from imp.engine import archive
 
 
 def test_resume_gone_abandoned(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -35,14 +37,21 @@ def test_resume_gone_unknown_keeps_no_match(monkeypatch, tmp_path: Path, capsys)
     assert out == ""
 
 
-def test_journal_status_reads_status_field(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        m.journal, "journal_show",
-        lambda control, cid, name: b'{"status":"completed","step":"merge"}'
-        if name == "state.json" else None)
+def test_journal_status_reads_status_field(tmp_path: Path) -> None:
+    events = tmp_path / "e.jsonl"
+    events.write_text("")
+    cj = tmp_path / "c.json"
+    cj.write_text(json.dumps({
+        "id": "2026-06-01-xyz999", "title": "X", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(json.dumps({
+        "id": "2026-06-01-xyz999", "status": "completed", "step": "merge"}))
+    archive.archive_change(
+        tmp_path, "2026-06-01-xyz999", events_path=events,
+        change_json_path=cj, state_json_path=sj)
     assert m._journal_status(tmp_path, "2026-06-01-xyz999") == "completed"
 
 
-def test_journal_status_absent_returns_none(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(m.journal, "journal_show", lambda control, cid, name: None)
+def test_journal_status_absent_returns_none(tmp_path: Path) -> None:
     assert m._journal_status(tmp_path, "x") is None

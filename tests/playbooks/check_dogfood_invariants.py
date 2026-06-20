@@ -110,12 +110,6 @@ def check_no_artifacts_on_code_branch(repo: str, base: str) -> Result:
                   f"branch: {_fmt(artifacts)}")
 
 
-def journal_ids(repo: str) -> list[str]:
-    """Legacy journal ids from refs/imp/journal (transition window only)."""
-    out = _git(repo, "ls-tree", "--name-only", "refs/imp/journal").stdout
-    return [ln.strip() for ln in out.splitlines() if ln.strip()]
-
-
 def archived_change_ids(repo: str) -> list[str]:
     """Change ids from the archive index (new primary store)."""
     db = os.path.join(repo, ".imp", "archive", "index.db")

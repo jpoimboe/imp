@@ -247,39 +247,6 @@ def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
 
 
-def test_journal_append_and_accumulate(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    stage = tmp_path / ".imp"
-    stage.mkdir(exist_ok=True)  # gitignored by _init_repo
-    f1 = stage / "events.jsonl"
-    f1.write_text('{"e":1}\n')
-    f2 = stage / "change.json"
-    f2.write_text('{"slug":"one"}')
-
-    # First journaled Change: ref does not exist yet -> root commit, no -p.
-    wt.journal_commit(tmp_path, "one", {"events.jsonl": f1, "change.json": f2})
-    assert _git(tmp_path, "show", "refs/imp/journal:one/change.json").stdout == '{"slug":"one"}'
-
-    # Second Change accumulates under its own slug dir.
-    f3 = stage / "two.jsonl"
-    f3.write_text('{"e":2}\n')
-    wt.journal_commit(tmp_path, "two", {"events.jsonl": f3})
-    assert _git(tmp_path, "show", "refs/imp/journal:two/events.jsonl").stdout == '{"e":2}\n'
-    assert _git(tmp_path, "show", "refs/imp/journal:one/change.json").returncode == 0
-    # Journal never touches base's working tree.
-    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
-
-
-def test_journal_not_on_code_history(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    f1 = tmp_path / "events.jsonl"
-    f1.write_text("x\n")
-    wt.journal_commit(tmp_path, "one", {"events.jsonl": f1})
-    # Orphan: no shared ancestor with main.
-    base = _git(tmp_path, "merge-base", "main", "refs/imp/journal").returncode
-    assert base != 0
-
-
 def _make_worktree_and_check(root, slug="probe") -> bool:
     """True iff a fresh worktree off base HEAD ignores .imp/."""
     wt.create_worktree(root, slug, "main")
@@ -364,9 +331,6 @@ def test_artifact_commit_writes_flat_and_accumulates(tmp_path: Path) -> None:
     assert "feat/" not in _git(tmp_path, "ls-tree", "--name-only",
                                "refs/imp/journal-wip/feat").stdout
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
-    # The shared journal ref is NOT touched by an artifact commit.
-    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
-                "refs/imp/journal").returncode != 0
 
 
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:

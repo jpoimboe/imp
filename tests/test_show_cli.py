@@ -1,4 +1,4 @@
-"""imp show reads live artifacts, then falls back to the journal after merge."""
+"""imp show reads live artifacts, then the archive after merge."""
 from __future__ import annotations
 
 import io
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.engine import worktree
+from imp.engine import archive, worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -245,13 +245,21 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
         {"spec/ghost01.md": spec,
          "plans/ghost01-plan-1.md": p1, "plans/ghost01-plan-2.md": p2},
         message="artifact: ghost")
-    # Seed a journal entry (events only — NOT artifacts) so `_resolve_id` finds the
+    # Seed the archive runtime (events/change/state) so `_resolve_id` finds the
     # id while the artifacts remain reachable solely via the wip ref.
-    legacy = tmp_path / "legacy.jsonl"
-    legacy.write_text(
+    events = tmp_path / "ghost-events.jsonl"
+    events.write_text(
         '{"id":"ghost01","timestamp":"2026-06-01T00:00:00+00:00",'
         '"type":"change_created","payload":{}}\n')
-    worktree.journal_commit(tmp_path, "ghost01", {"events.jsonl": legacy})
+    cj = tmp_path / "ghost-change.json"
+    cj.write_text(json.dumps({
+        "id": "ghost01", "title": "Ghost", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "ghost-state.json"
+    sj.write_text(json.dumps({"id": "ghost01", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "ghost01", events_path=events,
+        change_json_path=cj, state_json_path=sj)
 
     assert "WIP-ONLY SPEC" in _run(monkeypatch, tmp_path, "show", "ghost01", "spec")
     out = _run(monkeypatch, tmp_path, "show", "ghost01", "plan")

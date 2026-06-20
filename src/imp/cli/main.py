@@ -40,9 +40,8 @@ from imp.cli.session_run import (
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
-from imp.engine import backlog, journal, recovery, worktree
+from imp.engine import backlog, recovery, worktree
 from imp.engine.abandon import tear_down_change
-from imp.engine.archive import migrate as archive_migrate
 from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
@@ -1119,8 +1118,7 @@ def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
 
 def _show_newest_plan_rel(control: Path, change_id: str) -> str | None:
     """plans/<id>-plan-N.md for the highest N: live worktree first, then the
-    retained wip ref, then the legacy journal (during the transition window).
-    Returns None when no plan exists anywhere."""
+    retained wip ref. Returns None when no plan exists anywhere."""
     live_dir = _change_home(control, change_id) / "artifacts" / "plans"
     if live_dir.is_dir():
         pick = archive_read.pick_newest_plan(
@@ -1178,7 +1176,7 @@ def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
     if (cdir / "change.json").exists():
         raw = (cdir / "change.json").read_bytes()
     else:
-        raw = journal.journal_show(control, change_id, "change.json")
+        raw = archive_read.read_change_json(control, change_id)
     if raw is None:
         return None
     try:
@@ -1303,9 +1301,9 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
     """Worktree first, archive second. Returns None if the id is in neither.
 
     Worktree-first is necessary, not merely preferred: an id lives in exactly
-    one place (journal_commit runs once, concurrent with worktree removal), so
-    the only overlap is a crash mid-sequence where worktree-first harmlessly
-    returns identical content."""
+    one place (the archive snapshot is written once, concurrent with worktree
+    removal), so the only overlap is a crash mid-sequence where worktree-first
+    harmlessly returns identical content."""
     try:
         change = Change.load(control, change_id)
     except LoadError:
@@ -1541,11 +1539,11 @@ _Row = tuple[str, str, str, str, str, str]
 def _status_row(change_id: str, state_json: bytes, change_json: bytes,
                 last_activity: str) -> _Row | None:
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
-    by either worktree file bytes or journal_show bytes. The journaled
-    state.json and change.json are schema-identical to the in-flight ones (both
-    written by State.save / Change.create), so the two sections can't silently
-    drift. Returns None on malformed/incomplete JSON so a single corrupt entry
-    can't crash the whole `imp status` listing (callers skip None)."""
+    by either worktree file bytes or archive bytes. The archived state.json and
+    change.json are schema-identical to the in-flight ones (both written by
+    State.save / Change.create), so the two sections can't silently drift.
+    Returns None on malformed/incomplete JSON so a single corrupt entry can't
+    crash the whole `imp status` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)
@@ -1611,30 +1609,14 @@ def _status_rows(control: Path) -> list[_Row]:
 
 
 def _completed_rows(control: Path) -> list[_Row]:
-    """Completed/abandoned Changes NOT currently surfaced in-flight. Archived rows
-    come from a SINGLE indexed query (spec AC 7); legacy journaled ids are folded
-    in via the transition fan-out until the importer retires refs/imp/journal."""
+    """Completed/abandoned Changes NOT currently surfaced in-flight, from a
+    SINGLE indexed archive query (spec AC 7)."""
     live = {r[0] for r in _status_rows(control)}
     rows: list[_Row] = []
-    seen: set[str] = set()
     for row in archive_read.completed_rows(control):
         if row[0] in live or row[1] in _INFLIGHT:
             continue
         rows.append(row)
-        seen.add(row[0])
-    for change_id in journal.journal_ids(control):
-        if change_id in live or change_id in seen:
-            continue
-        state_json = journal.journal_show(control, change_id, "state.json")
-        change_json = journal.journal_show(control, change_id, "change.json")
-        if state_json is None or change_json is None:
-            continue
-        last = _journal_last_iso(control, change_id) or ""
-        jrow = _status_row(change_id, state_json, change_json, last)
-        if jrow is None or jrow[1] in _INFLIGHT:
-            continue
-        rows.append(jrow)
-        seen.add(change_id)
     return rows
 
 
@@ -1763,10 +1745,10 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
              input_fn: Callable[[str], str] = input) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
-    Order is pinned by git (spec §2): journal BEFORE worktree removal (records
-    live inside the worktree); `git branch -D` AFTER (git refuses to delete a
-    branch checked out in a worktree). Idempotent / crash-tolerant: re-running
-    after any mid-sequence crash converges."""
+    Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
+    worktree removal (records live inside the worktree); `git branch -D` AFTER
+    (git refuses to delete a branch checked out in a worktree). Idempotent /
+    crash-tolerant: re-running after any mid-sequence crash converges."""
     try:
         change = Change.load(control, change_id)
     except (LoadError, LoadErrors):
@@ -1888,42 +1870,6 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
     return _abandon(control, change_id, assume_yes=args.yes)
-
-
-def _cmd_migrate_journal(
-    args: argparse.Namespace, *,
-    input_fn: Callable[[str], str] = input,
-    interactive: bool | None = None,
-) -> int:
-    control = _control_root()
-    ids = journal.journal_ids(control)
-    if not ids:
-        print("imp: refs/imp/journal is absent or empty; nothing to migrate.")
-        return 0
-    print(f"About to migrate {len(ids)} Change(s) from refs/imp/journal into the "
-          "archive, then retire the ref.")
-    print("Confirm that no in-flight Changes remain (drain them first).")
-    do_prompt = not args.yes and (
-        _interactive() if interactive is None else interactive)
-    if do_prompt:
-        try:
-            ans = input_fn(
-                "Type 'y' to confirm, anything else to cancel: ").strip().lower()
-        except EOFError:
-            ans = ""
-        if ans not in ("y", "yes"):
-            print("Migration cancelled; refs/imp/journal left intact.")
-            return 1
-    imported = archive_migrate.import_journal(control)
-    if len(imported) != len(ids):
-        skipped = sorted(set(ids) - set(imported))
-        print(f"imp: {len(skipped)} Change(s) could not be imported "
-              f"({', '.join(skipped)}); refs/imp/journal NOT retired. "
-              "Investigate the skipped Change(s) before retrying.")
-        return 1
-    archive_migrate.retire_journal(control)
-    print(f"Migrated {len(imported)} Change(s); refs/imp/journal retired.")
-    return 0
 
 
 def _cmd_artifact_commit(args: argparse.Namespace) -> int:
@@ -2247,7 +2193,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show a Change's spec, plan, review, events, or status.",
         description=(
             "Print one artifact of a Change. Reads the live worktree files while "
-            "the Change is in flight, and falls back to the journal once it is "
+            "the Change is in flight, and falls back to the archive once it is "
             "merged and the worktree is gone."),
     )
     p_show.add_argument("token", help="Change id or its short token.")
@@ -2312,16 +2258,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
-
-    p_migrate = sub.add_parser(
-        "migrate-journal",
-        help="Import the legacy refs/imp/journal into the archive and retire the ref",
-    )
-    p_migrate.add_argument(
-        "-y", "--yes", action="store_true",
-        help="Skip the confirmation prompt",
-    )
-    p_migrate.set_defaults(func=_cmd_migrate_journal)
 
     p_artifact = sub.add_parser(
         "artifact-commit",

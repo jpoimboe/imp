@@ -360,14 +360,6 @@ def _commit_files_to_ref(
                            capture_output=True, text=True)
 
 
-def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
-    """Append one commit to refs/imp/journal (spec §4, §6); files land under
-    <id>/ in the journal tree. Thin wrapper over the generalized writer."""
-    _commit_files_to_ref(
-        control_root, ref="refs/imp/journal", prefix=f"{change_id}/",
-        files=files, message=f"journal: {change_id}")
-
-
 def artifact_commit(
     control_root: Path, change_id: str, files: Mapping[str, Path], *, message: str,
 ) -> None:

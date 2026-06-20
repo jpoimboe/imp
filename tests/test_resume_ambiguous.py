@@ -1,22 +1,29 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 import imp.cli.main as m
+from imp.engine import archive
 
 
-def test_row_for_id_from_journal(monkeypatch, tmp_path: Path) -> None:
-    def fake_show(control, cid, name):
-        if name == "state.json":
-            return b'{"status":"completed","step":"merge"}'
-        if name == "change.json":
-            return b'{"title":"Done","created_at":"2026-06-01T00:00:00+00:00"}'
-        return None
-
-    monkeypatch.setattr(m.journal, "journal_show", fake_show)
-    monkeypatch.setattr(m, "_journal_last_iso", lambda c, i: "2026-06-05T00:00:00+00:00")
+def test_row_for_id_from_archive(tmp_path: Path) -> None:
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"timestamp":"2026-06-05T00:00:00+00:00","type":"change_created",'
+        '"payload":{}}\n')
+    cj = tmp_path / "c.json"
+    cj.write_text(json.dumps({
+        "id": "2026-06-01-xyz999", "title": "Done", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(json.dumps({
+        "id": "2026-06-01-xyz999", "status": "completed", "step": "merge"}))
+    archive.archive_change(
+        tmp_path, "2026-06-01-xyz999", events_path=events,
+        change_json_path=cj, state_json_path=sj)
     row = m._row_for_id(tmp_path, "2026-06-01-xyz999")
     assert row == ("2026-06-01-xyz999", "completed", "merge",
                    "2026-06-05T00:00:00+00:00", "Done", "2026-06-01T00:00:00+00:00")
