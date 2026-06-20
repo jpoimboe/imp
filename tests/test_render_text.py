@@ -1360,7 +1360,39 @@ def test_call_args_line_strips_mcp_prefix_from_tool_name() -> None:
     assert "mcp__" not in out
 
 
-def test_retried_subagent_shows_retrying_annotation() -> None:
+def test_subagent_suspended_structured_kind_renders_interrupted() -> None:
+    # Structured kind="interrupted" wins over the is_error->(failed) fallback.
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="SubagentSuspended: subagent paused", error=True,
+            kind="interrupted"),
+    ]))
+    assert "(interrupted)" in out
+    assert "(failed)" not in out
+
+
+def test_subagent_suspended_bracket_marker_renders_interrupted() -> None:
+    # Bracketed [interrupted] marker in is_error content classifies as interrupted.
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="SubagentSuspended: subagent paused [interrupted]", error=True),
+    ]))
+    assert "(interrupted)" in out
+    assert "(failed)" not in out
+
+
+def test_abnormal_then_healthy_same_name_subagent_shows_no_retrying() -> None:
+    # a same-name subagent re-dispatched under the SAME opener
+    # after an abnormal close must NOT inherit a "retrying (n)" tag. The first close
+    # still shows its terminal (failed) tag; the second healthy row is clean.
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -1373,27 +1405,8 @@ def test_retried_subagent_shows_retrying_annotation() -> None:
         _ev("6", "tool_result", agent_id="step:p/s", id="b2",
             content='{"status": "Success"}', error=False),
     ]))
-    assert "(failed)" in out          # the first attempt is still marked failed
-    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
-
-
-def test_retried_subagent_after_interrupted_shows_retrying_annotation() -> None:
-    # An interrupted (not errored) first attempt still bumps the failure counter,
-    # so the re-dispatch is annotated "retrying (2)".
-    out = "\n".join(_lines([
-        _ev("2", "step_started", step="s", kind="agent", phase="p",
-            model="m", provider="anthropic"),
-        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
-            input={"subagent_name": "reviewer"}),
-        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
-            content="runner cancelled", error=False, kind="interrupted"),
-        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
-            input={"subagent_name": "reviewer"}),
-        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
-            content='{"status": "Success"}', error=False),
-    ]))
-    assert "(interrupted)" in out     # first attempt is marked interrupted
-    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+    assert "(failed)" in out          # the abnormal first close still reads (failed)
+    assert "retrying" not in out      # but no retry annotation anywhere
 
 
 def test_parallel_same_name_subagents_not_marked_retrying() -> None:

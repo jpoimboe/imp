@@ -194,6 +194,7 @@ class EventLog(Protocol):
                            block: Any,
                            citations: list[dict[str, Any]] | None = None,
                            id_ns: str | None = None,
+                           kind: str | None = None,
                            ) -> dict[str, Any]: ...
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -320,6 +321,7 @@ class _BaseEventLog:
                            block: Any,
                            citations: list[dict[str, Any]] | None = None,
                            id_ns: str | None = None,
+                           kind: str | None = None,
                            ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "id": block.tool_use_id, "content": block.content,
@@ -333,6 +335,8 @@ class _BaseEventLog:
         # on legacy and non-task results so the ordered two-dict probe still fires.
         if id_ns is not None:
             payload["id_ns"] = id_ns
+        if kind is not None:
+            payload["kind"] = kind
         return self._emit(agent_id=agent_id, type="tool_result", payload=payload)
 
     def append(self, *, agent_id: str | None, type: str,

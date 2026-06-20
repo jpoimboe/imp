@@ -447,6 +447,44 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
     assert len(results) == 1
     assert results[0]["payload"]["error"] is True
     assert results[0]["payload"]["id_ns"] == "block"
+    assert "kind" not in results[0]["payload"]
+
+
+@pytest.mark.anyio
+async def test_wrap_task_suspension_marks_result_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # a subagent-origin pause cannot unwind the SDK loop, so
+    # dispatch_task's SubagentSuspended degrades to an is_error task tool_result.
+    # That degraded result must carry a structured kind="interrupted" so the
+    # renderer classifies the fold as (interrupted), not (failed).
+    import imp.providers.claude_code as cc_mod
+    from imp.agents.subagents import SubagentSuspended, make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.coordinator = None
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    async def _suspend(ctx2, name, desc, *, tool_call_event_id="", tier=None, **kwargs):
+        raise SubagentSuspended("subagent paused")
+
+    monkeypatch.setattr(cc_mod, "dispatch_task", _suspend)
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    with pytest.raises(SubagentSuspended):
+        await wrapped({"subagent_name": "sub", "task_description": "do",
+                       "__tool_use_id__": ""})
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["kind"] == "interrupted"
 
 
 @pytest.mark.anyio
