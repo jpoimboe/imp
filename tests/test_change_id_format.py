@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-from imp.engine.slug import new_change_id
+from imp.engine.change_id import new_change_id
 
 _ID_RE = re.compile(r"^[a-z0-9]{6}$")
 

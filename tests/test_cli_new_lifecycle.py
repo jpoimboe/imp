@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from imp.engine.change import Change
-from imp.engine.slug import new_change_id
+from imp.engine.change_id import new_change_id
 from tests.conftest import _seed_control
 
 _ID_RE = re.compile(r"[a-z0-9]{6}")

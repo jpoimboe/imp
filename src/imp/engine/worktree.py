@@ -373,7 +373,7 @@ def artifact_commit(
 ) -> None:
     """Append one commit to the per-change artifact lineage
     refs/imp/journal-wip/<id>, accumulating on the prior wip tip. Files sit FLAT
-    at the wip tree root (e.g. spec/<slug>.md, plans/<slug>-plan-N.md)."""
+    at the wip tree root (e.g. spec/<id>.md, plans/<id>-plan-N.md)."""
     _commit_files_to_ref(
         control_root, ref=f"refs/imp/journal-wip/{change_id}", prefix="",
         files=files, message=message)

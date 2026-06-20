@@ -4,7 +4,7 @@ from typing import Any
 
 from imp.agents.tools import imp_tool
 from imp.engine import backlog
-from imp.engine.slug import new_change_id
+from imp.engine.change_id import new_change_id
 from imp.engine.state import JsonlEventLog
 
 

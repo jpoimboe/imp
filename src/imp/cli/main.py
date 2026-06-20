@@ -44,10 +44,10 @@ from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
+from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import new_change_id
 from imp.engine.state import LockHeld, State
 from imp.engine.workflow_lifecycle import (
     DriftState,
@@ -747,7 +747,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         opening_intent = opening_text
 
     change_id = new_change_id()
-    # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
+    # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:

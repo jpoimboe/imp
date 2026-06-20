@@ -289,8 +289,9 @@ async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.resolved_tiers = {"medium": ProviderModel("openai", "gpt-5.2")}
 
     await dispatch_task(ctx, "reviewer", "review please")
@@ -315,8 +316,9 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     await dispatch_task(ctx, "reviewer", "go")
     inv = capture["inv"]
@@ -381,8 +383,9 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
     ctx.resolved_tiers = {
         "medium": ProviderModel("openai", "gpt-5.2"),     # frontmatter target
@@ -420,8 +423,9 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
     ctx.resolved_tiers = {
         "medium": ProviderModel("openai", "gpt-5.2"),
@@ -459,8 +463,9 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
     ctx.resolved_tiers = {
         "medium": ProviderModel("openai", "gpt-5.2"),
@@ -485,8 +490,9 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("low", "high")
     ctx.resolved_tiers = {"high": ProviderModel("anthropic", "opus")}
 
@@ -513,8 +519,9 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.change_context = ChangeContext(
+        handle="test", id="test", title="Test", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("low", "medium", "high")
     ctx.resolved_tiers = {
         "low": ProviderModel("anthropic", "claude-haiku-4-5-20251001"),
