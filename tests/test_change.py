@@ -65,7 +65,8 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="X", change_id="zzz999", base_branch="main")
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert set(meta) == {"id", "title", "base_branch", "created_at",
-                         "depends_on", "project_root", "materialized"}
+                         "depends_on", "project_root", "materialized",
+                         "layout_version", "imp_commit"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
