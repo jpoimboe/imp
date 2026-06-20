@@ -1,4 +1,4 @@
-"""Read side of the per-Change archive: unions index/record/blob with the legacy journal."""
+"""Read side of the per-Change archive: index/record/blob store."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import re
 import subprocess
 from pathlib import Path
 
-from imp.engine import journal
 from imp.engine.archive import blobs_root, index, index_path, record, records_root
 from imp.engine.archive.blobstore import LocalBlobStore
 
@@ -24,21 +23,18 @@ def _read_index_ids(control_root: Path) -> list[str]:
 
 
 def archived_ids(control_root: Path) -> list[str]:
-    ids = set(_read_index_ids(control_root))
-    ids.update(journal.journal_ids(control_root))
-    return sorted(ids)
+    return sorted(_read_index_ids(control_root))
 
 
 def is_archived(control_root: Path, change_id: str) -> bool:
     db = index_path(control_root)
-    if db.exists():
-        conn = index.connect(db)
-        try:
-            if index.has_change(conn, change_id):
-                return True
-        finally:
-            conn.close()
-    return change_id in journal.journal_ids(control_root)
+    if not db.exists():
+        return False
+    conn = index.connect(db)
+    try:
+        return index.has_change(conn, change_id)
+    finally:
+        conn.close()
 
 
 def completed_rows(
@@ -56,29 +52,27 @@ def completed_rows(
 
 def read_events(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
-    if rec is not None:
-        blob = LocalBlobStore(blobs_root(control_root)).get(rec["events_hash"])
-        if blob is not None:
-            return blob
-    return journal.journal_show(control_root, change_id, "events.jsonl")
+    if rec is None:
+        return None
+    return LocalBlobStore(blobs_root(control_root)).get(rec["events_hash"])
 
 
 def read_state_json(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
-    if rec is not None:
-        return json.dumps(rec["final_state"]).encode("utf-8")
-    return journal.journal_show(control_root, change_id, "state.json")
+    if rec is None:
+        return None
+    return json.dumps(rec["final_state"]).encode("utf-8")
 
 
 def read_change_json(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
-    if rec is not None:
-        return json.dumps({
-            "id": rec["id"], "title": rec["title"], "base_branch": rec["base"],
-            "created_at": rec["created_at"], "depends_on": rec["depends_on"],
-            "materialized": True,
-        }).encode("utf-8")
-    return journal.journal_show(control_root, change_id, "change.json")
+    if rec is None:
+        return None
+    return json.dumps({
+        "id": rec["id"], "title": rec["title"], "base_branch": rec["base"],
+        "created_at": rec["created_at"], "depends_on": rec["depends_on"],
+        "materialized": True,
+    }).encode("utf-8")
 
 
 def _git_bytes(control_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
@@ -90,7 +84,7 @@ def read_artifact(control_root: Path, change_id: str, rel: str) -> bytes | None:
         control_root, "cat-file", "-p", f"refs/imp/journal-wip/{change_id}:{rel}")
     if wip.returncode == 0:
         return wip.stdout
-    return journal.journal_show(control_root, change_id, rel)
+    return None
 
 
 def pick_newest_plan(change_id: str, names: list[str]) -> str | None:
@@ -103,18 +97,17 @@ def pick_newest_plan(change_id: str, names: list[str]) -> str | None:
 
 
 def newest_plan_name(control_root: Path, change_id: str) -> str | None:
-    """Highest-N plan filename from the wip ref, else the legacy journal; bare filename."""
-    for treeish in (f"refs/imp/journal-wip/{change_id}:plans",
-                    f"refs/imp/journal:{change_id}/plans"):
-        proc = subprocess.run(
-            ["git", "ls-tree", "--name-only", treeish],
-            cwd=control_root, capture_output=True, text=True)
-        if proc.returncode == 0:
-            pick = pick_newest_plan(
-                change_id,
-                [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
-            if pick:
-                return pick
+    """Highest-N plan filename from the retained wip ref; bare filename."""
+    treeish = f"refs/imp/journal-wip/{change_id}:plans"
+    proc = subprocess.run(
+        ["git", "ls-tree", "--name-only", treeish],
+        cwd=control_root, capture_output=True, text=True)
+    if proc.returncode == 0:
+        pick = pick_newest_plan(
+            change_id,
+            [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
+        if pick:
+            return pick
     return None
 
 
