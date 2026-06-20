@@ -682,7 +682,7 @@ def _call_args_line(c: nv.ToolCall) -> str:
         tag = ""
     parts = []
     for k, v in (c.input or {}).items():
-        val = " ".join(str(v).split())    # collapse newlines/whitespace runs
+        val = _caret_escape(" ".join(str(v).split()))   # collapse, then neutralize
         if len(val) > _ARG_VALUE_CLIP:
             val = val[:_ARG_VALUE_CLIP] + "…"
         parts.append(f"{k}={val}")
@@ -751,7 +751,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
                               *pal.NODE_COLORS["tools"], gutters=gutters)
         result = c.result or ""
         if result:
-            src = result.split("\n")
+            src = _caret_escape(result).split("\n")
             shown = src[:_OUTPUT_MAX_LINES]
             clipped = [(ln[:_OUTPUT_LINE_CLIP] + "…") if len(ln) > _OUTPUT_LINE_CLIP
                        else ln for ln in shown]
@@ -768,7 +768,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
             # printed. When result is non-empty, align at the "→ " column; when
             # empty (footer-only shape), render without the arrow anchor so the
             # output reads cleanly without a stray "→ " prefix.
-            footer = c.citations_footer.lstrip("\n")
+            footer = _caret_escape(c.citations_footer).lstrip("\n")
             if result:
                 yield from _hang_wrap(footer, "→ ", width, depth + 1, color,
                                       *pal.NODE_COLORS["tools"], gutters=gutters)

@@ -1147,6 +1147,21 @@ def test_full_burst_empty_result_no_arrow_but_footer_renders() -> None:
     assert "Sources:" in out and "https://a.test" in out
 
 
+def test_full_burst_citation_footer_bel_becomes_caret() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="web_search",
+            input={"query": "x"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1", content="",
+            citations=[{"title": "ring\x07bell", "url": "https://a.test"}]),
+        _ev("6", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    assert "\x07" not in out
+    assert "^G" in out
+
+
 def test_full_burst_empty_burst_renders_nothing() -> None:
     burst = nv.ToolBurstFold(calls=[])
     lines = list(rt._render_burst(burst, depth=1, full=True, color=False, width=80))
@@ -1536,3 +1551,47 @@ def test_caret_escape_preserves_tab_newline_and_printable() -> None:
 
 def test_caret_escape_only_touches_control_bytes_in_mixed_string() -> None:
     assert rt._caret_escape("a\x07b\x1bc\nd") == "a^Gb^[c\nd"
+
+
+def test_full_tool_result_and_args_control_bytes_become_caret() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"cmd": "ring\x07now"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ring\x07null\x00esc\x1bdone", error=False),
+    ], full=True))
+    # color=False here, so the ONLY ESC byte that could appear is content ESC.
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "\x1b" not in out
+    assert "^G" in out and "^@" in out and "^[" in out   # caret notation present
+
+
+def test_full_tool_result_pyc_marshal_bytes_no_bel() -> None:
+    # live-view-attach-replay-style fixture: a tool result carrying .pyc marshal
+    # bytes (BEL/NUL/ESC) renders with zero raw BEL.
+    marshal = "\x07\x00\x63\x00\x00\x00\x1b\x08"
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="grep", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content=f"matched cache {marshal} bytecode", error=False),
+    ], full=True))
+    assert "\x07" not in out
+
+
+def test_colored_render_keeps_sgr_but_caret_escapes_content() -> None:
+    tree = nv.build_tree([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="beep\x07", error=False),
+    ])
+    out = "\n".join(render_tree(tree, full=True, color=True, width=80))
+    assert "\x1b[" in out        # imp's own SGR color codes survive (color not broken)
+    assert "\x07" not in out     # content BEL is escaped, not emitted raw
+    assert "^G" in out
