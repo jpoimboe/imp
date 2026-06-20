@@ -170,6 +170,8 @@ rather than deleting it. Measure twice, cut once.
  - Do not use a colon before tool calls. Your tool calls may not be shown directly in
    the output, so text like "Let me read the file:" followed by a read tool call
    should just be "Let me read the file." with a period.
+ - When you ask the user to choose among a fixed set of options, present them as a
+   numbered list (`1.`, `2.`, …) so they can reply with a single digit.
 
 # Text output (does not apply to tool calls)
 Assume users can't see most tool calls or thinking — only your text output. Before
