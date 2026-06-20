@@ -265,7 +265,7 @@ class Change:
         stored = meta.get("layout_version", 0)
         if stored != LAYOUT_VERSION:
             migrate(stored, LAYOUT_VERSION, change_dir)
-            # if migrate() succeeds, meta is now stale; re-read change.json before use
+            meta = json.loads((change_dir / "change.json").read_text())
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
             else (control_root / ".imp" / "worktrees" / change_id).resolve()
