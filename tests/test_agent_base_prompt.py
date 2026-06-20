@@ -95,3 +95,18 @@ def test_base_has_numbered_options_convention() -> None:
     assert "single digit" in low
     for banned in ("go live", "go-live", "build/park", "build now or save"):
         assert banned not in low, banned
+
+
+def test_base_has_recommendation_anchored_and_no_jargon_conventions() -> None:
+    low = _AGENT_BASE_PROMPT.lower()
+    # Recommendation-anchored yes/no convention (after the numbered-list rule).
+    assert "plain affirmative" in low
+    assert "declining is always implicitly available" in low
+    # The non-obvious-decline carve-out is stated as a follow-on, not a sibling option.
+    assert "follow-on to the question" in low
+    # No-internal-jargon convention, pairing with the narrate rule.
+    assert "complexity classes" in low
+    assert "phase or step ids" in low
+    assert "workflow variable names" in low
+    assert "internal tool names" in low
+    assert "describe the effect in plain language" in low
