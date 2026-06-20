@@ -470,7 +470,7 @@ def test_user_message_shown_in_live_on_tty_and_nontty() -> None:
     for e in events:
         drv.on_event(e)
     drv.finish()
-    assert "    do the thing" in out.getvalue()   # gutter turn, no caret
+    assert "> do the thing" in out.getvalue()   # caret turn
 
     # TTY live: prompt_toolkit erased its echo, so the driver reprints the turn.
     tout = _TTYPipe()
@@ -478,10 +478,10 @@ def test_user_message_shown_in_live_on_tty_and_nontty() -> None:
     for e in events:
         tdrv.on_event(e)
     tdrv.finish()
-    assert "    do the thing" in tout.getvalue()   # gutter turn, no caret
+    assert "> do the thing" in tout.getvalue()   # caret turn
 
     # imp log (no terminal echo) always renders the user turn.
-    assert "    do the thing" in "\n".join(_render_body(events))
+    assert "> do the thing" in "\n".join(_render_body(events))
 
 
 def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
