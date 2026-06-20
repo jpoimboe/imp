@@ -150,7 +150,8 @@ def test_seed_messages_named_carries_the_name(tmp_path: Path) -> None:
     assert len(blocks) == 1                       # single block, separator inside
     text = blocks[0].text
     assert text.startswith("<imp:begin/>")
-    assert "add-oauth-eee555" in text
+    assert "eee555" in text
+    assert "add-oauth" not in text               # no slug prefix — bare id only
     assert "\n\n" in text                         # token and name line kept apart
 
 

@@ -291,7 +291,7 @@ def _recover_phase(change: Change) -> str | None:
 
 
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
-    name = change.handle
+    name = change.id
     phase = _phase_from_events(list(change.event_log().read()))
     return name, phase, change.id
 
@@ -1677,7 +1677,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
 
-    token = change.handle
+    token = change.id
     do_prompt = not assume_yes and (
         _interactive() if interactive is None else interactive)
     if do_prompt:

@@ -61,7 +61,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     assert token == "qzbscf"
 
 
-def test_pause_facts_named_change_shows_handle(tmp_path: Path) -> None:
+def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
@@ -69,5 +69,6 @@ def test_pause_facts_named_change_shows_handle(tmp_path: Path) -> None:
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, _token = _pause_facts(change)
-    assert name == "add-version-flag-qzbscf"
+    name, _phase, token = _pause_facts(change)
+    assert name == "qzbscf"          # the bare id, not a slugified handle
+    assert token == "qzbscf"
