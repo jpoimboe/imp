@@ -858,7 +858,7 @@ def test_spec_writer_prompt_has_go_live_park_branch() -> None:
     assert "head_changed" in body                        # re-ground when base advanced
     assert "go live" in lowered                          # the build-it branch
     assert "save for later" in lowered or "park" in lowered  # the park branch
-    assert "spec phase pauses" in body.lower()           # park path specifically pauses the spec phase
+    assert "spec phase pauses" in body.lower()           # park path pauses the spec phase
 
 
 def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
