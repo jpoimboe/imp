@@ -24,7 +24,7 @@ def relative_age(then_iso: str | None, *, now: datetime) -> str:
     return f"{hours // 24}d"
 
 
-ID_W = 6        # bare 6-char Change id; the "ID" header also fits in 6 cols
+ID_W = 6        # bare 6-char Change id
 TITLE_W = 24
 STATUS_W = 13   # widest status: len("merge_blocked")
 STEP_W = 20     # widest default-workflow step name
