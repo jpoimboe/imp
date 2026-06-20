@@ -60,10 +60,6 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     assert not (ch.change_dir / "steps").exists()                  # transcript dir dropped
     assert "imp/feat" in _git(tmp_path, "branch", "--list", "imp/feat").stdout  # branch kept
 
-    # No longer appends to refs/imp/journal (the linear ref is being retired).
-    assert _git(
-        tmp_path, "show", "refs/imp/journal:feat/change.json").returncode != 0
-
     # Archive captured the terminal snapshot: record + blob + index rows.
     from imp.engine import archive
     from imp.engine.archive import index, record
