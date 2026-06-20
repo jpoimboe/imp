@@ -13,7 +13,7 @@ def test_materialize_creates_worktree_and_removes_record(tmp_path: Path) -> None
     _seed_control(tmp_path)
     backlog.write_record(
         tmp_path, change_id="ddd111", title="Add OAuth",
-        brief="wire OAuth", depends_on=["dep001"],
+        description="wire OAuth", depends_on=["dep001"],
         created_by="step:finalize")
 
     change = backlog.materialize_record(

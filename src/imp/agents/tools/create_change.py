@@ -12,13 +12,13 @@ from imp.engine.state import JsonlEventLog
     name="create_change",
     description=(
         "Record a durable follow-up backlog Change (no branch/worktree yet). "
-        "Give it a short title and a self-contained brief that needs no other "
-        "context; optionally list change ids it depends_on. Returns the new id; "
-        "it is startable later with `imp resume <id>`."
+        "Give it a short title and a self-contained description that needs no "
+        "other context; optionally list change ids it depends_on. Returns the "
+        "new id; it is startable later with `imp resume <id>`."
     ),
 )
 def create_change(
-    ctx: Any, title: str, brief: str, depends_on: list[str] | None = None,
+    ctx: Any, title: str, description: str, depends_on: list[str] | None = None,
 ) -> str:
     if ctx.change_state is None:
         raise RuntimeError("create_change is only available to top-level Change steps")
@@ -26,7 +26,7 @@ def create_change(
     new_id = new_change_id()
     deps = list(depends_on or [])
     backlog.write_record(
-        control_root, change_id=new_id, title=title, brief=brief,
+        control_root, change_id=new_id, title=title, description=description,
         depends_on=deps, created_by=ctx.agent_id or "agent")
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     log.append(

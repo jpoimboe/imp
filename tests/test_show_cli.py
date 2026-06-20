@@ -116,3 +116,124 @@ def test_show_missing_change_returns_error(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["show", "nonexistent-change-id", "spec"])
     assert rc == 2
+
+
+def test_show_backlog_default_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine import backlog
+    _seed_control(tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="wire up OAuth login", depends_on=[], created_by="human")
+    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111")
+    assert "Add OAuth" in out
+    assert "backlog" in out
+    assert "ready" in out
+    assert "wire up OAuth login" in out
+
+
+def test_show_backlog_status_prints_bare_word(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine import backlog
+    _seed_control(tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="d", depends_on=[], created_by="human")
+    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
+    assert out.strip() == "backlog"
+
+
+def test_show_backlog_spec_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+    from imp.engine import backlog
+    _seed_control(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="d", depends_on=[], created_by="human")
+    rc = main(["show", "2026-06-16-bkg111", "spec"])
+    assert rc == 2
+
+
+def test_backlog_card_omits_depends_on_when_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _backlog_card
+    _seed_control(tmp_path)
+    rec = {
+        "id": "bk001", "title": "Do X", "description": "",
+        "depends_on": [], "created_at": None,
+    }
+    lines = _backlog_card(rec, tmp_path, now=datetime.now(UTC))
+    joined = "\n".join(lines)
+    assert "depends_on" not in joined
+
+
+def test_backlog_card_omits_description_section_when_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _backlog_card
+    _seed_control(tmp_path)
+    rec = {
+        "id": "bk001", "title": "Do X", "description": "",
+        "depends_on": [], "created_at": None,
+    }
+    lines = _backlog_card(rec, tmp_path, now=datetime.now(UTC))
+    # no blank separator line and no description text
+    assert "" not in lines
+
+
+def test_backlog_card_includes_depends_on_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _backlog_card
+    _seed_control(tmp_path)
+    rec = {
+        "id": "bk001", "title": "Do X", "description": "",
+        "depends_on": ["dep001"], "created_at": None,
+    }
+    lines = _backlog_card(rec, tmp_path, now=datetime.now(UTC))
+    assert any("depends_on" in line for line in lines)
+    assert any("dep001" in line for line in lines)
+
+
+def test_show_live_default_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    _seed_with_artifacts(tmp_path, _ID, "Feat")
+    out = _run(monkeypatch, tmp_path, "show", _ID)
+    assert "Feat" in out
+    assert "running" in out
+
+
+def test_show_journaled_default_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    files = {str(p.relative_to(ch.change_dir / "artifacts")): p
+             for p in sorted((ch.change_dir / "artifacts").rglob("*")) if p.is_file()}
+    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
+    st = State.load(ch.state_dir)
+    st.status = "completed"
+    st.save(ch.state_dir)
+    worktree.fold_wip_into_journal(tmp_path, _ID, {
+        "events.jsonl": ch.events_path,
+        "change.json": ch.change_dir / "change.json",
+        "state.json": ch.state_dir / "state.json",
+    })
+    worktree.remove_worktree(tmp_path, _ID)
+    out = _run(monkeypatch, tmp_path, "show", _ID)
+    assert "Feat" in out
+    assert "completed" in out

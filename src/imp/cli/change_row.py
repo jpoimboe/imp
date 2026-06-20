@@ -42,6 +42,7 @@ STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "merge_blocked": ("yellow",),
     "errored": ("bold", "red"),
     "draft": ("magenta",),
+    "backlog": ("dim",),
 }
 
 
@@ -75,7 +76,7 @@ def format_change_line(*, change_id: str, title: str, status: str, step: str,
     raw = title.strip()
     id_pad = f"{change_id:<{ID_W}}"
     status_pad = f"{status:<{STATUS_W}}"
-    step_pad = f"{(step or '-'):<{STEP_W}}"
+    step_pad = f"{_truncate(step or '-', STEP_W):<{STEP_W}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
     # NAME is the final column, so it needs no trailing pad — only a cap so a
     # very long name can't spill past the terminal's right edge.

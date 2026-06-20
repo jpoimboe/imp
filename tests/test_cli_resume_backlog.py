@@ -23,15 +23,15 @@ def _resume_args(token: str) -> argparse.Namespace:
 def test_title_for_id_returns_backlog_title(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="2026-06-16-bkg444", title="My Title",
-                         brief="b", depends_on=[], created_by="human")
+                         description="b", depends_on=[], created_by="human")
     title = main._title_for_id(tmp_path, "2026-06-16-bkg444")
     assert title == "My Title"
 
 
 def test_iter_change_ids_includes_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="2026-06-16-bkg111", title="",
-                         brief="b", depends_on=[], created_by="human")
+    backlog.write_record(tmp_path, change_id="2026-06-16-bkg111", title="Iter test",
+                         description="b", depends_on=[], created_by="human")
     assert "2026-06-16-bkg111" in main._iter_change_ids(tmp_path)
 
 
@@ -40,7 +40,7 @@ async def test_resume_backlog_materializes_and_runs(
         tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="2026-06-16-bkg222", title="Add OAuth",
-                         brief="wire OAuth login", depends_on=[], created_by="human")
+                         description="wire OAuth login", depends_on=[], created_by="human")
 
     captured: dict = {}
 
@@ -54,7 +54,7 @@ async def test_resume_backlog_materializes_and_runs(
         _resume_args("2026-06-16-bkg222"), tmp_path, "2026-06-16-bkg222")
 
     assert rc == 0
-    assert captured["seed_opening"] == "wire OAuth login"
+    assert captured["seed_opening"] == "Add OAuth\n\nwire OAuth login"
     assert captured["change"].id == "2026-06-16-bkg222"
     # Materialized: worktree exists, record removed.
     assert (tmp_path / ".imp" / "worktrees" / "2026-06-16-bkg222").is_dir()
@@ -66,7 +66,7 @@ async def test_resume_backlog_warns_on_blocked(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="2026-06-16-bkg333", title="X",
-                         brief="b", depends_on=["2026-06-16-missing"],
+                         description="b", depends_on=["2026-06-16-missing"],
                          created_by="human")
     monkeypatch.setattr(journal, "journal_ids", lambda cr: [])
 

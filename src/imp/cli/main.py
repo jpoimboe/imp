@@ -615,12 +615,16 @@ async def _run_tui_session(
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
     change_id = new_change_id()
-    backlog.write_record(
-        control, change_id=change_id,
-        title=getattr(args, "title", None) or "",
-        brief=args.backlog,
-        depends_on=list(getattr(args, "depends_on", None) or []),
-        created_by="human")
+    try:
+        backlog.write_record(
+            control, change_id=change_id,
+            title=args.backlog,
+            description=getattr(args, "description", None) or "",
+            depends_on=list(getattr(args, "depends_on", None) or []),
+            created_by="human")
+    except ValueError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     print(f"imp: recorded backlog Change {change_id} "
           f"(start it with `imp resume {change_id}`)")
     return 0
@@ -690,7 +694,15 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
 
+    if getattr(args, "description", None) and getattr(args, "backlog", None) is None:
+        print("imp: --description requires --backlog", file=sys.stderr)
+        return 2
+
     if getattr(args, "backlog", None) is not None:
+        if getattr(args, "title", None):
+            print("imp: --backlog and --title cannot be combined "
+                  "(--backlog is the title)", file=sys.stderr)
+            return 2
         return _record_backlog(args, control)
 
     try:
@@ -852,7 +864,7 @@ async def _maybe_resume_backlog(
               f"record was left behind; delete `.imp/backlog/{change_id}.json` and "
               f"resume the existing Change", file=sys.stderr)
         return 2
-    return await _run_fresh_session(change, args=args, seed_opening=rec["brief"])
+    return await _run_fresh_session(change, args=args, seed_opening=backlog.seed_opening(rec))
 
 
 def _validate_from_target(
@@ -1140,6 +1152,101 @@ _REVIEW_STEPS = frozenset({
 })
 
 
+def _user_message_text(payload: dict[str, Any]) -> str:
+    return "".join(
+        b.get("text", "") for b in (payload.get("content") or [])
+        if isinstance(b, dict) and b.get("type") == "text")
+
+
+def _first_user_message(events: list[dict[str, Any]]) -> str | None:
+    for ev in events:
+        if ev.get("type") == "user_message":
+            text = _user_message_text(ev.get("payload") or {}).strip()
+            if text:
+                return text
+    return None
+
+
+def _latest_phase(events: list[dict[str, Any]]) -> str | None:
+    phase = None
+    for ev in events:
+        if ev.get("type") == "step_started":
+            phase = (ev.get("payload") or {}).get("phase") or phase
+    return phase
+
+
+def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
+    cdir = _change_home(control, change_id)
+    raw: bytes | None
+    if (cdir / "change.json").exists():
+        raw = (cdir / "change.json").read_bytes()
+    else:
+        raw = journal.journal_show(control, change_id, "change.json")
+    if raw is None:
+        return None
+    try:
+        result: dict[str, Any] = json.loads(raw)
+        return result
+    except json.JSONDecodeError:
+        return None
+
+
+def _backlog_card(rec: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
+    ready, unmerged = backlog.readiness(control, rec["depends_on"])
+    readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
+    created = rec.get("created_at")
+    lines = [
+        f"id:         {rec['id']}",
+        f"title:      {rec['title'] or '(unnamed)'}",
+        "status:     backlog",
+        f"readiness:  {readiness}",
+        f"created:    {created or '-'} ({change_row.relative_age(created, now=now)})",
+    ]
+    if rec["depends_on"]:
+        lines.append(f"depends_on: {', '.join(rec['depends_on'])}")
+    description = rec.get("description") or ""
+    if description:
+        lines.append("")
+        lines.append(description)
+    return lines
+
+
+def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
+    row = _row_for_id(control, change_id)
+    if row is None:
+        return []
+    _id, status, step, last, title, created = row
+    events = _load_events_for_id(control, change_id) or []
+    lines = [
+        f"id:            {_id}",
+        f"title:         {title.strip() or '(unnamed)'}",
+        f"status:        {status}",
+    ]
+    if status in _INFLIGHT and step not in ("", "-"):
+        phase = _latest_phase(events)
+        lines.append(f"step:          {step}" + (f" ({phase})" if phase else ""))
+    lines.append(
+        f"created:       {created or '-'} ({change_row.relative_age(created, now=now)})")
+    lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
+    meta = _change_meta(control, change_id) or {}
+    if meta.get("base_branch"):
+        lines.append(f"base_branch:   {meta['base_branch']}")
+    if meta.get("depends_on"):
+        lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
+    opening = _first_user_message(events)
+    if opening:
+        lines.append("")
+        lines.append(opening)
+    return lines
+
+
+def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
+    rec = backlog.read_record(control, change_id)
+    if rec is not None:
+        return _backlog_card(rec, control, now=now)
+    return _change_card(control, change_id, now=now)
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     control = _control_root()
     try:
@@ -1147,6 +1254,22 @@ def _cmd_show(args: argparse.Namespace) -> int:
     except SystemExit:
         return 2
     resource = args.resource
+    rec = backlog.read_record(control, change_id)
+    if rec is not None:
+        if resource is None:
+            for line in _backlog_card(rec, control, now=datetime.now(UTC)):
+                print(line)
+            return 0
+        if resource == "status":
+            print("backlog")
+            return 0
+        print(f"imp: {change_id} is in the backlog (not started); "
+              f"no {resource} yet", file=sys.stderr)
+        return 2
+    if resource is None:
+        for line in _detail_card(control, change_id, now=datetime.now(UTC)):
+            print(line)
+        return 0
     if resource == "spec":
         data = _show_artifact(control, change_id, f"spec/{change_id}.md")
     elif resource == "plan":
@@ -1221,7 +1344,7 @@ def _log_picker_empty() -> int:
 
 async def _pick_log_target(control: Path) -> str | int:
     rows = _sort_rows_newest_first(
-        _status_rows(control) + _completed_rows(control))
+        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
     default_id = _resolve_default_id(control)
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
@@ -1257,6 +1380,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
     events = _load_events_for_id(control, change_id)
     if events is None:
+        rec = backlog.read_record(control, change_id)
+        if rec is not None:
+            for line in _backlog_card(rec, control, now=datetime.now(UTC)):
+                print(line)
+            return 0
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
 
@@ -1792,18 +1920,15 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backlog_status_lines(control: Path, *, now: datetime) -> list[str]:
-    recs = sorted(backlog.list_records(control),
-                  key=lambda r: r.get("created_at", ""), reverse=True)
-    lines: list[str] = []
-    for rec in recs:
+def _backlog_rows(control: Path) -> list[_Row]:
+    rows: list[_Row] = []
+    for rec in backlog.list_records(control):
         ready, unmerged = backlog.readiness(control, rec["depends_on"])
-        state = "ready" if ready else f"blocked on {', '.join(unmerged)}"
-        age = change_row.relative_age(rec.get("created_at"), now=now)
-        lines.append(
-            f"  {rec['id']}  {state}  {age}  {rec['created_by']}  "
-            f"{rec['title'] or '(unnamed)'}")
-    return lines
+        step = "ready" if ready else f"blocked: {', '.join(unmerged)}"
+        created = rec.get("created_at", "")
+        rows.append((rec["id"], "backlog", step, created,
+                     rec.get("title") or "", created))
+    return rows
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -1817,9 +1942,9 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(f"imp: {_notice}")
     now = datetime.now(UTC)
     inflight = _sort_rows_newest_first(_status_rows(control))
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
-    backlog_lines = _backlog_status_lines(control, now=now)
-    if not inflight and not past and not backlog_lines:
+    if not inflight and not backlog_rows and not past:
         print(_NO_CHANGES_MESSAGE)
         return 0
     color = should_use_color(sys.stdout)
@@ -1829,19 +1954,17 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color, name_width=name_w))
+    for r in backlog_rows:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color, name_width=name_w))
     if past:
-        if inflight:
+        if inflight or backlog_rows:
             print()
         for r in past:
             print(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
-    if backlog_lines:
-        if inflight or past:
-            print()
-        print("Backlog")
-        for line in backlog_lines:
-            print(line)
     return 0
 
 
@@ -2010,10 +2133,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
-    p_new.add_argument("--backlog", metavar="BRIEF", default=None,
-                       help="Record a backlog Change with this brief WITHOUT "
-                            "starting it; prints its id. Start it later with "
-                            "`imp resume <id>`.")
+    p_new.add_argument("--backlog", metavar="TITLE", default=None,
+                       help="Record a backlog Change with this TITLE WITHOUT "
+                            "starting it; prints its id. Add --description for a "
+                            "longer brief. Start it later with `imp resume <id>`.")
+    p_new.add_argument("--description", metavar="TEXT", default=None,
+                       help="Optional longer description for a --backlog Change "
+                            "(may be empty).")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A change id this backlog Change depends on "
@@ -2100,9 +2226,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_show.add_argument("token", help="Change id or its short token.")
     p_show.add_argument(
-        "resource", nargs="?", default="status",
+        "resource", nargs="?", default=None,
         choices=["spec", "plan", "review", "events", "status"],
-        help="Which artifact to print (default: status).")
+        help="Which artifact to print (default: a detail card).")
     p_show.set_defaults(func=_cmd_show)
 
     p_status = sub.add_parser(

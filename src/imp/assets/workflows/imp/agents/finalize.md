@@ -118,7 +118,7 @@ item per turn):
     leave its `progress.md` line `needs-decision` (it rides the rework and is
     re-evaluated next pass).
   - **hand to a follow-up** — defer it to a new backlog Change. Call
-    `create_change(title="<short title>", brief="<self-contained brief that needs
+    `create_change(title="<short title>", description="<self-contained brief that needs
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
     and tell the human it is startable via `imp resume <new-change-id>` once this

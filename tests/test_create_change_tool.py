@@ -41,7 +41,7 @@ def test_create_change_writes_record_and_emits_event(tmp_path: Path) -> None:
     tool = get_registry()["create_change"]
     msg = tool.invoke(ctx, {
         "title": "Follow-up: extract helper",
-        "brief": "extract the duplicated parser into one function",
+        "description": "extract the duplicated parser into one function",
         "depends_on": [ch.id]})
 
     # Returned confirmation names the new id.
@@ -52,7 +52,7 @@ def test_create_change_writes_record_and_emits_event(tmp_path: Path) -> None:
     rec = backlog.read_record(ch.control_root, new_id)
     assert rec is not None
     assert rec["title"] == "Follow-up: extract helper"
-    assert rec["brief"] == "extract the duplicated parser into one function"
+    assert rec["description"] == "extract the duplicated parser into one function"
     assert rec["depends_on"] == [ch.id]
     assert rec["created_by"] == "step:finalize"
 
@@ -66,7 +66,7 @@ def test_create_change_writes_record_and_emits_event(tmp_path: Path) -> None:
 def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     tool = get_registry()["create_change"]
-    tool.invoke(_ctx(ch, state), {"title": "T", "brief": "b"})
+    tool.invoke(_ctx(ch, state), {"title": "T", "description": "b"})
     rec = backlog.read_record(ch.control_root, backlog.list_ids(ch.control_root)[0])
     assert rec["depends_on"] == []
 
@@ -75,4 +75,4 @@ def test_create_change_from_subagent_raises(tmp_path: Path) -> None:
     ch, _ = _make(tmp_path)
     tool = get_registry()["create_change"]
     with pytest.raises(RuntimeError):
-        tool.invoke(_ctx(ch, None), {"title": "T", "brief": "b"})  # subagent: state=None
+        tool.invoke(_ctx(ch, None), {"title": "T", "description": "b"})  # subagent: state=None
