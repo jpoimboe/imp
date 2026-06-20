@@ -854,12 +854,15 @@ def test_spec_writer_prompt_has_build_or_save_section() -> None:
     lowered = body.lower()
     assert "create_and_enter_worktree" in body
     assert "head_changed" in body
-    assert "build now" in lowered
-    assert "save as a draft" in lowered
+
+    assert "build this out now" in lowered
+    assert "1. **Build it now**" not in body
+    assert "2. **Save as a draft**" not in body
+
+    assert "imp resume <id>" in body
     assert "spec phase pauses" in lowered
-    assert "1. **Build it now**" in body
-    assert "2. **Save as a draft**" in body
-    assert "Going live or parking the draft" not in body
+
+    assert "going live or parking the draft" not in lowered
     assert "go live" not in lowered
     assert "go-live" not in lowered
 
@@ -898,4 +901,47 @@ def test_no_bundled_agent_prompt_references_the_change_handle() -> None:
         if "change.handle" in text or "<handle>" in text:
             offenders.append(p.name)
     assert offenders == []
+
+
+def test_finalize_merge_gate_is_recommendation_anchored() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["finalize"].prompt_template_source
+    # Removed verbatim example and token scripting.
+    assert "Reply `merge`, or describe the rework" not in body
+    assert "Merge this into the base branch, or send it back for rework" not in body
+    # New instruction: a recommendation-anchored affirmative asked after the walk.
+    assert "recommendation-anchored" in body
+    assert "after the per-item walk" in body
+    # Guardrails retained.
+    assert "never announce it" in body
+    assert "underspecified" in body
+
+
+def test_integration_resolve_gate_is_recommendation_anchored() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["integration-resolve"].prompt_template_source
+    # Removed framing and the spelled-out two-reply enumeration.
+    assert "Accept this integration and re-enqueue it, or send it back for rework" not in body
+    assert "Spell out the two replies" not in body
+    # New instruction: recommendation-anchored affirmative.
+    assert "recommendation-anchored" in body
+    # Substantive re-enqueue mechanics retained as plain prose.
+    assert "back of the queue" in body
+    # Guardrails retained.
+    assert "never announce it" in body
+    assert "underspecified" in body
+
+
+def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    # Standard path: say nothing about the classification.
+    assert "say nothing to the user about the classification" in lowered
+    # Trivial path: a plain-language heads-up, never naming the internal label.
+    assert "brief plain-language heads-up" in lowered
+    assert "never name the internal" in lowered
 

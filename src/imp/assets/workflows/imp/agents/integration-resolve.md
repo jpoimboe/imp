@@ -83,15 +83,16 @@ In `bash`:
 ## Present and decide — in prose
 
 Speak in prose, not a field dump. Summarize what integration did, what the review
-or verify flagged, and your recommendation. End with the ask itself, e.g.
-**"Accept this integration and re-enqueue it, or send it back for rework?"**, then
-call `wait_for_user`. The human reads only your prose (`wait_for_user` shows no
+or verify flagged, and your recommendation. Close with a single
+recommendation-anchored affirmative — the bare yes/no of whatever you recommend, with
+no co-equal "…, or X?" pairing and no spelled-out reply tokens. If you recommend
+accepting, ask the plain affirmative (e.g. "Re-enqueue this integration?"); if you
+recommend rework, the rework is the affirmative (e.g. "Send this back to fix X?").
+Then call `wait_for_user`. The human reads only your prose (`wait_for_user` shows no
 prompt), so ask the question — never announce it ("I'll solicit the decision").
-Spell out the two replies:
-- reply **merge** to accept the integration and re-enqueue this change at the back of the queue
-  (it goes to the back of the queue; when it reaches the head it re-integrates and
-  re-verifies only if the base has moved again, otherwise it merges directly), or
-- describe the **rework** to send it back to the plan-writer.
+Accepting re-enqueues this change at the back of the queue; when it reaches the head
+it re-integrates and re-verifies only if the base moved again, otherwise it merges
+directly.
 
 When a requested rework is underspecified, settle the scope first with
 `wait_for_user` before returning. In a headless run `wait_for_user` pauses for a

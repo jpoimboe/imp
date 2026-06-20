@@ -36,9 +36,13 @@ def test_headless_goes_live_without_build_vs_park_solicit(tmp_path: Path) -> Non
     assert "go live" not in block.lower()
 
 
-def test_interactive_keeps_build_vs_park_solicit(tmp_path: Path) -> None:
+def test_interactive_keeps_build_solicit(tmp_path: Path) -> None:
     block = _section(_render(tmp_path, non_interactive=False))
     assert "wait_for_user" in block
-    assert "Save as a draft" in block
-    assert "Build it now" in block
     assert "create_and_enter_worktree" in block
+
+    assert "build this out now" in block.lower()
+    assert "1. **Build it now**" not in block
+    assert "2. **Save as a draft**" not in block
+
+    assert "imp resume <id>" in block
