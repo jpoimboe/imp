@@ -110,3 +110,7 @@ def test_base_has_recommendation_anchored_and_no_jargon_conventions() -> None:
     assert "workflow variable names" in low
     assert "internal tool names" in low
     assert "describe the effect in plain language" in low
+    # Ordering: yes/no convention appears after the numbered-list rule.
+    assert low.index("numbered list") < low.index("plain affirmative")
+    # Ordering: no-jargon convention appears after the narrate rule.
+    assert low.index("narrate your internal deliberation") < low.index("complexity classes")
