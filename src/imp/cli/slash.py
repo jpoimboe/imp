@@ -147,8 +147,8 @@ async def ask_line_with_slash(
     Framing: no chrome around the field. While the user types, only the
     bright-blue caret marks the turn; on submit prompt_toolkit erases its region
     (erase_when_done) and the live driver reprints the entered line with the
-    subtle "entered input" background. The gray bracketing rules are gone — the
-    background is the marker now.
+    blue ▌ left bar. The gray bracketing rules are gone — the
+    left bar is the marker now.
 
     `coord` (the run's InterruptCoordinator) wraps the prompt turn in
     `coord.tty_quiesced()` so the ESC reader releases /dev/tty for
