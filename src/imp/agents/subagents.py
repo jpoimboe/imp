@@ -210,6 +210,7 @@ async def dispatch_task(
         vars=ctx.change_state.vars if ctx.change_state is not None else {},
         project_facts=cc.project_facts,
         guidance=cc.guidance,
+        non_interactive=False,
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 

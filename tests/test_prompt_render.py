@@ -1,4 +1,4 @@
-"""Tests for render_prompt / build_context (4 namespaces: change, events, vars, project)."""
+"""Tests for render_prompt / build_context (5 namespaces: change, events, vars, project, run)."""
 
 from __future__ import annotations
 
@@ -207,3 +207,29 @@ def test_change_home_defaults_empty(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(change_id="t", change_title="t", event_log=log)
     assert render_prompt("{{ change.home }}", ctx) == ""
+
+
+def test_renders_run_namespace_true(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log, non_interactive=True)
+    assert render_prompt("{{ run.non_interactive }}", ctx) == "True"
+    assert render_prompt(
+        "{% if run.non_interactive %}headless{% else %}interactive{% endif %}", ctx,
+    ) == "headless"
+
+
+def test_renders_run_namespace_false_default(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    assert render_prompt("{{ run.non_interactive }}", ctx) == "False"
+    assert render_prompt(
+        "{% if run.non_interactive %}headless{% else %}interactive{% endif %}", ctx,
+    ) == "interactive"
+
+
+def test_missing_run_attr_raises(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_title="t", event_log=_log(tmp_path / "events.jsonl", []),
+    )
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ run.bogus }}", ctx)

@@ -901,6 +901,7 @@ async def _run_agent_invocation(
                 change_home=str(change.change_dir),
                 event_log=log, vars=state.vars,
                 project_facts=project_facts, guidance=guidance,
+                non_interactive=non_interactive,
             ),
         )
         system_prompt_override = None

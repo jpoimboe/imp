@@ -1,0 +1,43 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from imp.agents.prompts import build_context, render_prompt
+from imp.assets import bundled_workflow_dir
+from imp.engine.loader import load_workflow
+from imp.engine.state import JsonlEventLog
+
+
+def _section(rendered: str) -> str:
+    start = rendered.find("## Going live or parking the draft")
+    end = rendered.find("## Writing the Spec", start)
+    assert start != -1 and end != -1
+    return rendered[start:end]
+
+
+def _render(tmp_path: Path, *, non_interactive: bool) -> str:
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["spec-writer"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    return render_prompt(
+        body,
+        build_context(change_title="t", event_log=log,
+                      non_interactive=non_interactive),
+    )
+
+
+def test_headless_goes_live_without_build_vs_park_solicit(tmp_path: Path) -> None:
+    block = _section(_render(tmp_path, non_interactive=True))
+    assert "create_and_enter_worktree" in block
+    assert 'complete_step(phase="written"' in block
+    # The headless branch drops the build-or-park solicit and the park option.
+    assert "wait_for_user" not in block
+    assert "Save for later (park)" not in block
+
+
+def test_interactive_keeps_build_vs_park_solicit(tmp_path: Path) -> None:
+    block = _section(_render(tmp_path, non_interactive=False))
+    assert "wait_for_user" in block
+    assert "Save for later (park)" in block
+    assert "Build it now (go live)" in block
+    assert "create_and_enter_worktree" in block

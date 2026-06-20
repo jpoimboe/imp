@@ -2078,3 +2078,30 @@ def test_step_started_payload_carries_command_only_for_script() -> None:
                  on_max_retries=Pause(), max_loops=1, source=loc)
     assert _step_started_payload(script)["command"] == "make check"
     assert "command" not in _step_started_payload(agent)
+
+
+@pytest.mark.anyio
+async def test_executor_passes_run_mode_to_prompt(tmp_path: Path) -> None:
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "headless={{ run.non_interactive }}\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n  - name: only\n    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    sink: list[str] = []
+    _register_prompt_capturing({"status": "Success"}, sink)
+
+    result = await run_change(
+        change, on_event=lambda _e: None, non_interactive=True,
+    )
+    assert result is RunResult.COMPLETED
+    assert any("headless=True" in p for p in sink)

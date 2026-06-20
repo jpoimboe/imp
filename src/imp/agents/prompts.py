@@ -1,12 +1,14 @@
 """Prompt template rendering for agent .md bodies.
 
-Four namespaces (spec §7.5):
+Five namespaces (spec §7.5):
   change.id — stable identity; change.title — human title
   events.<step-name>.<field> — validated agent_output of prior step;
       missing steps render as empty (lenient-within)
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
       because the dict is passed directly under StrictUndefined (strict-within)
   project.<fact> — project facts + guidance; missing key raises (strict-within)
+  run.non_interactive — the run's input-channel mode (bool); a missing attr
+      under run raises (strict-within), like change/project
 
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
@@ -74,6 +76,11 @@ class _ChangeNamespace:
     home: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class _RunNamespace:
+    non_interactive: bool = False
+
+
 class _ProjectNamespace:
     """Strict project-facts namespace: raises UndefinedError on a missing key,
     AttributeError for dunder/leading-underscore names."""
@@ -106,6 +113,7 @@ class PromptContext:
     events: _EventsNamespace
     vars: dict[str, Any]
     project: _ProjectNamespace
+    run: _RunNamespace
 
 
 def build_context(
@@ -113,6 +121,7 @@ def build_context(
     *, change_id: str = "", change_home: str = "",
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None, guidance: str = "",
+    non_interactive: bool = False,
 ) -> PromptContext:
     facts = {**(project_facts or {}), "guidance": guidance}
     return PromptContext(
@@ -121,6 +130,7 @@ def build_context(
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),
+        run=_RunNamespace(non_interactive=non_interactive),
     )
 
 
@@ -128,6 +138,8 @@ _env = jinja2.Environment(
     undefined=jinja2.StrictUndefined,
     autoescape=False,
     keep_trailing_newline=True,
+    trim_blocks=True,
+    lstrip_blocks=True,
 )
 
 
@@ -136,7 +148,7 @@ def render_prompt(template_source: str, ctx: PromptContext) -> str:
     try:
         return _env.from_string(template_source).render(
             change=ctx.change, events=ctx.events, vars=ctx.vars,
-            project=ctx.project,
+            project=ctx.project, run=ctx.run,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e
