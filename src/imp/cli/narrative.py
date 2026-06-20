@@ -234,7 +234,6 @@ class SubagentFold:
     is_error: bool = False
     terminal_state: str | None = None  # 'stalled' (live via B.2); 'interrupted'
                                        # is forward-compat scaffolding; else None
-    retry_attempt: int = 0
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
     collapsible = True
@@ -389,7 +388,6 @@ class NarrativeBuilder:
         # (which the providers suppress) still surfaces as a malformed-log warning.
         self._closed_sub_by_block: dict[str, SubagentFold] = {}
         self._closed_sub_by_event: dict[str, SubagentFold] = {}
-        self._subagent_failures: dict[tuple[str | None, str], int] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
@@ -1078,11 +1076,11 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
     fold.end_ts = end_ts
     fold.is_error = bool(p.get("error", False))
     fold.outcome = _summarize_result(p.get("content"))
-    # Terminal state for Part D's glyph. Prefer an explicit payload kind (forward
-    # compatible); else detect the bracketed marker dispatch_task embeds in the
-    # failure message ("... failed (config) [stalled]"). The brackets keep the
-    # match precise (low false-positive). 'interrupted' is matched too for
-    # forward compatibility, though no subagent path emits it today.
+    # Terminal state for Part D's glyph. Prefer an explicit payload kind (the
+    # claude_code degraded-pause path sets kind="interrupted"); else detect the
+    # bracketed marker an is_error failure message embeds ("... [stalled]" /
+    # "... [interrupted]" — the codex degraded-pause path appends the latter).
+    # The brackets keep the match precise (low false-positive).
     kind = p.get("kind")
     if kind not in ("stalled", "interrupted"):
         # The bracketed marker only originates from the failure path; a
@@ -1134,18 +1132,6 @@ def _take_closed_fold(
     return fold
 
 
-def _apply_close_outcome(
-    self: NarrativeBuilder, fold: SubagentFold, p: dict[str, Any], ts: str | None,
-) -> None:
-    """Stamp a fold's outcome from a task tool_result and count a failed/terminal
-    subagent for the retry-annotation tally. Shared by the in-time close and the
-    late authoritative close of a provisionally salvage-closed fold."""
-    _close_subagent_fold(fold, p, ts)
-    if fold.is_error or fold.terminal_state in ("stalled", "interrupted"):
-        key = (fold.opener_agent_id, fold.subagent_name)
-        self._subagent_failures[key] = self._subagent_failures.get(key, 0) + 1
-
-
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     ts = event.get("timestamp")
@@ -1158,7 +1144,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # an arbitrary fold close; unstamped legacy results take the ordered probe.
     fold, status = _take_subagent_fold(self, rid, p.get("id_ns"))
     if fold is not None:
-        _apply_close_outcome(self, fold, p, ts)
+        _close_subagent_fold(fold, p, ts)
         return
     if status == "stamped_miss":
         # Before warning: is this the AUTHORITATIVE result for a fold a salvage
@@ -1167,7 +1153,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         # real outcome to the already-closed fold and stay quiet.
         late = _take_closed_fold(self, rid, p.get("id_ns"))
         if late is not None:
-            _apply_close_outcome(self, late, p, ts)
+            _close_subagent_fold(late, p, ts)
             return
         self._append(ErrorNode(
             message=f"task result {rid!r} (id_ns={p.get('id_ns')!r}) matched no open fold",
@@ -1424,8 +1410,6 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"))
-    fold.retry_attempt = self._subagent_failures.get(
-        (fold.opener_agent_id, fold.subagent_name), 0)
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     # Register in both dicts: always by event id (unique per mint), by block id
