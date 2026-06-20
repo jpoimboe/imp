@@ -1872,7 +1872,6 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon(control, change_id, assume_yes=args.yes)
 
 
-
 def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     control = _control_root()
     change_id = os.environ.get("IMP_CHANGE_ID")
