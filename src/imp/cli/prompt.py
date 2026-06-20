@@ -130,7 +130,7 @@ class Prompt:
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:
         """The prompt caret as prompt_toolkit formatted text: a bright-blue
-        ``❯ `` under color, plain otherwise. `None` selects the default caret."""
+        ``> `` under color, plain otherwise. `None` selects the default caret."""
         from imp.cli import palette as pal
 
         text = pal.CARET if prompt_text is None else prompt_text
