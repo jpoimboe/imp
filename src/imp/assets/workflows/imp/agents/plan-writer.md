@@ -1,7 +1,7 @@
 ---
 name: plan-writer
 label: writing plan
-description: Write the next bite-sized plan (.imp/change/artifacts/plans/<id>-plan-N.md) from the spec and progress, then commit it.
+description: Write the next bite-sized plan ({{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md) from the spec and progress, then commit it.
 subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
