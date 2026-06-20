@@ -533,7 +533,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity()
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -542,7 +542,7 @@ def test_current_activity_none_when_no_step() -> None:
     assert b.current_activity() is None
 
 
-def test_current_activity_agent_step_with_thinking_child_is_thinking() -> None:
+def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -551,7 +551,7 @@ def test_current_activity_agent_step_with_thinking_child_is_thinking() -> None:
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity()
 
 
 
@@ -1237,13 +1237,13 @@ def test_current_activity_all_killed_basis_is_bare_count() -> None:
 def test_current_activity_agent_step_no_burst_is_thinking() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity()
 
 
 def test_current_activity_chrome_step_is_running() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="g", kind="merge", phase="p"))
-    assert b.current_activity() == nv.Activity(label="running")
+    assert b.current_activity() == nv.Activity()
 
 
 def test_activity_to_text_flattens_segments() -> None:
@@ -1836,17 +1836,33 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(label="thinking")
+    assert b.current_activity() == nv.Activity()
 
 
-def test_current_activity_running_label_for_chrome_step() -> None:
+def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="merge-it", kind="merge", phase="integrate"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(label="running")
+    assert b.current_activity() == nv.Activity()
+
+
+def test_current_activity_agent_no_burst_emits_no_verb() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="spec", kind="agent", phase="design",
+             label="speccing"))
+    # The step label rides through; the activity word is dropped entirely.
+    assert b.current_activity() == nv.Activity(step_label="speccing", label=None)
+
+
+def test_current_activity_script_step_names_the_command() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="gate", kind="script", phase="verify",
+             label="testing", command="make check"))
+    assert b.current_activity() == nv.Activity(step_label="testing",
+                                               label="make check")
 
 
 def test_subagent_activity_has_no_step_prefix() -> None:

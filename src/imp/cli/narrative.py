@@ -441,8 +441,13 @@ class NarrativeBuilder:
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
-            verb = "running" if top.kind in CHROME_KINDS else "thinking"
-            return Activity(step_label=step_label, label=verb)
+            if top.kind in CHROME_KINDS:
+                # Name the running command (script steps carry one); command-less
+                # chrome kinds fall back to a bare label + timer.
+                return Activity(step_label=step_label, label=top.command)
+            # Pure-thinking agent turn: the spinner + step label already imply it,
+            # so emit no activity word.
+            return Activity(step_label=step_label, label=None)
         if self._current_phase is not None:
             return Activity(label="working")
         return None

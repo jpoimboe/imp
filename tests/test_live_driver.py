@@ -1209,9 +1209,9 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert "reviewing plan · thinking" in line
+    assert "reviewing plan · 18s" in line
+    assert "thinking" not in line                  # the thinking verb is dropped
     assert "review · reviewing plan" not in line   # the phase is NOT shown in the status line
-    assert "18s" in line
 
 
 def test_labeled_forward_goto_label_in_both_paths() -> None:
@@ -1321,7 +1321,7 @@ def test_compose_activity_status_has_no_per_call_timer() -> None:
 def test_status_spine_label_activity_elapsed() -> None:
     from imp.cli.live_driver import compose_activity_status
 
-    # labeled step, fallback (thinking) activity: label · activity · elapsed.
+    # labeled agent step: step_label · elapsed (no thinking verb).
     # The phase is deliberately omitted (it lives in the scrollback phase header).
     b = nv.NarrativeBuilder()
     for e in [
@@ -1332,9 +1332,9 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert line.split(" ", 1)[1] == "reviewing plan · thinking · 18s"
+    assert line.split(" ", 1)[1] == "reviewing plan · 18s"   # no thinking verb
 
-    # quiet/unlabeled step: the step segment is dropped -> activity · elapsed.
+    # quiet/unlabeled script step: no display label, no command -> bare timer.
     q = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1343,7 +1343,7 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
-    assert qline.split(" ", 1)[1] == "running · 4s"
+    assert qline.split(" ", 1)[1] == "4s"
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
