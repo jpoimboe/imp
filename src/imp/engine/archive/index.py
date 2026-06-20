@@ -58,3 +58,25 @@ def ingest(
              ev.get("timestamp"), ev.get("type"),
              json.dumps(ev.get("payload"))))
     conn.commit()
+
+
+def change_ids(conn: sqlite3.Connection) -> list[str]:
+    return [r[0] for r in conn.execute("SELECT id FROM changes ORDER BY id")]
+
+
+def has_change(conn: sqlite3.Connection, change_id: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM changes WHERE id = ?", (change_id,)).fetchone() is not None
+
+
+def completed_rows(
+    conn: sqlite3.Connection,
+) -> list[tuple[str, str, str, str, str, str]]:
+    rows = conn.execute(
+        "SELECT id, status, step, title, created_at,"
+        " (SELECT MAX(ts) FROM events WHERE events.change_id = changes.id)"
+        " FROM changes").fetchall()
+    return [
+        (cid, status or "", step or "-", last or "", title or "", created or "")
+        for (cid, status, step, title, created, last) in rows
+    ]
