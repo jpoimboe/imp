@@ -752,16 +752,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
-        change = Change.create(control, title=title, change_id=change_id,
-                               base_branch=base)
+        change = Change.create_draft(control, title=title, change_id=change_id,
+                                     base_branch=base)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
-        return 2
-    except worktree.BranchExists:
-        # The random suffix makes this effectively impossible; surface a clean
-        # message rather than a raw git error (spec §2, AC 7).
-        print(f"imp: a Change with id {change_id!r} already exists; re-run `imp new`",
-              file=sys.stderr)
         return 2
 
     _warn_if_tui_unavailable(args, sys.stdout)
@@ -1422,7 +1416,7 @@ def _effective_status(status: str, change_dir: Path) -> str:
     `errored` (in RESUMABLE) so `imp status` shows it and `imp resume` offers it.
 
     Only `running` is re-derived; every other status is authoritative. A MISSING
-    lock file is left as `running` (the microsecond between Change.create and the
+    lock file is left as `running` (the microsecond between Change.create_draft and the
     run acquiring the lock) — a real crash leaves the pid file behind."""
     if status != "running":
         return status

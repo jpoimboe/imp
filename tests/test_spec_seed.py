@@ -9,7 +9,7 @@ import pytest
 
 import imp.cli.prompt as prompt_mod
 from imp.cli import main as cli_main
-from tests.conftest import _seed_control
+from tests.conftest import _git, _seed_control
 
 
 def test_build_parser_new_positional_is_opening() -> None:
@@ -446,3 +446,31 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
     assert rc == 0
     assert captured["seed_opening"] is None
     assert captured["opening_intent"] is None
+
+
+def test_new_creates_unmaterialized_draft(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None,
+                           opening_intent: object = None) -> int:
+        captured["change"] = change
+        return 0
+
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+
+    args = _new_args(opening="add a dark-mode toggle", non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+    assert rc == 0
+
+    change = captured["change"]
+    cid = change.id  # type: ignore[union-attr]
+    assert change.materialized is False                                  # type: ignore[union-attr]
+    assert not (tmp_path / ".imp" / "worktrees" / cid).exists()          # no worktree
+    assert _git(tmp_path, "branch", "--list", f"imp/{cid}").stdout.strip() == ""  # no branch
+    assert (tmp_path / ".imp" / "changes" / cid / "change.json").exists()  # permanent home
