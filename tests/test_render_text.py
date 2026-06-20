@@ -616,19 +616,19 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
                                elapsed_s=5.0, action={"verb": "continue"}, extras=[])
     assert "\n".join(rt._render(bc_lbl, depth=1, full=False, color=False, width=80)) \
         == "  reviewing plan · complete · 5s"
-    # goto WITH a workflow route label: the non-bold yellow "→ <label>" route
-    # leads a three-line block — label, a (gutter-bearing) blank, then the gray
-    # completion line — so the route announces what's next, set off by air above
-    # the step it completed.
+    # goto WITH a workflow route label: the gray completion line prints first,
+    # then a (gutter-bearing) blank, then the non-bold yellow "→ <label>" route
+    # line beneath it — so the route announcing what's next prints after the line
+    # saying the step is done.
     bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "task-lead",
                                     "resume": False, "rework": True},
                             label="addressing review feedback", extras=["status=Success"])
     lines2 = list(rt._render(bc2, depth=1, full=False, color=False, width=80))
     assert lines2 == [
-        "  → addressing review feedback",
-        "  ",
         "  code-reviewer · complete · 41s",
+        "  ",
+        "  → addressing review feedback",
     ]
     # goto WITHOUT a route label: only the completion line, no extra line, no empty gap.
     bc3 = nv.BreadcrumbLine(step_name="spec-reviewer", elapsed_s=2.0,
@@ -1466,7 +1466,7 @@ def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
     assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
 
 
-def test_breadcrumb_renders_route_label_above_completion() -> None:
+def test_breadcrumb_renders_route_label_below_completion() -> None:
     lines = list(rt._render(
         nv.BreadcrumbLine(
             step_name="finalize", kind="agent", elapsed_s=2,
@@ -1475,15 +1475,15 @@ def test_breadcrumb_renders_route_label_above_completion() -> None:
             label="entering the merge queue"),
         depth=0, full=False, color=False, width=80))
     assert lines == [
-        "→ entering the merge queue",
-        "",
         "finalize · complete · 2s",
+        "",
+        "→ entering the merge queue",
     ]
 
 
-def test_breadcrumb_route_label_keeps_yellow_above_completion() -> None:
-    # colors and arrow are preserved: the "→ <label>" route line stays yellow
-    # above a (blank) separator and the gray completion line below it.
+def test_breadcrumb_route_label_keeps_yellow_below_completion() -> None:
+    # colors and arrow are preserved: the gray completion line prints first, then
+    # a (blank) separator, then the yellow "→ <label>" route line below it.
     lines = list(rt._render(
         nv.BreadcrumbLine(
             step_name="finalize", kind="agent", elapsed_s=2,
@@ -1492,10 +1492,10 @@ def test_breadcrumb_route_label_keeps_yellow_above_completion() -> None:
             label="entering the merge queue"),
         depth=0, full=False, color=True, width=80))
     assert len(lines) == 3
-    label_line, blank, body = lines
-    assert label_line == pal.ansi("→ entering the merge queue", "yellow")
-    assert blank == ""
+    body, blank, label_line = lines
     assert body == pal.ansi("finalize · complete · 2s", "gray")
+    assert blank == ""
+    assert label_line == pal.ansi("→ entering the merge queue", "yellow")
 
 
 def test_breadcrumb_without_label_has_no_route_line() -> None:
@@ -1526,13 +1526,13 @@ def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
             action={"verb": "continue"}, var_mutations={}, label=None),
     ]
     rendered = _lines(events)
-    # the route label leads its own line, two lines above the finalize completion
-    # line, with a blank between them.
+    # the finalize completion line prints first, then a blank, then the route
+    # label two lines below it.
+    bc_i = next(i for i, ln in enumerate(rendered) if "finalize · complete" in ln)
     lbl_i = next(i for i, ln in enumerate(rendered)
                  if ln.strip() == "→ entering the merge queue")
-    bc_i = next(i for i, ln in enumerate(rendered) if "finalize · complete" in ln)
-    assert bc_i == lbl_i + 2
-    assert rendered[lbl_i + 1].strip() == ""
+    assert lbl_i == bc_i + 2
+    assert rendered[bc_i + 1].strip() == ""
     assert "→ entering the merge queue" not in rendered[bc_i]
 
 
