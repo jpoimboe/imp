@@ -19,10 +19,24 @@ def test_pause_lines_without_a_phase_drop_the_at_clause() -> None:
     assert lines[0] == "Paused  add-version-flag"
 
 
-def test_pause_lines_color_dims_both_lines_without_a_glyph() -> None:
+def test_pause_lines_color_lifecycle_yellow_with_glyph_on_headline() -> None:
     lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=True)
-    assert lines[0] == "\x1b[2mPaused  add-version-flag  at implement\x1b[0m"
-    assert lines[1] == "\x1b[2m   resume:  imp resume yaitd7\x1b[0m"
+    assert lines[0] == "\x1b[33m⏸ Paused  add-version-flag  at implement\x1b[0m"
+    assert lines[1] == "\x1b[33m   resume:  imp resume yaitd7\x1b[0m"
+    assert "⏸" not in lines[1]                 # glyph leads only the headline
+
+
+def test_pause_lines_color_lifecycle_yellow_with_reason() -> None:
+    lines = _pause_lines("add-version-flag", "implement", "yaitd7",
+                         reason="ctrl-c", color=True)
+    assert lines[0] == "\x1b[33m⏸ Paused  add-version-flag  at implement  (ctrl-c)\x1b[0m"
+
+
+def test_pause_lines_recover_hint_is_yellow_without_glyph() -> None:
+    lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=True,
+                         recover_phase="design")
+    assert lines[-1] == "\x1b[33m   recover: imp resume yaitd7 --from design\x1b[0m"
+    assert "⏸" not in lines[-1]
 
 
 def test_phase_from_events_takes_the_last_step_started_phase() -> None:
@@ -43,10 +57,6 @@ def test_pause_lines_include_reason_when_given() -> None:
                          reason="ctrl-c", color=False)
     assert lines[0] == "Paused  add-version-flag  at implement  (ctrl-c)"
 
-
-def test_pause_lines_color_dims_with_reason() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7", reason="ctrl-c", color=True)
-    assert lines[0] == "\x1b[2mPaused  add-version-flag  at implement  (ctrl-c)\x1b[0m"
 
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:

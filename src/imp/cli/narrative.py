@@ -296,8 +296,11 @@ class OutcomeLine:
 class LiteralTextNode:
     """A plain string output field (e.g. coder.summary, reviewer notes) surfaced
     as bold agent-style prose. Distinct from AgentTextNode, which holds a provider
-    payload and lazily parses it — this node carries a ready string (issues 5/6)."""
+    payload and lazily parses it — this node carries a ready string (issues 5/6).
+    An optional `color_role` (a NODE_COLORS key) routes it through the colored-line
+    path instead of the markdown/prose path; None keeps the prose rendering."""
     text: str
+    color_role: str | None = None
     collapsible = False
 
 
@@ -649,7 +652,8 @@ NarrativeBuilder._HANDLERS["merge_blocked"] = _h_merge_blocked
 
 def _h_waiting_for_head(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    self._append(LiteralTextNode(text=f"waiting to merge — {p.get('ahead', 0)} ahead"))
+    self._append(LiteralTextNode(text=f"waiting to merge — {p.get('ahead', 0)} ahead",
+                                 color_role="lifecycle"))
 
 
 NarrativeBuilder._HANDLERS["waiting_for_head"] = _h_waiting_for_head

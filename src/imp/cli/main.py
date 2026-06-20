@@ -233,13 +233,14 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 # redirected output stays plain and script-parseable. Shared by `new`/`resume`.
 
 def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
-    """Run finished cleanly — green, ✓ on the headline."""
+    """Run finished cleanly — ✓ on the headline."""
     color = should_use_color(sys.stdout)
     mark = "✓ " if color else ""
     if merged:
-        print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.", "green",
-                   enabled=color))
-        print(ansi(f"Change {change.id}: {value}", "green", enabled=color))
+        print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.",
+                   *pal.NODE_COLORS["lifecycle"], enabled=color))
+        print(ansi(f"Change {change.id}: {value}",
+                   *pal.NODE_COLORS["lifecycle"], enabled=color))
     else:
         print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
 
@@ -259,14 +260,17 @@ def _pause_lines(
 ) -> list[str]:
     at = f"  at {phase}" if phase else ""
     why = f"  ({reason})" if reason else ""
+    glyph = "⏸ " if color else ""
     lines = [
-        ansi(f"Paused  {name}{at}{why}", "dim", enabled=color),
-        ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
+        ansi(f"{glyph}Paused  {name}{at}{why}", *pal.NODE_COLORS["lifecycle"],
+             enabled=color),
+        ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
+             enabled=color),
     ]
     if recover_phase is not None:
         lines.append(ansi(
             f"   recover: imp resume {token} --from {recover_phase}",
-            "dim", enabled=color))
+            *pal.NODE_COLORS["lifecycle"], enabled=color))
     return lines
 
 

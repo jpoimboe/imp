@@ -494,6 +494,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.LiteralTextNode):
+        if node.color_role:
+            yield from _wrap(_caret_escape(node.text), width, depth, color,
+                             *pal.NODE_COLORS[node.color_role], gutters=gutters)
+            return
         yield from _render_markdown_block(_caret_escape(node.text), width, depth,
                                           color, gutters)
         return
@@ -559,9 +563,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.OutcomeLine):
         text = pal.action_text(node.action)
-        ac = pal.accent_color(node.action)
-        codes = (ac,) if ac else ()
-        yield _line(f"→ {text}", depth, color, *codes, gutters=gutters)
+        yield _line(f"→ {text}", depth, color, *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.BreadcrumbLine):
@@ -595,16 +597,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if node.label and not (node.interrupted or blocked):
             yield _gutter_indent(depth, gutters, color)
             yield _line(f"→ {node.label}", depth, color,
-                        *pal.NODE_COLORS["warning"], gutters=gutters)
+                        *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.PauseNode):
-        # A resumable stop — dim `paused (reason)`, the same quiet treatment the
-        # live view gives every pause (_emit_paused_summary), so a
-        # pause never reads as an `error:` in `imp log`. The driving failure, if
-        # any, was already shown as its own `error:` event above.
-        yield _line(f"paused ({node.reason})", depth, color,
-                    *pal.NODE_COLORS["metadata"], gutters=gutters)
+        glyph = "⏸ " if color else ""
+        yield _line(f"{glyph}paused ({node.reason})", depth, color,
+                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.RenameNode):
@@ -664,7 +663,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.MergedNode):
         mark = "✓ " if color else ""
         yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
-                    "green", gutters=gutters)
+                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

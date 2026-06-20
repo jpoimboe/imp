@@ -83,17 +83,6 @@ def test_should_use_color_force_var_overrides_pipe(monkeypatch, force_var) -> No
     assert pal.should_use_color(io.StringIO()) is False
 
 
-@pytest.mark.parametrize("action,expected", [
-    ({"verb": "continue"}, "green"), ({"verb": "pause"}, "cyan"),
-    ({"verb": "goto", "target": "impl"}, "cyan"),
-    ({"verb": "unknown"}, None),
-    # bare strings still tolerated (legacy/fallback path)
-    ("continue", "green"), ("retry", "yellow"), ("mystery", None),
-])
-def test_accent_color_for_action(action, expected) -> None:
-    assert pal.accent_color(action) == expected
-
-
 def test_action_display_text() -> None:
     assert pal.action_text({"verb": "continue"}) == "continue"
     assert pal.action_text({"verb": "goto", "target": "impl"}) == "goto(impl)"
@@ -109,11 +98,6 @@ def test_action_text_goto_resume_marker() -> None:
     assert pal.action_text(
         {"verb": "goto", "target": "coder", "resume": False}) == "goto(coder)"
     assert pal.action_text({"verb": "goto", "target": "coder"}) == "goto(coder)"
-
-
-def test_action_text_resume_keeps_goto_color() -> None:
-    # the verb stays "goto", so accent coloring is unaffected by resume
-    assert pal.accent_color({"verb": "goto", "target": "coder", "resume": True}) == "cyan"
 
 
 def test_fold_glyphs_default_unicode() -> None:
@@ -217,6 +201,17 @@ def test_light_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
 def test_user_bar_is_blue_glyph_under_color_and_space_off() -> None:
     assert pal.user_bar(enabled=True) == "\x1b[94m┃\x1b[0m"
     assert pal.user_bar(enabled=False) == " "   # blank gutter when color is off
+
+
+def test_lifecycle_role_is_nonbold_yellow_in_all_themes() -> None:
+    # named role over yellow, non-bold — must resolve identically in all themes.
+    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        assert pal.ansi("x", *pal.NODE_COLORS["lifecycle"], enabled=True) == \
+            pal.ansi("x", "yellow", enabled=True)
+        assert pal._ANSI["bold"] not in pal.ansi("x", *pal.NODE_COLORS["lifecycle"],
+                                                 enabled=True)
 
 
 def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:

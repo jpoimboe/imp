@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re as _re
+import unittest.mock
 from pathlib import Path
 
 from imp.cli import narrative as nv
@@ -517,6 +518,16 @@ def test_literal_text_node_renders_as_agent_prose() -> None:
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     assert any("line one" in ln for ln in out)
     assert any("line two" in ln for ln in out)
+
+
+def test_literal_color_role_renders_plain_yellow_no_bullet() -> None:
+    roled = list(rt._render(nv.LiteralTextNode(text="hi", color_role="lifecycle"),
+                            depth=0, full=False, color=True, width=80))
+    assert roled == [pal.ansi("hi", "yellow")]
+    # No color role → unchanged: the bold "• " agent-prose bullet, via markdown.
+    plain = list(rt._render(nv.LiteralTextNode(text="hi"),
+                            depth=0, full=False, color=True, width=80))
+    assert plain == ["\x1b[1m• \x1b[0mhi"]
 
 
 def test_consecutive_prose_turns_separated_by_blank_line() -> None:
@@ -1292,7 +1303,22 @@ def test_merged_node_renders_friendly_footer() -> None:
     assert plain == "Merged 2026-06-12-run-x into master."
     colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
     assert "✓ Merged 2026-06-12-run-x into master." in colored
-    assert pal._ANSI["green"] in colored
+    assert pal._ANSI["yellow"] in colored
+    assert pal._ANSI["green"] not in colored
+
+
+def test_merged_node_renders_lifecycle_yellow_in_all_themes() -> None:
+    # assert merge footer carries theme's yellow SGR (not green) across all themes
+    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        try:
+            colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+            yellow_open = pal.sgr("yellow", enabled=True)
+            assert yellow_open in colored
+            assert pal._ANSI["green"] not in colored
+        finally:
+            pal.set_theme("ansi")
 
 
 def test_complete_step_findings_hidden_lean_visible_full() -> None:
@@ -1825,3 +1851,63 @@ def test_skill_load_renders_gerund() -> None:
     joined = "\n".join(out)
     assert "loading skill refactor" in joined
     assert "load skill refactor" not in joined   # imperative form is gone
+
+
+def test_route_label_renders_lifecycle_yellow() -> None:
+    bc = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
+                           action={"verb": "goto", "target": "task-lead",
+                                   "resume": False, "rework": True},
+                           label="addressing review feedback")
+    with unittest.mock.patch.dict(pal.NODE_COLORS, {"lifecycle": ("cyan",)}):
+        for theme in ("ansi", "dark", "light"):
+            pal.set_theme(theme)
+            try:
+                lines = list(rt._render(bc, depth=1, full=False, color=True, width=80))
+                route = next(ln for ln in lines if "→ addressing review feedback" in ln)
+                assert pal._ANSI["cyan"] in route
+                assert pal._ANSI["yellow"] not in route
+            finally:
+                pal.set_theme("ansi")
+
+
+def test_pause_node_renders_lifecycle_yellow_with_glyph() -> None:
+    node = nv.PauseNode(reason="ctrl-c")
+    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert plain == "paused (ctrl-c)"          # no glyph when color is off
+    colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "⏸ paused (ctrl-c)" in colored
+    assert pal._ANSI["yellow"] in colored
+    assert pal._ANSI["dim"] not in colored     # was dim metadata; no longer
+
+
+def test_pause_node_renders_lifecycle_yellow_in_all_themes() -> None:
+    node = nv.PauseNode(reason="ctrl-c")
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        try:
+            colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+            assert pal.sgr("yellow", enabled=True) in colored
+            assert pal._ANSI["dim"] not in colored
+        finally:
+            pal.set_theme("ansi")
+
+
+def test_outcome_line_renders_lifecycle_yellow_not_accent_by_verb() -> None:
+    line = next(iter(rt._render(nv.OutcomeLine(action={"verb": "continue"}),
+                                depth=0, full=False, color=True, width=80)))
+    assert "→ continue" in line
+    assert pal._ANSI["yellow"] in line
+    # was accent-by-verb: continue resolved to green — that must be gone.
+    assert pal._ANSI["green"] not in line
+
+
+def test_outcome_line_renders_lifecycle_yellow_in_all_themes() -> None:
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        try:
+            line = next(iter(rt._render(nv.OutcomeLine(action={"verb": "continue"}),
+                                        depth=0, full=False, color=True, width=80)))
+            assert pal.sgr("yellow", enabled=True) in line
+            assert pal._ANSI["green"] not in line
+        finally:
+            pal.set_theme("ansi")
