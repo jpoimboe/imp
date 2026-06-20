@@ -616,15 +616,14 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
                                elapsed_s=5.0, action={"verb": "continue"}, extras=[])
     assert "\n".join(rt._render(bc_lbl, depth=1, full=False, color=False, width=80)) \
         == "  reviewing plan · complete · 5s"
-    # goto WITH a workflow route label: a SEPARATE non-bold yellow "→ <label>" line
-    # beneath the completion line; no inline arrow on the completion line.
+    # goto WITH a workflow route label: the non-bold yellow "→ <label>" route
+    # rides inline on the SAME completion line, after the elapsed time.
     bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "task-lead",
                                     "resume": False, "rework": True},
                             label="addressing review feedback", extras=["status=Success"])
     lines2 = list(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert lines2 == ["  code-reviewer · complete · 41s",
-                      "  → addressing review feedback"]
+    assert lines2 == ["  code-reviewer · complete · 41s → addressing review feedback"]
     # goto WITHOUT a route label: only the completion line, no extra line, no empty gap.
     bc3 = nv.BreadcrumbLine(step_name="spec-reviewer", elapsed_s=2.0,
                             action={"verb": "goto", "target": "plan-writer",
@@ -1432,7 +1431,7 @@ def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
     assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
 
 
-def test_breadcrumb_renders_route_label_on_its_own_yellow_line() -> None:
+def test_breadcrumb_renders_route_label_inline_after_completion() -> None:
     lines = list(rt._render(
         nv.BreadcrumbLine(
             step_name="finalize", kind="agent", elapsed_s=2,
@@ -1440,7 +1439,23 @@ def test_breadcrumb_renders_route_label_on_its_own_yellow_line() -> None:
                     "resume": False, "rework": False},
             label="entering the merge queue"),
         depth=0, full=False, color=False, width=80))
-    assert lines == ["finalize · complete · 2s", "→ entering the merge queue"]
+    assert lines == ["finalize · complete · 2s → entering the merge queue"]
+
+
+def test_breadcrumb_route_label_keeps_yellow_on_the_shared_line() -> None:
+    # colors and arrow are preserved: the completion body stays gray, the
+    # "→ <label>" route segment stays yellow, both on the single shared line.
+    lines = list(rt._render(
+        nv.BreadcrumbLine(
+            step_name="finalize", kind="agent", elapsed_s=2,
+            action={"verb": "goto", "target": "wait-for-head",
+                    "resume": False, "rework": False},
+            label="entering the merge queue"),
+        depth=0, full=False, color=True, width=80))
+    assert len(lines) == 1
+    (line,) = lines
+    assert pal.ansi("→ entering the merge queue", "yellow") in line
+    assert pal.ansi("finalize · complete · 2s", "gray") in line
 
 
 def test_breadcrumb_without_label_has_no_route_line() -> None:
@@ -1471,8 +1486,9 @@ def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
             action={"verb": "continue"}, var_mutations={}, label=None),
     ]
     out = "\n".join(_lines(events))
-    assert "finalize · complete" in out
-    assert any(ln.strip() == "→ entering the merge queue" for ln in out.split("\n"))
+    # the route label rides inline on the finalize completion line (same line).
+    assert any("finalize · complete" in ln and ln.rstrip().endswith(
+        "→ entering the merge queue") for ln in out.split("\n"))
 
 
 def test_header_line_uses_step_label_and_falls_back_to_id() -> None:

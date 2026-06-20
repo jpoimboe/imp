@@ -34,7 +34,8 @@ def test_quiet_flag_lands_on_the_step_node() -> None:
 
 def test_workflow_route_label_lands_on_the_breadcrumb() -> None:
     # The rule's `label` rides step_completed.payload.label onto the breadcrumb,
-    # where the renderer turns it into the own-line yellow "→ <label>".
+    # where the renderer turns it into the inline yellow "→ <label>" that rides
+    # on the same completion line.
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="code-reviewer", kind="agent",

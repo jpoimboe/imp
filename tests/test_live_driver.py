@@ -1230,8 +1230,8 @@ def test_labeled_forward_goto_label_in_both_paths() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("finalize · complete" in ln for ln in body)
-    assert any(ln.strip() == "→ entering the merge queue" for ln in body)
+    assert any("finalize · complete" in ln and ln.rstrip().endswith(
+        "→ entering the merge queue") for ln in body)
     assert body == _render_body(events)
 
 
