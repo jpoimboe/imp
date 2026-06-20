@@ -1148,6 +1148,101 @@ _REVIEW_STEPS = frozenset({
 })
 
 
+def _user_message_text(payload: dict[str, Any]) -> str:
+    return "".join(
+        b.get("text", "") for b in (payload.get("content") or [])
+        if isinstance(b, dict) and b.get("type") == "text")
+
+
+def _first_user_message(events: list[dict[str, Any]]) -> str | None:
+    for ev in events:
+        if ev.get("type") == "user_message":
+            text = _user_message_text(ev.get("payload") or {}).strip()
+            if text:
+                return text
+    return None
+
+
+def _latest_phase(events: list[dict[str, Any]]) -> str | None:
+    phase = None
+    for ev in events:
+        if ev.get("type") == "step_started":
+            phase = (ev.get("payload") or {}).get("phase") or phase
+    return phase
+
+
+def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
+    cdir = _change_home(control, change_id)
+    raw: bytes | None
+    if (cdir / "change.json").exists():
+        raw = (cdir / "change.json").read_bytes()
+    else:
+        raw = journal.journal_show(control, change_id, "change.json")
+    if raw is None:
+        return None
+    try:
+        result: dict[str, Any] = json.loads(raw)
+        return result
+    except json.JSONDecodeError:
+        return None
+
+
+def _backlog_card(rec: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
+    ready, unmerged = backlog.readiness(control, rec["depends_on"])
+    readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
+    created = rec.get("created_at")
+    lines = [
+        f"id:         {rec['id']}",
+        f"title:      {rec['title'] or '(unnamed)'}",
+        "status:     backlog",
+        f"readiness:  {readiness}",
+        f"created:    {created or '-'} ({change_row.relative_age(created, now=now)})",
+    ]
+    if rec["depends_on"]:
+        lines.append(f"depends_on: {', '.join(rec['depends_on'])}")
+    description = rec.get("description") or ""
+    if description:
+        lines.append("")
+        lines.append(description)
+    return lines
+
+
+def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
+    row = _row_for_id(control, change_id)
+    if row is None:
+        return []
+    _id, status, step, last, title, created = row
+    events = _load_events_for_id(control, change_id) or []
+    lines = [
+        f"id:            {_id}",
+        f"title:         {title.strip() or '(unnamed)'}",
+        f"status:        {status}",
+    ]
+    if status in _INFLIGHT and step not in ("", "-"):
+        phase = _latest_phase(events)
+        lines.append(f"step:          {step}" + (f" ({phase})" if phase else ""))
+    lines.append(
+        f"created:       {created or '-'} ({change_row.relative_age(created, now=now)})")
+    lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
+    meta = _change_meta(control, change_id) or {}
+    if meta.get("base_branch"):
+        lines.append(f"base_branch:   {meta['base_branch']}")
+    if meta.get("depends_on"):
+        lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
+    opening = _first_user_message(events)
+    if opening:
+        lines.append("")
+        lines.append(opening)
+    return lines
+
+
+def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
+    rec = backlog.read_record(control, change_id)
+    if rec is not None:
+        return _backlog_card(rec, control, now=now)
+    return _change_card(control, change_id, now=now)
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     control = _control_root()
     try:
