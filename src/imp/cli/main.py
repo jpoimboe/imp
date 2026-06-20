@@ -11,7 +11,6 @@ import contextlib
 import json
 import logging
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -43,6 +42,7 @@ from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
+from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
@@ -1109,32 +1109,22 @@ def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     live = _change_home(control, change_id) / "artifacts" / rel
     if live.is_file():
         return live.read_bytes()
-    return journal.journal_show(control, change_id, rel)
+    return archive_read.read_artifact(control, change_id, rel)
 
 
 def _show_newest_plan_rel(control: Path, change_id: str) -> str | None:
-    """plans/<id>-plan-N.md for the highest N, live worktree first then journal.
-    Returns None when no plan exists in either place."""
-    def _newest(names: list[str]) -> str | None:
-        best, pick = -1, None
-        for name in names:
-            mobj = re.fullmatch(rf"{re.escape(change_id)}-plan-(\d+)\.md", name)
-            if mobj and int(mobj.group(1)) > best:
-                best, pick = int(mobj.group(1)), name
-        return pick
-
+    """plans/<id>-plan-N.md for the highest N: live worktree first, then the
+    retained wip ref, then the legacy journal (during the transition window).
+    Returns None when no plan exists anywhere."""
     live_dir = _change_home(control, change_id) / "artifacts" / "plans"
     if live_dir.is_dir():
-        pick = _newest([p.name for p in live_dir.iterdir() if p.is_file()])
+        pick = archive_read.pick_newest_plan(
+            change_id, [p.name for p in live_dir.iterdir() if p.is_file()])
         if pick:
             return f"plans/{pick}"
-    proc = subprocess.run(
-        ["git", "ls-tree", "--name-only", f"refs/imp/journal:{change_id}/plans"],
-        cwd=control, capture_output=True, text=True)
-    if proc.returncode == 0:
-        pick = _newest([ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
-        if pick:
-            return f"plans/{pick}"
+    pick = archive_read.newest_plan_name(control, change_id)
+    if pick:
+        return f"plans/{pick}"
     return None
 
 
