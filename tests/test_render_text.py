@@ -1673,3 +1673,49 @@ def test_complete_step_prose_field_control_bytes_escaped() -> None:
     assert "\x00" not in out
     assert "^G" in out
     assert "^@" in out
+
+
+def test_subagent_outcome_scalar_and_block_control_bytes_escaped() -> None:
+    raw = json.dumps({"verdict": "pass\x07", "detail": "line one\nline\x00 two more"})
+    sub = nv.SubagentFold(subagent_name="reviewer", event_id="e1", block_id="b1",
+                          nested=nv.NarrativeBuilder())
+    sub.outcome = raw
+    out = "\n".join(rt.subagent_outcome_lines(sub, depth=0, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "→" in out
+
+
+def test_subagent_outcome_nondict_prose_control_bytes_escaped() -> None:
+    sub = nv.SubagentFold(subagent_name="reviewer", event_id="e1", block_id="b1",
+                          nested=nv.NarrativeBuilder())
+    sub.outcome = "dispatch failed\x07 hard\x00"
+    out = "\n".join(rt.subagent_outcome_lines(sub, depth=0, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+    assert "^@" in out
+
+
+def test_fallback_payload_values_control_bytes_escaped() -> None:
+    node = nv.FallbackLine(event_type="weird_event", payload={"detail": "raw\x07 val\x00"})
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "weird_event" in out             # imp-assigned event_type label is intact
+
+
+def test_step_context_content_control_bytes_escaped() -> None:
+    node = nv.StepContextNode(payload={
+        "provider": "anthropic", "model": "m", "max_tool_calls": 5,
+        "system_prompt": "be helpful\x07 always\x00",
+        "tools_schema": [{"name": "bash\x1b"}],
+    })
+    out = "\n".join(rt._render_step_context(node, depth=0, full=True, color=False,
+                                            width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "\x1b" not in out
+    assert "^G" in out and "^@" in out and "^[" in out

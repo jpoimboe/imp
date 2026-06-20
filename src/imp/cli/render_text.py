@@ -425,7 +425,7 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     except (ValueError, TypeError):
         data = None
     if not isinstance(data, dict):
-        yield from _wrap(raw, width, depth, color, *codes, gutters=gutters)
+        yield from _wrap(_caret_escape(raw), width, depth, color, *codes, gutters=gutters)
         return
     scalars: list[str] = []
     blocks: list[tuple[str, str]] = []
@@ -433,12 +433,12 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
         if isinstance(v, str) and "\n" in v:
             blocks.append((k, v))
         else:
-            scalars.append(f"{k}={v}")
+            scalars.append(_caret_escape(f"{k}={v}"))
     if scalars:
         yield _line("→ " + " · ".join(scalars), depth, color, *codes, gutters=gutters)
     for k, v in blocks:
-        yield _line(f"{k}:", depth, color, *codes, gutters=gutters)
-        yield from _wrap(v, width, depth + 1, color, *codes, gutters=gutters)
+        yield _line(_caret_escape(f"{k}:"), depth, color, *codes, gutters=gutters)
+        yield from _wrap(_caret_escape(v), width, depth + 1, color, *codes, gutters=gutters)
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
@@ -664,7 +664,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.FallbackLine):
-        kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
+        kv = " ".join(f"{k}={_caret_escape(str(v))}" for k, v in node.payload.items())
         yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
@@ -822,10 +822,10 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
                 *pal.NODE_COLORS["metadata"], gutters=gutters)
     yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"],
                 gutters=gutters)
-    yield from _wrap(str(p.get("system_prompt", "")), width, depth + 2, color,
-                     *pal.NODE_COLORS["metadata"], gutters=gutters)
+    yield from _wrap(_caret_escape(str(p.get("system_prompt", ""))), width, depth + 2,
+                     color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     for t in tools:
         name = t.get("name", t) if isinstance(t, dict) else t
-        yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"],
-                    gutters=gutters)
+        yield _line(f"- {_caret_escape(str(name))}", depth + 2, color,
+                    *pal.NODE_COLORS["metadata"], gutters=gutters)
