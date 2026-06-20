@@ -1595,3 +1595,44 @@ def test_colored_render_keeps_sgr_but_caret_escapes_content() -> None:
     assert "\x1b[" in out        # imp's own SGR color codes survive (color not broken)
     assert "\x07" not in out     # content BEL is escaped, not emitted raw
     assert "^G" in out
+
+
+def test_full_thinking_control_bytes_escaped() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "thinking", agent_id="step:p/s", content="mull\x07ing\x00over\x1bit"),
+    ], full=True))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "\x1b" not in out
+    assert "^G" in out
+
+
+def test_prose_leaf_control_bytes_escaped() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "hello\x07 world\x00"}]}),
+    ], full=True))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+
+
+def test_user_message_control_bytes_escaped() -> None:
+    node = nv.UserMessageNode(text="please\x07 run\x00 it", interactive=True)
+    out = "\n".join(rt._render(node, depth=1, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+
+
+def test_literal_text_node_control_bytes_escaped() -> None:
+    node = nv.LiteralTextNode(text="hi\x07 there\x00")
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out

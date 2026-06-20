@@ -484,11 +484,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.AgentTextNode):
-        yield from _render_markdown_block(node.text, width, depth, color, gutters)
+        yield from _render_markdown_block(_caret_escape(node.text), width, depth,
+                                          color, gutters)
         return
 
     if isinstance(node, nv.LiteralTextNode):
-        yield from _render_markdown_block(node.text, width, depth, color, gutters)
+        yield from _render_markdown_block(_caret_escape(node.text), width, depth,
+                                          color, gutters)
         return
 
     if isinstance(node, nv.UserMessageNode):
@@ -515,7 +517,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         hang = " " * len(pal.CARET)
         avail = max(8, width - _INDENT_W * depth - len(pal.CARET))
         first = True
-        for para in node.text.split("\n"):
+        for para in _caret_escape(node.text).split("\n"):
             if not para:
                 yield indent
                 continue
@@ -534,7 +536,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if full:
             yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
                         *pal.NODE_COLORS["thinking"], gutters=gutters)
-            yield from _wrap(node.content, width, depth + 1, color,
+            yield from _wrap(_caret_escape(node.content), width, depth + 1, color,
                              *pal.NODE_COLORS["thinking"], gutters=gutters)
         # full=False: thinking is noise in the default view — render nothing.
         # (A transient `· thinking` status cue lives in narrative.current_activity.)
