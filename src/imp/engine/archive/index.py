@@ -25,7 +25,7 @@ _SCHEMA = (
 
 def connect(index_path: Path) -> sqlite3.Connection:
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(index_path)
+    conn = sqlite3.connect(index_path, timeout=30)
     for stmt in _SCHEMA:
         conn.execute(stmt)
     conn.commit()
