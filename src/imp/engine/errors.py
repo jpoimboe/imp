@@ -64,6 +64,5 @@ class LayoutMismatch(LoadError):
             f"  birth imp_commit: {breadcrumb}\n"
             f"  recover: finish or abandon-and-restart this change under the new "
             f"layout, or hand-migrate {change_dir}; its events and transcripts "
-            f"are preserved at refs/imp/journal "
-            f"(git cat-file -p refs/imp/journal:<id>/events.jsonl)."
+            f"are accessible via `imp log {change_dir.name}`."
         )

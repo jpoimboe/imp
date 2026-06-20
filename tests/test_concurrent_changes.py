@@ -118,9 +118,8 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
     assert not (tmp_path / ".imp" / "worktrees" / "spine").exists()  # worktree removed
     branch_list = _git(tmp_path, "branch", "--list", "imp/spine").stdout
     assert "imp/spine" in branch_list                            # branch kept
-    assert (
-        _git(tmp_path, "show", "refs/imp/journal:spine/change.json").returncode == 0
-    )                                                            # journaled
+    from imp.engine.archive import read as archive_read
+    assert archive_read.is_archived(tmp_path, "spine")           # archived (index)
     assert os.getcwd() == cwd_before                             # cwd restored
 
 

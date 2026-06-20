@@ -102,3 +102,32 @@ def test_write_record_rejects_blank_title(tmp_path: Path) -> None:
         backlog.write_record(
             tmp_path, change_id="aaa111", title="   ",
             description="anything", depends_on=[], created_by="human")
+
+
+def test_readiness_resolves_from_archive_index(tmp_path: Path) -> None:
+    import json as _json
+    import subprocess
+
+    from imp.engine import archive
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"d-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"payload":{}}\n')
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "dep1", "title": "Dep", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "dep1", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "dep1", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    assert backlog.readiness(tmp_path, ["dep1"]) == (True, [])
+    assert backlog.readiness(tmp_path, ["dep1", "ghost"]) == (False, ["ghost"])

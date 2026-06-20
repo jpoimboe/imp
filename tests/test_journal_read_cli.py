@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.engine import journal, worktree
+from imp.engine import worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -425,7 +425,7 @@ def test_status_default_inflight_columns_and_color(
     assert lines[1].startswith("yaitd7")
 
 
-def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:
+def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -441,15 +441,18 @@ def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:
 
     rc = m._abandon(tmp_path, "doomed", assume_yes=True)
     assert rc == 0
-    assert journal.journal_show(tmp_path, "doomed", "plans/doomed-plan-1.md") \
+    from imp.engine.archive import read as archive_read
+    # Artifact stays reachable on the RETAINED wip ref (spec AC 3).
+    assert archive_read.read_artifact(tmp_path, "doomed", "plans/doomed-plan-1.md") \
         == b"# plan\n"
-    assert journal.journal_show(tmp_path, "doomed", "state.json") is not None
+    # Runtime snapshot is archived (record/blob/index), not journaled.
+    assert archive_read.read_state_json(tmp_path, "doomed") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/doomed"],
-        cwd=tmp_path, capture_output=True).returncode != 0
+        cwd=tmp_path, capture_output=True).returncode == 0
 
 
-def test_abandon_without_wip_still_journals_runtime(tmp_path: Path) -> None:
+def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -458,14 +461,66 @@ def test_abandon_without_wip_still_journals_runtime(tmp_path: Path) -> None:
     # No artifact committed → no wip ref exists.
     rc = m._abandon(tmp_path, "bare", assume_yes=True)
     assert rc == 0
-    # Runtime state is journaled even without any artifact.
-    assert journal.journal_show(tmp_path, "bare", "state.json") is not None
+    from imp.engine.archive import read as archive_read
+    # Runtime state is archived even without any artifact; no wip ref was ever created.
+    assert archive_read.read_state_json(tmp_path, "bare") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/bare"],
         cwd=tmp_path, capture_output=True).returncode != 0
 
 
-def test_finalize_journals_artifacts_from_wip(tmp_path: Path) -> None:
+def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
+    import io
+    import json as _json
+    import subprocess
+    from contextlib import redirect_stdout
+
+    import imp.cli.main as m
+    from imp.engine import archive, worktree
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"a-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"payload":{"id":"arch01"}}\n')
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "arch01", "title": "Arch", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "arch01", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    # Seed a DECOY journal entry with divergent status and NO events.jsonl so
+    # _resolve_id finds the id while the archive supplies the real bytes.
+    # If the journal were preferred, status would be "running" (not "completed"),
+    # and events would be absent.
+    decoy_state = tmp_path / "decoy-state.json"
+    decoy_state.write_text(_json.dumps({"id": "arch01", "status": "running"}))
+    decoy_change = tmp_path / "decoy-change.json"
+    decoy_change.write_text(_json.dumps({"id": "arch01", "title": "Arch"}))
+    worktree.journal_commit(tmp_path, "arch01", {
+        "state.json": decoy_state, "change.json": decoy_change})
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    def _run(*argv: str) -> str:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            assert m.main(list(argv)) == 0, buf.getvalue()
+        return buf.getvalue()
+
+    assert "change_created" in _run("show", "arch01", "events")
+    assert "completed" in _run("show", "arch01", "status")
+
+
+def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     from imp.engine import executor
     from imp.engine.state import JsonlEventLog
 
@@ -486,13 +541,116 @@ def test_finalize_journals_artifacts_from_wip(tmp_path: Path) -> None:
 
     executor._complete(ch, State.load(ch.state_dir), JsonlEventLog(ch.events_path))
 
-    # The journal carries BOTH the artifact and the runtime snapshot, and the wip
-    # ref is gone.
-    assert journal.journal_show(tmp_path, "doc-thing", "spec/doc-thing.md") \
+    from imp.engine.archive import read as archive_read
+    # The artifact stays on the RETAINED wip ref; the runtime snapshot is archived.
+    assert archive_read.read_artifact(tmp_path, "doc-thing", "spec/doc-thing.md") \
         == b"# the spec\n"
-    assert journal.journal_show(tmp_path, "doc-thing", "events.jsonl") is not None
-    assert journal.journal_show(tmp_path, "doc-thing", "change.json") is not None
+    assert archive_read.read_events(tmp_path, "doc-thing") is not None
+    assert archive_read.read_change_json(tmp_path, "doc-thing") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet",
          "refs/imp/journal-wip/doc-thing"],
-        cwd=tmp_path, capture_output=True).returncode != 0
+        cwd=tmp_path, capture_output=True).returncode == 0
+
+
+def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None:
+    import json as _json
+    import subprocess
+
+    import imp.cli.main as m
+    from imp.engine import archive
+
+    # Set up a minimal git repo (not via _seed_control — no conftest dep needed).
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"log-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"payload":{"id":"logtest"}}\n'
+        '{"id":"log-e1","parent_id":"log-e0","agent_id":"plan-writer",'
+        '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'
+        '"payload":{"step":"plan-writer","phase":"plan"}}\n'
+    )
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "logtest", "title": "Log Test", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "logtest", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "logtest", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    # Seed a decoy journal entry with a different event type so we can tell which
+    # source _load_events_for_id prefers. If the journal were preferred, the output
+    # would mention "abandoned" instead of "plan-writer".
+    decoy = tmp_path / "decoy.jsonl"
+    decoy.write_text(
+        '{"id":"d-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_abandoned",'
+        '"payload":{}}\n'
+    )
+    worktree.journal_commit(tmp_path, "logtest", {"events.jsonl": decoy})
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = m.main(["log", "logtest"])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "plan-writer" in out    # from archive blob, not from decoy journal
+    assert "abandoned" not in out  # decoy journal event must NOT appear
+
+
+def test_status_all_lists_archived_and_legacy(tmp_path, monkeypatch) -> None:
+    import io
+    import json as _json
+    from contextlib import redirect_stdout
+
+    import imp.cli.main as m
+    from imp.engine import archive, worktree
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+
+    # An archived (index) completed Change with no in-flight home.
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"x-e0","timestamp":"2026-06-02T00:00:00+00:00",'
+        '"type":"change_created","payload":{}}\n')
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "arch01", "title": "Archived One", "base_branch": "main",
+        "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "arch01", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    # A legacy journaled completed Change (transition window).
+    levents = tmp_path / "le.jsonl"
+    levents.write_text(
+        '{"id":"l-e0","timestamp":"2026-06-01T00:00:00+00:00",'
+        '"type":"change_created","payload":{}}\n')
+    lcj = tmp_path / "lc.json"
+    lcj.write_text(_json.dumps({
+        "id": "leg01", "title": "Legacy One", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    lsj = tmp_path / "ls.json"
+    lsj.write_text(_json.dumps({"id": "leg01", "status": "completed", "step": None}))
+    worktree.journal_commit(tmp_path, "leg01", {
+        "events.jsonl": levents, "change.json": lcj, "state.json": lsj})
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert m.main(["status", "--all"]) == 0
+    out = buf.getvalue()
+    assert "arch01" in out
+    assert "leg01" in out
+    assert "Archived One" in out
+    assert "Legacy One" in out

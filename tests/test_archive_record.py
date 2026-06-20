@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from imp.engine.archive import record
+
+
+def _change_meta() -> dict:
+    return {
+        "id": "alpha",
+        "title": "Alpha",
+        "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00",
+        "depends_on": ["beta"],
+    }
+
+
+def _final_state() -> dict:
+    return {"id": "alpha", "status": "completed", "step": "finalize",
+            "vars": {"k": 1}, "merge_commit": "abc123"}
+
+
+def test_build_record_maps_fields_from_change_and_state() -> None:
+    rec = record.build_record(_change_meta(), _final_state(), "hash123")
+    assert rec == {
+        "id": "alpha",
+        "title": "Alpha",
+        "base": "main",
+        "created_at": "2026-06-01T00:00:00+00:00",
+        "depends_on": ["beta"],
+        "final_state": _final_state(),
+        "events_hash": "hash123",
+    }
+
+
+def test_build_record_absent_depends_on() -> None:
+    meta = {k: v for k, v in _change_meta().items() if k != "depends_on"}
+    rec = record.build_record(meta, _final_state(), "hash123")
+    assert rec["depends_on"] == []
+
+
+def test_write_then_read_record_roundtrips(tmp_path: Path) -> None:
+    records_dir = tmp_path / "records"
+    rec = record.build_record(_change_meta(), _final_state(), "hash123")
+    path = record.write_record(records_dir, rec)
+    assert path == records_dir / "alpha.json"
+    assert record.read_record(records_dir, "alpha") == rec
+
+
+def test_read_record_absent_returns_none(tmp_path: Path) -> None:
+    assert record.read_record(tmp_path / "records", "nope") is None
+
+
+def test_list_record_ids(tmp_path: Path) -> None:
+    records_dir = tmp_path / "records"
+    meta_z = {**_change_meta(), "id": "zeta"}
+    record.write_record(records_dir, record.build_record(meta_z, _final_state(), "h"))
+    record.write_record(records_dir, record.build_record(_change_meta(), _final_state(), "h"))
+    assert record.list_record_ids(records_dir) == ["alpha", "zeta"]
+
+
+def test_list_record_ids_missing_dir_returns_empty(tmp_path: Path) -> None:
+    assert record.list_record_ids(tmp_path / "nope") == []

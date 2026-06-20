@@ -35,5 +35,5 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
     assert rc == 2
     assert "999" in err and str(LAYOUT_VERSION) in err     # both versions surfaced
     assert "cafef00d" in err                                # imp_commit breadcrumb
-    assert "refs/imp/journal" in err                        # recovery recipe
+    assert "imp log" in err                                  # recovery recipe
     assert "no Change matches" not in err                   # did NOT fall to _resume_gone

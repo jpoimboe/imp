@@ -11,7 +11,6 @@ import contextlib
 import json
 import logging
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -43,6 +42,8 @@ from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
+from imp.engine.archive import migrate as archive_migrate
+from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
@@ -1020,12 +1021,12 @@ def _change_home(control: Path, change_id: str) -> Path:
 
 
 def _iter_change_ids(control: Path) -> list[str]:
-    """All known Change ids: permanent homes first, then journaled ids not live,
+    """All known Change ids: permanent homes first, then archived ids not live,
     then backlog ids not yet seen."""
     live = _list_change_homes(control)
     seen = set(live)
     out = list(live)
-    for cid in journal.journal_ids(control):
+    for cid in archive_read.archived_ids(control):
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
@@ -1037,7 +1038,7 @@ def _iter_change_ids(control: Path) -> list[str]:
 
 
 def _title_for_id(control: Path, change_id: str) -> str | None:
-    """Read a Change's current title (worktree first, backlog second, journal third)."""
+    """Read a Change's current title (worktree first, backlog second, archive third)."""
     cdir = _change_home(control, change_id)
     cj = cdir / "change.json"
     if cj.exists():
@@ -1048,7 +1049,7 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
     rec = backlog.read_record(control, change_id)
     if rec is not None:
         return str(rec["title"])
-    raw = journal.journal_show(control, change_id, "change.json")
+    raw = archive_read.read_change_json(control, change_id)
     if raw is None:
         return None
     try:
@@ -1109,32 +1110,22 @@ def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     live = _change_home(control, change_id) / "artifacts" / rel
     if live.is_file():
         return live.read_bytes()
-    return journal.journal_show(control, change_id, rel)
+    return archive_read.read_artifact(control, change_id, rel)
 
 
 def _show_newest_plan_rel(control: Path, change_id: str) -> str | None:
-    """plans/<id>-plan-N.md for the highest N, live worktree first then journal.
-    Returns None when no plan exists in either place."""
-    def _newest(names: list[str]) -> str | None:
-        best, pick = -1, None
-        for name in names:
-            mobj = re.fullmatch(rf"{re.escape(change_id)}-plan-(\d+)\.md", name)
-            if mobj and int(mobj.group(1)) > best:
-                best, pick = int(mobj.group(1)), name
-        return pick
-
+    """plans/<id>-plan-N.md for the highest N: live worktree first, then the
+    retained wip ref, then the legacy journal (during the transition window).
+    Returns None when no plan exists anywhere."""
     live_dir = _change_home(control, change_id) / "artifacts" / "plans"
     if live_dir.is_dir():
-        pick = _newest([p.name for p in live_dir.iterdir() if p.is_file()])
+        pick = archive_read.pick_newest_plan(
+            change_id, [p.name for p in live_dir.iterdir() if p.is_file()])
         if pick:
             return f"plans/{pick}"
-    proc = subprocess.run(
-        ["git", "ls-tree", "--name-only", f"refs/imp/journal:{change_id}/plans"],
-        cwd=control, capture_output=True, text=True)
-    if proc.returncode == 0:
-        pick = _newest([ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
-        if pick:
-            return f"plans/{pick}"
+    pick = archive_read.newest_plan_name(control, change_id)
+    if pick:
+        return f"plans/{pick}"
     return None
 
 
@@ -1143,7 +1134,9 @@ def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
     live = change / "state" / "state.json" if name == "state.json" else change / name
     if live.is_file():
         return live.read_bytes()
-    return journal.journal_show(control, change_id, name)
+    if name == "state.json":
+        return archive_read.read_state_json(control, change_id)
+    return archive_read.read_events(control, change_id)
 
 
 _REVIEW_STEPS = frozenset({
@@ -1303,7 +1296,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
 
 def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] | None:
-    """Worktree first, journal second. Returns None if the id is in neither.
+    """Worktree first, archive second. Returns None if the id is in neither.
 
     Worktree-first is necessary, not merely preferred: an id lives in exactly
     one place (journal_commit runs once, concurrent with worktree removal), so
@@ -1315,7 +1308,7 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
         change = None
     if change is not None:
         return list(change.event_log().read())
-    raw = journal.journal_show(control, change_id, "events.jsonl")
+    raw = archive_read.read_events(control, change_id)
     if raw is None:
         return None
     return _parse_jsonl(raw)
@@ -1323,15 +1316,15 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
 
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent change home by its events.jsonl mtime, else
-    most-recent journaled id (by last-event timestamp), else None."""
+    most-recent archived id (by last-event timestamp), else None."""
     homes = _list_change_homes(control)
     if homes:
         return max(homes, key=lambda s: (_change_home(control, s)
                                          / "events.jsonl").stat().st_mtime)
-    journaled = journal.journal_ids(control)
-    if not journaled:
+    archived = archive_read.archived_ids(control)
+    if not archived:
         return None
-    return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
+    return max(archived, key=lambda s: _journal_last_iso(control, s) or "")
 
 
 _NO_CHANGES_MESSAGE = "No changes."
@@ -1478,23 +1471,11 @@ def _last_event_iso(events_path: Path) -> str | None:
 
 
 def _journal_last_iso(control: Path, change_id: str) -> str | None:
-    raw = journal.journal_show(control, change_id, "events.jsonl")
-    if raw is None:
-        return None
-    line = _last_nonempty_line(raw)
-    if line is None:
-        return None
-    return _iso_from_line(line.decode("utf-8", errors="replace"))
+    return archive_read.last_event_iso(control, change_id)
 
 
 def _journal_status(control: Path, change_id: str) -> str | None:
-    raw = journal.journal_show(control, change_id, "state.json")
-    if raw is None:
-        return None
-    try:
-        return str(json.loads(raw)["status"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
+    return archive_read.status_of(control, change_id)
 
 
 def _resume_gone(control: Path, change_id: str) -> int:
@@ -1510,7 +1491,7 @@ def _resume_gone(control: Path, change_id: str) -> int:
     return 2
 
 
-# Spec §10: in-flight statuses; completed Changes live in the journal.
+# Spec §10: in-flight statuses; completed Changes live in the archive.
 _INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
 RESUMABLE = ("paused", "errored", "merge_blocked", "draft")
 
@@ -1584,7 +1565,7 @@ def _draft_label(status: str, change_json: bytes) -> str:
 
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = _change_home(control, change_id)
-    # journal_show returns bytes | None; the live change-home branch always finds
+    # archive_read returns bytes | None; the live change-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     change_json: bytes | None
@@ -1593,8 +1574,8 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
         change_json = (cdir / "change.json").read_bytes()
         last = _last_event_iso(cdir / "events.jsonl") or ""
     else:
-        state_json = journal.journal_show(control, change_id, "state.json")
-        change_json = journal.journal_show(control, change_id, "change.json")
+        state_json = archive_read.read_state_json(control, change_id)
+        change_json = archive_read.read_change_json(control, change_id)
         if state_json is None or change_json is None:
             return None
         last = _journal_last_iso(control, change_id) or ""
@@ -1626,25 +1607,30 @@ def _status_rows(control: Path) -> list[_Row]:
 
 
 def _completed_rows(control: Path) -> list[_Row]:
-    """Journal-backed completed Changes: every journaled id NOT currently surfaced as
-    an in-flight row. The dedup set is the IN-FLIGHT id set (exactly the ids
-    _status_rows emits), NOT every change home — a merged change keeps its home
-    but is `completed`, so it must fall through to this completed section rather than be
-    masked by mere home presence."""
+    """Completed/abandoned Changes NOT currently surfaced in-flight. Archived rows
+    come from a SINGLE indexed query (spec AC 7); legacy journaled ids are folded
+    in via the transition fan-out until the importer retires refs/imp/journal."""
     live = {r[0] for r in _status_rows(control)}
     rows: list[_Row] = []
+    seen: set[str] = set()
+    for row in archive_read.completed_rows(control):
+        if row[0] in live or row[1] in _INFLIGHT:
+            continue
+        rows.append(row)
+        seen.add(row[0])
     for change_id in journal.journal_ids(control):
-        if change_id in live:
+        if change_id in live or change_id in seen:
             continue
         state_json = journal.journal_show(control, change_id, "state.json")
         change_json = journal.journal_show(control, change_id, "change.json")
         if state_json is None or change_json is None:
             continue
         last = _journal_last_iso(control, change_id) or ""
-        row = _status_row(change_id, state_json, change_json, last)
-        if row is None or row[1] in _INFLIGHT:
-            continue  # belt-and-suspenders; journaled rows are completed
-        rows.append(row)
+        jrow = _status_row(change_id, state_json, change_json, last)
+        if jrow is None or jrow[1] in _INFLIGHT:
+            continue
+        rows.append(jrow)
+        seen.add(change_id)
     return rows
 
 
@@ -1885,10 +1871,10 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     except SystemExit:
         # _resolve_id scans live worktrees only. A Change whose worktree was
         # already removed (crash between abandon's remove and branch-delete)
-        # is unresolvable there — but abandon journaled the id before removal,
-        # so recover it from the journal to still reap an orphaned branch
+        # is unresolvable there — but abandon archived the id before removal,
+        # so recover it from the archive to still reap an orphaned branch
         # (AC #12). Exact id, else unique suffix match.
-        ids = journal.journal_ids(control)
+        ids = archive_read.archived_ids(control)
         token = args.token
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
@@ -1898,6 +1884,42 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
     return _abandon(control, change_id, assume_yes=args.yes)
+
+
+def _cmd_migrate_journal(
+    args: argparse.Namespace, *,
+    input_fn: Callable[[str], str] = input,
+    interactive: bool | None = None,
+) -> int:
+    control = _control_root()
+    ids = journal.journal_ids(control)
+    if not ids:
+        print("imp: refs/imp/journal is absent or empty; nothing to migrate.")
+        return 0
+    print(f"About to migrate {len(ids)} Change(s) from refs/imp/journal into the "
+          "archive, then retire the ref.")
+    print("Confirm that no in-flight Changes remain (drain them first).")
+    do_prompt = not args.yes and (
+        _interactive() if interactive is None else interactive)
+    if do_prompt:
+        try:
+            ans = input_fn(
+                "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        except EOFError:
+            ans = ""
+        if ans not in ("y", "yes"):
+            print("Migration cancelled; refs/imp/journal left intact.")
+            return 1
+    imported = archive_migrate.import_journal(control)
+    if len(imported) != len(ids):
+        skipped = sorted(set(ids) - set(imported))
+        print(f"imp: {len(skipped)} Change(s) could not be imported "
+              f"({', '.join(skipped)}); refs/imp/journal NOT retired. "
+              "Investigate the skipped Change(s) before retrying.")
+        return 1
+    archive_migrate.retire_journal(control)
+    print(f"Migrated {len(imported)} Change(s); refs/imp/journal retired.")
+    return 0
 
 
 def _cmd_artifact_commit(args: argparse.Namespace) -> int:
@@ -2286,6 +2308,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
+
+    p_migrate = sub.add_parser(
+        "migrate-journal",
+        help="Import the legacy refs/imp/journal into the archive and retire the ref",
+    )
+    p_migrate.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt",
+    )
+    p_migrate.set_defaults(func=_cmd_migrate_journal)
 
     p_artifact = sub.add_parser(
         "artifact-commit",

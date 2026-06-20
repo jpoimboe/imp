@@ -17,6 +17,14 @@ from tests.conftest import _seed_control
 _ID = "feat01"
 
 
+def _git_wip_present(control: Path, change_id: str) -> bool:
+    import subprocess
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet",
+         f"refs/imp/journal-wip/{change_id}"],
+        cwd=control, capture_output=True).returncode == 0
+
+
 def _seed_with_artifacts(control: Path, change_id: str, title: str) -> Change:
     ch = Change.create(control, title=title, change_id=change_id, base_branch="main")
     spec = ch.change_dir / "artifacts" / "spec"
@@ -80,7 +88,7 @@ def test_show_events_and_review_live(
     assert "task-lead" not in review_out
 
 
-def test_show_spec_falls_back_to_journal_after_merge(
+def test_show_spec_falls_back_after_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
@@ -94,14 +102,18 @@ def test_show_spec_falls_back_to_journal_after_merge(
     with ch.events_path.open("w", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "step_started", "agent_id": None,
                              "payload": {"step": "plan-reviewer", "phase": "plan"}}) + "\n")
-    worktree.fold_wip_into_journal(tmp_path, _ID, {
-        "events.jsonl": ch.events_path,
-        "change.json": ch.change_dir / "change.json",
-        "state.json": ch.state_dir / "state.json",
-    })
+    from imp.engine import archive
+    archive.archive_change(
+        tmp_path, _ID,
+        events_path=ch.events_path,
+        change_json_path=ch.change_dir / "change.json",
+        state_json_path=ch.state_dir / "state.json",
+    )
+    # The per-Change artifact ref is RETAINED at archive (spec AC 3).
+    assert _git_wip_present(tmp_path, _ID)
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
-    # Worktree gone -> journal fallback.
+    # Worktree gone -> archive/journal fallback.
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
     assert "PLAN TWO" in _run(monkeypatch, tmp_path, "show", _ID, "plan")
     assert "completed" in _run(monkeypatch, tmp_path, "show", _ID, "status")
@@ -217,23 +229,31 @@ def test_show_live_default_renders_card(
     assert "running" in out
 
 
-def test_show_journaled_default_renders_card(
+def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # No change home: artifacts must come from the retained wip ref (spec AC 10, 12).
     _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    files = {str(p.relative_to(ch.change_dir / "artifacts")): p
-             for p in sorted((ch.change_dir / "artifacts").rglob("*")) if p.is_file()}
-    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
-    st = State.load(ch.state_dir)
-    st.status = "completed"
-    st.save(ch.state_dir)
-    worktree.fold_wip_into_journal(tmp_path, _ID, {
-        "events.jsonl": ch.events_path,
-        "change.json": ch.change_dir / "change.json",
-        "state.json": ch.state_dir / "state.json",
-    })
-    worktree.remove_worktree(tmp_path, _ID)
-    out = _run(monkeypatch, tmp_path, "show", _ID)
-    assert "Feat" in out
-    assert "completed" in out
+    spec = tmp_path / "spec.md"
+    spec.write_text("# WIP-ONLY SPEC\n")
+    p1 = tmp_path / "p1.md"
+    p1.write_text("# PLAN A\n")
+    p2 = tmp_path / "p2.md"
+    p2.write_text("# PLAN B\n")
+    worktree.artifact_commit(
+        tmp_path, "ghost01",
+        {"spec/ghost01.md": spec,
+         "plans/ghost01-plan-1.md": p1, "plans/ghost01-plan-2.md": p2},
+        message="artifact: ghost")
+    # Seed a journal entry (events only — NOT artifacts) so `_resolve_id` finds the
+    # id while the artifacts remain reachable solely via the wip ref.
+    legacy = tmp_path / "legacy.jsonl"
+    legacy.write_text(
+        '{"id":"ghost01","timestamp":"2026-06-01T00:00:00+00:00",'
+        '"type":"change_created","payload":{}}\n')
+    worktree.journal_commit(tmp_path, "ghost01", {"events.jsonl": legacy})
+
+    assert "WIP-ONLY SPEC" in _run(monkeypatch, tmp_path, "show", "ghost01", "spec")
+    out = _run(monkeypatch, tmp_path, "show", "ghost01", "plan")
+    assert "PLAN B" in out          # newest
+    assert "PLAN A" not in out

@@ -83,5 +83,8 @@ def test_complete_finalizes_even_when_next_head_vanishes(tmp_path, monkeypatch) 
 
     assert result == RunResult.COMPLETED
     assert not (tmp_path / ".imp" / "worktrees" / "aaa").exists()      # worktree removed
-    assert _git(tmp_path, "show", "refs/imp/journal:aaa/change.json").returncode == 0  # wip folded
+    from imp.engine import archive
+    assert archive.records_root(tmp_path).joinpath("aaa.json").is_file()  # archived
+    assert _git(
+        tmp_path, "show", "refs/imp/journal:aaa/change.json").returncode != 0  # not journaled
     assert spawned == []                                    # vanished next head never spawned
