@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from pathlib import Path
 
-from imp.engine import archive, journal
+from imp.engine import archive, journal, worktree
 
 _RUNTIME_FILES = ("events.jsonl", "change.json", "state.json")
 
@@ -29,4 +30,54 @@ def import_change_runtime(control_root: Path, change_id: str) -> bool:
             events_path=tmp / "events.jsonl",
             change_json_path=tmp / "change.json",
             state_json_path=tmp / "state.json")
+    return True
+
+
+def _wip_ref_exists(control_root: Path, change_id: str) -> bool:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet",
+         f"refs/imp/journal-wip/{change_id}"],
+        cwd=control_root, capture_output=True, text=True)
+    return proc.returncode == 0
+
+
+def _journal_artifact_rels(control_root: Path, change_id: str) -> list[str]:
+    """Recursive non-runtime paths under refs/imp/journal:<id> (e.g.
+    spec/<id>.md, plans/<id>-plan-1.md), relative to the Change's subtree."""
+    proc = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", f"refs/imp/journal:{change_id}"],
+        cwd=control_root, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return []
+    return [
+        line.strip()
+        for line in proc.stdout.splitlines()
+        if line.strip() and line.strip() not in _RUNTIME_FILES
+    ]
+
+
+def import_change_artifacts(control_root: Path, change_id: str) -> bool:
+    """Materialize refs/imp/journal-wip/<id> from the journal's non-runtime
+    subtrees. Skips (returns False) when the ref already exists (a recent Change
+    already carries its artifacts there) or when the journal has no artifacts."""
+    if _wip_ref_exists(control_root, change_id):
+        return False
+    rels = _journal_artifact_rels(control_root, change_id)
+    if not rels:
+        return False
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        files: dict[str, Path] = {}
+        for rel in rels:
+            blob = journal.journal_show(control_root, change_id, rel)
+            if blob is None:
+                continue
+            dest = tmp / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(blob)
+            files[rel] = dest
+        if not files:
+            return False
+        worktree.artifact_commit(
+            control_root, change_id, files, message=f"migrate: {change_id}")
     return True

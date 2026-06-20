@@ -7,6 +7,7 @@ from pathlib import Path
 from imp.engine import archive, worktree
 from imp.engine.archive import index, migrate, record, records_root
 from imp.engine.archive.blobstore import hash_content
+from imp.engine.archive.read import newest_plan_name, read_artifact
 
 
 def _git_init(root: Path) -> None:
@@ -79,3 +80,48 @@ def test_import_change_runtime_builds_record_blob_and_index(tmp_path: Path) -> N
 def test_import_change_runtime_missing_change_returns_false(tmp_path: Path) -> None:
     _git_init(tmp_path)
     assert migrate.import_change_runtime(tmp_path, "ghost") is False
+
+
+def _wip_ref_exists(control: Path, cid: str) -> bool:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet",
+         f"refs/imp/journal-wip/{cid}"],
+        cwd=control, capture_output=True, text=True)
+    return proc.returncode == 0
+
+
+def test_import_change_artifacts_builds_wip_ref_from_journal(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _journal_change(tmp_path, "alpha", "completed", artifacts={
+        "spec/alpha.md": b"# alpha spec\n",
+        "plans/alpha-plan-1.md": b"# alpha plan 1\n",
+    })
+
+    assert migrate.import_change_artifacts(tmp_path, "alpha") is True
+    assert _wip_ref_exists(tmp_path, "alpha")
+    # The artifacts are now readable off the retained per-Change ref, and the
+    # runtime files are NOT carried into it.
+    assert read_artifact(tmp_path, "alpha", "spec/alpha.md") == b"# alpha spec\n"
+    assert newest_plan_name(tmp_path, "alpha") == "alpha-plan-1.md"
+
+
+def test_import_change_artifacts_skips_when_ref_already_exists(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _journal_change(tmp_path, "alpha", "completed", artifacts={
+        "spec/alpha.md": b"# journal spec\n"})
+    # A wip ref already carries this Change's spec (recent Changes have one).
+    existing = tmp_path / "existing-spec.md"
+    existing.write_bytes(b"# existing spec\n")
+    worktree.artifact_commit(
+        tmp_path, "alpha", {"spec/alpha.md": existing}, message="seed")
+
+    assert migrate.import_change_artifacts(tmp_path, "alpha") is False
+    # The pre-existing ref content is untouched (not overwritten from the journal).
+    assert read_artifact(tmp_path, "alpha", "spec/alpha.md") == b"# existing spec\n"
+
+
+def test_import_change_artifacts_no_artifacts_returns_false(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _journal_change(tmp_path, "alpha", "completed")  # runtime files only
+    assert migrate.import_change_artifacts(tmp_path, "alpha") is False
+    assert not _wip_ref_exists(tmp_path, "alpha")
