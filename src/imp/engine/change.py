@@ -117,6 +117,7 @@ class Change:
         meta["project_root"] = str(wt_path)
         meta["materialized"] = True
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        link_change_home(wt_path, self.change_dir)
         return head_changed
 
     @property
@@ -201,6 +202,7 @@ class Change:
             loop_counts={},
         ).save(change_dir / "state")
 
+        link_change_home(wt_path, change_dir)
         change = cls(
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,

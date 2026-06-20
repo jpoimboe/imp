@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.change import link_change_home
+from imp.engine.change import Change, link_change_home
+from tests.conftest import _seed_control
 
 
 def _layout(tmp_path: Path) -> tuple[Path, Path]:
@@ -66,3 +67,34 @@ def test_stale_symlink_is_replaced(tmp_path: Path) -> None:
     link_change_home(worktree, change_dir)
     assert link.is_symlink()
     assert link.resolve() == change_dir.resolve()
+
+
+def test_create_links_worktree_home_no_phantom(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="cre1", base_branch="main")
+    link = ch.project_root / ".imp" / "changes" / "cre1"
+    assert link.is_symlink()
+    assert link.resolve() == ch.change_dir.resolve()
+
+
+def test_materialize_links_worktree_home(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="mat1", base_branch="main")
+    # A draft gets no worktree link (project_root is the control root).
+    assert not (ch.project_root / ".imp" / "changes" / "mat1").is_symlink()
+    ch.materialize()
+    link = ch.project_root / ".imp" / "changes" / "mat1"
+    assert link.is_symlink()
+    assert link.resolve() == ch.change_dir.resolve()
+
+
+def test_relative_edit_after_golive_lands_in_home(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="gol1", base_branch="main")
+    ch.materialize()
+    # A relative path through the worktree symlink writes into the permanent home,
+    # not a phantom.
+    p = ch.project_root / ".imp" / "changes" / "gol1" / "artifacts" / "note.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("via-symlink\n")
+    assert (ch.change_dir / "artifacts" / "note.txt").read_text() == "via-symlink\n"
