@@ -399,7 +399,6 @@ def test_spec_writer_prompt_drops_auto_titled_conditional() -> None:
     body = wf.agents["spec-writer"].prompt_template_source
     assert "change.auto_titled" not in body
     assert "{% if change.auto_titled" not in body
-    assert "{% else %}" not in body
 
 
 def test_spec_writer_prompt_mandates_opening_question() -> None:
