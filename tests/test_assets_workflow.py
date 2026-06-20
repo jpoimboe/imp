@@ -914,3 +914,19 @@ def test_finalize_merge_gate_is_recommendation_anchored() -> None:
     assert "never announce it" in body
     assert "underspecified" in body
 
+
+def test_integration_resolve_gate_is_recommendation_anchored() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["integration-resolve"].prompt_template_source
+    # Removed framing and the spelled-out two-reply enumeration.
+    assert "Accept this integration and re-enqueue it, or send it back for rework" not in body
+    assert "Spell out the two replies" not in body
+    # New instruction: recommendation-anchored affirmative.
+    assert "recommendation-anchored" in body
+    # Substantive re-enqueue mechanics retained as plain prose.
+    assert "back of the queue" in body
+    # Guardrails retained.
+    assert "never announce it" in body
+    assert "underspecified" in body
+
