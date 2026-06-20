@@ -87,6 +87,11 @@ def test_seed_opening_title_only_when_description_empty() -> None:
     assert backlog.seed_opening(rec) == "Add OAuth"
 
 
+def test_seed_opening_missing_description_key() -> None:
+    rec = {"title": "Add OAuth"}
+    assert backlog.seed_opening(rec) == "Add OAuth"
+
+
 def test_seed_opening_joins_title_and_description() -> None:
     rec = {"title": "Add OAuth", "description": "wire up OAuth login"}
     assert backlog.seed_opening(rec) == "Add OAuth\n\nwire up OAuth login"
