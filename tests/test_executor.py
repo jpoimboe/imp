@@ -2030,7 +2030,7 @@ def _seed_two_step_workflow(root: Path) -> Change:
     (wf_dir / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.handle }}\n"
+        "go {{ change.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
