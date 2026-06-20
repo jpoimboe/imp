@@ -132,7 +132,7 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_ask_async_prefixes_caret_with_indent_and_aligns_continuation() -> None:
+async def test_ask_async_caret_at_content_column_with_gutter() -> None:
     captured: dict[str, object] = {}
 
     class _SpySession:
@@ -144,16 +144,17 @@ async def test_ask_async_prefixes_caret_with_indent_and_aligns_continuation() ->
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     line = await prompt.ask_async(indent="  ")
     assert line == "ok"
-    # The caret message is indented to the agent-content column.
-    assert captured["msg"] == "  > "
-    # The continuation aligns wrapped/multi-line input under the caret:
-    # indent width (2) + caret width (2) = 4 blanks.
+    # indent (2) + 2-col gutter (two spaces, color off) → caret at column 4,
+    # body text at column 6.
+    assert captured["msg"] == "    > "
     cont = captured["prompt_continuation"]
-    assert cont(80, 1, False) == "    "
+    # Pad = len(indent)+2 (gutter) +len(CARET)=2 → 6 cols, so continuation text
+    # lands under the first line's body (no shift on submit).
+    assert cont(80, 1, False) == "      "
 
 
 @pytest.mark.anyio
-async def test_ask_async_flush_left_when_no_indent() -> None:
+async def test_ask_async_gutter_at_root_when_no_indent() -> None:
     captured: dict[str, object] = {}
 
     class _SpySession:
@@ -164,5 +165,24 @@ async def test_ask_async_flush_left_when_no_indent() -> None:
 
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     await prompt.ask_async()
-    assert captured["msg"] == "> "
-    assert captured["prompt_continuation"](80, 1, False) == "  "
+    assert captured["msg"] == "  > "                       # 2-col gutter, caret at col 2
+    # Pad = len(indent)=0 +2 (gutter) +len(CARET)=2 → 4 cols, under the body.
+    assert captured["prompt_continuation"](80, 1, False) == "    "
+
+
+@pytest.mark.anyio
+async def test_ask_async_question_path_caret_at_content_column() -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured["msg"] = msg
+            captured.update(kwargs)
+            return "yes"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    await prompt.ask_async(question="Merge it?", indent="  ")
+    # The question block and the caret are both prefixed with indent + gutter.
+    assert captured["msg"] == "    Merge it?\n    > "
+    # Pad = len(indent)=2 +2 (gutter) +len(CARET)=2 → 6 cols, under the body.
+    assert captured["prompt_continuation"](80, 1, False) == "      "

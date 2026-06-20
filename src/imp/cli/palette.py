@@ -154,12 +154,22 @@ def user_bg_open(*, enabled: bool) -> str:
 # the gray bracketing rules. bright_blue keeps the "user = blue" identity
 # (NODE_COLORS["user"]).
 CARET = "> "
+BAR = "▌"
 
 
 def caret(*, enabled: bool) -> str:
     """The styled prompt caret as a raw ANSI string (callers that drive
     prompt_toolkit must wrap it in ANSI(); plain-stdout callers print it)."""
     return ansi(CARET, "bright_blue", enabled=enabled)
+
+
+def user_bar(*, enabled: bool) -> str:
+    """The blue ▌ left-rule that marks a user turn's gutter, or a single space
+    when color is off — keeps the gutter column blank so the live input
+    prompt's color-off appearance matches the reprinted turn."""
+    if not enabled:
+        return " "
+    return ansi(BAR, "bright_blue", enabled=True)
 
 
 def rule(width: int, *, enabled: bool) -> str:

@@ -21,14 +21,16 @@ from pathlib import Path
 from typing import Any
 
 
-def _prompt_message_text(question: str, *, color: bool, width: int = 80) -> str:
+def _prompt_message_text(question: str, *, color: bool, width: int = 80,
+                         indent: str = "") -> str:
     from imp.cli import palette as pal
     from imp.cli.render_text import render_question_block
     q = question.strip()
     if not q:
-        return pal.caret(enabled=color)
+        return indent + pal.caret(enabled=color)
     lines = render_question_block(q, width, 0, color)
-    return "\n".join(lines) + "\n" + pal.caret(enabled=color)
+    body = "\n".join(indent + ln for ln in lines)
+    return body + "\n" + indent + pal.caret(enabled=color)
 
 
 def _placeholder_text(*, color: bool) -> str:
@@ -173,13 +175,14 @@ class Prompt:
 
         from imp.cli import palette as pal
 
+        gutter = pal.user_bar(enabled=self._color) + " "
         if question.strip():
-            rendered = _prompt_message_text(question, color=self._color, width=width)
+            rendered = _prompt_message_text(
+                question, color=self._color, width=width, indent=indent + gutter)
             msg: Any = ANSI(rendered) if self._color else rendered
-            cont = " " * len(pal.CARET)
         else:
-            msg = self._message(prompt_text, indent=indent)
-            cont = " " * (len(indent) + len(pal.CARET))
+            msg = self._message(prompt_text, indent=indent + gutter)
+        cont = " " * (len(indent) + 2 + len(pal.CARET))
         placeholder = ANSI(_placeholder_text(color=True)) if self._color else None
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
