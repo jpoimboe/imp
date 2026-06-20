@@ -933,3 +933,15 @@ def test_integration_resolve_gate_is_recommendation_anchored() -> None:
     assert "never announce it" in body
     assert "underspecified" in body
 
+
+def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    # Standard path: say nothing about the classification.
+    assert "say nothing to the user about the classification" in lowered
+    # Trivial path: a plain-language heads-up, never naming the internal label.
+    assert "this is small enough that i'll just make the change directly" in lowered
+    assert "never name the internal" in lowered
+

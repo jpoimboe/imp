@@ -421,6 +421,13 @@ Otherwise emit `standard`. A large-but-precisely-specified change (e.g. a
 mechanical 200-line rename) is `standard`, not `trivial` — low ambiguity is not
 low complexity.
 
+**Signal the path in plain language, never the label.** On the `standard` path,
+say nothing to the user about the classification. On the fast path (`trivial`), give
+a brief plain-language heads-up that you're proceeding directly — e.g. "this is small enough that I'll just make the change directly" — and never name the internal
+`trivial` label or call it a "fast path" to the user. On a trivial change this
+heads-up and the build affirmative may collapse into one question; the
+resumable-draft decline still applies if the user declines.
+
 **Thin spec on `trivial`.** When `complexity: trivial`, write a thin spec —
 **Goal + Acceptance criteria only**. This **supersedes** the four-part structure
 in "Writing the Spec" above: deliberately omit Scope and Decisions summary on a
