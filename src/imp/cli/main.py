@@ -694,6 +694,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
 
+    if getattr(args, "description", None) and getattr(args, "backlog", None) is None:
+        print("imp: --description requires --backlog", file=sys.stderr)
+        return 2
+
     if getattr(args, "backlog", None) is not None:
         if getattr(args, "title", None):
             print("imp: --backlog and --title cannot be combined "

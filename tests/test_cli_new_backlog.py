@@ -76,6 +76,21 @@ def test_new_backlog_with_title_flag_is_error(
     assert "imp:" in capsys.readouterr().err
 
 
+def test_description_without_backlog_is_error(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    import asyncio
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc = asyncio.run(main._async_cmd_new(
+        argparse.Namespace(backlog=None, description="some text", depends_on=[],
+                           title=None, base_branch=None, from_target=None,
+                           non_interactive=True, message=None, tui=False,
+                           opening=None, spec_file=None, playbook=None,
+                           findings_only=False)))
+    assert rc == 2
+    assert "imp:" in capsys.readouterr().err
+
+
 def test_new_backlog_argparse_wiring(tmp_path: Path, monkeypatch) -> None:
     parser = main._build_parser()
     args = parser.parse_args(
