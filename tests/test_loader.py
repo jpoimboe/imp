@@ -1101,31 +1101,31 @@ def test_step_label_must_be_a_string(tmp_path: Path) -> None:
 
 
 def test_parse_agent_file_label_absent_is_none(tmp_path):
-    p = tmp_path / "x.md"
-    p.write_text(
-        "---\nname: x\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter="name: x\noutput:\n  status: {type: enum, values: [Success, Error]}",
+    )
     agent = parse_agent_file(p)
     assert agent.label is None
 
 
 def test_parse_agent_file_label_present(tmp_path):
-    p = tmp_path / "x.md"
-    p.write_text(
-        "---\nname: x\nlabel: exploring codebase\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\nlabel: exploring codebase\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
     agent = parse_agent_file(p)
     assert agent.label == "exploring codebase"
 
 
 def test_parse_agent_file_non_string_label_raises_with_source(tmp_path):
-    p = tmp_path / "x.md"
-    p.write_text(
-        "---\nname: x\nlabel: 42\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter="name: x\nlabel: 42\noutput:\n  status: {type: enum, values: [Success, Error]}",
+    )
     with pytest.raises(LoadError) as ei:
         parse_agent_file(p)
     assert "label" in str(ei.value)
@@ -1135,11 +1135,13 @@ def test_parse_agent_file_non_string_label_raises_with_source(tmp_path):
 def test_step_inherits_agent_label_when_step_omits_it(tmp_path):
     from imp.engine.loader import load_workflow
     wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "agents" / "a.md").write_text(
-        "---\nname: a\nlabel: writing spec\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
+    write_agent_md(
+        wf_dir / "agents" / "a.md",
+        frontmatter=(
+            "name: a\nlabel: writing spec\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
     (wf_dir / "workflow.yaml").write_text(
         "name: w\n"
         "phases:\n  - name: p\n    steps:\n"
@@ -1151,11 +1153,13 @@ def test_step_inherits_agent_label_when_step_omits_it(tmp_path):
 def test_step_label_overrides_agent_label(tmp_path):
     from imp.engine.loader import load_workflow
     wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "agents" / "a.md").write_text(
-        "---\nname: a\nlabel: writing spec\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
+    write_agent_md(
+        wf_dir / "agents" / "a.md",
+        frontmatter=(
+            "name: a\nlabel: writing spec\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
     (wf_dir / "workflow.yaml").write_text(
         "name: w\n"
         "phases:\n  - name: p\n    steps:\n"
@@ -1167,11 +1171,10 @@ def test_step_label_overrides_agent_label(tmp_path):
 def test_step_label_none_when_neither_present(tmp_path):
     from imp.engine.loader import load_workflow
     wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "agents" / "a.md").write_text(
-        "---\nname: a\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
+    write_agent_md(
+        wf_dir / "agents" / "a.md",
+        frontmatter="name: a\noutput:\n  status: {type: enum, values: [Success, Error]}",
+    )
     (wf_dir / "workflow.yaml").write_text(
         "name: w\n"
         "phases:\n  - name: p\n    steps:\n"
