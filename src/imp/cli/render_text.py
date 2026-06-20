@@ -664,7 +664,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.MergedNode):
         mark = "✓ " if color else ""
         yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
-                    "green", gutters=gutters)
+                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

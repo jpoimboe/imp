@@ -233,13 +233,14 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 # redirected output stays plain and script-parseable. Shared by `new`/`resume`.
 
 def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
-    """Run finished cleanly — green, ✓ on the headline."""
+    """Run finished cleanly — ✓ on the headline."""
     color = should_use_color(sys.stdout)
     mark = "✓ " if color else ""
     if merged:
-        print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.", "green",
-                   enabled=color))
-        print(ansi(f"Change {change.id}: {value}", "green", enabled=color))
+        print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.",
+                   *pal.NODE_COLORS["lifecycle"], enabled=color))
+        print(ansi(f"Change {change.id}: {value}",
+                   *pal.NODE_COLORS["lifecycle"], enabled=color))
     else:
         print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
 

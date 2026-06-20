@@ -1292,7 +1292,22 @@ def test_merged_node_renders_friendly_footer() -> None:
     assert plain == "Merged 2026-06-12-run-x into master."
     colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
     assert "✓ Merged 2026-06-12-run-x into master." in colored
-    assert pal._ANSI["green"] in colored
+    assert pal._ANSI["yellow"] in colored
+    assert pal._ANSI["green"] not in colored
+
+
+def test_merged_node_renders_lifecycle_yellow_in_all_themes() -> None:
+    # assert merge footer carries theme's yellow SGR (not green) across all themes
+    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        try:
+            colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+            yellow_open = pal.sgr("yellow", enabled=True)
+            assert yellow_open in colored
+            assert pal._ANSI["green"] not in colored
+        finally:
+            pal.set_theme("ansi")
 
 
 def test_complete_step_findings_hidden_lean_visible_full() -> None:
