@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,10 +21,12 @@ def import_change_runtime(control_root: Path, change_id: str) -> bool:
     if change_json is None or state_json is None:
         return False
     events = journal.journal_show(control_root, change_id, "events.jsonl") or b""
+    change_meta = json.loads(change_json)
+    change_meta.setdefault("id", change_id)
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         (tmp / "events.jsonl").write_bytes(events)
-        (tmp / "change.json").write_bytes(change_json)
+        (tmp / "change.json").write_text(json.dumps(change_meta))
         (tmp / "state.json").write_bytes(state_json)
         archive.archive_change(
             control_root, change_id,
