@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import shutil
 import subprocess
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -520,6 +521,27 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
     out = buf.getvalue()
     assert rc == 0, out
     assert "plan-writer" in out    # rendered from the archive events blob
+
+
+def test_change_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
+    """After abandon (permanent change home rmtree'd, worktree gone), _change_meta
+    resolves the Change's metadata from the archive record, not the retired journal."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Meta One", change_id="meta-one",
+                  base_branch="main")
+    home = tmp_path / ".imp" / "changes" / "meta-one"
+    assert (home / "change.json").exists()
+    _complete_and_archive(tmp_path, "meta-one")
+    shutil.rmtree(home)                       # abandon path: permanent home gone
+    assert not home.exists()
+    assert not (tmp_path / ".imp" / "worktrees" / "meta-one").exists()
+
+    meta = m._change_meta(tmp_path, "meta-one")
+    assert meta is not None
+    assert meta["base_branch"] == "main"
+    assert meta["title"] == "Meta One"
 
 
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
