@@ -516,13 +516,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(handle: str, title: str, change_id: str, marker: str,
+def _run_header_line(change_id: str, title: str, marker: str,
                      *, color: bool) -> str:
-    named = bool(title.strip())
-    head = handle if named else change_id
-    name = title.strip() if named else "(unnamed)"
+    stripped = title.strip()
+    name = stripped if stripped else "(unnamed)"
     tail = f" · {name} · {marker}"
-    return (ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
+    return (ansi(change_id, *pal.NODE_COLORS["workflow"], enabled=color)
             + ansi(tail, "dim", enabled=color))
 
 
@@ -649,7 +648,7 @@ async def _run_fresh_session(
 
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+        change.id, change.title, "new", color=should_use_color(sys.stdout)))
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
@@ -765,7 +764,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
         print(_run_header_line(
-            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+            change.id, change.title, "new", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -779,12 +778,12 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     if _tui_requested(args):
         print(_run_header_line(
-            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+            change.id, change.title, "new", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, seed_opening=opening_text,
                                       opening_intent=opening_intent)
 
     print(_run_header_line(
-        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+        change.id, change.title, "new", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
@@ -928,7 +927,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
         print(_run_header_line(
-            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -944,7 +943,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             if rc is not None:
                 return rc
         print(_run_header_line(
-            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, resume=True, from_target=from_target)
 
     # Interactive resume: a thin session-client. Validate --from client-side
@@ -956,7 +955,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             return rc
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
+        change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
