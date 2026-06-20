@@ -260,14 +260,17 @@ def _pause_lines(
 ) -> list[str]:
     at = f"  at {phase}" if phase else ""
     why = f"  ({reason})" if reason else ""
+    glyph = "⏸ " if color else ""
     lines = [
-        ansi(f"Paused  {name}{at}{why}", "dim", enabled=color),
-        ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
+        ansi(f"{glyph}Paused  {name}{at}{why}", *pal.NODE_COLORS["lifecycle"],
+             enabled=color),
+        ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
+             enabled=color),
     ]
     if recover_phase is not None:
         lines.append(ansi(
             f"   recover: imp resume {token} --from {recover_phase}",
-            "dim", enabled=color))
+            *pal.NODE_COLORS["lifecycle"], enabled=color))
     return lines
 
 
