@@ -4,48 +4,48 @@ tiers resolved:
   high   → openai/gpt-5.5
     differ from medium: tier 1, vendor jump
 
-design
-  
-  spec · claude-sonnet-4-6
-  
-  ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50
-    system_prompt:
-      You are a spec writer. Draft a detailed specification.
-    tools:
-      - bash
-      - read_file
-  • Drafting the spec.
-  
-  ▾ thinking
-    I need to consider the auth requirements carefully before writing the spec.
-    Let me think about OAuth2 vs API keys.
-  ▾ tools
-    · read_file [killed]  path=README.md
-    → # Project
-      Auth module needed.
-    · bash  command=ls src/
-    → auth.py
-      main.py
-  ▾ reviewer
-  │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
-  │   system_prompt:
-  │     You are a reviewer.
-  │   tools:
-  │ • The spec looks good. Auth flows are clearly defined.
-  │ → status=Success · summary=Spec approved
-  
-  > Please add a section on token expiry.
-  
-  spec · complete · status=Success · summary=Spec drafted
+── design ───
 
-implement
-  
-  build · claude-sonnet-4-6
-  
-  error: [provider] rate limited
-  
-  warning: dropped block
-  
-  phase_exhausted  phase=implement
-  
-  paused (ctrl-c)
+spec · claude-sonnet-4-6
+
+▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50
+  system_prompt:
+    You are a spec writer. Draft a detailed specification.
+  tools:
+    - bash
+    - read_file
+• Drafting the spec.
+
+▾ thinking
+  I need to consider the auth requirements carefully before writing the spec.
+  Let me think about OAuth2 vs API keys.
+▾ tools
+  · read_file [killed]  path=README.md
+  → # Project
+    Auth module needed.
+  · bash  command=ls src/
+  → auth.py
+    main.py
+▾ reviewer
+│ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
+│   system_prompt:
+│     You are a reviewer.
+│   tools:
+│ • The spec looks good. Auth flows are clearly defined.
+│ → status=Success · summary=Spec approved
+
+> Please add a section on token expiry.
+
+spec · complete · status=Success · summary=Spec drafted
+
+── implement ───
+
+build · claude-sonnet-4-6
+
+error: [provider] rate limited
+
+warning: dropped block
+
+phase_exhausted  phase=implement
+
+paused (ctrl-c)

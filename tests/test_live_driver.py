@@ -470,7 +470,7 @@ def test_user_message_shown_in_live_on_tty_and_nontty() -> None:
     for e in events:
         drv.on_event(e)
     drv.finish()
-    assert "> do the thing" in out.getvalue()   # caret turn
+    assert "> do the thing" in out.getvalue()   # caret turn at column 0
 
     # TTY live: prompt_toolkit erased its echo, so the driver reprints the turn.
     tout = _TTYPipe()
@@ -478,7 +478,7 @@ def test_user_message_shown_in_live_on_tty_and_nontty() -> None:
     for e in events:
         tdrv.on_event(e)
     tdrv.finish()
-    assert "> do the thing" in tout.getvalue()   # caret turn
+    assert "> do the thing" in tout.getvalue()   # caret turn at column 0
 
     # imp log (no terminal echo) always renders the user turn.
     assert "> do the thing" in "\n".join(_render_body(events))
@@ -763,8 +763,8 @@ def test_prepare_for_prompt_flushes_separator_with_indent_bytes() -> None:
                     model="m", provider="anthropic"))
     # step header emitted, _prev_prose armed for the step body
     drv.prepare_for_prompt()
-    # the armed separator is a blank carrying the step-children indent (depth 1 = 2 spaces)
-    assert out.getvalue().endswith("  \n")
+    # the armed separator is a bare blank line (depth 0 = column 0, no leading spaces)
+    assert out.getvalue().endswith("\n\n")
     assert drv._separator_emitted is True
 
 
@@ -964,7 +964,7 @@ def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
     drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
     drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
-    assert drv._frontier_depth() == 1                  # streaming below the margin
+    assert drv._frontier_depth() == 0                  # streaming flush at column 0
     raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
     result = drv.compose_status(0, 1.0)
     assert result == raw                                # no indent added
@@ -1367,12 +1367,51 @@ def test_prompt_indent_matches_open_step_frontier_depth() -> None:
     ]
     for e in events:
         drv.on_event(e)
-    # A step under a phase renders its content at depth 1, so the solicit caret
-    # indents two columns — the same column its echoed reply renders at.
-    assert drv.prompt_indent() == "  "
+    # A step under a phase renders its content at column 0 (the transcript is flat),
+    # so the solicit caret has no indent — the same column its echoed reply renders at.
+    assert drv.prompt_indent() == ""
 
 
 def test_prompt_indent_empty_when_no_open_step() -> None:
     drv, _out = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="x"))
     assert drv.prompt_indent() == ""
+
+
+def test_multiphase_subagent_reentry_live_log_parity() -> None:
+    # A multi-phase run with a subagent and an implement-loop re-entry: the live body
+    # must be byte-equal to the imp log body, the re-entry must print a second
+    # `── implement ───` start rule, and a closed phase's end rule must land at column 0.
+    events = [
+        ev("e0", "change_created", change_id=1, title="t", timestamp="2026-06-03T00:00:00+00:00"),
+        ev("e1", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
+        ev("e2", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}, timestamp="2026-06-03T00:00:01+00:00"),
+        ev("e3", "step_started", step="build", kind="agent", phase="implement",
+           model="m", provider="anthropic", timestamp="2026-06-03T00:00:01+00:00"),
+        ev("e4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("e5", "llm_response", agent_id="sub:e4",
+           raw={"content": [{"type": "text", "text": "finding"}]}, usage={}),
+        ev("e6", "tool_result", agent_id="a", id="t1", content='{"status":"Success"}'),
+        ev("e7", "step_completed", step="build", kind="agent",
+           action={"verb": "continue"}, var_mutations={}, timestamp="2026-06-03T00:00:02+00:00"),
+        ev("e8", "step_started", step="replan", kind="agent", phase="plan",
+           model="m", provider="anthropic", timestamp="2026-06-03T00:00:02+00:00"),
+        ev("e9", "step_completed", step="replan", kind="agent",
+           action={"verb": "continue"}, var_mutations={}, timestamp="2026-06-03T00:00:03+00:00"),
+        ev("e10", "step_started", step="build", kind="agent", phase="implement",
+           model="m", provider="anthropic", timestamp="2026-06-03T00:00:03+00:00"),
+        ev("e11", "step_completed", step="build", kind="agent",
+           action={"verb": "continue"}, var_mutations={}, timestamp="2026-06-03T00:00:04+00:00"),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert body == _render_body(events)                       # live == imp log, byte-for-byte
+    assert sum(1 for ln in body if ln.strip() == "── implement ───") == 2  # re-entry rule
+    end_rule = next(ln for ln in body if "implement complete" in ln)
+    assert end_rule.startswith("── implement complete")       # end rule flush at column 0

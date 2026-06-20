@@ -313,22 +313,25 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         prev_prose = spaces_after(child, full=full)
 
 
+def _phase_rule(label: str) -> str:
+    """Fixed-width by design — the navigational landmark is the yellow
+    `lifecycle` color, not a full-width bar."""
+    return f"── {label} ───"
+
+
 def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
                           gutters: tuple[int, ...] = ()) -> str:
-    """The `✓ <phase> · <N>s` completion line, shared by both renderers (§7).
+    """The `── <phase> complete · <N>s ───` end rule, shared by both renderers (§7).
     `depth` is the phase HEADER's depth — pass `depth` from render_text and
-    `cur.depth - 1` from the live driver; both equal the header level.
+    `cur.depth` from the live driver; both equal the header level.
     This depth equivalence holds only because phases appear solely as direct
     children of the root (single-level invariant) and would break if phases
     ever nested inside SubagentFolds."""
     elapsed = nv.phase_elapsed(node)
     done = fmt_seconds_done(elapsed)
     secs = f" · {done}" if done else ""
-    # No checkmark, and dark gray (the breadcrumb color) — identical treatment to
-    # the step-completion line, so the whole family of `<name> complete · …` lines
-    # reads consistently as quiet chrome rather than the bold blue of a phase header.
-    return _line(f"{node.name} complete{secs}", depth, color,
-                 *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+    return _line(_phase_rule(f"{node.name} complete{secs}"), depth, color,
+                 *pal.NODE_COLORS["lifecycle"], gutters=gutters)
 
 
 def header_line(node: Any, *, depth: int, color: bool,
@@ -341,7 +344,8 @@ def header_line(node: Any, *, depth: int, color: bool,
     for subagents — they emit `subagent_status_row`. This bare header survives only
     for the --full expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
-        return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
+        return _line(_phase_rule(node.name), depth, color,
+                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
@@ -454,7 +458,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
         # priming the children walk so the first step gets a lead-in blank.
         yield header_line(node, depth=depth, color=color, gutters=gutters)
-        yield from _render_children(node.children, depth=depth + 1, full=full,
+        yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
                                     prime=True, live_viewer=live_viewer)
         if node.closed and nv.phase_elapsed(node) is not None:
@@ -471,9 +475,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # through here and renders its full block, just like a loud step.
         # A step's content flows at the step's OWN indent (no +1): the header is a
         # label and its prose/breadcrumb align directly beneath it, rather than
-        # indenting a further level and burying the agent's words. Phases still
-        # indent their steps (the +1 lives in PhaseNode above); subagent folds add
-        # their own level + gutter internally. (design: aligned indent)
+        # indenting a further level and burying the agent's words. Phases no longer
+        # indent their steps either — the transcript is flat at column 0; subagent
+        # folds add their own level + gutter internally. (design: aligned indent)
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
         # speaker label and the speech don't bunch (design: §5.4 air). Priming the
