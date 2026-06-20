@@ -533,7 +533,6 @@ async def _route_script(
             run_script, step, cwd=change.workflow_dir,
             env_extra=engine_env(project_root=change.project_root,
                                  change_id=change.id,
-                                 change_handle=change.handle,
                                  change_title=change.title,
                                  change_dir=change.change_dir,
                                  verify_command=verify_command,
@@ -1011,7 +1010,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,
-                   change_handle=change.handle, change_title=change.title,
+                   change_title=change.title,
                    change_dir=change.change_dir,
                    verify_command=config.verify_command,
                    verify_timeout=config.verify_timeout),

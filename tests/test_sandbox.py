@@ -105,20 +105,20 @@ def test_clearenv_and_setenv_allowlist():
 
 def test_live_engine_env_supersedes_frozen_imp_vars():
     # Regression (name-on-intent + sandbox): a Change is created with an empty
-    # title, so the policy is frozen with IMP_CHANGE_HANDLE="" at run start. After
-    # rename_change the live per-spawn engine_env carries the real handle;
-    # build_sandbox_argv sources IMP_* from it authoritatively, so a handle-dependent
-    # gate never sees the frozen "" (which would fire `${IMP_CHANGE_HANDLE:?}`).
+    # title, so the policy is frozen with IMP_CHANGE_TITLE="" at run start. After
+    # rename_change the live per-spawn engine_env carries the real title;
+    # build_sandbox_argv sources IMP_* from it authoritatively, so a title-dependent
+    # gate never sees the frozen "".
     pol = _policy(setenv=(("PATH", "/usr/bin"),
-                          ("IMP_CHANGE_HANDLE", ""),
+                          ("IMP_CHANGE_TITLE", ""),
                           ("TMPDIR", "/tmp")))
     argv = build_sandbox_argv(
         "x", cwd="/wt", policy=pol,
-        engine_env={"IMP_CHANGE_HANDLE": "live-mode-log-polish",
+        engine_env={"IMP_CHANGE_TITLE": "Live mode log polish",
                     "PYTHONPATH": "/wt/src"})
-    assert argv.count("IMP_CHANGE_HANDLE") == 1       # not duplicated
-    i = argv.index("IMP_CHANGE_HANDLE")
-    assert argv[i + 1] == "live-mode-log-polish"   # fresh value wins
+    assert argv.count("IMP_CHANGE_TITLE") == 1       # not duplicated
+    i = argv.index("IMP_CHANGE_TITLE")
+    assert argv[i + 1] == "Live mode log polish"   # fresh value wins
     assert "PYTHONPATH" not in argv                 # non-IMP_ key stays out (prefix allowlist)
 
 

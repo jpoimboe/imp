@@ -72,12 +72,11 @@ async def bash(
     # mid-run rename_change is reflected immediately; subagents have no live Change
     # (and no rename authority) and fall back to the frozen change_context snapshot.
     # change_context is a render-time snapshot that rename_change never updates, so
-    # reading it here would leak a stale (empty name-on-intent) handle/title.
+    # reading it here would leak a stale (empty name-on-intent) title.
     src = ctx.change or ctx.change_context
     eng = engine_env(
         project_root=ctx.project_root,
         change_id=src.id if src else "",
-        change_handle=src.handle if src else "",
         change_title=src.title if src else "",
         change_dir=(getattr(src, "change_dir", None)
                     or (Path(h) if (h := getattr(src, "change_home", None)) else None)),
