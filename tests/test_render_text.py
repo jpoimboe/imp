@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re as _re
+import unittest.mock
 from pathlib import Path
 
 from imp.cli import narrative as nv
@@ -1840,3 +1841,41 @@ def test_skill_load_renders_gerund() -> None:
     joined = "\n".join(out)
     assert "loading skill refactor" in joined
     assert "load skill refactor" not in joined   # imperative form is gone
+
+
+def test_route_label_renders_lifecycle_yellow() -> None:
+    bc = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
+                           action={"verb": "goto", "target": "task-lead",
+                                   "resume": False, "rework": True},
+                           label="addressing review feedback")
+    with unittest.mock.patch.dict(pal.NODE_COLORS, {"lifecycle": ("cyan",)}):
+        for theme in ("ansi", "dark", "light"):
+            pal.set_theme(theme)
+            try:
+                lines = list(rt._render(bc, depth=1, full=False, color=True, width=80))
+                route = next(ln for ln in lines if "→ addressing review feedback" in ln)
+                assert pal._ANSI["cyan"] in route
+                assert pal._ANSI["yellow"] not in route
+            finally:
+                pal.set_theme("ansi")
+
+
+def test_outcome_line_renders_lifecycle_yellow_not_accent_by_verb() -> None:
+    line = next(iter(rt._render(nv.OutcomeLine(action={"verb": "continue"}),
+                                depth=0, full=False, color=True, width=80)))
+    assert "→ continue" in line
+    assert pal._ANSI["yellow"] in line
+    # was accent-by-verb: continue resolved to green — that must be gone.
+    assert pal._ANSI["green"] not in line
+
+
+def test_outcome_line_renders_lifecycle_yellow_in_all_themes() -> None:
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        try:
+            line = next(iter(rt._render(nv.OutcomeLine(action={"verb": "continue"}),
+                                        depth=0, full=False, color=True, width=80)))
+            assert pal.sgr("yellow", enabled=True) in line
+            assert pal._ANSI["green"] not in line
+        finally:
+            pal.set_theme("ansi")

@@ -559,9 +559,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.OutcomeLine):
         text = pal.action_text(node.action)
-        ac = pal.accent_color(node.action)
-        codes = (ac,) if ac else ()
-        yield _line(f"→ {text}", depth, color, *codes, gutters=gutters)
+        yield _line(f"→ {text}", depth, color, *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.BreadcrumbLine):
@@ -595,7 +593,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if node.label and not (node.interrupted or blocked):
             yield _gutter_indent(depth, gutters, color)
             yield _line(f"→ {node.label}", depth, color,
-                        *pal.NODE_COLORS["warning"], gutters=gutters)
+                        *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.PauseNode):
