@@ -494,6 +494,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.LiteralTextNode):
+        if node.color_role:
+            yield from _wrap(_caret_escape(node.text), width, depth, color,
+                             *pal.NODE_COLORS[node.color_role], gutters=gutters)
+            return
         yield from _render_markdown_block(_caret_escape(node.text), width, depth,
                                           color, gutters)
         return

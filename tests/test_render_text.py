@@ -520,6 +520,16 @@ def test_literal_text_node_renders_as_agent_prose() -> None:
     assert any("line two" in ln for ln in out)
 
 
+def test_literal_color_role_renders_plain_yellow_no_bullet() -> None:
+    roled = list(rt._render(nv.LiteralTextNode(text="hi", color_role="lifecycle"),
+                            depth=0, full=False, color=True, width=80))
+    assert roled == ["\x1b[33mhi\x1b[0m"]
+    # No color role → unchanged: the bold "• " agent-prose bullet, via markdown.
+    plain = list(rt._render(nv.LiteralTextNode(text="hi"),
+                            depth=0, full=False, color=True, width=80))
+    assert plain == ["\x1b[1m• \x1b[0mhi"]
+
+
 def test_consecutive_prose_turns_separated_by_blank_line() -> None:
     # Two real prose turns with a thinking-only turn between them (which emits no
     # AgentTextNode and renders nothing in lean mode). They must NOT bunch — one
