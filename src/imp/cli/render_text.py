@@ -576,7 +576,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         else:
             parts = [f"{name} · complete" if node.show_complete else name]
         if full:
-            parts.extend(node.extras)
+            parts.extend(_caret_escape(e) for e in node.extras)
         if not (node.interrupted or blocked) and (act is None or act.get("verb") != "goto"):
             verb_text = pal.action_text(node.action) if node.action is not None else None
             if verb_text and verb_text != "continue":
@@ -606,20 +606,21 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.RenameNode):
         indent = _gutter_indent(depth, gutters, color)
         marker = pal.ansi("→ named ", "dim", enabled=color)
-        name = pal.ansi(node.name, *pal.NODE_COLORS["workflow"], enabled=color)
+        name = pal.ansi(_caret_escape(node.name), *pal.NODE_COLORS["workflow"],
+                        enabled=color)
         yield indent + marker + name
         return
 
     if isinstance(node, nv.ErrorNode):
         if node.is_warning:
-            yield _line(f"warning: {node.message}", depth, color,
+            yield _line(f"warning: {_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["warning"], gutters=gutters)
         else:
             tag = f"[{node.category}] " if node.category else ""
-            yield _line(f"error: {tag}{node.message}", depth, color,
+            yield _line(f"error: {tag}{_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["error"], gutters=gutters)
             if full and node.detail and node.detail not in node.message:
-                yield from _wrap(node.detail, width, depth + 1, color,
+                yield from _wrap(_caret_escape(node.detail), width, depth + 1, color,
                                  *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
@@ -727,7 +728,7 @@ def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
     yield _line(f"{pal.fold_glyph(expanded=True)} complete_step", depth, color,
                 *pal.NODE_COLORS["tools"], gutters=gutters)
     for k, v in prose:
-        yield from _wrap(f"{k}: {v}", width, depth + 1, color,
+        yield from _wrap(f"{k}: {_caret_escape(v)}", width, depth + 1, color,
                          *pal.NODE_COLORS["tools"], gutters=gutters)
 
 

@@ -1636,3 +1636,40 @@ def test_literal_text_node_control_bytes_escaped() -> None:
     assert "\x07" not in out
     assert "\x00" not in out
     assert "^G" in out
+
+
+def test_error_message_and_detail_control_bytes_escaped() -> None:
+    node = nv.ErrorNode(message="boom\x07", category="tool",
+                        detail="trace\x00line", is_warning=False)
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "error: [tool]" in out          # imp's framing stays intact, unescaped
+
+
+def test_rename_title_control_bytes_escaped() -> None:
+    node = nv.RenameNode(name="my\x07change\x00")
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "→ named " in out                # imp's marker stays intact, unescaped
+
+
+def test_breadcrumb_extras_control_bytes_escaped() -> None:
+    node = nv.BreadcrumbLine(step_name="review", extras=["verdict=pass\x07", "n=3\x00"])
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+
+
+def test_complete_step_prose_field_control_bytes_escaped() -> None:
+    out = "\n".join(rt._render_output_args(
+        {"outcome": "did\x07 the\x00 thing and then some more text " * 3},
+        depth=0, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+    assert "^@" in out
