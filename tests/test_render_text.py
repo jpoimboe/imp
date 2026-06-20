@@ -523,7 +523,7 @@ def test_literal_text_node_renders_as_agent_prose() -> None:
 def test_literal_color_role_renders_plain_yellow_no_bullet() -> None:
     roled = list(rt._render(nv.LiteralTextNode(text="hi", color_role="lifecycle"),
                             depth=0, full=False, color=True, width=80))
-    assert roled == ["\x1b[33mhi\x1b[0m"]
+    assert roled == [pal.ansi("hi", "yellow")]
     # No color role → unchanged: the bold "• " agent-prose bullet, via markdown.
     plain = list(rt._render(nv.LiteralTextNode(text="hi"),
                             depth=0, full=False, color=True, width=80))
