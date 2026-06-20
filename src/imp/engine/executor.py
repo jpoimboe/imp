@@ -402,9 +402,9 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     - No merge happened (merge-to-base was never reached, or the gate never set
       it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
     - merge-to-base already merged under the lock (state.merge_commit set, base ref
-      durably advanced): finalize — mark completed, journal the final artifacts,
+      durably advanced): finalize — mark completed, archive the final snapshot,
       then remove the worktree (branch kept). Ordering is crash-safe: status is
-      written + saved BEFORE journal/remove, so a crash mid-finalize leaves the
+      written + saved BEFORE archive/remove, so a crash mid-finalize leaves the
       merge durable and the worktree a harmless leftover. Recovery: a crash AFTER
       status='completed' is already done; a crash in the window between _route_merge
       recording merge_commit and this status write leaves status='running' — re-running
@@ -428,11 +428,13 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
           {"base": change.base_branch, "commit": state.merge_commit})
     from imp.engine import merge_queue
     merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
-    worktree.fold_wip_into_journal(change.control_root, change.id, {
-        "events.jsonl": change.events_path,
-        "change.json": change.change_dir / "change.json",
-        "state.json": change.state_dir / "state.json",
-    })
+    from imp.engine import archive
+    archive.archive_change(
+        change.control_root, change.id,
+        events_path=change.events_path,
+        change_json_path=change.change_dir / "change.json",
+        state_json_path=change.state_dir / "state.json",
+    )
     worktree.remove_worktree(change.control_root, change.id)
     shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
     return RunResult.COMPLETED
@@ -639,7 +641,7 @@ async def _route_merge(
     """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
     merge_to_base), re-asserts a clean worktree (DIRTY) under the lock, performs
     the merge, and routes on the result via the step's rules. On MERGED it stashes
-    the commit in State.merge_commit; the actual finalize (journal + worktree
+    the commit in State.merge_commit; the actual finalize (archive + worktree
     removal + mark completed) happens when the run falls through to _complete."""
     from imp.engine import worktree
     _emit_started(log, step)

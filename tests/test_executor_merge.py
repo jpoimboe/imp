@@ -37,7 +37,7 @@ def _ctx(ch) -> tuple:
     return State.load(ch.state_dir), JsonlEventLog(ch.events_path)
 
 
-def test_merge_step_merges_then_complete_journals_and_removes(tmp_path: Path) -> None:
+def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
@@ -59,14 +59,25 @@ def test_merge_step_merges_then_complete_journals_and_removes(tmp_path: Path) ->
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists() # worktree removed
     assert not (ch.change_dir / "steps").exists()                  # transcript dir dropped
     assert "imp/feat" in _git(tmp_path, "branch", "--list", "imp/feat").stdout  # branch kept
-    assert _git(tmp_path, "show", "refs/imp/journal:feat/change.json").returncode == 0
 
-    # The journal captures the full terminal snapshot: state.json with the
-    # completed status, and events.jsonl with the change_merged event.
-    journaled_state = _git(tmp_path, "show", "refs/imp/journal:feat/state.json").stdout
-    assert '"completed"' in journaled_state
-    journaled_events = _git(tmp_path, "show", "refs/imp/journal:feat/events.jsonl").stdout
-    assert "change_merged" in journaled_events
+    # No longer appends to refs/imp/journal (the linear ref is being retired).
+    assert _git(
+        tmp_path, "show", "refs/imp/journal:feat/change.json").returncode != 0
+
+    # Archive captured the terminal snapshot: record + blob + index rows.
+    from imp.engine import archive
+    from imp.engine.archive import index, record
+    rec = record.read_record(archive.records_root(tmp_path), "feat")
+    assert rec is not None
+    assert rec["final_state"]["status"] == "completed"
+    conn = index.connect(archive.index_path(tmp_path))
+    try:
+        assert conn.execute(
+            "SELECT status FROM changes WHERE id='feat'").fetchone() == ("completed",)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE change_id='feat'").fetchone()[0] >= 1
+    finally:
+        conn.close()
 
 
 def test_merge_step_merge_blocked_on_conflict(tmp_path: Path) -> None:

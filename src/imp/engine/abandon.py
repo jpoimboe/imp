@@ -1,4 +1,4 @@
-"""Abandon a Change: mark abandoned, remove from merge queue, journal, remove worktree + branch."""
+"""Abandon a Change: mark abandoned, remove from merge queue, archive, remove worktree + branch."""
 from __future__ import annotations
 
 import shutil
@@ -20,12 +20,14 @@ def tear_down_change(change: Change) -> None:
         state.save(change.state_dir)
         change.event_log().append(
             agent_id=None, type="change_abandoned", payload={})
-        # journal commit must happen before worktree removal (records live inside the worktree)
-        worktree.fold_wip_into_journal(control, change_id, {
-            "events.jsonl": change.events_path,
-            "change.json": change.change_dir / "change.json",
-            "state.json": change.state_dir / "state.json",
-        })
+        # archive before worktree removal (the runtime files live inside the worktree)
+        from imp.engine import archive
+        archive.archive_change(
+            control, change_id,
+            events_path=change.events_path,
+            change_json_path=change.change_dir / "change.json",
+            state_json_path=change.state_dir / "state.json",
+        )
     # Uses RepoGitLock, independent of the per-change ProjectLock held above.
     merge_queue.pop_and_wake(control, change_id, base_branch)
     # branch delete must happen after worktree removal (git forbids deleting a checked-out branch)

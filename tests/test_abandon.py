@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _completed_rows, _status_rows
-from imp.engine import journal, worktree
+from imp.cli.main import _abandon, _status_rows
+from imp.engine import worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.state import ProjectLock, State
@@ -36,7 +36,7 @@ def test_delete_branch_removes_and_is_idempotent(tmp_path: Path) -> None:
     worktree.delete_branch(tmp_path, "feat")
 
 
-def test_abandon_happy_path_tears_down_and_journals(tmp_path: Path) -> None:
+def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
 
@@ -46,10 +46,11 @@ def test_abandon_happy_path_tears_down_and_journals(tmp_path: Path) -> None:
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
     assert not (tmp_path / ".imp" / "changes" / "feat").exists()   # root home dropped
 
-    # Durable: change_abandoned event + abandoned status retrievable via journal.
-    state_json = journal.journal_show(tmp_path, "feat", "state.json")
+    # Durable: change_abandoned event + abandoned status retrievable via archive.
+    from imp.engine.archive import read as archive_read
+    state_json = archive_read.read_state_json(tmp_path, "feat")
     assert state_json is not None and b'"abandoned"' in state_json
-    events = journal.journal_show(tmp_path, "feat", "events.jsonl")
+    events = archive_read.read_events(tmp_path, "feat")
     assert events is not None and b"change_abandoned" in events
 
 
@@ -59,8 +60,9 @@ def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
     _abandon(tmp_path, "feat")
 
     assert all(r[0] != "feat" for r in _status_rows(tmp_path))           # not in-flight
-    completed = {r[0]: r[1] for r in _completed_rows(tmp_path)}
-    assert completed.get("feat") == "abandoned"                          # labeled abandoned
+    from imp.engine.archive import read as archive_read
+    assert archive_read.is_archived(tmp_path, "feat")                    # in archive
+    assert archive_read.status_of(tmp_path, "feat") == "abandoned"       # labeled abandoned
 
 
 def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
@@ -214,7 +216,7 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
     assert torn == ["feat"]  # fell through to direct teardown
 
 
-def test_tear_down_change_destroys_worktree_branch_and_journals(
+def test_tear_down_change_destroys_worktree_branch_and_archives(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
@@ -225,9 +227,10 @@ def test_tear_down_change_destroys_worktree_branch_and_journals(
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
     assert not (tmp_path / ".imp" / "changes" / "feat").exists()   # root home dropped
-    state_json = journal.journal_show(tmp_path, "feat", "state.json")
+    from imp.engine.archive import read as archive_read
+    state_json = archive_read.read_state_json(tmp_path, "feat")
     assert state_json is not None and b'"abandoned"' in state_json
-    events = journal.journal_show(tmp_path, "feat", "events.jsonl")
+    events = archive_read.read_events(tmp_path, "feat")
     assert events is not None and b"change_abandoned" in events
 
 

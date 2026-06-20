@@ -425,7 +425,7 @@ def test_status_default_inflight_columns_and_color(
     assert lines[1].startswith("yaitd7")
 
 
-def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:
+def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -441,15 +441,18 @@ def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:
 
     rc = m._abandon(tmp_path, "doomed", assume_yes=True)
     assert rc == 0
-    assert journal.journal_show(tmp_path, "doomed", "plans/doomed-plan-1.md") \
+    from imp.engine.archive import read as archive_read
+    # Artifact stays reachable on the RETAINED wip ref (spec AC 3).
+    assert archive_read.read_artifact(tmp_path, "doomed", "plans/doomed-plan-1.md") \
         == b"# plan\n"
-    assert journal.journal_show(tmp_path, "doomed", "state.json") is not None
+    # Runtime snapshot is archived (record/blob/index), not journaled.
+    assert archive_read.read_state_json(tmp_path, "doomed") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/doomed"],
-        cwd=tmp_path, capture_output=True).returncode != 0
+        cwd=tmp_path, capture_output=True).returncode == 0
 
 
-def test_abandon_without_wip_still_journals_runtime(tmp_path: Path) -> None:
+def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -458,14 +461,15 @@ def test_abandon_without_wip_still_journals_runtime(tmp_path: Path) -> None:
     # No artifact committed → no wip ref exists.
     rc = m._abandon(tmp_path, "bare", assume_yes=True)
     assert rc == 0
-    # Runtime state is journaled even without any artifact.
-    assert journal.journal_show(tmp_path, "bare", "state.json") is not None
+    from imp.engine.archive import read as archive_read
+    # Runtime state is archived even without any artifact; no wip ref was ever created.
+    assert archive_read.read_state_json(tmp_path, "bare") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/bare"],
         cwd=tmp_path, capture_output=True).returncode != 0
 
 
-def test_finalize_journals_artifacts_from_wip(tmp_path: Path) -> None:
+def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     from imp.engine import executor
     from imp.engine.state import JsonlEventLog
 
@@ -486,13 +490,13 @@ def test_finalize_journals_artifacts_from_wip(tmp_path: Path) -> None:
 
     executor._complete(ch, State.load(ch.state_dir), JsonlEventLog(ch.events_path))
 
-    # The journal carries BOTH the artifact and the runtime snapshot, and the wip
-    # ref is gone.
-    assert journal.journal_show(tmp_path, "doc-thing", "spec/doc-thing.md") \
+    from imp.engine.archive import read as archive_read
+    # The artifact stays on the RETAINED wip ref; the runtime snapshot is archived.
+    assert archive_read.read_artifact(tmp_path, "doc-thing", "spec/doc-thing.md") \
         == b"# the spec\n"
-    assert journal.journal_show(tmp_path, "doc-thing", "events.jsonl") is not None
-    assert journal.journal_show(tmp_path, "doc-thing", "change.json") is not None
+    assert archive_read.read_events(tmp_path, "doc-thing") is not None
+    assert archive_read.read_change_json(tmp_path, "doc-thing") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet",
          "refs/imp/journal-wip/doc-thing"],
-        cwd=tmp_path, capture_output=True).returncode != 0
+        cwd=tmp_path, capture_output=True).returncode == 0

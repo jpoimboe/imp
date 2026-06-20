@@ -10,6 +10,8 @@ check is location-agnostic — no pinned file, line, or commit count.
 from __future__ import annotations
 
 import argparse
+import os
+import sqlite3
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -75,20 +77,20 @@ def check_atomic_coder_commit(repo: str, base: str, sentinel: str) -> Result:
                   if commits else f"no run commit modifies {_fmt(files)}")
 
 
-def check_artifacts_in_journal(repo: str) -> Result:
-    ids = journal_ids(repo)
+def check_artifacts_in_archive(repo: str) -> Result:
+    ids = archived_change_ids(repo)
     if len(ids) != 1:
-        return Result("artifacts_in_journal", False,
-                      f"expected exactly one journaled change, got {_fmt(ids)}")
+        return Result("artifacts_in_archive", False,
+                      f"expected exactly one archived change, got {_fmt(ids)}")
     cid = ids[0]
-    spec = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal:{cid}/spec")
-    plans = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal:{cid}/plans")
+    spec = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal-wip/{cid}:spec")
+    plans = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal-wip/{cid}:plans")
     ok = (spec.returncode == 0
           and spec.stdout.strip().splitlines()[-1].endswith(".md")
           and plans.returncode == 0 and "-plan-" in plans.stdout)
-    return Result("artifacts_in_journal", ok,
-                  f"journal {cid}/ carries spec + plan(s)" if ok else
-                  f"journal {cid}/ missing spec or plan "
+    return Result("artifacts_in_archive", ok,
+                  f"wip-ref {cid}/ carries spec + plan(s)" if ok else
+                  f"wip-ref {cid}/ missing spec or plan "
                   f"(spec rc={spec.returncode}, plans rc={plans.returncode})")
 
 
@@ -109,8 +111,24 @@ def check_no_artifacts_on_code_branch(repo: str, base: str) -> Result:
 
 
 def journal_ids(repo: str) -> list[str]:
+    """Legacy journal ids from refs/imp/journal (transition window only)."""
     out = _git(repo, "ls-tree", "--name-only", "refs/imp/journal").stdout
     return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+
+def archived_change_ids(repo: str) -> list[str]:
+    """Change ids from the archive index (new primary store)."""
+    db = os.path.join(repo, ".imp", "archive", "index.db")
+    if not os.path.exists(db):
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            return [r[0] for r in conn.execute("SELECT id FROM changes ORDER BY id")]
+        finally:
+            conn.close()
+    except Exception:
+        return []
 
 
 def _imp(repo: str, imp: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -121,10 +139,10 @@ def _imp(repo: str, imp: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def check_readback(repo: str, imp: str) -> Result:
-    ids = journal_ids(repo)
+    ids = archived_change_ids(repo)
     if len(ids) != 1:
         return Result("readback", False,
-                      f"expected exactly one journaled change, got {_fmt(ids)}")
+                      f"expected exactly one archived change, got {_fmt(ids)}")
     cid = ids[0]
     token = cid
     log = _imp(repo, imp, "log", cid)
@@ -164,8 +182,8 @@ def run_checks(repo: str, sentinel: str, base: str, imp: str) -> list[Result]:
          lambda: check_sentinel_in_src(repo, sentinel)),
         ("atomic_coder_commit",
          lambda: check_atomic_coder_commit(repo, base, sentinel)),
-        ("artifacts_in_journal",
-         lambda: check_artifacts_in_journal(repo)),
+        ("artifacts_in_archive",
+         lambda: check_artifacts_in_archive(repo)),
         ("no_artifacts_on_code_branch",
          lambda: check_no_artifacts_on_code_branch(repo, base)),
         ("readback", lambda: check_readback(repo, imp)),
