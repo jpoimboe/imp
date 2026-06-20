@@ -178,8 +178,8 @@ set up until you confirm the build.
 
 {% if run.non_interactive %}
 This is a **headless run** (`--non-interactive`): no human is present to answer a
-build-vs-park question, so the choice is predetermined — **build**. Once the design is
-settled, **do not** solicit a build-or-park choice from the user. Go live directly: call
+build-or-save question, so the choice is predetermined — **build**. Once the design is
+settled, **do not** solicit a build-or-save choice from the user. Set up the workspace directly: call
 `create_and_enter_worktree` (it takes no arguments). It forks the branch and worktree
 from the base branch's current tip and switches this change into it — your subsequent
 `Read`/`Bash`/edit tools operate in the new worktree immediately. It reports whether the
@@ -188,8 +188,8 @@ re-ground the spec against current code in this same turn** — re-read the file
 brainstorm assumed and reconcile any drift — before writing the spec. Then write and
 commit the spec and finish with `complete_step(phase="written", …)` exactly as in
 "Writing the Spec" below; the spec commit and `spec-reviewer` run only now that the
-change is live. (A genuine intent-fork escalation at the "Ask vs. decide" high bar still
-parks for a human even headless — only this build-vs-park gate auto-builds.)
+change is set up. (A genuine intent-fork escalation at the "Ask vs. decide" high bar still
+parks for a human even headless — only this build-or-save gate auto-builds.)
 {% else %}
 Once the design is settled (the user has approved it) and **before you write and commit
 the spec**, surface the choice in your turn text and confirm via `wait_for_user`:

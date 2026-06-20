@@ -9,7 +9,7 @@ from imp.engine.state import JsonlEventLog
 
 
 def _section(rendered: str) -> str:
-    start = rendered.find("## Going live or parking the draft")
+    start = rendered.find("## Build now or save for later")
     end = rendered.find("## Writing the Spec", start)
     assert start != -1 and end != -1
     return rendered[start:end]
@@ -30,14 +30,15 @@ def test_headless_goes_live_without_build_vs_park_solicit(tmp_path: Path) -> Non
     block = _section(_render(tmp_path, non_interactive=True))
     assert "create_and_enter_worktree" in block
     assert 'complete_step(phase="written"' in block
-    # The headless branch drops the build-or-park solicit and the park option.
+    # The headless branch drops the build-or-save solicit and the save option.
     assert "wait_for_user" not in block
-    assert "Save for later (park)" not in block
+    assert "Save as a draft" not in block
+    assert "go live" not in block.lower()
 
 
 def test_interactive_keeps_build_vs_park_solicit(tmp_path: Path) -> None:
     block = _section(_render(tmp_path, non_interactive=False))
     assert "wait_for_user" in block
-    assert "Save for later (park)" in block
-    assert "Build it now (go live)" in block
+    assert "Save as a draft" in block
+    assert "Build it now" in block
     assert "create_and_enter_worktree" in block
