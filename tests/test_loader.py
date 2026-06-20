@@ -1098,3 +1098,35 @@ def test_step_label_must_be_a_string(tmp_path: Path) -> None:
         """, agents={"spec-writer": _WRITER})
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
+
+
+def test_parse_agent_file_label_absent_is_none(tmp_path):
+    p = tmp_path / "x.md"
+    p.write_text(
+        "---\nname: x\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    agent = parse_agent_file(p)
+    assert agent.label is None
+
+
+def test_parse_agent_file_label_present(tmp_path):
+    p = tmp_path / "x.md"
+    p.write_text(
+        "---\nname: x\nlabel: exploring codebase\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    agent = parse_agent_file(p)
+    assert agent.label == "exploring codebase"
+
+
+def test_parse_agent_file_non_string_label_raises_with_source(tmp_path):
+    p = tmp_path / "x.md"
+    p.write_text(
+        "---\nname: x\nlabel: 42\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "label" in str(ei.value)
+    assert ei.value.source is not None and ei.value.source.file == p

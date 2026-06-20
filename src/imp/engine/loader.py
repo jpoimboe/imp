@@ -150,6 +150,10 @@ def parse_agent_file(path: Path) -> AgentDef:
     tier_raw = fm.get("tier")
     tier = str(tier_raw) if tier_raw is not None else None
 
+    label_raw = fm.get("label")
+    if label_raw is not None and not isinstance(label_raw, str):
+        raise LoadError("an agent's `label:` must be a string", source)
+
     return AgentDef(
         name=str(fm["name"]),
         description=str(fm.get("description", "")),
@@ -164,6 +168,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         explicit_tools=explicit_tools,
         deny_tools=deny_tools,
         drivers=drivers,
+        label=label_raw,
     )
 
 
