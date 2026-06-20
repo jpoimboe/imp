@@ -81,8 +81,9 @@ class Change:
         depends_on: list[str] | None = None,
     ) -> Change:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
-        internal state inside the worktree. Raises worktree.BranchExists on the
-        (effectively impossible) id collision — the caller reports a clean error."""
+        internal state at the control root (.imp/changes/<id>). Raises
+        worktree.BranchExists on the (effectively impossible) id collision —
+        the caller reports a clean error."""
         wt_path = worktree.create_worktree(control_root, change_id, base_branch)
         change_dir = control_root / ".imp" / "changes" / change_id
         change_dir.mkdir(parents=True)

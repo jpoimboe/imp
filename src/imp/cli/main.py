@@ -1458,8 +1458,8 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
 
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = _change_home(control, change_id)
-    # journal_show returns bytes | None; the live-worktree branch always finds the
-    # files. Annotate so the None-guard below stays reachable (not dead code).
+    # journal_show returns bytes | None; the live change-home branch always finds
+    # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     change_json: bytes | None
     if (cdir / "change.json").exists():
