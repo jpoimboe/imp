@@ -132,11 +132,14 @@ re-raises them, so a rework pass re-surfaces only the fix-now work — no
 double-seeding, no re-asking.
 
 If there are no needs-decision items, present the prose summary and end with the
-ask itself, e.g. **"Merge this into the base branch, or send it back for rework?
-Reply `merge`, or describe the rework."**, then call `wait_for_user`. The human
-reads only your prose (`wait_for_user` shows no prompt), so ask the question —
-never announce it ("I'll solicit the merge decision"). Applies to every
-`wait_for_user` here, including the per-item walk above.
+ask itself; otherwise ask it last, after the per-item walk. The closing question is
+a single recommendation-anchored affirmative — the bare yes/no of whatever you
+recommend. If you recommend merging, ask the plain merge affirmative (e.g. "Ready to
+merge?"); if you recommend rework, the rework is the affirmative (e.g. "Send this
+back to fix X?"). No co-equal "…, or rework?" pairing and no scripted reply tokens.
+Then call `wait_for_user`. The human reads only your prose (`wait_for_user` shows no
+prompt), so ask the question — never announce it ("I'll solicit the merge
+decision"). Applies to every `wait_for_user` here, including the per-item walk above.
 
 When a human-requested rework is underspecified, settle the details first (a
 brainstorming-like posture) — use `wait_for_user` to clarify the desired outcome and scope before returning a rework decision — then hand a crisp brief to the

@@ -899,3 +899,18 @@ def test_no_bundled_agent_prompt_references_the_change_handle() -> None:
             offenders.append(p.name)
     assert offenders == []
 
+
+def test_finalize_merge_gate_is_recommendation_anchored() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["finalize"].prompt_template_source
+    # Removed verbatim example and token scripting.
+    assert "Reply `merge`, or describe the rework" not in body
+    assert "Merge this into the base branch, or send it back for rework" not in body
+    # New instruction: a recommendation-anchored affirmative asked after the walk.
+    assert "recommendation-anchored" in body
+    assert "after the per-item walk" in body
+    # Guardrails retained.
+    assert "never announce it" in body
+    assert "underspecified" in body
+
