@@ -13,6 +13,5 @@ def test_backlog_change_created_does_not_clobber_root() -> None:
                      "kind": "backlog", "depends_on": ["2026-06-16-par111"]}},
     ]
     tree = build_tree(events)
-    assert tree.root.change_id == "par111"
-    assert tree.root.handle == "parent-par111"
+    assert tree.root.id == "par111"
     assert tree.root.title == "Parent"

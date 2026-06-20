@@ -14,8 +14,7 @@ def test_change_renamed_appends_a_rename_node_with_the_handle() -> None:
     renames = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]
     assert len(renames) == 1
     assert renames[0].name == "add-version-flag-vflag1"
-    # The header fields still update (existing behavior, unchanged).
-    assert tree.root.handle == "add-version-flag-vflag1"
+    # The header title still updates (existing behavior, unchanged).
     assert tree.root.title == "Add version flag"
 
 

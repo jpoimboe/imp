@@ -74,9 +74,8 @@ _PROSE_THRESHOLD = 80  # issues 5/6: string output fields longer than this (or
 
 @dataclass
 class WorkflowNode:
-    handle: str | None = None
+    id: str | None = None
     title: str = ""
-    change_id: str | None = None
     status: str = "running"            # running | paused | completed
     children: list[Any] = field(default_factory=list)
     collapsible = False
@@ -604,24 +603,23 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     if p.get("kind") == "backlog":
         return
-    self._root.handle = p.get("handle")
     self._root.title = p.get("title", "")
-    self._root.change_id = p.get("id")
+    self._root.id = p.get("id")
 
 
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
 def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # A rename carries the new title + handle as a unit (current schema). Apply them
-    # together; ignore a legacy/partial event missing either, rather than leaving
-    # the header half-updated (e.g. new handle beside a stale title).
+    # A rename carries the new title + handle as a unit (current schema). Apply the
+    # title; ignore a legacy/partial event missing either. (The id is immutable, and
+    # WorkflowNode no longer has a handle field — the event still carries handle for the
+    # breadcrumb until Part 2 removes the payload key and switches it to the id.)
     new_title = p.get("new_title")
     new_handle = p.get("handle")
     if new_title is None or new_handle is None:
         return
     self._root.title = new_title
-    self._root.handle = new_handle
     self._append(RenameNode(name=new_handle))
 
 
@@ -631,7 +629,7 @@ NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
 def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "completed"
-    descriptor = self._root.handle or self._root.change_id or ""
+    descriptor = self._root.id or ""
     # Append at the WORKFLOW ROOT (not the still-open phase): the merged footer is a
     # run-level terminal line that ends the whole transcript, after every phase.
     self._root.children.append(MergedNode(change_id=descriptor, base=str(p.get("base", ""))))
@@ -1430,8 +1428,8 @@ def structural_repr(node: Any) -> Any:
     §5.4 incremental==batch test and by future regression tests."""
     t = type(node).__name__
     if isinstance(node, WorkflowNode):
-        return {"t": t, "handle": node.handle, "title": node.title,
-                "change_id": node.change_id, "status": node.status,
+        return {"t": t, "id": node.id, "title": node.title,
+                "status": node.status,
                 "children": [structural_repr(c) for c in node.children]}
     if isinstance(node, PhaseNode):
         return {"t": t, "name": node.name, "closed": node.closed,
