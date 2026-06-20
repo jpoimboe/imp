@@ -15,7 +15,6 @@ def _ctx(ch: Change, state: State) -> ToolContext:
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = state
-    ctx.event_log = ch.event_log()
     return ctx
 
 
