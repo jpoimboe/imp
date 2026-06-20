@@ -28,7 +28,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {}
 
 
 def migrate(old_v: int, new_v: int, change_dir: Path) -> None:
-    """Forward-migrate a change home from old_v to new_v; raises LayoutMismatch when no path is registered."""
+    """Raises LayoutMismatch when no migration path (old_v, new_v) is registered."""
     fn = _MIGRATIONS.get((old_v, new_v))
     if fn is None:
         meta = json.loads((change_dir / "change.json").read_text())
