@@ -847,17 +847,21 @@ def test_sweep_verify_green_clears_stale_carry() -> None:
     assert m.var_mutations["sweep_tolerated_carry"] is False
 
 
-def test_spec_writer_prompt_has_go_live_park_branch() -> None:
-    # Verifies the go-live/park decision section exists in the spec-writer prompt.
+def test_spec_writer_prompt_has_build_or_save_section() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
-    assert "create_and_enter_worktree" in body          # names the go-live tool
-    assert "head_changed" in body                        # re-ground when base advanced
-    assert "go live" in lowered                          # the build-it branch
-    assert "save for later" in lowered or "park" in lowered  # the park branch
-    assert "spec phase pauses" in body.lower()           # park path pauses the spec phase
+    assert "create_and_enter_worktree" in body
+    assert "head_changed" in body
+    assert "build now" in lowered
+    assert "save as a draft" in lowered
+    assert "spec phase pauses" in lowered
+    assert "1. **Build it now**" in body
+    assert "2. **Save as a draft**" in body
+    assert "Going live or parking the draft" not in body
+    assert "go live" not in lowered
+    assert "go-live" not in lowered
 
 
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:

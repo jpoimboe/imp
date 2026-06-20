@@ -87,3 +87,11 @@ def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
     built = CodexAgentRunner._build_prompt(None, inv.system_prompt)
     assert built.startswith(inv.system_prompt)
     assert _AGENT_BASE_PROMPT in built
+
+
+def test_base_has_numbered_options_convention() -> None:
+    low = _AGENT_BASE_PROMPT.lower()
+    assert "numbered list" in low
+    assert "single digit" in low
+    for banned in ("go live", "go-live", "build/park", "build now or save"):
+        assert banned not in low, banned
