@@ -12,6 +12,7 @@ from imp.engine.change import Change
 from imp.remote.session.client import SessionClient
 from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.server import SessionServer
+from imp.remote.session.socket_server import SessionSocket
 
 
 @pytest.fixture
@@ -77,6 +78,8 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
         prompt_ev = {"id": "e1", "type": "awaiting_user_input", "payload": {"prompt": "go?"}}
         events_path.write_text(json.dumps(prompt_ev) + "\n")
         on_event(prompt_ev)
+        # Late clients get replay (_replay=True, ignored) plus this live pending prompt.
+        server.set_pending_prompt(prompt_ev)
         gate_emitted.set()
         reply = await user_chat_input_fn("")
         got.append(reply)
@@ -112,3 +115,44 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
             tg.cancel_scope.cancel()
     finally:
         await fg_client.aclose()
+
+
+@pytest.mark.anyio
+async def test_deliver_session_reply_ignores_replayed_gate(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    inputs: list[str] = []
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+
+        async def _server_gate() -> None:
+            with anyio.fail_after(5):
+                while socket.attached_count == 0:
+                    await anyio.sleep(0.02)
+            # A replayed (marked) gate: the delivering client must NOT answer it.
+            socket.broadcast({"type": "awaiting_user_input",
+                              "payload": {"prompt": "old"}, "_replay": True})
+            await anyio.sleep(0.1)
+            # The live (unmarked) gate, then open next_input to capture the reply.
+            socket.broadcast({"type": "awaiting_user_input",
+                              "payload": {"prompt": "live"}})
+            inputs.append(await socket.next_input())
+
+        tg.start_soon(_server_gate)
+        with anyio.fail_after(5):
+            await deliver_session_reply(cast(Change, None), "approved", attach=_attach)
+        with anyio.fail_after(5):
+            while not inputs:
+                await anyio.sleep(0.02)
+        assert inputs == ["approved"]   # answered the live gate, not the replayed one
+        tg.cancel_scope.cancel()
+    await socket.close()
