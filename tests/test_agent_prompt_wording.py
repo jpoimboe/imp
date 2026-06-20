@@ -39,6 +39,16 @@ def test_plan_writer_writes_to_artifacts_and_uses_commit_script() -> None:
     assert "imp/plans/" not in body
 
 
+def test_plan_writer_decides_and_records_scope_contradictions() -> None:
+    body = _agent_prompt("plan-writer")
+    assert "correction-with-a-default" in body
+    assert "marginal cost" in body
+    assert "ships a broken feature" in body
+    assert "ride to the" in body
+    # Stale "authoritative for that point" phrase is reconciled away.
+    assert "authoritative for that point" not in body
+
+
 def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     for name, agent in wf.agents.items():

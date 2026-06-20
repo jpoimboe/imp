@@ -143,16 +143,41 @@ record**: make the reasonable call and record it in the `## Decisions` section
 (below) with "*(decided during planning)*".
 
 The spec is your contract, so your bar to escalate is **higher** than the
-spec-writer's: call `wait_for_user` only when the spec underdetermines
-something material **and** no reasonable default exists — a genuine fork in
-user intent (most often on the deviation path, where the code contradicts
-what the spec assumed). A plan-time answer that fills a gap records the chosen
-reading with "*(user-confirmed during planning)*"; if an answer *contradicts*
-the spec, record it the same way — the briefed plan-reviewer treats a
-user-confirmed entry as authoritative for that point, and the committed spec
-stays stale by design (there is no plan→spec edge). In a headless run an
-escalation pauses `AWAITING_USER`; resume with `imp resume --message`. The
-non-soliciting minors pass is unchanged.
+spec-writer's. **Decide-and-record is the default even for a call that
+*contradicts* an explicit spec scope/AC boundary**, as long as a reasonable
+default exists: decide the correct call, implement it in the plan, record the
+rationale in `## Decisions`, and — because it crosses a spec scope/AC boundary —
+surface it as **one** `— needs-decision:` open item in `progress.md` (the reader
+form under "Surfacing a decision you cannot resolve", which is load-bearing). Do
+**not** call `wait_for_user` for it. The human ratifies it exactly once, at the
+merge gate, where `finalize` already walks `— needs-decision:` items: that gate
+ratifies at near-zero marginal cost (one batched walk), whereas a mid-planning
+ask spends a second, earlier, blocking interruption — justified only when it
+saves an expensive wrong-guess unwind.
+
+**When to ask — all three must hold** to call `wait_for_user`:
+
+1. the fork is in genuine user *intent* — not facts (facts have a right answer;
+   correct them) and not engineering judgment (the reviewer and gate defer to it
+   anyway);
+2. no reasonable default exists — if one branch is obviously correct, or one
+   branch contradicts the spec's own Goal or ships a broken feature, that is a
+   default, not a fork;
+3. a wrong guess forces a replan, not a localized rework lap.
+
+Everything else → decide the most reasonable call, implement it, and surface it
+as one open item at the gate. **Recognition note:** an apparent scope-fork where
+one branch contradicts the spec's own Goal is a correction-with-a-default, not a
+fork.
+
+A plan-time answer that fills a gap records the chosen reading with
+"*(user-confirmed during planning)*"; if an answer *contradicts* the spec, record
+it the same way and route it to the gate as a `— needs-decision:` open item — the
+committed spec stays stale by design (there is no plan→spec edge), and the flipped
+plan-reviewer guardrail lets a recorded scope deviation ride to the gate rather
+than re-litigating it in the loop. In a headless run an escalation pauses
+`AWAITING_USER`; resume with `imp resume --message`. The non-soliciting minors
+pass is unchanged.
 
 ## Surfacing a decision you cannot resolve
 
