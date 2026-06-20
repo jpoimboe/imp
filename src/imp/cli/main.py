@@ -1340,7 +1340,7 @@ def _log_picker_empty() -> int:
 
 async def _pick_log_target(control: Path) -> str | int:
     rows = _sort_rows_newest_first(
-        _status_rows(control) + _completed_rows(control))
+        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
     default_id = _resolve_default_id(control)
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
@@ -1376,6 +1376,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
     events = _load_events_for_id(control, change_id)
     if events is None:
+        rec = backlog.read_record(control, change_id)
+        if rec is not None:
+            for line in _detail_card(control, change_id, now=datetime.now(UTC)):
+                print(line)
+            return 0
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
 

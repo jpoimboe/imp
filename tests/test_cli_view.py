@@ -368,3 +368,45 @@ def test_term_width_floors_to_80_when_columns_nonpositive(monkeypatch) -> None:
     # must substitute 80.
     monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((0, 24)))
     assert cli_main._term_width() == 80
+
+
+def test_log_backlog_id_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    import imp.cli.main as m
+    from imp.engine import backlog
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="wire up OAuth login", depends_on=[], created_by="human")
+    rc = main(["log", "2026-06-16-bkg111"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Add OAuth" in out
+    assert "wire up OAuth login" in out
+    assert "no such Change" not in out
+
+
+def test_log_picker_rows_include_backlog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+    from imp.engine import backlog
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="d", depends_on=[], created_by="human")
+    captured: dict = {}
+
+    async def _fake_picker(*, rows, header, on_empty, selected_index):
+        captured["rows"] = rows
+        return 2
+
+    monkeypatch.setattr(m, "_pick_change_target", _fake_picker)
+    import anyio
+    anyio.run(m._pick_log_target, tmp_path)
+    assert any(r[0] == "2026-06-16-bkg111" for r in captured["rows"])
