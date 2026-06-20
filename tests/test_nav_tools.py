@@ -1,6 +1,7 @@
 # tests/test_nav_tools.py
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import anyio
@@ -365,3 +366,278 @@ def test_grep_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> N
     out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
     assert ".imp/change/artifacts/spec/feat.md" in out
     assert "events.jsonl" not in out
+
+
+# --- gitignore-aware grep tests ---
+
+def _init_git_repo(root: Path, gitignore: str) -> None:
+    def g(*a: str) -> None:
+        subprocess.run(["git", *a], cwd=root, capture_output=True,
+                       text=True, check=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    (root / ".gitignore").write_text(gitignore)
+    (root / "README.md").write_text("seed\n")
+    g("add", "-A")
+    g("commit", "-qm", "seed")
+
+
+def test_grep_skips_ignored_dirs_hidden_and_nonhidden(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path,
+                   ".mypy_cache/\nbuild/\n__pycache__/\n_bmad-output/\n")
+    (tmp_path / "real.py").write_text("NEEDLE here\n")
+    for d in (".mypy_cache", "build", "__pycache__", "_bmad-output"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "junk.py").write_text("NEEDLE junk\n")
+
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "real.py" in out
+    assert ".mypy_cache" not in out
+    assert "build" not in out
+    assert "__pycache__" not in out
+    assert "_bmad-output" not in out
+
+
+def test_grep_searches_tracked_hidden_dir(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    gh = tmp_path / ".github"
+    gh.mkdir()
+    (gh / "ci.yml").write_text("NEEDLE in ci\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-qm", "add gh"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert ".github/ci.yml" in out
+
+
+def test_grep_searches_fresh_untracked_nonignored_file(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "brand_new.py").write_text("NEEDLE fresh\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "brand_new.py" in out
+
+
+def test_grep_skips_individually_ignored_file(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "secret.txt\n")
+    (tmp_path / "secret.txt").write_text("NEEDLE secret\n")
+    (tmp_path / "ok.txt").write_text("NEEDLE ok\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "ok.txt" in out
+    assert "secret.txt" not in out
+
+
+def test_grep_escape_hatch_searches_explicit_ignored_dir(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "artifact.txt").write_text("NEEDLE inside build\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path="build")
+    assert "build/artifact.txt" in out
+
+
+def test_grep_carveout_searched_in_repo(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, ".imp/\n")
+    art = tmp_path / ".imp" / "change" / "artifacts" / "spec"
+    art.mkdir(parents=True)
+    (art / "feat.md").write_text("the DECISION is X\n")
+    (tmp_path / ".imp" / "events.jsonl").write_text("the DECISION leaked\n")
+
+    out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
+    assert ".imp/change/artifacts/spec/feat.md" in out
+    assert "events.jsonl" not in out
+
+
+def test_grep_nested_gitignore_honored(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / ".gitignore").write_text("*.tmp\n")
+    (sub / "keep.py").write_text("NEEDLE keep\n")
+    (sub / "drop.tmp").write_text("NEEDLE drop\n")
+
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "sub/keep.py" in out
+    assert "drop.tmp" not in out
+
+
+def test_grep_git_failure_degrades_to_fallback(tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.nav as nav_mod
+
+    async def _fail(*a: object, **k: object) -> None:
+        return None
+    monkeypatch.setattr(nav_mod, "list_unignored", _fail)
+
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "build").mkdir()
+    # build/ is gitignored: the normal git path would skip it. With
+    # list_unignored failing, the os.walk fallback (EXCLUDED_DIRS only, no
+    # gitignore) searches it instead — proving the degrade.
+    (tmp_path / "build" / "x.py").write_text("NEEDLE in build\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "build/x.py" in out
+
+
+def test_grep_skips_binary_file_with_nul_no_repo(tmp_path: Path) -> None:
+    (tmp_path / "bin.dat").write_bytes(b"NEEDLE\x00more bytes\n")
+    (tmp_path / "text.txt").write_text("NEEDLE in text\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "text.txt" in out
+    assert "bin.dat" not in out
+
+
+def test_grep_skips_tracked_binary_in_repo(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "img.bin").write_bytes(b"NEEDLE\x00\x01\x02payload\n")
+    (tmp_path / "src.txt").write_text("NEEDLE source\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-qm", "add binary"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "src.txt" in out
+    assert "img.bin" not in out
+
+
+def test_grep_binary_skip_on_external_target(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "bin.dat").write_bytes(b"NEEDLE\x00rest\n")
+    (ext / "text.txt").write_text("NEEDLE text\n")
+    out = _grep(_ctx(wt), pattern="NEEDLE", path=str(ext))
+    assert (ext / "text.txt").as_posix() in out
+    assert "bin.dat" not in out
+
+
+# --- gitignore-aware glob tests ---
+
+def test_glob_skips_ignored_dirs(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, ".mypy_cache/\nbuild/\n")
+    (tmp_path / "real.py").write_text("")
+    for d in (".mypy_cache", "build"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "junk.py").write_text("")
+
+    out = _glob(_ctx(tmp_path), pattern="**/*.py")
+    assert "real.py" in out
+    assert "junk.py" not in out
+
+
+def test_glob_searches_tracked_hidden_dir(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    gh = tmp_path / ".github"
+    gh.mkdir()
+    (gh / "ci.yml").write_text("")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-qm", "gh"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+
+    out = _glob(_ctx(tmp_path), pattern="**/*.yml")
+    assert ".github/ci.yml" in out
+
+
+def test_glob_keeps_fresh_untracked_nonignored_file(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "fresh.py").write_text("")
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert "fresh.py" in out
+
+
+def test_glob_carveout_kept_in_repo(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, ".imp/\n")
+    plans = tmp_path / ".imp" / "change" / "artifacts" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "feat-plan-1.md").write_text("")
+    (tmp_path / ".imp" / "events.jsonl").write_text("")
+
+    out = _glob(_ctx(tmp_path), pattern="**/*")
+    assert ".imp/change/artifacts/plans/feat-plan-1.md" in out
+    assert "events.jsonl" not in out
+
+
+def test_glob_escape_hatch_explicit_ignored_base(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "out.o").write_text("")
+    out = _glob(_ctx(tmp_path), pattern="*.o", path="build")
+    assert "build/out.o" in out
+
+
+def test_glob_description_documents_gitignore_skip() -> None:
+    desc = get_registry()["glob"].description
+    assert "git ignores" in desc
+    assert ".imp/change/artifacts/" in desc
+    assert "searches it anyway" in desc
+    # retained guarantees
+    assert "bounded by the sandbox like bash" in desc
+
+
+def test_grep_description_documents_gitignore_and_binary() -> None:
+    desc = get_registry()["grep"].description
+    assert "git ignores" in desc
+    assert ".imp/change/artifacts/" in desc
+    assert "searches it anyway" in desc
+    assert "binary" in desc
+    # retained guarantees
+    assert "bounded by the sandbox like bash" in desc
+    assert "external" in desc and "cap" in desc
+
+
+def test_glob_git_failure_degrades_to_no_gitignore_filter(tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.nav as nav_mod
+
+    async def _fail(*a: object, **k: object) -> None:
+        return None
+    monkeypatch.setattr(nav_mod, "partition_ignored", _fail)
+
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "out.py").write_text("")
+    (tmp_path / "ok.py").write_text("")
+
+    out = _glob(_ctx(tmp_path), pattern="**/*.py")
+    # With partition_ignored failing, ignored build/ is NOT filtered
+    assert "ok.py" in out
+    assert "build/out.py" in out
+
+
+def test_grep_no_repo_fallback_uses_excluded_dirs_not_gitignore(tmp_path: Path) -> None:
+    # No git repo: grep falls back to os.walk + EXCLUDED_DIRS ({".imp", ".git"}).
+    # A directory that git would normally ignore (build/) is still searched.
+    (tmp_path / "real.py").write_text("NEEDLE here\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "out.py").write_text("NEEDLE in build\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path=".")
+    assert "real.py" in out
+    assert "build/out.py" in out   # not ignored — fallback uses EXCLUDED_DIRS only
+
+
+def test_grep_git_path_respects_sandbox_masking(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "ok.py").write_text("NEEDLE ok\n")
+    (tmp_path / "secret.py").write_text("NEEDLE secret\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    subprocess.run(["git", "commit", "-qm", "add files"], cwd=tmp_path,
+                   capture_output=True, text=True, check=True)
+    ctx = _ctx(tmp_path)
+    ctx.sandbox_policy = _policy(tmp_path, secret_files=(str(tmp_path / "secret.py"),))
+    out = _grep(ctx, pattern="NEEDLE", path=".")
+    assert "ok.py" in out
+    assert "secret.py" not in out
+
+
+def test_grep_binary_skip_on_escape_hatch_path(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path, "build/\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "text.txt").write_text("NEEDLE text\n")
+    (tmp_path / "build" / "bin.dat").write_bytes(b"NEEDLE\x00binary content\n")
+    # Explicitly targeting ignored build/ triggers the escape hatch (plain os.walk).
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", path="build")
+    assert "build/text.txt" in out
+    assert "bin.dat" not in out
