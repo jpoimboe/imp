@@ -894,7 +894,7 @@ async def _run_agent_invocation(
     else:
         rendered = render_prompt(
             agent_def.prompt_template_source, build_context(
-                change_id=change.id, change_handle=change.handle, change_title=change.title,
+                change_id=change.id, change_title=change.title,
                 change_home=str(change.change_dir),
                 event_log=log, vars=state.vars,
                 project_facts=project_facts, guidance=guidance,

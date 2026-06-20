@@ -88,7 +88,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     (wf_dir / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.handle }}\n"
+        "go {{ change.id }}\n"
     )
     # New inline-surface format: phases is a list of {name, steps}.
     # on_max_retries uses verb-style: {pause: true}.

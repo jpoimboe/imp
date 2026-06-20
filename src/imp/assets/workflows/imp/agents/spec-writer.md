@@ -191,7 +191,7 @@ it now, or save the draft for later?
   commit and `spec-reviewer` run only now that the change is live.
 - **Save for later (park).** Do **not** call `create_and_enter_worktree` and do **not**
   emit `phase: written`. Tell the user the draft is saved and resumable later with
-  `imp resume <handle>`, then call `wait_for_user`. The spec phase pauses with the draft
+  `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with the draft
   saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
   resume you re-offer this same go-live choice.
 

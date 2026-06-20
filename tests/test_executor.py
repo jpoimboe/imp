@@ -184,7 +184,7 @@ def _seed_minimal_workflow(
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.handle }}\n"
+        "go {{ change.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"

@@ -30,7 +30,7 @@ def _agent(name: str) -> AgentDef:
                                 values=("Success", "Error"), required=True),),
             source=SourceLoc(file=Path("a.md"), line=1),
         ),
-        prompt_template_source="hi {{ change.handle }}",
+        prompt_template_source="hi {{ change.id }}",
         source_path=Path("a.md"),
         source=SourceLoc(file=Path("a.md"), line=1),
     )
@@ -46,7 +46,7 @@ def _agent2(name: str, *, max_tool_calls=None, subagents=(),
         subagents=tuple(subagents),
         output_schema=OutputSchema(fields=fields,
                                    source=SourceLoc(file=Path("a.md"), line=1)),
-        prompt_template_source="hi {{ change.handle }}",
+        prompt_template_source="hi {{ change.id }}",
         source_path=Path("a.md"), source=SourceLoc(file=Path("a.md"), line=1),
         max_tool_calls=max_tool_calls)
 
@@ -94,7 +94,7 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}])
     ctx.change_context = ChangeContext(
-        handle="change-42", title="Change 42", project_root=tmp_path,
+        handle="change-42", id="change-42", title="Change 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 
@@ -157,7 +157,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
         [{"type": "agent_output", "payload": {"status": "Success", "note": "done"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
-        handle="change-42", title="Change 42", project_root=tmp_path,
+        handle="change-42", id="change-42", title="Change 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     out = await dispatch_task(ctx, "reviewer", "please review")
@@ -202,7 +202,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
             ),),
             source=SourceLoc(file=Path("sub.md"), line=1),
         ),
-        prompt_template_source="hello {{ change.handle }}",
+        prompt_template_source="hello {{ change.id }}",
         source_path=Path("sub.md"),
         source=SourceLoc(file=Path("sub.md"), line=1),
     )
@@ -214,7 +214,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         parent_transcript_dir=tmp_path / "parent",
         change_context=ChangeContext(
-            handle="change-7", title="Change 7", project_root=tmp_path,
+            handle="change-7", id="change-7", title="Change 7", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
@@ -289,7 +289,7 @@ async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.resolved_tiers = {"medium": ProviderModel("openai", "gpt-5.2")}
 
@@ -315,7 +315,7 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     await dispatch_task(ctx, "reviewer", "go")
@@ -381,7 +381,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
     ctx.resolved_tiers = {
@@ -420,7 +420,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
     ctx.resolved_tiers = {
@@ -459,7 +459,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
     ctx.resolved_tiers = {
@@ -485,7 +485,7 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("low", "high")
     ctx.resolved_tiers = {"high": ProviderModel("anthropic", "opus")}
@@ -513,7 +513,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="test", title="Test", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="test", id="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("low", "medium", "high")
     ctx.resolved_tiers = {
@@ -546,7 +546,7 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
-        handle="c", title="C c", project_root=tmp_path,
+        handle="c", id="c", title="C c", project_root=tmp_path,
         workflow_dir=tmp_path / "wf")
 
     await dispatch_task(ctx, "reviewer", "review it")
@@ -571,7 +571,7 @@ async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding([{"type": "error", "payload": {
         "category": "agent_incomplete",
         "kind": "no_complete_step_after_nudges", "message": "no complete_step"}}])
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     with pytest.raises(RuntimeError):
         await dispatch_task(ctx, "reviewer", "review it")
@@ -609,7 +609,7 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     out = await dispatch_task(ctx, "reviewer", "review it")
@@ -641,7 +641,7 @@ async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
     ctx.coordinator = coord
     ctx.spawn_subagent = _spawn_yielding([{"type": "thinking", "payload": {}}],
                                          on_run=_trip)
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     with pytest.raises(SubagentSuspended):
         await dispatch_task(ctx, "reviewer", "review it")
@@ -684,7 +684,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = coord
     ctx.spawn_subagent = _spawn
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     async def main() -> None:
@@ -737,7 +737,7 @@ async def test_subagent_headless_backoff_hits_ceiling(tmp_path: Path,
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
     ctx.non_interactive = True  # headless
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     with pytest.raises(SubagentSuspended, match="retry ceiling"):
@@ -766,7 +766,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     ctx.non_interactive = True  # headless parent
 
@@ -788,7 +788,7 @@ async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> N
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     ctx.non_interactive = False  # interactive parent
 
@@ -815,7 +815,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"status": "Success"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(handle="c", id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     pol = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),

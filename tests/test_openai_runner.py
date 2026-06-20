@@ -550,7 +550,7 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
 @pytest.mark.anyio
 async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
     """Every create() call within one invocation passes the same
-    prompt_cache_key, equal to f"{change_handle}:{agent_id}"."""
+    prompt_cache_key, equal to f"{change_id}:{agent_id}"."""
     (tmp_path / "art").mkdir()
     (tmp_path / "data.txt").write_text("payload")
     fake = FakeResponsesClient([
