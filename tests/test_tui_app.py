@@ -255,7 +255,7 @@ def test_your_turn_status_line_shows_blue_accent_marker() -> None:
     app = TuiApp(coord=_FakeCoord(), color=True, width=80)
     app._prompt_visible = True
     line = app.status_line()
-    assert "▌ your turn" in line       # left accent marker, not a full stripe
+    assert "┃ your turn" in line       # left accent marker, not a full stripe
     assert pal.sgr("bright_blue", enabled=True) in line  # bright_blue accent (imp's user identity)
     assert "\x1b[7m" not in line       # no inverse fill in the your-turn text
 

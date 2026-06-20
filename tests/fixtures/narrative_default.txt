@@ -9,7 +9,7 @@ design
   
     reviewer · claude-sonnet-4-6
   
-    > Please add a section on token expiry.
+    Please add a section on token expiry.
   
   spec · complete
 

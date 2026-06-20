@@ -145,9 +145,9 @@ async def ask_line_with_slash(
     resolved skill body; anything else returns as-is.
 
     Framing: no chrome around the field. While the user types, only the
-    bright-blue caret marks the turn; on submit prompt_toolkit erases its region
+    bright-blue ┃ bar marks the turn; on submit prompt_toolkit erases its region
     (erase_when_done) and the live driver reprints the entered line with the
-    blue ▌ left bar. The gray bracketing rules are gone — the
+    blue ┃ left bar. The gray bracketing rules are gone — the
     left bar is the marker now.
 
     `coord` (the run's InterruptCoordinator) wraps the prompt turn in

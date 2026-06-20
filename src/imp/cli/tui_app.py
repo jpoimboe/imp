@@ -69,7 +69,7 @@ class TuiApp:
 
     def status_line(self) -> str:
         if self._prompt_visible:
-            marker = pal.ansi("▌ your turn", "bright_blue", enabled=self._color)
+            marker = pal.ansi(f"{pal.BAR} your turn", "bright_blue", enabled=self._color)
             hint = pal.ansi(HINT, "gray", "dim", enabled=self._color)
             return f"{marker}{_STATUS_SEP}{hint}"
         left = self._driver.status_text(self._frame, self._elapsed())

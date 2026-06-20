@@ -34,7 +34,7 @@ design
   │ • The spec looks good. Auth flows are clearly defined.
   │ → status=Success · summary=Spec approved
   
-    > Please add a section on token expiry.
+    Please add a section on token expiry.
   
   spec · complete · status=Success · summary=Spec drafted
 

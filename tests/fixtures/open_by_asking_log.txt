@@ -5,10 +5,10 @@ spec
   
   • What change would you like to make?
   
-    > Add a top-level `--version` flag (with a `-V` short alias) to the `imp`
-      CLI that prints the installed imp version and exits 0, without requiring a
-      subcommand. Read the version from the installed package metadata
-      (importlib.metadata) so it stays in sync with pyproject.toml.
+    Add a top-level `--version` flag (with a `-V` short alias) to the `imp` CLI
+    that prints the installed imp version and exits 0, without requiring a
+    subcommand. Read the version from the installed package metadata
+    (importlib.metadata) so it stays in sync with pyproject.toml.
   
   • Let me explore the CLI structure before proposing a design.
   
@@ -52,9 +52,9 @@ spec
   
     Does this look right, and which fallback do you want?
   
-    > Design looks right. Go with (a): on PackageNotFoundError, print `imp
-      unknown` and still exit 0 so --version never crashes. Please also assert
-      that fallback path in the test.
+    Design looks right. Go with (a): on PackageNotFoundError, print `imp
+    unknown` and still exit 0 so --version never crashes. Please also assert
+    that fallback path in the test.
   
   • Naming this add-version-flag.
   
@@ -495,7 +495,7 @@ review
     Would you like to merge this change, or send it back to implement with
     feedback?
   
-    > Merge it. The two items are non-blocking nits and the change is clean.
+    Merge it. The two items are non-blocking nits and the change is clean.
   
     1 call · complete_step
   

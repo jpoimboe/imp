@@ -302,7 +302,7 @@ def test_snapshot_full(monkeypatch) -> None:
 
 
 def test_synthetic_user_message_dropped_genuine_shown() -> None:
-    # point 3: only a human reply the engine awaited renders as `> …`; the
+    # point 3: only a human reply the engine awaited renders as a gutter turn; the
     # synthetic "begin" kickoff (no preceding awaiting_user_input) is dropped.
     out = "\n".join(_lines([
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
@@ -312,8 +312,8 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
         _ev("4", "user_message", agent_id="step:p/s",
             content=[{"type": "text", "text": "do the real thing"}]),
     ]))
-    assert "> begin" not in out
-    assert "> do the real thing" in out
+    assert "begin" not in out
+    assert "    do the real thing" in out   # gutter-indented human turn
 
 
 def test_interjected_user_message_renders_as_human_turn() -> None:
@@ -321,7 +321,7 @@ def test_interjected_user_message_renders_as_human_turn() -> None:
     # emits user_message (the typed text) IMMEDIATELY followed by user_interjected
     # — with NO preceding awaiting_user_input. Without consuming user_interjected
     # the message would be tagged interactive=False and dropped as a synthetic
-    # engine prompt. It must instead render as a genuine `> …` human turn.
+    # engine prompt. It must instead render as a genuine human turn (gutter).
     events = [
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
         _ev("2", "llm_response", agent_id="step:p/s", provider="anthropic",
@@ -334,7 +334,7 @@ def test_interjected_user_message_renders_as_human_turn() -> None:
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "> actually use postgres" in out
+    assert "    actually use postgres" in out   # gutter-indented human turn
     step = tree.root.children[0].children[0]
     assert isinstance(step, nv.StepNode)
     um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
@@ -388,7 +388,7 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "> go ahead" in out
+    assert "    go ahead" in out   # gutter-indented human turn
     # The re-emitted awaiting_user_input uniquely sets interactive=True on the
     # resumed step (resume re-entry resets it to False first, so only the
     # re-emitted event could have set it back). Assert directly on the node.
@@ -964,20 +964,22 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
 
 def test_user_message_blue_bar_then_caret_text_color_on() -> None:
     """The user turn renders at the node's own depth (depth=1 → a 2-space indent),
-    with a blue ▌ left bar + a space gutter, then a bright-blue `> ` caret and the
-    body in default fg. Continuation lines repeat the bar + a 3-space pad so the
-    body aligns under itself. No background fill, no trailing spaces."""
+    with a blue ┃ left bar + a single-space gutter, then the body in default fg —
+    no leading caret. Continuation lines repeat the bar + one space so the body
+    aligns under itself. No background fill, no trailing spaces."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    assert out[0] == "  \x1b[94m▌\x1b[0m \x1b[94m> \x1b[0mline one"
-    assert out[1] == "  \x1b[94m▌\x1b[0m   line two"
+    assert out[0] == "  \x1b[94m┃\x1b[0m line one"
+    assert out[1] == "  \x1b[94m┃\x1b[0m line two"
     assert "\x1b[48;2;" not in out[0] and "\x1b[104m" not in out[0]   # no bg
 
 
-def test_user_message_blue_bar_no_bg_in_truecolor_theme() -> None:
-    """No background fill in any theme now — the blue ▌ bar marks the turn, so a
-    truecolor theme no longer paints a slate background."""
+def test_user_message_blue_bar_with_subtle_bg_in_truecolor_theme() -> None:
+    """The reprinted (scrolled-back) user turn carries a subtle entered-input
+    background in a truecolor theme, opened AFTER the ┃ bar (Option A): the
+    highlight hugs the bar, covering the separating space + the typed text, and
+    closes at text end — no full-width fill, so copy/paste stays clean."""
     pal.set_theme("dark")
     try:
         node = nv.UserMessageNode(text="hello", interactive=True)
@@ -985,17 +987,21 @@ def test_user_message_blue_bar_no_bg_in_truecolor_theme() -> None:
     finally:
         pal.set_theme("ansi")
     assert len(out) == 1
-    assert "\x1b[48;2;" not in out[0]               # no background fill
-    assert "\x1b[38;2;127;162;202m▌\x1b[0m" in out[0]  # truecolor blue left bar present
-    assert out[0].endswith("hello")                 # body last; no trailing reset/space
+    bar = "\x1b[38;2;127;162;202m┃\x1b[0m"  # truecolor blue left bar
+    bg = "\x1b[48;2;43;47;58m"             # subtle slate (#2B2F3A) opened after the bar
+    assert out[0] == bar + bg + " hello\x1b[0m"   # space + text on the bg, reset at end
 
 
-def test_user_message_no_color_keeps_caret_and_blank_gutter() -> None:
+def test_user_message_no_color_blank_gutter_no_caret() -> None:
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     joined = "\n".join(out)
-    assert "\x1b[94m" not in joined and "\x1b[104m" not in joined and "▌" not in joined
-    assert "> line one" in joined            # `> ` still anchors the speaker
+    assert "\x1b[94m" not in joined and "\x1b[104m" not in joined and "┃" not in joined
+    assert ">" not in joined                 # no caret anymore — just the gutter
+    # Color off: the ┃ bar degrades to a blank space, so the turn is plain
+    # indented text with no visible marker. Both lines share one column.
+    assert out[0] == "    line one"
+    assert out[1] == "    line two"
 
 
 def test_lean_subagent_is_single_status_row() -> None:
@@ -1785,7 +1791,7 @@ def test_opening_intent_renders_user_turn_with_gutter() -> None:
          "payload": {"text": "add a flag"}},
     ])
     body = list(rt.render_tree(tree, full=False, color=False, width=80))
-    assert any(ln == "  > add a flag" for ln in body)   # depth-0 + 2-col gutter
+    assert any(ln == "  add a flag" for ln in body)   # depth-0 + 2-col gutter, no caret
 
 
 def test_burst_summary_drops_sub_second_duration() -> None:

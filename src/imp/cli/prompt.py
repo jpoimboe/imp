@@ -68,7 +68,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     # No style override: while the user types, the input region keeps the
-    # terminal's default fg/bg (a bright-blue caret is the only marker). On
+    # terminal's default fg/bg (the bright-blue ┃ bar is the only marker). On
     # submit, erase_when_done wipes prompt_toolkit's whole rendered region —
     # prompt + input + the menu-reservation row that caused the old stray bottom
     # bar — so NOTHING it drew survives in scroll-back. The live driver then
@@ -131,15 +131,18 @@ class Prompt:
         self._session = self._session_factory()
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:
-        """The prompt caret as prompt_toolkit formatted text: a bright-blue
-        ``> `` under color, plain otherwise. `None` selects the default caret."""
+        """The prompt caret as prompt_toolkit formatted text. The default caret
+        (`prompt_text is None`) is now empty — the ┃ bar in `indent` is the sole
+        user-turn marker — so only an explicit non-empty `prompt_text` is styled
+        bright-blue. Empty text adds no escapes (keeps the live line clean)."""
         from imp.cli import palette as pal
 
         text = pal.CARET if prompt_text is None else prompt_text
         if self._color:
             from prompt_toolkit.formatted_text import ANSI
 
-            return ANSI(indent + pal.ansi(text, "bright_blue", enabled=True))
+            styled = pal.ansi(text, "bright_blue", enabled=True) if text else ""
+            return ANSI(indent + styled)
         return indent + text
 
     def ask(self, prompt_text: str | None = None) -> str:

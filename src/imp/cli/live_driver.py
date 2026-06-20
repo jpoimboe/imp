@@ -235,7 +235,7 @@ class LiveDriver:
             # The interactive prompt uses erase_when_done, so prompt_toolkit leaves
             # NO echo in scroll-back on a real terminal — we reprint the turn here
             # (no longer suppressed on a TTY). Rendered as a user turn: flush-left,
-            # bright-blue caret, blue ▌ left bar,
+            # marked by the blue ┃ left bar (no leading caret),
             # spaced like a chat message. The same path serves a non-TTY sink
             # (offline capture / `imp run | tee` / the snap-ui mockup), so live and
             # `imp log` show the user's turn identically.

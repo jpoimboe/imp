@@ -147,10 +147,11 @@ def test_user_color_is_bright_blue_foreground() -> None:
 
 
 def test_caret_and_rule_helpers() -> None:
-    # The input-field chrome: a bright-blue caret and a gray rule, both plain
-    # when color is disabled (the rule's dashes are structural, kept regardless).
-    assert pal.caret(enabled=True) == "\x1b[94m> \x1b[0m"
-    assert pal.caret(enabled=False) == "> "
+    # The input-field chrome: the caret is empty (the ┃ bar is the sole user-turn
+    # marker), so caret() is "" with no stray escapes regardless of color. The
+    # gray rule's dashes are structural, kept regardless.
+    assert pal.caret(enabled=True) == ""
+    assert pal.caret(enabled=False) == ""
     assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
     assert pal.rule(4, enabled=False) == "────"
 
@@ -214,7 +215,7 @@ def test_light_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
 
 
 def test_user_bar_is_blue_glyph_under_color_and_space_off() -> None:
-    assert pal.user_bar(enabled=True) == "\x1b[94m▌\x1b[0m"
+    assert pal.user_bar(enabled=True) == "\x1b[94m┃\x1b[0m"
     assert pal.user_bar(enabled=False) == " "   # blank gutter when color is off
 
 

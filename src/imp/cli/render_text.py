@@ -503,13 +503,21 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
             # something the human typed, so it never renders as a `>` turn.
             return
-        # A blue ▌ left bar marks the human turn in the gutter on every line (no
-        # background fill → no trailing spaces, clean copy/paste, even left edge).
-        # First line: {indent}{▌} {> }{text}; continuations: {indent}{▌}   {text}
-        # (body aligned under the first line's text).
+        # A blue ┃ left bar marks the human turn in the gutter on every line.
+        # First line: {indent}{┃} {text}; continuations: {indent}{┃} {text} (body
+        # aligned under the first line's text). The bar + one space is the whole
+        # marker now — no leading caret (pal.CARET is "").
+        #
+        # On a truecolor theme the reprinted (scrolled-back) turn carries a subtle
+        # entered-input background, opened AFTER the bar so the highlight hugs the
+        # bar — it covers the separating space (left padding) and the typed text,
+        # and closes at text end (no full-width fill → clean copy/paste). Blank
+        # separator lines stay unpainted. The live input field is never painted.
         indent = _gutter_indent(depth, gutters, color)
         bar = pal.user_bar(enabled=color)
         caret = pal.caret(enabled=color)
+        bg = pal.user_bg_open(enabled=color)
+        end = "\x1b[0m" if bg else ""
         avail = max(8, width - _INDENT_W * depth - 2 - len(pal.CARET))
         first = True
         for para in _caret_escape(node.text).split("\n"):
@@ -517,10 +525,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 yield indent + bar
                 continue
             for line in textwrap.wrap(para, width=avail) or [""]:
-                if first:
-                    yield indent + bar + " " + caret + line
-                else:
-                    yield indent + bar + "   " + line
+                lead = caret if first else ""
+                yield indent + bar + bg + " " + lead + line + end
                 first = False
         return
 
