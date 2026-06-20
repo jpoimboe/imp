@@ -44,10 +44,10 @@ from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
+from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import derive_handle, new_change_id
 from imp.engine.state import LockHeld, State
 from imp.engine.workflow_lifecycle import (
     DriftState,
@@ -291,7 +291,7 @@ def _recover_phase(change: Change) -> str | None:
 
 
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
-    name = change.handle
+    name = change.id
     phase = _phase_from_events(list(change.event_log().read()))
     return name, phase, change.id
 
@@ -516,13 +516,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(handle: str, title: str, change_id: str, marker: str,
+def _run_header_line(change_id: str, title: str, marker: str,
                      *, color: bool) -> str:
-    named = bool(title.strip())
-    head = handle if named else change_id
-    name = title.strip() if named else "(unnamed)"
+    stripped = title.strip()
+    name = stripped if stripped else "(unnamed)"
     tail = f" · {name} · {marker}"
-    return (ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
+    return (ansi(change_id, *pal.NODE_COLORS["workflow"], enabled=color)
             + ansi(tail, "dim", enabled=color))
 
 
@@ -649,7 +648,7 @@ async def _run_fresh_session(
 
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+        change.id, change.title, "new", color=should_use_color(sys.stdout)))
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
@@ -748,7 +747,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         opening_intent = opening_text
 
     change_id = new_change_id()
-    # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
+    # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
@@ -765,7 +764,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
         print(_run_header_line(
-            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+            change.id, change.title, "new", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -779,12 +778,12 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     if _tui_requested(args):
         print(_run_header_line(
-            change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+            change.id, change.title, "new", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, seed_opening=opening_text,
                                       opening_intent=opening_intent)
 
     print(_run_header_line(
-        change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
+        change.id, change.title, "new", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
@@ -928,7 +927,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
         print(_run_header_line(
-            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -944,7 +943,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             if rc is not None:
                 return rc
         print(_run_header_line(
-            change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
+            change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, resume=True, from_target=from_target)
 
     # Interactive resume: a thin session-client. Validate --from client-side
@@ -956,7 +955,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             return rc
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
-        change.handle, change.title, change.id, "resuming", color=should_use_color(sys.stdout)))
+        change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
@@ -1048,15 +1047,12 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
 
 def _resolve_id(control: Path, token: str) -> str:
     """Resolve a user-typed token to a Change id (spec AC 7): it must be an
-    unambiguous substring of exactly one change's LIVE handle (recomputed from the
-    current title). The id is always a substring of its own handle, so a bare id
-    always resolves. Multiple matches exit non-zero listing candidates; none errors."""
+    unambiguous substring of exactly one change's id. Multiple matches exit
+    non-zero listing candidates; none errors."""
     if not token.strip():
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         raise SystemExit(2)
-    ids = _iter_change_ids(control)
-    matches = [cid for cid in ids
-               if token in derive_handle(_title_for_id(control, cid) or "", cid)]
+    matches = [cid for cid in _iter_change_ids(control) if token in cid]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -1076,7 +1072,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             print(f"  {cid}", file=sys.stderr)
             continue
         print(change_row.format_change_line(
-            handle=derive_handle(row[4], row[0]), title=row[4], status=row[1], step=row[2],
+            change_id=row[0], title=row[4], status=row[1], step=row[2],
             last_iso=row[3], now=now, color=color), file=sys.stderr)
     raise SystemExit(2)
 
@@ -1096,12 +1092,6 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
-def _show_handle(control: Path, change_id: str) -> str:
-    """Current handle for a change, worktree-first then journal."""
-    title = _title_for_id(control, change_id) or ""
-    return derive_handle(title, change_id)
-
-
 def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     live = _change_home(control, change_id) / "artifacts" / rel
     if live.is_file():
@@ -1109,13 +1099,13 @@ def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     return journal.journal_show(control, change_id, rel)
 
 
-def _show_newest_plan_rel(control: Path, change_id: str, handle: str) -> str | None:
-    """plans/<handle>-plan-N.md for the highest N, live worktree first then
-    journal. Returns None when no plan exists in either place."""
+def _show_newest_plan_rel(control: Path, change_id: str) -> str | None:
+    """plans/<id>-plan-N.md for the highest N, live worktree first then journal.
+    Returns None when no plan exists in either place."""
     def _newest(names: list[str]) -> str | None:
         best, pick = -1, None
         for name in names:
-            mobj = re.fullmatch(rf"{re.escape(handle)}-plan-(\d+)\.md", name)
+            mobj = re.fullmatch(rf"{re.escape(change_id)}-plan-(\d+)\.md", name)
             if mobj and int(mobj.group(1)) > best:
                 best, pick = int(mobj.group(1)), name
         return pick
@@ -1156,12 +1146,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
     except SystemExit:
         return 2
     resource = args.resource
-    if resource in ("spec", "plan"):
-        handle = _show_handle(control, change_id)
     if resource == "spec":
-        data = _show_artifact(control, change_id, f"spec/{handle}.md")
+        data = _show_artifact(control, change_id, f"spec/{change_id}.md")
     elif resource == "plan":
-        rel = _show_newest_plan_rel(control, change_id, handle)
+        rel = _show_newest_plan_rel(control, change_id)
         data = _show_artifact(control, change_id, rel) if rel else None
     elif resource == "events":
         data = _show_runtime(control, change_id, "events.jsonl")
@@ -1568,7 +1556,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     print(change_row.header_line(color=color), file=sys.stderr)
     for r in rows:
         print(change_row.format_change_line(
-            handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color), file=sys.stderr)
     return 2
 
@@ -1689,7 +1677,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
 
-    token = change.handle
+    token = change.id
     do_prompt = not assume_yes and (
         _interactive() if interactive is None else interactive)
     if do_prompt:
@@ -1836,14 +1824,14 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     print(change_row.header_line(color=color))
     for r in inflight:
         print(change_row.format_change_line(
-            handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color))
     if past:
         if inflight:
             print()
         for r in past:
             print(change_row.format_change_line(
-                handle=derive_handle(r[4], r[0]), title=r[4], status=r[1], step=r[2],
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, dim=True))
     if backlog_lines:
         if inflight or past:

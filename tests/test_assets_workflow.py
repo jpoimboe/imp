@@ -882,3 +882,17 @@ def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
                        output={"exit": 124, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Pause)
 
+
+def test_no_bundled_agent_prompt_references_the_change_handle() -> None:
+    """Part 2: every agent prompt names artifacts by the bare id. No prompt may
+    still reference the removed `change.handle` Jinja var or a `<handle>` stem."""
+    from imp.assets import bundled_workflow_dir
+
+    agents = bundled_workflow_dir("imp") / "agents"
+    offenders = []
+    for p in sorted(agents.glob("*.md")):
+        text = p.read_text()
+        if "change.handle" in text or "<handle>" in text:
+            offenders.append(p.name)
+    assert offenders == []
+

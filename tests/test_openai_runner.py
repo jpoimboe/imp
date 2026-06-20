@@ -60,7 +60,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            id="test", handle="test", title="Test", project_root=tmp_path,
+            id="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
@@ -550,7 +550,7 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
 @pytest.mark.anyio
 async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
     """Every create() call within one invocation passes the same
-    prompt_cache_key, equal to f"{change_handle}:{agent_id}"."""
+    prompt_cache_key, equal to f"{change_id}:{agent_id}"."""
     (tmp_path / "art").mkdir()
     (tmp_path / "data.txt").write_text("payload")
     fake = FakeResponsesClient([
@@ -590,7 +590,7 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
     inv = replace(
         inv,
         change_context=ChangeContext(
-            id="test-2", handle="test-2", title="Test 2", project_root=tmp_path,
+            id="test-2", title="Test 2", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )

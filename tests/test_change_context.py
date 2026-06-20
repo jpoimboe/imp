@@ -10,12 +10,19 @@ from imp.agents.runner import ChangeContext
 
 def test_change_context_carries_workflow_dir(tmp_path: Path) -> None:
     wf = tmp_path / ".imp" / "change" / "workflow"
-    cc = ChangeContext(
-        handle="s", title="t", project_root=tmp_path, workflow_dir=wf,
-    )
+    cc = ChangeContext(title="t", project_root=tmp_path, workflow_dir=wf)
     assert cc.workflow_dir == wf
+    assert not hasattr(cc, "handle")
+
+
+def test_change_context_rejects_handle_argument(tmp_path: Path) -> None:
+    wf = tmp_path / ".imp" / "change" / "workflow"
+    with pytest.raises(TypeError):
+        ChangeContext(  # type: ignore[call-arg]
+            handle="s", title="t", project_root=tmp_path, workflow_dir=wf
+        )
 
 
 def test_change_context_workflow_dir_is_required(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
-        ChangeContext(handle="s", title="t", project_root=tmp_path)  # type: ignore[call-arg]
+        ChangeContext(title="t", project_root=tmp_path)  # type: ignore[call-arg]

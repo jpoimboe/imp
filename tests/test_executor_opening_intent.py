@@ -26,7 +26,7 @@ def _seed(root: Path) -> object:
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.handle }}\n"
+        "go {{ change.id }}\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"

@@ -123,7 +123,7 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            handle="test", title="Test", project_root=tmp_path,
+            title="Test", project_root=tmp_path,
             workflow_dir=workflow_dir,
         ),
         transcript_dir=tmp_path / f"step-{provider_name}",
@@ -347,7 +347,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
         events_path=events_path,
     )
     ctx.change_context = ChangeContext(
-        handle="test-change", title="Test Change", project_root=tmp_path,
+        title="Test Change", project_root=tmp_path,
         workflow_dir=workflow_dir,
     )
     ctx.event_log = JsonlEventLog(events_path)

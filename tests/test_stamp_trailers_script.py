@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 STAMP = Path("src/imp/assets/workflows/imp/scripts/stamp-trailers.sh").resolve()
-SLUG = "2026-06-11-stamp-test"
+ID = "2026-06-01-stamp-test"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -25,7 +25,7 @@ def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
         ["bash", str(STAMP)],
         cwd=project_root.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(project_root),
-             "IMP_CHANGE_HANDLE": SLUG,
+             "IMP_CHANGE_ID": ID,
              "IMP_CHANGE_DIR": str(project_root / ".imp" / "change")},
         capture_output=True, text=True, check=False,
     )
@@ -51,7 +51,7 @@ def _record_change(project_root: Path) -> None:
 
 
 def _commit(pr: Path, msg: str, *, stamped: bool = False) -> str:
-    body = msg if not stamped else f"{msg}\n\nChange: {SLUG}"
+    body = msg if not stamped else f"{msg}\n\nChange: {ID}"
     _git(pr, "commit", "-m", body)
     return _git(pr, "rev-parse", "HEAD").stdout.strip()
 
@@ -84,8 +84,8 @@ def test_stamp_trailers_stamps_linear_range(tmp_path: Path) -> None:
     result = _run(pr)
     assert result.returncode == 0, result.stderr
     # Stamping rebases the range, so reference the rewritten commits by position.
-    assert _change(pr, "HEAD~1") == SLUG   # docs: spec
-    assert _change(pr, "HEAD") == SLUG     # feat: work
+    assert _change(pr, "HEAD~1") == ID   # docs: spec
+    assert _change(pr, "HEAD") == ID     # feat: work
 
 
 def test_stamp_reads_base_branch_from_change_dir(tmp_path: Path) -> None:
@@ -103,8 +103,8 @@ def test_stamp_reads_base_branch_from_change_dir(tmp_path: Path) -> None:
     res = subprocess.run(
         ["bash", str(STAMP)], cwd=pr.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(pr),
-             "IMP_CHANGE_HANDLE": SLUG, "IMP_CHANGE_DIR": str(home)},
+             "IMP_CHANGE_ID": ID, "IMP_CHANGE_DIR": str(home)},
         capture_output=True, text=True, check=False)
     assert res.returncode == 0, res.stderr
-    assert _change(pr, "HEAD") == SLUG
+    assert _change(pr, "HEAD") == ID
 

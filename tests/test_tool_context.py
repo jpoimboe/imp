@@ -37,7 +37,7 @@ def test_change_context_field(tmp_path: Path) -> None:
     from imp.agents.runner import ChangeContext
     ctx = _ctx(tmp_path)
     assert ctx.change_context is None
-    ctx.change_context = ChangeContext(handle="chg-7", title="Test change", project_root=tmp_path,
+    ctx.change_context = ChangeContext(title="Test change", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     assert ctx.change_context.project_root == tmp_path
 

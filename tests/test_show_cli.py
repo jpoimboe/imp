@@ -11,24 +11,22 @@ import pytest
 from imp.cli.main import main
 from imp.engine import worktree
 from imp.engine.change import Change
-from imp.engine.slug import derive_handle
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
 _ID = "feat01"
 
 
-def _seed_with_artifacts(control: Path, change_id: str, title: str) -> tuple[Change, str]:
+def _seed_with_artifacts(control: Path, change_id: str, title: str) -> Change:
     ch = Change.create(control, title=title, change_id=change_id, base_branch="main")
-    handle = derive_handle(ch.title, ch.id)       # matches _show_handle artifact naming
     spec = ch.change_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
-    (spec / f"{handle}.md").write_text("# SPEC BODY\n")
+    (spec / f"{change_id}.md").write_text("# SPEC BODY\n")
     plans = ch.change_dir / "artifacts" / "plans"
     plans.mkdir(parents=True)
-    (plans / f"{handle}-plan-1.md").write_text("# PLAN ONE\n")
-    (plans / f"{handle}-plan-2.md").write_text("# PLAN TWO\n")
-    return ch, handle
+    (plans / f"{change_id}-plan-1.md").write_text("# PLAN ONE\n")
+    (plans / f"{change_id}-plan-2.md").write_text("# PLAN TWO\n")
+    return ch
 
 
 def _run(monkeypatch: pytest.MonkeyPatch, control: Path, *argv: str) -> str:
@@ -67,7 +65,7 @@ def test_show_events_and_review_live(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch, _slug = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
     # Append a review-phase step event and a non-review one.
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"type": "step_started", "agent_id": None,
@@ -86,7 +84,7 @@ def test_show_spec_falls_back_to_journal_after_merge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch, _slug = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
     files = {str(p.relative_to(ch.change_dir / "artifacts")): p
              for p in sorted((ch.change_dir / "artifacts").rglob("*")) if p.is_file()}
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
@@ -103,7 +101,7 @@ def test_show_spec_falls_back_to_journal_after_merge(
     })
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
-    # Worktree gone -> journal fallback (handle re-derived from the journaled title).
+    # Worktree gone -> journal fallback.
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
     assert "PLAN TWO" in _run(monkeypatch, tmp_path, "show", _ID, "plan")
     assert "completed" in _run(monkeypatch, tmp_path, "show", _ID, "status")

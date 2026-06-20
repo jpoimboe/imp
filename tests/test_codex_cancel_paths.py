@@ -51,7 +51,7 @@ def _invocation(tmp_path: Path, *, event_log: object,
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
         change_context=ChangeContext(
-            handle="s", title="t", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
+            title="t", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
                                mode="allow", source=_SRC),),

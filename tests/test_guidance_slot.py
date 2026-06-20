@@ -46,14 +46,14 @@ def test_slot_absent_from_scripts() -> None:
 
 
 def test_block_renders_directive_when_guidance_set() -> None:
-    ctx = build_context("s", "t", InMemoryEventLog(), guidance="NO BACKCOMPAT.")
+    ctx = build_context("t", InMemoryEventLog(), guidance="NO BACKCOMPAT.")
     out = render_prompt(GUIDANCE_BLOCK, ctx)
     assert "## Project guidance" in out
     assert "NO BACKCOMPAT." in out
 
 
 def test_block_is_empty_when_guidance_unset() -> None:
-    ctx = build_context("s", "t", InMemoryEventLog(), guidance="")
+    ctx = build_context("t", InMemoryEventLog(), guidance="")
     out = render_prompt(GUIDANCE_BLOCK, ctx)
     assert "## Project guidance" not in out
     assert out.strip() == ""

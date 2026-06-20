@@ -59,7 +59,7 @@ def _inv(tmp_path: Path, tools: frozenset[str], elog) -> AgentInvocation:
         agent_def=_agent(tools), provider_name="anthropic",
         model_name="claude-sonnet-4-6", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(handle="s", title="t", project_root=tmp_path,
+        change_context=ChangeContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "step",
         fs_permissions=(), events_path=tmp_path / "events.jsonl",

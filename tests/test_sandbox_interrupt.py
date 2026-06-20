@@ -59,7 +59,6 @@ def _ctx(worktree: Path) -> ToolContext:
         events_path=worktree / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
-        handle="s",
         title="t",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",

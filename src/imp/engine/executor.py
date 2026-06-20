@@ -143,12 +143,12 @@ def _resume_replays_transcript(transcript_dir: Any) -> bool:
 def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
     """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
     plus a name line when the Change is named — so a named Change conveys its
-    handle through the immutable conversation record, never the cached prefix.
+    id through the immutable conversation record, never the cached prefix.
     Unnamed Changes get the begin token alone (no leaked provisional name). One
     TextBlock with a blank-line separator, so every provider's text join keeps
     the token and the name line apart on the wire."""
     opening = wrapper_text or "<imp:begin/>"
-    text = (f"{opening}\n\nThis Change is named `{change.handle}`."
+    text = (f"{opening}\n\nThis Change is named `{change.id}`."
             if change.title.strip() else opening)
     return (Message(role="user", content=(TextBlock(text=text),)),)
 
@@ -533,7 +533,6 @@ async def _route_script(
             run_script, step, cwd=change.workflow_dir,
             env_extra=engine_env(project_root=change.project_root,
                                  change_id=change.id,
-                                 change_handle=change.handle,
                                  change_title=change.title,
                                  change_dir=change.change_dir,
                                  verify_command=verify_command,
@@ -654,7 +653,7 @@ async def _route_merge(
     # worker thread so the event loop keeps turning — same rationale as the
     # script gate (see _route_script). The surrounding emits and state.save stay
     # on the loop thread (single terminal writer / no cross-thread state race).
-    spec_path = change.change_dir / "artifacts" / "spec" / f"{change.handle}.md"
+    spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
     body = _decisions_body(spec_path)
     result = await anyio.to_thread.run_sync(
         functools.partial(
@@ -895,7 +894,7 @@ async def _run_agent_invocation(
     else:
         rendered = render_prompt(
             agent_def.prompt_template_source, build_context(
-                change_id=change.id, change_handle=change.handle, change_title=change.title,
+                change_id=change.id, change_title=change.title,
                 change_home=str(change.change_dir),
                 event_log=log, vars=state.vars,
                 project_facts=project_facts, guidance=guidance,
@@ -934,7 +933,7 @@ async def _run_agent_invocation(
         system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         change_context=ChangeContext(
-            id=change.id, handle=change.handle, title=change.title,
+            id=change.id, title=change.title,
             change_home=str(change.change_dir),
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
@@ -1011,7 +1010,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,
-                   change_handle=change.handle, change_title=change.title,
+                   change_title=change.title,
                    change_dir=change.change_dir,
                    verify_command=config.verify_command,
                    verify_timeout=config.verify_timeout),

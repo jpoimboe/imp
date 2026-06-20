@@ -216,7 +216,7 @@ def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123"
     wf = _wf()
     body = wf.agents["code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_handle="t", change_title="t", event_log=log,
+    ctx = build_context(change_title="t", event_log=log,
                         vars={"review_scope": review_scope, "review_base": review_base,
                               "fast_path": False})
     return render_prompt(body, ctx)

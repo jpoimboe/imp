@@ -101,7 +101,7 @@ from imp.cli import change_row            # a new module → only resolves in th
 def scene_status():
     rows = [change_row.header_line(color=True)]
     for cid, title, st, step, age in data.ROWS:
-        rows.append(change_row.format_change_line(handle=cid, title=title,
+        rows.append(change_row.format_change_line(change_id=cid, title=title,
             status=st, step=step, last_iso=data.iso(age), now=data.NOW, color=True))
     return rows
 SCENES = {"status": scene_status, ...}

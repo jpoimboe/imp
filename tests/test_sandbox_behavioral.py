@@ -94,7 +94,6 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         events_path=worktree / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
-        handle="test",
         title="Test",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
@@ -352,60 +351,57 @@ def test_gate_writing_in_its_cwd_succeeds() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_gate_sees_post_rename_handle_not_frozen_empty() -> None:
-    """Regression: name-on-intent freezes the policy with IMP_CHANGE_HANDLE="" at run
-    start; after rename_change the gate's fresh env_extra carries the real handle.
-    Reproduces the dogfood failure where spec-commit-verify.sh's
-    `${IMP_CHANGE_HANDLE:?not set by engine}` fired inside the bwrap --clearenv jail.
+def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
+    """Regression: name-on-intent freezes the policy with IMP_CHANGE_TITLE="" at run
+    start; after rename_change the gate's fresh env_extra carries the real title.
+    Reproduces the dogfood failure where a `${IMP_CHANGE_*:?not set by engine}`
+    guard fired inside the bwrap --clearenv jail.
     """
     import dataclasses
 
     from imp.engine.gates import run_script
     from imp.engine.types import Pause, SourceLoc, Step
 
-    root = _make_root("imp-test-handle-")
+    root = _make_root("imp-test-title-")
     try:
-        # Policy frozen with an EMPTY handle, exactly as _build_sandbox_policy bakes it
-        # at run start before the agent has named the Change.
         pol = _active_policy(root)
-        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_HANDLE", "")))
+        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_TITLE", "")))
         step = Step(
             name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
             max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
-            command=': "${IMP_CHANGE_HANDLE:?IMP_CHANGE_HANDLE not set by engine}"; '
-                    'printf %s "$IMP_CHANGE_HANDLE"',
+            command=': "${IMP_CHANGE_TITLE:?IMP_CHANGE_TITLE not set by engine}"; '
+                    'printf %s "$IMP_CHANGE_TITLE"',
             timeout_seconds=30,
         )
-        # The fresh per-spawn engine_env the executor builds from the renamed Change.
         result = run_script(step, cwd=root, policy=pol,
-                            env_extra={"IMP_CHANGE_HANDLE": "live-mode-log-polish"})
+                            env_extra={"IMP_CHANGE_TITLE": "Live mode log polish"})
         assert result["exit"] == 0, f"gate exited {result['exit']}: {result}"
-        assert result["stdout"] == "live-mode-log-polish"
+        assert result["stdout"] == "Live mode log polish"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_bash_tool_uses_live_change_handle_not_stale_snapshot() -> None:
-    """Regression: the bash tool must read IMP_CHANGE_HANDLE from the LIVE Change, not
+def test_bash_tool_uses_live_change_title_not_stale_snapshot() -> None:
+    """Regression: the bash tool must read IMP_CHANGE_TITLE from the LIVE Change, not
     the frozen change_context snapshot that rename_change never updates. Without the
-    fix the agent's own bash sees the empty name-on-intent handle inside the sandbox.
+    fix the agent's own bash sees the empty name-on-intent title inside the sandbox.
     """
     import types as _t
 
-    root = _make_root("imp-test-bash-handle-")
+    root = _make_root("imp-test-bash-title-")
     try:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
-        # change_context = the pre-rename snapshot (empty handle); ctx.change = the
+        # change_context = the pre-rename snapshot (empty title); ctx.change = the
         # live, renamed Change. The bash tool must prefer the live one.
         ctx.change_context = ChangeContext(
-            id="2026-06-10-x", handle="", title="",
+            id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
         ctx.change = _t.SimpleNamespace(
-            id="2026-06-10-x", handle="2026-06-10-renamed", title="renamed")
-        out = _bash(ctx, 'printf %s "$IMP_CHANGE_HANDLE"')
+            id="2026-06-10-x", handle="", title="renamed")
+        out = _bash(ctx, 'printf %s "$IMP_CHANGE_TITLE"')
         assert out["returncode"] == 0, out
-        assert out["stdout"] == "2026-06-10-renamed"
+        assert out["stdout"] == "renamed"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -459,7 +455,6 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             events_path=wt_path / "events.jsonl",
         )
         ctx.change_context = ChangeContext(
-            handle="esc1",
             title="Escape Test",
             project_root=wt_path,
             workflow_dir=wt_path / ".imp" / "wf",

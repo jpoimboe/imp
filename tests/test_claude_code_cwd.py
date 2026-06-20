@@ -50,7 +50,6 @@ def _invocation(project_root: Path) -> AgentInvocation:
         system_prompt="be a coder",
         initial_messages=(),
         change_context=ChangeContext(
-            handle="test",
             title="Test",
             project_root=project_root,
             workflow_dir=project_root / ".imp" / "change" / "workflow",

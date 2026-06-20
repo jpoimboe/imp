@@ -24,7 +24,6 @@ from pathlib import Path
 ENGINE_ENV_VARS = frozenset({
     "IMP_PROJECT_ROOT",
     "IMP_CHANGE_ID",
-    "IMP_CHANGE_HANDLE",
     "IMP_CHANGE_TITLE",
     "IMP_CHANGE_DIR",
     "IMP_VERIFY_COMMAND",
@@ -64,7 +63,7 @@ def overlay_engine_env(
 
 
 def engine_env(
-    *, project_root: Path, change_id: str, change_handle: str, change_title: str,
+    *, project_root: Path, change_id: str, change_title: str,
     change_dir: Path | None = None,
     verify_command: str | None = None, verify_timeout: int | None = None,
 ) -> dict[str, str]:
@@ -74,9 +73,6 @@ def engine_env(
         IMP_PROJECT_ROOT  — absolute path of the project root on the host.
         IMP_CHANGE_ID     — the stable, immutable Change identity; hook authors
                             MUST key on this.
-        IMP_CHANGE_HANDLE — display-only derived name; MAY change mid-session on a
-                            title rename. Do not key automation on it; use
-                            IMP_CHANGE_ID.
         IMP_CHANGE_TITLE  — human-readable title for the change.
         IMP_CHANGE_DIR    — absolute host path of the change state directory;
                             injected only when change_dir is provided. Scripts
@@ -104,7 +100,6 @@ def engine_env(
     env = {
         "IMP_PROJECT_ROOT": str(project_root),
         "IMP_CHANGE_ID": change_id,
-        "IMP_CHANGE_HANDLE": change_handle,
         "IMP_CHANGE_TITLE": change_title,
     }
     if change_dir is not None:

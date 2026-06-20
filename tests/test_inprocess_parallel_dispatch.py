@@ -80,7 +80,7 @@ def _inv(tmp_path: Path, log, provider: str) -> AgentInvocation:
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            handle="test", title="Test", project_root=tmp_path,
+            title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),

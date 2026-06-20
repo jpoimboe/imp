@@ -17,7 +17,7 @@ no task counter — ground "what's next" in current reality: the plan as it now
 reads, what is already committed, and progress notes.
 
 Read first, every entry:
-- The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md`
+- The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`
   (highest N — find it with glob).
 - `{{ change.home }}/progress.md` if it exists. It is **bounded**: a durable
   `## Completed plans` section (one line per plan: what landed + a representative
@@ -25,7 +25,7 @@ Read first, every entry:
   current plan, keep each task's **commit subject** here (so a buried task can be
   re-found for a fixup); do NOT carry the verbose per-task narrative of plans already
   completed.
-- The spec at `{{ change.home }}/artifacts/spec/{{ change.handle }}.md` for grounding.
+- The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback, treat it as **authoritative over progress.md**:

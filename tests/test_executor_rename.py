@@ -28,9 +28,9 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
         (ch.change_dir / "change.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
-    new_handle = ch.rename("Add OAuth", log=ch.event_log())
+    returned = ch.rename("Add OAuth", log=ch.event_log())
 
-    assert new_handle == "add-oauth-aaa111"
+    assert returned == "aaa111"                     # rename returns the id
     assert ch.title == "Add OAuth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
@@ -40,8 +40,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     assert "id" in meta and "slug" not in meta
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"][-1]
     assert renamed["payload"] == {
-        "id": id_before, "old_title": "orig", "new_title": "Add OAuth",
-        "handle": "add-oauth-aaa111"}
+        "id": id_before, "old_title": "orig", "new_title": "Add OAuth"}
 
 
 class _RenamingRunner:
@@ -150,7 +149,8 @@ def test_seed_messages_named_carries_the_name(tmp_path: Path) -> None:
     assert len(blocks) == 1                       # single block, separator inside
     text = blocks[0].text
     assert text.startswith("<imp:begin/>")
-    assert "add-oauth-eee555" in text
+    assert "eee555" in text
+    assert "add-oauth" not in text               # no slug prefix — bare id only
     assert "\n\n" in text                         # token and name line kept apart
 
 

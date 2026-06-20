@@ -85,7 +85,7 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": change_id, "handle": change.handle, "title": title},
+        payload={"id": change_id, "title": title},
     )
     return change
 
@@ -184,7 +184,7 @@ def _seed_minimal_workflow(
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.handle }}\n"
+        "go {{ change.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -1597,7 +1597,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
 def test_change_context_defaults_empty_facts() -> None:
     from imp.agents.runner import ChangeContext
     cc = ChangeContext(
-        handle="s", title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
+        title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
     assert cc.guidance == ""
 
@@ -2030,7 +2030,7 @@ def _seed_two_step_workflow(root: Path) -> Change:
     (wf_dir / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.handle }}\n"
+        "go {{ change.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"

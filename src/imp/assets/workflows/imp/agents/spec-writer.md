@@ -142,7 +142,7 @@ Because the opening message begins with `Implement this spec`, you are in
   flesh out obvious gaps — not to re-brainstorm or redesign.
 - **Go live** before writing — see **Going live or parking the draft** above.
 - **Name the change** (`rename_change`, or the name from the opening line if one
-  was supplied), then write `{{ change.home }}/artifacts/spec/<handle>.md` adopting the draft. Normalize
+  was supplied), then write `{{ change.home }}/artifacts/spec/{{ change.id }}.md` adopting the draft. Normalize
   just enough to imp's structure: ensure a **Goal** and **Acceptance criteria**
   are present. Do not invent Scope or rewrite the draft wholesale.
 - **Self-review and commit** exactly as in "Writing the Spec" (the same pre-commit
@@ -157,18 +157,18 @@ draft is still `standard` even though you asked nothing.
 ## Naming the Change (imp-specific)
 
 This Change may be **unnamed**. As soon as the user's intent is clear (typically
-after their 1st or 2nd reply), pick a short descriptive name (lowercase,
-hyphen-separated, ≤5 words) and call `rename_change(name="…")`. It applies
-**immediately** and **returns the settled handle** — use that returned handle to
-write and commit `{{ change.home }}/artifacts/spec/<handle>.md` **this same turn**. Announce the name in
-prose ("Calling this `add-version-flag`.") without asking the user for permission.
+after their 1st or 2nd reply), pick a short descriptive title (free-form prose, a
+few space-separated words) and call `rename_change(name="…")`. It applies
+**immediately** and **returns this Change's id** — write and commit
+`{{ change.home }}/artifacts/spec/{{ change.id }}.md` **this same turn**. Announce the name in
+prose ("Calling this `Add version flag`.") without asking the user for permission.
 
 If the opening message already names the Change (the user passed a name on the
 `imp new` line), use that name — you do not need to call `rename_change`. You may
 still rename once if scope clarifies before the spec is committed.
 
 There is no step-boundary dance: `rename_change` takes effect the instant you
-call it, and the name it returns is the one to commit under.
+call it, and the id it returns is the stem to commit the spec under.
 
 ## Going live or parking the draft
 
@@ -191,7 +191,7 @@ it now, or save the draft for later?
   commit and `spec-reviewer` run only now that the change is live.
 - **Save for later (park).** Do **not** call `create_and_enter_worktree` and do **not**
   emit `phase: written`. Tell the user the draft is saved and resumable later with
-  `imp resume <handle>`, then call `wait_for_user`. The spec phase pauses with the draft
+  `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with the draft
   saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
   resume you re-offer this same go-live choice.
 
@@ -205,9 +205,8 @@ no-op, so a resumed go-live is safe.
 
 ## Writing the Spec (the `phase: written` turn)
 
-Write the spec to `{{ change.home }}/artifacts/spec/<handle>.md`, where `<handle>` is the name
-`rename_change` returned (or the name from the opening message). When the
-brainstorm is settled, write `{{ change.home }}/artifacts/spec/<handle>.md` covering (the full
+Write the spec to `{{ change.home }}/artifacts/spec/{{ change.id }}.md`. When the
+brainstorm is settled, write `{{ change.home }}/artifacts/spec/{{ change.id }}.md` covering (the full
 four-part structure for a `standard` change; on a `trivial` change the "Thin spec
 on `trivial`" note below overrides this and you write Goal + Acceptance criteria
 only):
@@ -239,7 +238,7 @@ imp artifact-commit spec
 **Finish** with:
 
 ```
-complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
+complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")
 ```
 
 ## Rework Resumption
@@ -270,14 +269,14 @@ if there is one, or add a brief clarifying note to the spec so the next reviewer
 doesn't re-flag it. Never apply a finding you haven't verified, and never edit the
 spec into something you know to be wrong just to make a finding disappear.
 
-Address each verified finding, re-write `{{ change.home }}/artifacts/spec/<handle>.md`,
+Address each verified finding, re-write `{{ change.home }}/artifacts/spec/{{ change.id }}.md`,
 then run `imp artifact-commit spec` — the wip lineage is an
 append-only archive, so a revision is simply another commit; there is no amend
 or fixup. Finish tool-terminal:
 
 ```
 imp artifact-commit spec
-complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
+complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")
 ```
 
 The rework turn must be tool-terminal: end with `imp artifact-commit spec` then the
@@ -350,18 +349,18 @@ spec already passed; the reviewer's Minor/Nit `findings:` are advisory, not a re
 On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
-   `findings:`, re-write `{{ change.home }}/artifacts/spec/<handle>.md`, then run
+   `findings:`, re-write `{{ change.home }}/artifacts/spec/{{ change.id }}.md`, then run
    `imp artifact-commit spec` — the wip lineage is append-only, so a
    revision is another commit; there is no amend or fixup. Finish tool-terminal:
 
    ```
    imp artifact-commit spec
-   complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
+   complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")`.
+   `complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")`.
    Do not make an empty commit. The verification review still runs on the unchanged
    spec and will pass it through.
 

@@ -26,7 +26,7 @@ def _ev(eid, etype, agent_id=None, **payload):
 
 def test_phase_step_outcome_render_without_header() -> None:
     out = "\n".join(_lines([
-        _ev("1", "change_created", handle="add-auth-7", title="add auth"),
+        _ev("1", "change_created", title="add auth"),
         _ev("3", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("4", "step_completed", step="spec", kind="agent",
@@ -401,7 +401,7 @@ def test_chrome_step_collapses_to_single_breadcrumb() -> None:
     # §4: a chrome step (script/branch/merge gate) now prints a start header AND
     # a `complete` breadcrumb, just like any agent step.
     out = "\n".join(_lines([
-        _ev("1", "change_created", handle="s", title="t"),
+        _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
         _ev("3", "step_completed", step="spec-verify-commit", kind="script",
             action={"verb": "continue"}),
@@ -415,7 +415,7 @@ def test_open_chrome_step_shows_header() -> None:
     # its header line — just like any other open step. The old `name · running`
     # line is gone; the header is the step name, carrying the step color.
     out = _lines([
-        _ev("1", "change_created", handle="s", title="t"),
+        _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script",
             phase="implement"),
     ])
@@ -424,7 +424,7 @@ def test_open_chrome_step_shows_header() -> None:
     assert "running" not in hits[0]
     # The header carries the STEP color (not breadcrumb gray).
     colored = list(render_tree(nv.build_tree([
-        _ev("1", "change_created", handle="s", title="t"),
+        _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script",
             phase="implement"),
     ]), full=False, color=True, width=80))
@@ -432,7 +432,7 @@ def test_open_chrome_step_shows_header() -> None:
     assert pal._ANSI["step"] in header_ln
     # Once the gate completes, both header and `complete` breadcrumb appear.
     out2 = _lines([
-        _ev("1", "change_created", handle="s", title="t"),
+        _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script",
             phase="implement"),
         _ev("3", "step_completed", step="run-tests", kind="script",
@@ -800,7 +800,7 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     # The breadcrumb requires both step timestamps to compute duration.
     events = [
         {"id": "e0", "agent_id": None, "type": "change_created",
-         "payload": {"handle": "s", "title": "t"}},
+         "payload": {"title": "t"}},
         {"id": "e1", "agent_id": None, "type": "step_started",
          "payload": {"step": "step1", "kind": "branch", "phase": "spec"},
          "timestamp": "2026-06-03T00:00:00+00:00"},
@@ -926,7 +926,7 @@ def test_prose_then_structural_leaf_separated_by_blank() -> None:
     step_completed breadcrumb sits directly under the last prose line; the
     generalized rule inserts one gutter-bearing blank between them."""
     out = _lines([
-        _ev("1", "change_created", handle="x", title="t"),
+        _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="a",
@@ -946,7 +946,7 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     blank separator — the rule applies to ALL non-prose next children, not just
     leaves."""
     out = _lines([
-        _ev("1", "change_created", handle="x", title="t"),
+        _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="a",

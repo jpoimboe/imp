@@ -49,7 +49,7 @@ def _make_change(root: Path, *, change_id: str = "c", title: str = "t") -> Chang
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": change_id, "handle": change.handle, "title": title},
+        payload={"id": change_id, "title": title},
     )
     return change
 

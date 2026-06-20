@@ -25,7 +25,7 @@ def test_relative_age(then_iso, expected):
 
 
 def _row(**kw):
-    base = dict(handle="add-version-flag-yaitd7", title="Add version flag",
+    base = dict(change_id="yaitd7", title="Add version flag",
                 status="running", step="implement",
                 last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
     base.update(kw)
@@ -35,34 +35,24 @@ def _row(**kw):
 def test_format_columns_plain():
     line = format_change_line(**_row(), color=False)
     assert "\x1b[" not in line
-    assert line.startswith("add-version-flag-yaitd7")   # HANDLE first
-    assert "Add version flag" in line                   # TITLE
+    assert line.startswith("yaitd7")        # ID first
+    assert "Add version flag" in line       # TITLE
     assert "running" in line
     assert "implement" in line
-    assert "15m" in line                                # relative AGE
-    assert "yaitd7" not in line.split("Add version flag")[-1]  # no trailing ID column
+    assert "15m" in line                    # relative AGE
 
 
-def test_format_unnamed_uses_bare_id_handle():
-    line = format_change_line(**_row(handle="yaitd7", title="   "), color=False)
+def test_format_unnamed_shows_id_and_unnamed_label():
+    line = format_change_line(**_row(title="   "), color=False)
     assert line.startswith("yaitd7")
     assert "(unnamed)" in line
 
 
-def test_format_overlong_handle_keeps_id_tail_reachable():
-    # slugify caps the name at 60, so handles can exceed HANDLE_W (28); the id
-    # must stay visible for copy/paste even when the name is truncated.
-    long_handle = "add-" + "x" * 60 + "-yaitd7"
-    line = format_change_line(**_row(handle=long_handle, title="Long one"), color=False)
-    assert "…-yaitd7" in line           # ellipsized name, id tail preserved
-    assert "yaitd7" in line
-
-
-def test_header_line_has_handle_and_title_no_id():
+def test_header_line_leads_with_id_then_title():
     h = header_line(color=False)
-    assert h.startswith("HANDLE")
+    assert h.startswith("ID")
     assert "TITLE" in h
-    assert not h.rstrip().endswith("ID")
+    assert "HANDLE" not in h
 
 
 def test_format_truncates_long_title():
@@ -73,17 +63,15 @@ def test_format_truncates_long_title():
 
 
 def test_format_status_color_running():
-    # color on → only the STATUS value is wrapped in its color (ansi theme green).
     line = format_change_line(**_row(status="running"), color=True)
     assert "\x1b[32mrunning\x1b[0m" in line
 
 
 def test_format_dim_wraps_whole_row():
-    # The --all past section: whole row dimmed, no per-status color.
     line = format_change_line(**_row(status="completed"), color=True, dim=True)
     assert line.startswith("\x1b[2m")
     assert line.endswith("\x1b[0m")
-    assert "\x1b[32m" not in line                          # no per-status color in dim mode
+    assert "\x1b[32m" not in line
 
 
 def test_merged_status_renders_green():
