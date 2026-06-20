@@ -1,10 +1,14 @@
 # tests/test_codex_event_mapping.py
 from __future__ import annotations
 
+import dataclasses
+import json
 import types as _types
+from pathlib import Path
 from typing import Any
 
 from imp.engine.state import InMemoryEventLog
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_mcp import RunState
 from imp.providers.codex_runner import process_event
 from tests.codex_fakes import (
@@ -145,3 +149,52 @@ def test_non_task_mcp_result_is_unstamped() -> None:
         provider="codex", model="gpt-5.5", run_state=RunState(cap=10, agent_id="step:t"))
     result = next(e for e in elog.read() if e["type"] == "tool_result")
     assert "id_ns" not in result["payload"]
+
+
+def _labeled_def(name: str, label: str) -> Any:
+    base = AgentDef(
+        name=name, description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="hi", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    return dataclasses.replace(base, label=label)
+
+
+def test_task_item_started_stamps_subagent_label() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    args = {"subagent_name": "explorer", "task_description": "x"}
+    process_event(
+        _started("item_1", args),
+        **_pe_kwargs(elog, run_state, {}),
+        subagent_defs={"explorer": _labeled_def("explorer", "exploring codebase")})
+    call = next(e for e in elog.read() if e["type"] == "tool_call")
+    assert call["payload"]["name"] == "task"
+    assert call["payload"]["label"] == "exploring codebase"
+
+
+def test_task_item_started_omits_label_when_def_unknown() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    args = {"subagent_name": "ghost", "task_description": "x"}
+    process_event(
+        _started("item_1", args),
+        **_pe_kwargs(elog, run_state, {}),
+        subagent_defs={})
+    call = next(e for e in elog.read() if e["type"] == "tool_call")
+    assert "label" not in call["payload"]
+
+
+def test_task_item_started_handles_string_arguments() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    args = json.dumps({"subagent_name": "explorer", "task_description": "x"})
+    process_event(
+        _started("item_1", args),
+        **_pe_kwargs(elog, run_state, {}),
+        subagent_defs={"explorer": _labeled_def("explorer", "exploring codebase")})
+    call = next(e for e in elog.read() if e["type"] == "tool_call")
+    assert call["payload"]["label"] == "exploring codebase"
