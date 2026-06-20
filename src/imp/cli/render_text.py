@@ -27,6 +27,27 @@ _INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUT
 _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 
 
+def _caret_escape(text: str) -> str:
+    """Map C0 control bytes (U+0000-U+001F) and DEL (U+007F) to caret notation
+    (the cat -v / less convention: c -> "^" + chr(ord(c) ^ 0x40)), so a stray
+    BEL/ESC/NUL/CR in content cannot beep or alter terminal state. \\t and \\n are
+    load-bearing for the renderer's wrapping/layout and pass through unescaped; \\r
+    IS escaped (a bare CR rewrites the current TTY line). Pure total function over
+    str — run on content-origin strings BEFORE imp wraps its own SGR codes around
+    them, never on the composed colored output."""
+    out: list[str] = []
+    for ch in text:
+        if ch in ("\t", "\n"):
+            out.append(ch)
+            continue
+        o = ord(ch)
+        if o <= 0x1F or o == 0x7F:
+            out.append("^" + chr(o ^ 0x40))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def fmt_seconds(seconds: float | int | None) -> str:
     """Format an elapsed-second count for a completion/recap line. Under a minute
     reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`) so a long
@@ -404,7 +425,7 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     except (ValueError, TypeError):
         data = None
     if not isinstance(data, dict):
-        yield from _wrap(raw, width, depth, color, *codes, gutters=gutters)
+        yield from _wrap(_caret_escape(raw), width, depth, color, *codes, gutters=gutters)
         return
     scalars: list[str] = []
     blocks: list[tuple[str, str]] = []
@@ -412,12 +433,12 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
         if isinstance(v, str) and "\n" in v:
             blocks.append((k, v))
         else:
-            scalars.append(f"{k}={v}")
+            scalars.append(_caret_escape(f"{k}={v}"))
     if scalars:
         yield _line("→ " + " · ".join(scalars), depth, color, *codes, gutters=gutters)
     for k, v in blocks:
-        yield _line(f"{k}:", depth, color, *codes, gutters=gutters)
-        yield from _wrap(v, width, depth + 1, color, *codes, gutters=gutters)
+        yield _line(_caret_escape(f"{k}:"), depth, color, *codes, gutters=gutters)
+        yield from _wrap(_caret_escape(v), width, depth + 1, color, *codes, gutters=gutters)
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
@@ -463,11 +484,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.AgentTextNode):
-        yield from _render_markdown_block(node.text, width, depth, color, gutters)
+        yield from _render_markdown_block(_caret_escape(node.text), width, depth,
+                                          color, gutters)
         return
 
     if isinstance(node, nv.LiteralTextNode):
-        yield from _render_markdown_block(node.text, width, depth, color, gutters)
+        yield from _render_markdown_block(_caret_escape(node.text), width, depth,
+                                          color, gutters)
         return
 
     if isinstance(node, nv.UserMessageNode):
@@ -494,7 +517,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         hang = " " * len(pal.CARET)
         avail = max(8, width - _INDENT_W * depth - len(pal.CARET))
         first = True
-        for para in node.text.split("\n"):
+        for para in _caret_escape(node.text).split("\n"):
             if not para:
                 yield indent
                 continue
@@ -513,7 +536,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if full:
             yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
                         *pal.NODE_COLORS["thinking"], gutters=gutters)
-            yield from _wrap(node.content, width, depth + 1, color,
+            yield from _wrap(_caret_escape(node.content), width, depth + 1, color,
                              *pal.NODE_COLORS["thinking"], gutters=gutters)
         # full=False: thinking is noise in the default view — render nothing.
         # (A transient `· thinking` status cue lives in narrative.current_activity.)
@@ -553,7 +576,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         else:
             parts = [f"{name} · complete" if node.show_complete else name]
         if full:
-            parts.extend(node.extras)
+            parts.extend(_caret_escape(e) for e in node.extras)
         if not (node.interrupted or blocked) and (act is None or act.get("verb") != "goto"):
             verb_text = pal.action_text(node.action) if node.action is not None else None
             if verb_text and verb_text != "continue":
@@ -583,20 +606,21 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.RenameNode):
         indent = _gutter_indent(depth, gutters, color)
         marker = pal.ansi("→ named ", "dim", enabled=color)
-        name = pal.ansi(node.name, *pal.NODE_COLORS["workflow"], enabled=color)
+        name = pal.ansi(_caret_escape(node.name), *pal.NODE_COLORS["workflow"],
+                        enabled=color)
         yield indent + marker + name
         return
 
     if isinstance(node, nv.ErrorNode):
         if node.is_warning:
-            yield _line(f"warning: {node.message}", depth, color,
+            yield _line(f"warning: {_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["warning"], gutters=gutters)
         else:
             tag = f"[{node.category}] " if node.category else ""
-            yield _line(f"error: {tag}{node.message}", depth, color,
+            yield _line(f"error: {tag}{_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["error"], gutters=gutters)
             if full and node.detail and node.detail not in node.message:
-                yield from _wrap(node.detail, width, depth + 1, color,
+                yield from _wrap(_caret_escape(node.detail), width, depth + 1, color,
                                  *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
@@ -640,7 +664,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.FallbackLine):
-        kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
+        kv = " ".join(f"{k}={_caret_escape(str(v))}" for k, v in node.payload.items())
         yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
@@ -661,7 +685,7 @@ def _call_args_line(c: nv.ToolCall) -> str:
         tag = ""
     parts = []
     for k, v in (c.input or {}).items():
-        val = " ".join(str(v).split())    # collapse newlines/whitespace runs
+        val = _caret_escape(" ".join(str(v).split()))   # collapse, then neutralize
         if len(val) > _ARG_VALUE_CLIP:
             val = val[:_ARG_VALUE_CLIP] + "…"
         parts.append(f"{k}={val}")
@@ -704,7 +728,7 @@ def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
     yield _line(f"{pal.fold_glyph(expanded=True)} complete_step", depth, color,
                 *pal.NODE_COLORS["tools"], gutters=gutters)
     for k, v in prose:
-        yield from _wrap(f"{k}: {v}", width, depth + 1, color,
+        yield from _wrap(f"{k}: {_caret_escape(v)}", width, depth + 1, color,
                          *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
@@ -730,7 +754,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
                               *pal.NODE_COLORS["tools"], gutters=gutters)
         result = c.result or ""
         if result:
-            src = result.split("\n")
+            src = _caret_escape(result).split("\n")
             shown = src[:_OUTPUT_MAX_LINES]
             clipped = [(ln[:_OUTPUT_LINE_CLIP] + "…") if len(ln) > _OUTPUT_LINE_CLIP
                        else ln for ln in shown]
@@ -747,7 +771,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
             # printed. When result is non-empty, align at the "→ " column; when
             # empty (footer-only shape), render without the arrow anchor so the
             # output reads cleanly without a stray "→ " prefix.
-            footer = c.citations_footer.lstrip("\n")
+            footer = _caret_escape(c.citations_footer).lstrip("\n")
             if result:
                 yield from _hang_wrap(footer, "→ ", width, depth + 1, color,
                                       *pal.NODE_COLORS["tools"], gutters=gutters)
@@ -798,10 +822,10 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
                 *pal.NODE_COLORS["metadata"], gutters=gutters)
     yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"],
                 gutters=gutters)
-    yield from _wrap(str(p.get("system_prompt", "")), width, depth + 2, color,
-                     *pal.NODE_COLORS["metadata"], gutters=gutters)
+    yield from _wrap(_caret_escape(str(p.get("system_prompt", ""))), width, depth + 2,
+                     color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     for t in tools:
         name = t.get("name", t) if isinstance(t, dict) else t
-        yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"],
-                    gutters=gutters)
+        yield _line(f"- {_caret_escape(str(name))}", depth + 2, color,
+                    *pal.NODE_COLORS["metadata"], gutters=gutters)

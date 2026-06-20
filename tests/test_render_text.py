@@ -1147,6 +1147,21 @@ def test_full_burst_empty_result_no_arrow_but_footer_renders() -> None:
     assert "Sources:" in out and "https://a.test" in out
 
 
+def test_full_burst_citation_footer_bel_becomes_caret() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="web_search",
+            input={"query": "x"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1", content="",
+            citations=[{"title": "ring\x07bell", "url": "https://a.test"}]),
+        _ev("6", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    assert "\x07" not in out
+    assert "^G" in out
+
+
 def test_full_burst_empty_burst_renders_nothing() -> None:
     burst = nv.ToolBurstFold(calls=[])
     lines = list(rt._render_burst(burst, depth=1, full=True, color=False, width=80))
@@ -1514,3 +1529,193 @@ def test_header_line_appends_gray_resume_marker() -> None:
     no_model = nv.StepNode(name="commit-check", kind="script",
                            label="checking commit", resumed=True)
     assert rt.header_line(no_model, depth=0, color=False) == "checking commit (resume)"
+
+
+def test_caret_escape_maps_control_bytes_to_caret_notation() -> None:
+    # cat -v / less convention: c -> "^" + chr(ord(c) ^ 0x40).
+    assert rt._caret_escape("\x07") == "^G"   # BEL
+    assert rt._caret_escape("\x1b") == "^["    # ESC
+    assert rt._caret_escape("\x00") == "^@"    # NUL
+    assert rt._caret_escape("\x7f") == "^?"    # DEL
+    assert rt._caret_escape("\r") == "^M"      # bare CR rewrites the TTY line
+    assert rt._caret_escape("\x08") == "^H"    # BS
+
+
+def test_caret_escape_preserves_tab_newline_and_printable() -> None:
+    # \t and \n are load-bearing for layout — never escaped.
+    assert rt._caret_escape("\t") == "\t"
+    assert rt._caret_escape("\n") == "\n"
+    # Ordinary printable / non-ASCII multibyte text is unchanged.
+    assert rt._caret_escape("héllo · 世界") == "héllo · 世界"
+
+
+def test_caret_escape_only_touches_control_bytes_in_mixed_string() -> None:
+    assert rt._caret_escape("a\x07b\x1bc\nd") == "a^Gb^[c\nd"
+
+
+def test_full_tool_result_and_args_control_bytes_become_caret() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"cmd": "ring\x07now"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ring\x07null\x00esc\x1bdone", error=False),
+    ], full=True))
+    # color=False here, so the ONLY ESC byte that could appear is content ESC.
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "\x1b" not in out
+    assert "^G" in out and "^@" in out and "^[" in out   # caret notation present
+
+
+def test_full_tool_result_pyc_marshal_bytes_no_bel() -> None:
+    # live-view-attach-replay-style fixture: a tool result carrying .pyc marshal
+    # bytes (BEL/NUL/ESC) renders with zero raw BEL.
+    marshal = "\x07\x00\x63\x00\x00\x00\x1b\x08"
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="grep", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content=f"matched cache {marshal} bytecode", error=False),
+    ], full=True))
+    assert "\x07" not in out
+
+
+def test_colored_render_keeps_sgr_but_caret_escapes_content() -> None:
+    tree = nv.build_tree([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="beep\x07", error=False),
+    ])
+    out = "\n".join(render_tree(tree, full=True, color=True, width=80))
+    assert "\x1b[" in out        # imp's own SGR color codes survive (color not broken)
+    assert "\x07" not in out     # content BEL is escaped, not emitted raw
+    assert "^G" in out
+
+
+def test_full_thinking_control_bytes_escaped() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "thinking", agent_id="step:p/s", content="mull\x07ing\x00over\x1bit"),
+    ], full=True))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "\x1b" not in out
+    assert "^G" in out
+
+
+def test_prose_leaf_control_bytes_escaped() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "hello\x07 world\x00"}]}),
+    ], full=True))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+
+
+def test_user_message_control_bytes_escaped() -> None:
+    node = nv.UserMessageNode(text="please\x07 run\x00 it", interactive=True)
+    out = "\n".join(rt._render(node, depth=1, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+
+
+def test_literal_text_node_control_bytes_escaped() -> None:
+    node = nv.LiteralTextNode(text="hi\x07 there\x00")
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+
+
+def test_error_message_and_detail_control_bytes_escaped() -> None:
+    node = nv.ErrorNode(message="boom\x07", category="tool",
+                        detail="trace\x00line", is_warning=False)
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "error: [tool]" in out          # imp's framing stays intact, unescaped
+
+
+def test_rename_title_control_bytes_escaped() -> None:
+    node = nv.RenameNode(name="my\x07change\x00")
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "→ named " in out                # imp's marker stays intact, unescaped
+
+
+def test_breadcrumb_extras_control_bytes_escaped() -> None:
+    node = nv.BreadcrumbLine(step_name="review", extras=["verdict=pass\x07", "n=3\x00"])
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+
+
+def test_complete_step_prose_field_control_bytes_escaped() -> None:
+    out = "\n".join(rt._render_output_args(
+        {"outcome": "did\x07 the\x00 thing and then some more text " * 3},
+        depth=0, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+    assert "^@" in out
+
+
+def test_subagent_outcome_scalar_and_block_control_bytes_escaped() -> None:
+    raw = json.dumps({"verdict": "pass\x07", "detail": "line one\nline\x00 two more"})
+    sub = nv.SubagentFold(subagent_name="reviewer", event_id="e1", block_id="b1",
+                          nested=nv.NarrativeBuilder())
+    sub.outcome = raw
+    out = "\n".join(rt.subagent_outcome_lines(sub, depth=0, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "→" in out
+
+
+def test_subagent_outcome_nondict_prose_control_bytes_escaped() -> None:
+    sub = nv.SubagentFold(subagent_name="reviewer", event_id="e1", block_id="b1",
+                          nested=nv.NarrativeBuilder())
+    sub.outcome = "dispatch failed\x07 hard\x00"
+    out = "\n".join(rt.subagent_outcome_lines(sub, depth=0, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out
+    assert "^@" in out
+
+
+def test_fallback_payload_values_control_bytes_escaped() -> None:
+    node = nv.FallbackLine(event_type="weird_event", payload={"detail": "raw\x07 val\x00"})
+    out = "\n".join(rt._render(node, depth=0, full=True, color=False, width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "^G" in out and "^@" in out
+    assert "weird_event" in out             # imp-assigned event_type label is intact
+
+
+def test_step_context_content_control_bytes_escaped() -> None:
+    node = nv.StepContextNode(payload={
+        "provider": "anthropic", "model": "m", "max_tool_calls": 5,
+        "system_prompt": "be helpful\x07 always\x00",
+        "tools_schema": [{"name": "bash\x1b"}],
+    })
+    out = "\n".join(rt._render_step_context(node, depth=0, full=True, color=False,
+                                            width=80))
+    assert "\x07" not in out
+    assert "\x00" not in out
+    assert "\x1b" not in out
+    assert "^G" in out and "^@" in out and "^[" in out
