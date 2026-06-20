@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import signal
 from collections.abc import Callable
@@ -499,3 +500,61 @@ async def test_eoferror_at_abandon_confirm_also_detaches_cleanly(
             tg.start_soon(_client)
 
     assert survived == [True]
+
+
+@pytest.mark.anyio
+async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
+    tmp_path: Path,
+) -> None:
+    events_path = tmp_path / "events.jsonl"
+    sock = str(tmp_path / "s.sock")
+    # Journal holds three prior (resolved) gates; replay re-sends all three on attach.
+    recs = [{"id": f"g{i}", "type": "awaiting_user_input",
+             "payload": {"prompt": f"q{i}"}} for i in range(3)]
+    events_path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    server = SessionServer(sock, hibernate=False, events_path=events_path)
+    prompts: list[str] = []
+    result: dict[str, Any] = {}
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"id": "live", "type": "awaiting_user_input",
+                  "payload": {"prompt": "live?"}})
+        return await user_chat_input_fn("live?")
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:
+        prompts.append(prompt)
+        return "answer"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _serve() -> None:
+                result["r"] = await server.serve(run_fn)
+
+            tg.start_soon(_serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+
+    assert prompts == ["live?"]      # only the live gate solicited
+    assert result["r"] == "answer"   # the reply reached the still-open gate

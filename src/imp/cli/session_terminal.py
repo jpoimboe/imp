@@ -40,7 +40,7 @@ async def run_terminal_client(
 
     def _on_event(event: dict[str, Any]) -> None:
         driver.on_event(event)
-        if event.get("type") == "awaiting_user_input":
+        if event.get("type") == "awaiting_user_input" and not event.get("_replay"):
             prompt = (event.get("payload") or {}).get("prompt") or ""
             gate_send.send_nowait(prompt)
 
