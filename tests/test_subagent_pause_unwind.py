@@ -97,7 +97,7 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
         provider_name="fake", model_name="m",        # subagent inherits -> fake
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(handle="t", title="T", project_root=tmp_path,
+        change_context=ChangeContext(title="T", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),

@@ -933,7 +933,7 @@ async def _run_agent_invocation(
         system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         change_context=ChangeContext(
-            id=change.id, handle=change.id, title=change.title,
+            id=change.id, title=change.title,
             change_home=str(change.change_dir),
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,

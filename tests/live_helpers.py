@@ -209,7 +209,7 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
                     )),),
             ),),
             change_context=ChangeContext(
-                handle="s", title="parallel concurrency test",
+                title="parallel concurrency test",
                 project_root=tmp_path, workflow_dir=tmp_path, id="c1",
             ),
             transcript_dir=tmp_path / "tx",

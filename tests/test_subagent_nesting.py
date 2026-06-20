@@ -48,7 +48,7 @@ def _ctx(tmp_path: Path, *, depth: int) -> ToolContext:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.subagent_depth = depth
-    ctx.change_context = ChangeContext(handle="c", title="C", project_root=tmp_path,
+    ctx.change_context = ChangeContext(title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     return ctx
 

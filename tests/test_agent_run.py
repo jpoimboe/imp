@@ -30,7 +30,7 @@ def _agent(name: str = "rev", max_tool_calls=None, subagents=(),
 
 
 def _cc(tmp: Path) -> ChangeContext:
-    return ChangeContext(handle="s", title="t", project_root=tmp,
+    return ChangeContext(title="t", project_root=tmp,
                          workflow_dir=tmp / "wf")
 
 

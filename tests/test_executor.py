@@ -1597,7 +1597,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
 def test_change_context_defaults_empty_facts() -> None:
     from imp.agents.runner import ChangeContext
     cc = ChangeContext(
-        handle="s", title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
+        title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
     assert cc.guidance == ""
 

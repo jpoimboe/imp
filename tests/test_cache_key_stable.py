@@ -12,17 +12,17 @@ from imp.agents.runner import ChangeContext
 from imp.providers.openai import _prompt_cache_key
 
 
-def _cc(title: str, handle: str) -> ChangeContext:
+def _cc(title: str) -> ChangeContext:
     return ChangeContext(
-        id="fff666", handle=handle, title=title,
+        id="fff666", title=title,
         project_root=Path("/wt"), workflow_dir=Path("/wt/.imp/change/workflow"),
     )
 
 
 def test_cache_key_stable_across_title_rename() -> None:
     aid = "step:drafting/spec"
-    before = _cc("First Name", "first-name-fff666")     # pre-rename
-    after = _cc("Second Name", "second-name-fff666")    # post-rename (same id)
+    before = _cc("First Name")     # pre-rename
+    after = _cc("Second Name")    # post-rename (same id)
 
     # Keyed on the immutable id: identical before/after the title rename.
     assert _prompt_cache_key(before.id, aid) == _prompt_cache_key(after.id, aid)

@@ -60,7 +60,7 @@ def _bg_ctx(tmp_path: Path):
                       events_path=run_dir / "events.jsonl",
                       agent_id="step:t/coder", background_enabled=True)
     ctx.change_context = ChangeContext(
-        handle="t", title="T", project_root=tmp_path,
+        title="T", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 

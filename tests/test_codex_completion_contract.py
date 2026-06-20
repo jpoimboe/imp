@@ -81,7 +81,7 @@ def _inv(
         system_prompt="sp",
         initial_messages=(),
         change_context=ChangeContext(
-            handle="s", title="t", project_root=tmp_path,
+            title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(
@@ -109,7 +109,7 @@ def _inv_with_continuation(
         system_prompt="sp",
         initial_messages=(),
         change_context=ChangeContext(
-            handle="s", title="t", project_root=tmp_path,
+            title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(

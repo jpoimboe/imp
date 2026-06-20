@@ -43,7 +43,7 @@ def _inv(tmp_path, elog, *, continuation_fn) -> AgentInvocation:
     return AgentInvocation(
         agent_def=adef, provider_name="codex", model_name="gpt-5.5",
         system_prompt="sp", initial_messages=(),
-        change_context=ChangeContext(handle="s", title="t", project_root=tmp_path,
+        change_context=ChangeContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),

@@ -64,7 +64,7 @@ def _inv(provider, model, tmp_path):
         agent_def=_agent("rev"), provider_name=provider, model_name=model,
         system_prompt="", initial_messages=(),
         change_context=ChangeContext(
-            1, tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
+            tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path, fs_permissions=(),
         events_path=tmp_path / "e.jsonl")
 
@@ -111,7 +111,7 @@ async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
     inv = AgentInvocation(
         agent_def=agent, provider_name="fake", model_name="m",
         system_prompt="s", initial_messages=(),
-        change_context=ChangeContext(handle="x", title="t",
+        change_context=ChangeContext(title="t",
                                      project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "td",

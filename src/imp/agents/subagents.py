@@ -192,7 +192,7 @@ async def dispatch_task(
     from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
 
     cc = ctx.change_context or ChangeContext(
-        id="", handle="", title="", project_root=ctx.project_root,
+        id="", title="", project_root=ctx.project_root,
         # No change context → no change_dir, no snapshot; live dir is the only option.
         workflow_dir=(
             ctx.project_root / "imp" / "workflows"

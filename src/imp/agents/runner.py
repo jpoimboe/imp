@@ -67,12 +67,10 @@ class Diagnostics:
 # Engine → runner boundary value. Frozen to make it safe to pass to subagents.
 @dataclass(frozen=True, slots=True)
 class ChangeContext:
-    handle: str
     title: str
     project_root: Path
     workflow_dir: Path
-    id: str = ""   # stable Change identity (spec §1). Defaulted so test
-    # constructors stay green; production sites (executor, subagents) pass it.
+    id: str = ""
     change_home: str = ""
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = ""

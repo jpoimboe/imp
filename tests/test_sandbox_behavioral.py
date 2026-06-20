@@ -94,7 +94,6 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         events_path=worktree / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
-        handle="test",
         title="Test",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
@@ -396,7 +395,7 @@ def test_bash_tool_uses_live_change_title_not_stale_snapshot() -> None:
         # change_context = the pre-rename snapshot (empty title); ctx.change = the
         # live, renamed Change. The bash tool must prefer the live one.
         ctx.change_context = ChangeContext(
-            id="2026-06-10-x", handle="", title="",
+            id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
         ctx.change = _t.SimpleNamespace(
             id="2026-06-10-x", handle="", title="renamed")
@@ -456,7 +455,6 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             events_path=wt_path / "events.jsonl",
         )
         ctx.change_context = ChangeContext(
-            handle="esc1",
             title="Escape Test",
             project_root=wt_path,
             workflow_dir=wt_path / ".imp" / "wf",

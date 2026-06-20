@@ -22,7 +22,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         events_path=tmp_path / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
-        handle="s", title="t", project_root=tmp_path, workflow_dir=wf,
+        title="t", project_root=tmp_path, workflow_dir=wf,
     )
     ctx.event_log = JsonlEventLog(tmp_path / "events.jsonl")
     return ctx
