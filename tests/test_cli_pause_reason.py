@@ -46,6 +46,7 @@ def test_new_non_interactive_routes_through_session_client(
     async def _fake_run_session_client(
         change: Change, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
+        opening_intent: object = None,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening
@@ -90,6 +91,7 @@ def test_new_interactive_routes_through_session_client(
     async def _fake_run_session_client(
         change: Change, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
+        opening_intent: object = None,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening

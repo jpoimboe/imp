@@ -124,3 +124,45 @@ def test_message_plain_question_still_sits_above_the_caret() -> None:
 def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
     assert _placeholder_text(color=False) == "type your reply"
     assert _placeholder_text(color=True) == "\x1b[2mtype your reply\x1b[0m"
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_ask_async_prefixes_caret_with_indent_and_aligns_continuation() -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured["msg"] = msg
+            captured.update(kwargs)
+            return "ok"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    line = await prompt.ask_async(indent="  ")
+    assert line == "ok"
+    # The caret message is indented to the agent-content column.
+    assert captured["msg"] == "  > "
+    # The continuation aligns wrapped/multi-line input under the caret:
+    # indent width (2) + caret width (2) = 4 blanks.
+    cont = captured["prompt_continuation"]
+    assert cont(80, 1, False) == "    "
+
+
+@pytest.mark.anyio
+async def test_ask_async_flush_left_when_no_indent() -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured["msg"] = msg
+            captured.update(kwargs)
+            return ""
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    await prompt.ask_async()
+    assert captured["msg"] == "> "
+    assert captured["prompt_continuation"](80, 1, False) == "  "

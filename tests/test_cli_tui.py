@@ -112,7 +112,7 @@ def test_new_tui_on_non_tty_warns_and_routes_to_session_client(
     called = {"n": 0}
 
     async def _fake_client(change, *, driver, coord, solicit,
-                           seed_opening=None, status=None) -> int:
+                           seed_opening=None, status=None, opening_intent=None) -> int:
         called["n"] += 1
         return 0
 
@@ -295,7 +295,9 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
 async def test_run_tui_session_threads_resume_from_target_to_attach(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
-    def _fake_attach(change, *, seed_opening=None, resume=False, from_target=None):
+    def _fake_attach(
+        change, *, seed_opening=None, resume=False, from_target=None, opening_intent=None
+    ):
         seen["seed_opening"] = seed_opening
         seen["resume"] = resume
         seen["from_target"] = from_target

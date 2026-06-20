@@ -51,7 +51,8 @@ def _new_args(**kw: object) -> argparse.Namespace:
 def test_resolve_positional_is_verbatim_seed() -> None:
     res = cli_main.resolve_spec_seed(_new_args(opening="add a dark-mode toggle"))
     assert res == cli_main.SeedResolution(
-        title=None, seed_text="add a dark-mode toggle")
+        title=None, seed_text="add a dark-mode toggle",
+        opening_intent="add a dark-mode toggle")
     assert cli_main.SPEC_SEED_MARKER not in res.seed_text
 
 
@@ -133,7 +134,8 @@ def test_new_positional_delivers_verbatim_seed(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -158,7 +160,8 @@ def test_new_title_flag_sets_change_title(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -184,7 +187,8 @@ def test_new_spec_file_delivers_wrapped_seed(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -258,7 +262,8 @@ def test_new_positional_with_message_legal(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["seed_opening"] = seed_opening
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
@@ -284,7 +289,8 @@ def test_new_tui_delivers_seed(
     captured: dict[str, object] = {}
 
     async def _fake_tui(change: object, *, seed_opening: str | None = None,
-                        resume: bool = False, from_target: str | None = None) -> int:
+                        resume: bool = False, from_target: str | None = None,
+                        opening_intent: str | None = None) -> int:
         captured["seed_opening"] = seed_opening
         return 0
 
@@ -313,7 +319,8 @@ def test_new_non_interactive_spec_seed_via_session_client(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["seed_opening"] = seed_opening
         return 0
 
@@ -374,8 +381,10 @@ def test_opening_prompt_reply_wires_to_seed_opening(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object = None,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["seed_opening"] = seed_opening
+        captured["opening_intent"] = opening_intent
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -398,6 +407,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
 
     assert rc == 0
     assert captured["seed_opening"] == "add a feature"
+    assert captured["opening_intent"] == "add a feature"
 
 
 def test_opening_prompt_empty_reply_gives_none_seed_opening(
@@ -409,8 +419,10 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
 
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object = None,
-                           status: object = None) -> int:
+                           status: object = None,
+                           opening_intent: object = None) -> int:
         captured["seed_opening"] = seed_opening
+        captured["opening_intent"] = opening_intent
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -433,3 +445,4 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
 
     assert rc == 0
     assert captured["seed_opening"] is None
+    assert captured["opening_intent"] is None

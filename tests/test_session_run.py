@@ -298,7 +298,7 @@ async def test_run_session_client_threads_resume_into_attach(
 
     def _fake_build(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-        from_target: str | None = None,
+        from_target: str | None = None, opening_intent: str | None = None,
     ) -> Any:
         captured["resume"] = resume
 
@@ -343,7 +343,7 @@ async def test_run_session_client_threads_from_target_into_attach(
 
     def _fake_build(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-        from_target: str | None = None,
+        from_target: str | None = None, opening_intent: str | None = None,
     ) -> Any:
         captured["from_target"] = from_target
 

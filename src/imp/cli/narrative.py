@@ -1037,6 +1037,11 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         children[narration_idx].held = False
 
 
+def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._append(UserMessageNode(text=p.get("text", ""), interactive=True))
+
+
+NarrativeBuilder._HANDLERS["opening_intent"] = _h_opening_intent
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
 NarrativeBuilder._HANDLERS["llm_response"] = _h_llm_response
 NarrativeBuilder._HANDLERS["thinking"] = _h_thinking

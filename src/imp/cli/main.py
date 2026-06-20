@@ -147,6 +147,7 @@ class SeedError(Exception):
 class SeedResolution(NamedTuple):
     title: str | None
     seed_text: str | None
+    opening_intent: str | None = None
 
 
 def _read_seed_file(path: str) -> str:
@@ -184,12 +185,13 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
         if message is not None:
             raise SeedError("--spec-file and --message are mutually exclusive")
         return SeedResolution(
-            title, _build_seed(spec_file, _read_seed_file(spec_file)))
+            title, _build_seed(spec_file, _read_seed_file(spec_file)),
+            opening_intent=None)
 
     if opening is not None and opening.strip():
-        return SeedResolution(title, opening)
+        return SeedResolution(title, opening, opening_intent=opening)
 
-    return SeedResolution(title, None)
+    return SeedResolution(title, None, opening_intent=None)
 
 
 def resolve_playbook_seed(
@@ -578,13 +580,15 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 
 async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
-        resume: bool = False, from_target: str | None = None) -> int:
+        resume: bool = False, from_target: str | None = None,
+        opening_intent: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
     attach = build_session_attach(
-        change, seed_opening=seed_opening, resume=resume, from_target=from_target)
+        change, seed_opening=seed_opening, resume=resume, from_target=from_target,
+        opening_intent=opening_intent)
 
     async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)
@@ -702,7 +706,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 seed.title,
                 resolve_playbook_seed(
                     control, playbook_name, getattr(args, "opening", None),
-                    findings_only=getattr(args, "findings_only", False)))
+                    findings_only=getattr(args, "findings_only", False)),
+                opening_intent=None)
     except (SeedError, ValueError) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -726,6 +731,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     interactive = (not non_interactive
                    and sys.stdin.isatty() and sys.stdout.isatty())
     opening_text = seed.seed_text
+    opening_intent = seed.opening_intent
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         prompt = Prompt(
             editing_mode=_editing_mode(control),
@@ -739,6 +745,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         # An empty reply falls back to the unseeded path (the spec-writer opens
         # by asking); a real answer becomes the opening intent.
         opening_text = _normalize_opening_reply(reply)
+        opening_intent = opening_text
 
     change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
@@ -773,12 +780,14 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=opening_text, status=status)
+            seed_opening=opening_text, status=status,
+            opening_intent=opening_intent)
 
     if _tui_requested(args):
         print(_run_header_line(
             change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
-        return await _run_tui_session(change, seed_opening=opening_text)
+        return await _run_tui_session(change, seed_opening=opening_text,
+                                      opening_intent=opening_intent)
 
     print(_run_header_line(
         change.handle, change.title, change.id, "new", color=should_use_color(sys.stdout)))
@@ -791,7 +800,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         change, status=status, driver=driver, coord=coord)
     return await run_session_client(
         change, driver=driver, coord=coord, solicit=solicit,
-        seed_opening=opening_text, status=status)
+        seed_opening=opening_text, status=status,
+        opening_intent=opening_intent)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:

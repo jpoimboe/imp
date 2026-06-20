@@ -305,6 +305,11 @@ class LiveDriver:
         (malformed stream) → 0 (a bare \\n, indent-free)."""
         return self._frontier[-1].depth if self._frontier else 0
 
+    def prompt_indent(self) -> str:
+        """Indent string aligning the solicit caret with the open step's content column."""
+        return rt._gutter_indent(
+            self._frontier_depth(), self._gutters(), self._color)
+
     def prepare_for_prompt(self) -> None:
         """Flush the armed separator before the interactive prompt draws, record
         that it was emitted (consumed by the next non-empty _print_lines), and mark

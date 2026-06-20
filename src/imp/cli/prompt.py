@@ -128,17 +128,17 @@ class Prompt:
             lambda: _build_session(skills_dir, editing_mode=editing_mode))
         self._session = self._session_factory()
 
-    def _message(self, prompt_text: str | None) -> Any:
+    def _message(self, prompt_text: str | None, indent: str = "") -> Any:
         """The prompt caret as prompt_toolkit formatted text: a bright-blue
-        ``❯ `` under color, plain otherwise. `None` selects the default caret."""
+        ``> `` under color, plain otherwise. `None` selects the default caret."""
         from imp.cli import palette as pal
 
         text = pal.CARET if prompt_text is None else prompt_text
         if self._color:
             from prompt_toolkit.formatted_text import ANSI
 
-            return ANSI(pal.ansi(text, "bright_blue", enabled=True))
-        return text
+            return ANSI(indent + pal.ansi(text, "bright_blue", enabled=True))
+        return indent + text
 
     def ask(self, prompt_text: str | None = None) -> str:
         """Read a single line. Returns the user's text.
@@ -149,7 +149,7 @@ class Prompt:
         return str(result) if result is not None else ""
 
     async def ask_async(self, prompt_text: str | None = None, *,
-                        question: str = "", width: int = 80) -> str:
+                        question: str = "", width: int = 80, indent: str = "") -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run()).
@@ -171,14 +171,19 @@ class Prompt:
         ask_line_with_slash becomes a harmless defensive no-op (kept)."""
         from prompt_toolkit.formatted_text import ANSI
 
+        from imp.cli import palette as pal
+
         if question.strip():
             rendered = _prompt_message_text(question, color=self._color, width=width)
             msg: Any = ANSI(rendered) if self._color else rendered
+            cont = " " * len(pal.CARET)
         else:
-            msg = self._message(prompt_text)
+            msg = self._message(prompt_text, indent=indent)
+            cont = " " * (len(indent) + len(pal.CARET))
         placeholder = ANSI(_placeholder_text(color=True)) if self._color else None
         result = await self._session.prompt_async(
-            msg, handle_sigint=False, placeholder=placeholder)
+            msg, handle_sigint=False, placeholder=placeholder,
+            prompt_continuation=lambda _w, _l, _s: cont)
         return str(result) if result is not None else ""
 
     def history_strings(self) -> list[str]:
