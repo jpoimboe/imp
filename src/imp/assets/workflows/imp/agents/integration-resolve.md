@@ -72,8 +72,11 @@ before `finalize`.
 
 In `bash`:
 - `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`
-- The base-side incoming diff is `git diff "$(git merge-base "$BASE" HEAD)" "$BASE"`;
-  `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show the result.
+- The base-side incoming diff is `git diff <P> <B>`, with `<P>` / `<B>` read from the
+  `Integration-fork:` / `Integration-base:` lines at the top of
+  `{{ change.home }}/integration-notes.md` (after the rebase `git merge-base "$BASE" HEAD`
+  collapses to `$BASE`); `git show --first-parent HEAD` and
+  `git log --graph --oneline -n 20` show the result.
 - Read `{{ change.home }}/integration-notes.md` if present (the integrator's flagged,
   reasoned-but-uncertain resolutions) and the verify output for a verify-fail.
 - For each region both sides touched, confirm the merged result preserves BOTH

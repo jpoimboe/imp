@@ -19,13 +19,18 @@ with independent eyes, whether the integrated result silently breaks anything �
 In `bash`:
 - `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`
 - The base-side incoming diff — what base changed since this branch forked — is
-  `git diff "$(git merge-base "$BASE" HEAD)" "$BASE"`.
+  `git diff <P> <B>`, where `<P>` and `<B>` are read from the `Integration-fork:` /
+  `Integration-base:` lines at the top of `{{ change.home }}/integration-notes.md`.
+  After the rebase, `git merge-base "$BASE" HEAD` collapses to `$BASE`, so these recorded
+  endpoints are the only way to recover what the rebase integrated.
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show what
   the rebase/resolution produced.
-- If `{{ change.home }}/integration-notes.md` exists, the integrator resolved a textual
-  conflict and flagged reasoned-but-uncertain resolutions — read it and check each
-  first; they are the likeliest to be wrong. Its absence means a clean rebase: you
-  still review (the base moved), the notes are simply empty.
+- `{{ change.home }}/integration-notes.md` always exists here — it carries the
+  `Integration-fork:` / `Integration-base:` endpoint lines. If it ALSO contains the
+  integrator's resolution notes below those lines, the integrator resolved a textual
+  conflict and flagged reasoned-but-uncertain resolutions — read them and check each
+  first; they are the likeliest to be wrong. If it holds only the two endpoint lines, the
+  rebase was clean (no conflict required manual resolution); you still review, since the base moved.
 
 ## Judge
 

@@ -481,3 +481,18 @@ def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
     assert "recorded tolerated set" in low
     assert "[baseline]" not in text
     assert "[flaky]" not in text
+
+
+def test_integration_prompts_use_recorded_endpoints() -> None:
+    review = (AGENTS_DIR / "integration-review.md").read_text()
+    resolve = (AGENTS_DIR / "integration-resolve.md").read_text()
+    integ = (AGENTS_DIR / "integrator.md").read_text()
+    # Consumers parse the labeled endpoint lines, not a post-rebase merge-base diff.
+    for text in (review, resolve):
+        assert "Integration-fork:" in text
+        assert "Integration-base:" in text
+        assert 'git diff "$(git merge-base "$BASE" HEAD)" "$BASE"' not in text
+    # The integrator re-records the endpoints and replants cur_base_head.
+    assert "Integration-fork:" in integ
+    assert "Integration-base:" in integ
+    assert "cur_base_head" in integ
