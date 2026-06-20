@@ -65,7 +65,7 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="X", change_id="zzz999", base_branch="main")
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert set(meta) == {"id", "title", "base_branch", "created_at",
-                         "depends_on", "project_root"}
+                         "depends_on", "project_root", "materialized"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
@@ -189,3 +189,25 @@ def test_leaf_edit_pinned_in_graph_live_on_reload(tmp_path: Path) -> None:
     # A fresh load (what resume does) sees the edited bytes.
     wf_second = load_workflow(ch.workflow_dir)
     assert "EDITED BODY" in wf_second.agents["stub"].prompt_template_source
+
+
+def test_create_marks_materialized(tmp_path: Path) -> None:
+    import json
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="mat1", base_branch="main")
+    assert ch.materialized is True
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["materialized"] is True
+
+
+def test_load_defaults_materialized_true_when_absent(tmp_path: Path) -> None:
+    import json
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="mat2", base_branch="main")
+    meta_path = ch.change_dir / "change.json"
+    meta = json.loads(meta_path.read_text())
+    del meta["materialized"]          # a pre-flag (legacy) change.json
+    meta_path.write_text(json.dumps(meta))
+    loaded = Change.load(tmp_path, "mat2")
+    assert loaded.materialized is True
+    assert loaded.base_head == ""

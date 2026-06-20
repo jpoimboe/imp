@@ -23,6 +23,8 @@ class Change:
     control_root: Path
     project_root: Path           # the worktree
     change_dir: Path             # permanent home <control_root>/.imp/changes/<id>
+    materialized: bool = True    # False only for an un-materialized draft (no worktree)
+    base_head: str = ""          # base branch tip recorded at draft creation (drafts only)
 
     @property
     def handle(self) -> str:
@@ -94,6 +96,7 @@ class Change:
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
             "project_root": str(wt_path),
+            "materialized": True,
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -156,4 +159,6 @@ class Change:
             id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],
             control_root=control_root, project_root=project_root,
             change_dir=change_dir,
+            materialized=meta.get("materialized", True),
+            base_head=meta.get("base_head", ""),
         )
