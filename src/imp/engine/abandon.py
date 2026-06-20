@@ -9,7 +9,7 @@ from imp.engine.state import ProjectLock, State
 
 
 def tear_down_change(change: Change) -> None:
-    """Destroy a change: mark abandoned, journal, remove from the merge queue
+    """Destroy a change: mark abandoned, archive, remove from the merge queue
     (waking the next head if this change was the head), remove worktree + branch."""
     control = change.control_root
     change_id = change.id
