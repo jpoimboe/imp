@@ -83,17 +83,6 @@ def test_should_use_color_force_var_overrides_pipe(monkeypatch, force_var) -> No
     assert pal.should_use_color(io.StringIO()) is False
 
 
-@pytest.mark.parametrize("action,expected", [
-    ({"verb": "continue"}, "green"), ({"verb": "pause"}, "cyan"),
-    ({"verb": "goto", "target": "impl"}, "cyan"),
-    ({"verb": "unknown"}, None),
-    # bare strings still tolerated (legacy/fallback path)
-    ("continue", "green"), ("retry", "yellow"), ("mystery", None),
-])
-def test_accent_color_for_action(action, expected) -> None:
-    assert pal.accent_color(action) == expected
-
-
 def test_action_display_text() -> None:
     assert pal.action_text({"verb": "continue"}) == "continue"
     assert pal.action_text({"verb": "goto", "target": "impl"}) == "goto(impl)"
@@ -109,11 +98,6 @@ def test_action_text_goto_resume_marker() -> None:
     assert pal.action_text(
         {"verb": "goto", "target": "coder", "resume": False}) == "goto(coder)"
     assert pal.action_text({"verb": "goto", "target": "coder"}) == "goto(coder)"
-
-
-def test_action_text_resume_keeps_goto_color() -> None:
-    # the verb stays "goto", so accent coloring is unaffected by resume
-    assert pal.accent_color({"verb": "goto", "target": "coder", "resume": True}) == "cyan"
 
 
 def test_fold_glyphs_default_unicode() -> None:
