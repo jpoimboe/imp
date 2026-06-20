@@ -38,7 +38,8 @@ def _placeholder_text(*, color: bool) -> str:
     return pal.ansi("type your reply", "dim", enabled=color)
 
 
-def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs") -> Any:
+def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs",
+                   color: bool = False) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
     from prompt_toolkit.history import InMemoryHistory
@@ -67,16 +68,29 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             run_in_terminal(lambda: print("press ctrl-d to exit"))
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
-    # No style override: while the user types, the input region keeps the
-    # terminal's default fg/bg (the bright-blue ┃ bar is the only marker). On
-    # submit, erase_when_done wipes prompt_toolkit's whole rendered region —
-    # prompt + input + the menu-reservation row that caused the old stray bottom
-    # bar — so NOTHING it drew survives in scroll-back. The live driver then
-    # reprints the entered turn as a UserMessageNode with the subtle "entered
-    # input" background (render_text), giving the after-not-during highlight and
-    # one shared rendering for the user turn in live and `imp log`.
+    # The live solicit field paints a slate fill across the remaining line width
+    # via prompt_toolkit's default ("") style selector — it fills the input
+    # window's trailing cells with this background. Only under color + a truecolor
+    # theme (user_bg_style is "" on ansi / color off, so no fill). TRUE_COLOR so the
+    # 24-bit slate matches render_text's reprinted band, not a 256-color downgrade.
+    # On submit, erase_when_done wipes prompt_toolkit's whole rendered region; the
+    # live driver then reprints the turn as a UserMessageNode (render_text), giving
+    # one shared user-turn rendering in live and `imp log`.
+    style = None
+    color_depth = None
+    if color:
+        from prompt_toolkit.output import ColorDepth
+        from prompt_toolkit.styles import Style
+
+        from imp.cli import palette as pal
+
+        bg = pal.user_bg_style(enabled=True)
+        if bg:
+            style = Style.from_dict({"": bg})
+            color_depth = ColorDepth.TRUE_COLOR
     return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-                         editing_mode=mode, erase_when_done=True)
+                         editing_mode=mode, erase_when_done=True,
+                         style=style, color_depth=color_depth)
 
 
 class SlashCompleter:
@@ -127,14 +141,14 @@ class Prompt:
     ) -> None:
         self._color = color
         self._session_factory = _session_factory or (
-            lambda: _build_session(skills_dir, editing_mode=editing_mode))
+            lambda: _build_session(skills_dir, editing_mode=editing_mode, color=color))
         self._session = self._session_factory()
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:
         """The prompt caret as prompt_toolkit formatted text. The default caret
-        (`prompt_text is None`) is now empty — the ┃ bar in `indent` is the sole
-        user-turn marker — so only an explicit non-empty `prompt_text` is styled
-        bright-blue. Empty text adds no escapes (keeps the live line clean)."""
+        (`prompt_text is None`) is the bright-blue `> ` (pal.CARET); an explicit
+        non-empty `prompt_text` is styled the same bright-blue. Empty text adds no
+        escapes."""
         from imp.cli import palette as pal
 
         text = pal.CARET if prompt_text is None else prompt_text
@@ -178,15 +192,17 @@ class Prompt:
 
         from imp.cli import palette as pal
 
-        gutter = pal.user_bar(enabled=self._color) + " "
         if question.strip():
             rendered = _prompt_message_text(
-                question, color=self._color, width=width, indent=indent + gutter)
+                question, color=self._color, width=width, indent=indent)
             msg: Any = ANSI(rendered) if self._color else rendered
         else:
-            msg = self._message(prompt_text, indent=indent + gutter)
-        cont = " " * (len(indent) + 2 + len(pal.CARET))
-        placeholder = ANSI(_placeholder_text(color=True)) if self._color else None
+            msg = self._message(prompt_text, indent=indent)
+        cont = " " * (len(indent) + len(pal.CARET))
+        # The hint renders unconditionally in both color modes (ansi theme and NO_COLOR)
+        # — dim ANSI when color is on, the plain str when off (never None).
+        placeholder: Any = (ANSI(_placeholder_text(color=True)) if self._color
+                            else _placeholder_text(color=False))
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
             prompt_continuation=lambda _w, _l, _s: cont)

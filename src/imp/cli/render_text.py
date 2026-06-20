@@ -507,30 +507,30 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
             # something the human typed, so it never renders as a `>` turn.
             return
-        # A blue ┃ left bar marks the human turn in the gutter on every line.
-        # First line: {indent}{┃} {text}; continuations: {indent}{┃} {text} (body
-        # aligned under the first line's text). The bar + one space is the whole
-        # marker now — no leading caret (pal.CARET is "").
+        # A bright-blue `>` caret marks the human turn on the first line only; it
+        # sits OUTSIDE the slate. The separating space + the wrapped text sit ON the
+        # slate so the band hugs the text. Continuation lines carry a blank caret
+        # column (no repeated caret) and align under the first line's text (two
+        # columns past the caret), with the slate band continuing.
         #
         # On a truecolor theme the reprinted (scrolled-back) turn carries a subtle
-        # entered-input background, opened AFTER the bar so the highlight hugs the
-        # bar — it covers the separating space (left padding) and the typed text,
-        # and closes at text end (no full-width fill → clean copy/paste). Blank
-        # separator lines stay unpainted. The live input field is never painted.
+        # entered-input background, opened AFTER the caret column so the highlight
+        # covers the separating space + the typed text and closes at text end (no
+        # full-width fill → clean copy/paste). Blank separator lines stay unpainted.
+        # The live input field is painted by prompt.py, not here.
         indent = _gutter_indent(depth, gutters, color)
-        bar = pal.user_bar(enabled=color)
-        caret = pal.caret(enabled=color)
+        caret = pal.ansi(">", "bright_blue", enabled=color)
         bg = pal.user_bg_open(enabled=color)
         end = "\x1b[0m" if bg else ""
-        avail = max(8, width - _INDENT_W * depth - 2 - len(pal.CARET))
+        avail = max(8, width - _INDENT_W * depth - 2)
         first = True
         for para in _caret_escape(node.text).split("\n"):
             if not para:
-                yield indent + bar
+                yield indent
                 continue
             for line in textwrap.wrap(para, width=avail) or [""]:
-                lead = caret if first else ""
-                yield indent + bar + bg + " " + lead + line + end
+                lead = caret if first else " "
+                yield indent + lead + bg + " " + line + end
                 first = False
         return
 

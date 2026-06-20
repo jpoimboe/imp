@@ -401,7 +401,7 @@ class NarrativeBuilder:
         self._resuming = False
         # True between an awaiting_user_input event and the user_message that
         # answers it, so the next user_message is tagged as a genuine human turn
-        # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
+        # (rendered as `> …`) rather than a synthetic engine prompt (dropped).
         self._awaiting_reply = False
         # Unresolved wait_for_user calls: id → that call's input.prompt. Drives
         # the §1 orphan-result net.

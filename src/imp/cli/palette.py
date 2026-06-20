@@ -126,33 +126,16 @@ def sgr(*codes: str, enabled: bool) -> str:
     return "".join(_ANSI[c] for c in codes)
 
 
-# The interactive input field. A bright-blue ┃ bar marks the user's turn in the
-# gutter; a single space then leads into the typed text (no leading caret). The
-# bar is a centered heavy box-drawing vertical (U+2503) so it lines up with the
-# agent turn's centered "• " bullet. bright_blue keeps the "user = blue" identity
-# (NODE_COLORS["user"]). CARET is the empty string — kept as a named constant so
-# the width math that reads len(CARET) stays correct and a future marker can be
-# reinstated here.
-CARET = ""
-BAR = "┃"
+# The interactive input field. A bright-blue `> ` caret marks the user's turn —
+# the same render-safe two-byte sequence the init picker cursor emits. CARET is
+# styled bright_blue (NODE_COLORS["user"]) to keep the "user = blue" identity, and
+# carries its own trailing space so callers can use it as a one-piece prefix.
+CARET = "> "
 
 
 def caret(*, enabled: bool) -> str:
-    """The styled prompt caret as a raw ANSI string. Currently empty (the │ bar
-    is the sole user-turn marker), so this is "" with no stray escapes; kept for
-    callers and width math."""
-    if not CARET:
-        return ""
+    """The styled prompt caret: the bright-blue `> ` when color is on, plain `> ` when off."""
     return ansi(CARET, "bright_blue", enabled=enabled)
-
-
-def user_bar(*, enabled: bool) -> str:
-    """The blue │ left-rule that marks a user turn's gutter, or a single space
-    when color is off — keeps the gutter column blank so the live input
-    prompt's color-off appearance matches the reprinted turn."""
-    if not enabled:
-        return " "
-    return ansi(BAR, "bright_blue", enabled=True)
 
 
 # Subtle "entered input" background, per truecolor theme — the quiet highlight
@@ -175,6 +158,16 @@ def user_bg_open(*, enabled: bool) -> str:
     if rgb is None:
         return ""
     return "\x1b[48;2;{};{};{}m".format(*rgb)
+
+
+def user_bg_style(*, enabled: bool) -> str:
+    """Entered-input slate as a prompt_toolkit bg rule, or '' when color is off or ansi theme."""
+    if not enabled:
+        return ""
+    rgb = _USER_BG_RGB.get(_active_theme)
+    if rgb is None:
+        return ""
+    return "bg:#{:02x}{:02x}{:02x}".format(*rgb)
 
 
 def rule(width: int, *, enabled: bool) -> str:

@@ -314,7 +314,7 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
             content=[{"type": "text", "text": "do the real thing"}]),
     ]))
     assert "begin" not in out
-    assert "    do the real thing" in out   # gutter-indented human turn
+    assert "  > do the real thing" in out   # caret-marked human turn
 
 
 def test_interjected_user_message_renders_as_human_turn() -> None:
@@ -335,7 +335,7 @@ def test_interjected_user_message_renders_as_human_turn() -> None:
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "    actually use postgres" in out   # gutter-indented human turn
+    assert "  > actually use postgres" in out   # caret-marked human turn
     step = tree.root.children[0].children[0]
     assert isinstance(step, nv.StepNode)
     um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
@@ -389,7 +389,7 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "    go ahead" in out   # gutter-indented human turn
+    assert "  > go ahead" in out   # caret-marked human turn
     # The re-emitted awaiting_user_input uniquely sets interactive=True on the
     # resumed step (resume re-entry resets it to False first, so only the
     # re-emitted event could have set it back). Assert directly on the node.
@@ -979,24 +979,24 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_blue_bar_then_caret_text_color_on() -> None:
-    """The user turn renders at the node's own depth (depth=1 → a 2-space indent),
-    with a blue ┃ left bar + a single-space gutter, then the body in default fg —
-    no leading caret. Continuation lines repeat the bar + one space so the body
-    aligns under itself. No background fill, no trailing spaces."""
+def test_user_message_blue_caret_then_text_color_on() -> None:
+    """The user turn renders at the node's own depth (depth=1 → a 2-space indent).
+    First line: a bright-blue `>` caret (outside any slate) + one space + the body.
+    Continuation lines drop the caret (a blank column in its place) so the body
+    aligns under the first line's text. No background fill in the ansi theme."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    assert out[0] == "  \x1b[94m┃\x1b[0m line one"
-    assert out[1] == "  \x1b[94m┃\x1b[0m line two"
+    assert out[0] == "  \x1b[94m>\x1b[0m line one"
+    assert out[1] == "    line two"               # caret column blank, body aligned
     assert "\x1b[48;2;" not in out[0] and "\x1b[104m" not in out[0]   # no bg
 
 
-def test_user_message_blue_bar_with_subtle_bg_in_truecolor_theme() -> None:
+def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
     """The reprinted (scrolled-back) user turn carries a subtle entered-input
-    background in a truecolor theme, opened AFTER the ┃ bar (Option A): the
-    highlight hugs the bar, covering the separating space + the typed text, and
-    closes at text end — no full-width fill, so copy/paste stays clean."""
+    background in a truecolor theme, opened AFTER the caret: the `>` sits outside
+    the slate; the separating space + the text sit on it, and it closes at text end
+    (no full-width fill → clean copy/paste)."""
     pal.set_theme("dark")
     try:
         node = nv.UserMessageNode(text="hello", interactive=True)
@@ -1004,20 +1004,34 @@ def test_user_message_blue_bar_with_subtle_bg_in_truecolor_theme() -> None:
     finally:
         pal.set_theme("ansi")
     assert len(out) == 1
-    bar = "\x1b[38;2;127;162;202m┃\x1b[0m"  # truecolor blue left bar
-    bg = "\x1b[48;2;43;47;58m"             # subtle slate (#2B2F3A) opened after the bar
-    assert out[0] == bar + bg + " hello\x1b[0m"   # space + text on the bg, reset at end
+    caret = "\x1b[38;2;127;162;202m>\x1b[0m"   # truecolor bright-blue caret
+    bg = "\x1b[48;2;43;47;58m"                 # subtle slate (#2B2F3A) after the caret
+    assert out[0] == caret + bg + " hello\x1b[0m"   # space + text on the bg, reset at end
 
 
-def test_user_message_no_color_blank_gutter_no_caret() -> None:
+def test_user_message_multiline_continuation_carries_slate_no_caret() -> None:
+    """A multi-line truecolor turn: the continuation line drops the caret (blank
+    column in its place) but still carries the slate band, aligned under the body."""
+    pal.set_theme("dark")
+    try:
+        node = nv.UserMessageNode(text="one\ntwo", interactive=True)
+        out = list(rt._render(node, depth=0, full=False, color=True, width=80))
+    finally:
+        pal.set_theme("ansi")
+    assert len(out) == 2
+    caret = "\x1b[38;2;127;162;202m>\x1b[0m"
+    bg = "\x1b[48;2;43;47;58m"
+    assert out[0] == caret + bg + " one\x1b[0m"   # caret outside, band hugs the text
+    assert out[1] == " " + bg + " two\x1b[0m"     # blank caret column, band continues
+
+
+def test_user_message_no_color_plain_caret() -> None:
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     joined = "\n".join(out)
     assert "\x1b[94m" not in joined and "\x1b[104m" not in joined and "┃" not in joined
-    assert ">" not in joined                 # no caret anymore — just the gutter
-    # Color off: the ┃ bar degrades to a blank space, so the turn is plain
-    # indented text with no visible marker. Both lines share one column.
-    assert out[0] == "    line one"
+    # Color off degrades to a plain `> {text}` caret with no slate/SGR background.
+    assert out[0] == "  > line one"
     assert out[1] == "    line two"
 
 
@@ -1833,7 +1847,7 @@ def test_opening_intent_renders_user_turn_with_gutter() -> None:
          "payload": {"text": "add a flag"}},
     ])
     body = list(rt.render_tree(tree, full=False, color=False, width=80))
-    assert any(ln == "  add a flag" for ln in body)   # depth-0 + 2-col gutter, no caret
+    assert any(ln == "> add a flag" for ln in body)   # depth-0, caret-marked human turn
 
 
 def test_burst_summary_drops_sub_second_duration() -> None:

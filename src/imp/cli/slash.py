@@ -144,11 +144,11 @@ async def ask_line_with_slash(
     unknown, and not-found commands print and re-prompt; /<name> returns the
     resolved skill body; anything else returns as-is.
 
-    Framing: no chrome around the field. While the user types, only the
-    bright-blue ┃ bar marks the turn; on submit prompt_toolkit erases its region
+    Framing: no chrome around the field. While the user types, the slate input
+    field marks the turn; on submit prompt_toolkit erases its region
     (erase_when_done) and the live driver reprints the entered line with the
-    blue ┃ left bar. The gray bracketing rules are gone — the
-    left bar is the marker now.
+    bright-blue `> ` caret. The gray bracketing rules are gone — the caret is
+    the marker now.
 
     `coord` (the run's InterruptCoordinator) wraps the prompt turn in
     `coord.tty_quiesced()` so the ESC reader releases /dev/tty for
