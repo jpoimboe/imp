@@ -217,7 +217,7 @@ phases:
       - name: deferred-sweep
         file: agents/deferred-sweep.md
         tier: medium
-        label: clearing deferred items
+        label: resolving deferred items
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}

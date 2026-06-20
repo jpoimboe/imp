@@ -154,7 +154,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "autosquash-resolve": "resolving fixups",
         "plan-cycle-check": "checking plan coverage",
         "code-reviewer": "reviewing code",
-        "deferred-sweep": "clearing deferred items",
+        "deferred-sweep": "resolving deferred items",
         "sweep-verify": "testing",
         "finalize": "finalizing",
         "wait-for-head": "waiting to merge",
