@@ -214,6 +214,15 @@ def test_lifecycle_role_is_nonbold_yellow_in_all_themes() -> None:
                                                  enabled=True)
 
 
+def test_user_bg_style_truecolor_and_degraded() -> None:
+    assert pal.user_bg_style(enabled=False) == ""
+    assert pal.user_bg_style(enabled=True) == ""
+    pal.set_theme("dark")
+    assert pal.user_bg_style(enabled=True) == "bg:#2b2f3a"
+    pal.set_theme("light")
+    assert pal.user_bg_style(enabled=True) == "bg:#e4eaf2"
+
+
 def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
     braille = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     assert pal.spinner_frame(0) == "⠋"

@@ -177,6 +177,16 @@ def user_bg_open(*, enabled: bool) -> str:
     return "\x1b[48;2;{};{};{}m".format(*rgb)
 
 
+def user_bg_style(*, enabled: bool) -> str:
+    """Entered-input slate as a prompt_toolkit bg rule, or '' when color is off or ansi theme."""
+    if not enabled:
+        return ""
+    rgb = _USER_BG_RGB.get(_active_theme)
+    if rgb is None:
+        return ""
+    return "bg:#{:02x}{:02x}{:02x}".format(*rgb)
+
+
 def rule(width: int, *, enabled: bool) -> str:
     """A horizontal rule the width of the terminal, gray so it recedes."""
     return ansi("─" * max(1, width), "gray", enabled=enabled)
