@@ -176,9 +176,10 @@ class Prompt:
         if question.strip():
             rendered = _prompt_message_text(question, color=self._color, width=width)
             msg: Any = ANSI(rendered) if self._color else rendered
+            cont = " " * len(pal.CARET)
         else:
             msg = self._message(prompt_text, indent=indent)
-        cont = " " * (len(indent) + len(pal.CARET))
+            cont = " " * (len(indent) + len(pal.CARET))
         placeholder = ANSI(_placeholder_text(color=True)) if self._color else None
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
