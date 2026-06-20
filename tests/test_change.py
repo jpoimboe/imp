@@ -28,7 +28,6 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="Add OAuth",
                        change_id="abc123", base_branch="main")
     assert ch.id == "abc123"
-    assert ch.handle == "add-oauth-abc123"   # derived from title + id
     assert ch.base_branch == "main"
     wtpath = tmp_path / ".imp" / "worktrees" / "abc123"
     assert ch.project_root == wtpath

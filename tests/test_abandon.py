@@ -160,8 +160,8 @@ def test_abandon_prompt_and_cancel_use_handle(
                   interactive=True, input_fn=lambda _p: "n")
     out = capsys.readouterr().out
     assert rc == 1
-    assert "Abandon my-feature-yaitd7: 'My feature' (status" in out
-    assert "Abandon cancelled; my-feature-yaitd7 left intact." in out
+    assert "Abandon yaitd7: 'My feature' (status" in out
+    assert "Abandon cancelled; yaitd7 left intact." in out
 
 
 def test_abandon_confirmation_uses_handle(
@@ -174,7 +174,7 @@ def test_abandon_confirmation_uses_handle(
                   interactive=True, input_fn=lambda _p: "y")
     out = capsys.readouterr().out
     assert rc == 0
-    assert "Abandoned my-feature-yaitd7." in out
+    assert "Abandoned yaitd7." in out
     assert "2026-06-13-yaitd7" not in out
 
 

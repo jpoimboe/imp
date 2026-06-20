@@ -215,13 +215,13 @@ def test_empty_thinking_dropped_in_live_path() -> None:
 def test_no_slug_title_header_emitted() -> None:
     # The slug/title banner is gone: change_created (and a later change_renamed)
     # emit no `#slug  title` line — the transcript opens on the first turn.
+    # A rename DOES emit a `→ named …` breadcrumb (tested in test_rename_line.py).
     drv, out = _driver()
-    drv.on_event(ev("1", "change_created", handle="add-auth-7", title="add auth"))
+    drv.on_event(ev("1", "change_created", title="add auth"))
     drv.on_event(ev("2", "change_renamed", id="ch1", old_title="add auth",
-                    new_title="Add OAuth", handle="add-oauth-ch1"))
+                    new_title="Add OAuth"))
     body = _body(out)
     assert not any(ln.startswith("#") for ln in body)
-    assert not any("add auth" in ln or "Add OAuth" in ln for ln in body)
 
 
 def test_open_burst_recap_emitted_at_finish() -> None:
@@ -490,7 +490,7 @@ def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
     node.closed). Uses distinct names for phase ("finalize") and step ("deploy")
     so a phase-level assert cannot accidentally match a step-level breadcrumb."""
     events = [
-        {"type": "change_created", "agent_id": None, "payload": {"handle": "s", "title": "t"},
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
          "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
         {"type": "step_started", "agent_id": None,
          "payload": {"step": "deploy", "kind": "branch", "phase": "finalize"},
@@ -518,7 +518,7 @@ def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
 
 def test_phase_breadcrumb_identical_in_live_and_log() -> None:
     events = [
-        {"type": "change_created", "agent_id": None, "payload": {"handle": "s", "title": "t"},
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
          "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
         {"type": "step_started", "agent_id": None,
          "payload": {"step": "s1", "kind": "branch", "phase": "spec"},
@@ -1062,7 +1062,7 @@ def test_is_final_goto_breadcrumb_is_emitted() -> None:
 def test_change_merged_suppressed_in_live_path() -> None:
     drv, out = _driver()
     for e in [
-        ev("0", "change_created", id="run-x", handle="run-x",
+        ev("0", "change_created", id="run-x",
            title="Run X"),
         ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
         ev("2", "step_completed", step="merge-to-base", kind="merge",

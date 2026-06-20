@@ -1,4 +1,4 @@
-"""Change lifecycle (spec §3, §5): immutable id identity, derived handle, worktree
+"""Change lifecycle (spec §3, §5): immutable id identity, free-form title, worktree
 creation, permanent state home at <control_root>/.imp/changes/<id>/."""
 
 from __future__ import annotations
@@ -49,27 +49,20 @@ class Change:
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
     base_head: str = ""          # base branch tip recorded at draft creation (drafts only)
 
-    @property
-    def handle(self) -> str:
-        """Derived display name + filename stem (never a path or ref):
-        `slugify(title)-<id>` once named, the bare `<id>` while unnamed."""
-        from imp.engine.slug import derive_handle
-        return derive_handle(self.title, self.id)
-
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite change.json under the
         gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
-        Returns the new handle. The id is immutable, so nothing else moves."""
+        Returns the id. The id is immutable, so nothing else moves."""
         old_title = self.title
-        self.title = name                        # handle property now derives anew
+        self.title = name
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
         log.append(agent_id=None, type="change_renamed",
                    payload={"id": self.id, "old_title": old_title,
-                            "new_title": name, "handle": self.handle})
-        return self.handle
+                            "new_title": name})
+        return self.id
 
     def set_project_root(self, new_root: Path) -> None:
         self.project_root = new_root
@@ -185,7 +178,7 @@ class Change:
         )
         change.event_log().append(
             agent_id=None, type="change_created",
-            payload={"id": change_id, "handle": change.handle, "title": title},
+            payload={"id": change_id, "title": title},
         )
         return change
 
@@ -252,7 +245,7 @@ class Change:
         )
         change.event_log().append(
             agent_id=None, type="change_created",
-            payload={"id": change_id, "handle": change.handle, "title": title},
+            payload={"id": change_id, "title": title},
         )
         return change
 

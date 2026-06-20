@@ -1130,18 +1130,17 @@ def test_close_subagent_success_with_marker_text_is_not_terminal_state():
 def test_change_renamed_updates_root_title() -> None:
     # The narrative builder must reflect the settled title after change_renamed.
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", handle="", title=""))
+    b.add(ev("1", "change_created", title=""))
     b.add(ev("2", "change_renamed", id="aaa111",
-             old_title="", new_title="Add OAuth",
-             handle="add-oauth-aaa111"))
+             old_title="", new_title="Add OAuth"))
     assert b.tree.root.title == "Add OAuth"
 
 
 def test_change_renamed_ignores_legacy_partial_event() -> None:
-    # The handler applies new_title + handle atomically. A legacy/partial event
+    # The handler gates on new_title. A legacy/partial event
     # missing new_title must be IGNORED, not half-applied.
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", handle="orig-xyz", title="orig"))
+    b.add(ev("1", "change_created", title="orig"))
     b.add(ev("2", "change_renamed",
              old_title="orig",
              title="renamed"))   # NO new_title and NO handle — legacy/partial schema

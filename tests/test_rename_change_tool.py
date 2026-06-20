@@ -38,9 +38,6 @@ def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
     assert meta["title"] == "Add version flag"
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
     assert renamed and renamed[-1]["payload"]["new_title"] == "Add version flag"
-    # NB: the change_renamed payload still carries a "handle" key here — Change.rename
-    # strips it in Task 5, where test_change_rename_is_content_only asserts the exact
-    # no-handle payload. Asserting its absence now would fail at this commit.
 
 
 def test_rename_strips_outer_whitespace(tmp_path: Path) -> None:

@@ -160,7 +160,7 @@ def _seed_single_step(root: Path) -> Change:
     change = Change(id="s", title="t", base_branch="main", control_root=root,
                     project_root=root, change_dir=change_dir)
     change.event_log().append(agent_id=None, type="change_created",
-                              payload={"id": "s", "handle": change.handle, "title": "t"})
+                              payload={"id": "s", "title": "t"})
     return change
 
 

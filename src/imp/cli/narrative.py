@@ -611,16 +611,13 @@ NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
 def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # A rename carries the new title + handle as a unit (current schema). Apply the
-    # title; ignore a legacy/partial event missing either. (The id is immutable, and
-    # WorkflowNode no longer has a handle field — the event still carries handle for the
-    # breadcrumb until Part 2 removes the payload key and switches it to the id.)
+    # A rename carries the new title. Apply it; ignore a legacy/partial event that
+    # is missing new_title. The id is immutable; the breadcrumb shows the new title.
     new_title = p.get("new_title")
-    new_handle = p.get("handle")
-    if new_title is None or new_handle is None:
+    if new_title is None:
         return
     self._root.title = new_title
-    self._append(RenameNode(name=new_handle))
+    self._append(RenameNode(name=new_title))
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed

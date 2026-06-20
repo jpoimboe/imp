@@ -28,9 +28,9 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
         (ch.change_dir / "change.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
-    new_handle = ch.rename("Add OAuth", log=ch.event_log())
+    returned = ch.rename("Add OAuth", log=ch.event_log())
 
-    assert new_handle == "add-oauth-aaa111"
+    assert returned == "aaa111"                     # rename returns the id
     assert ch.title == "Add OAuth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
@@ -40,8 +40,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     assert "id" in meta and "slug" not in meta
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"][-1]
     assert renamed["payload"] == {
-        "id": id_before, "old_title": "orig", "new_title": "Add OAuth",
-        "handle": "add-oauth-aaa111"}
+        "id": id_before, "old_title": "orig", "new_title": "Add OAuth"}
 
 
 class _RenamingRunner:
