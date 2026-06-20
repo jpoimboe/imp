@@ -5,14 +5,37 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.engine import worktree
-from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
+
+LAYOUT_VERSION = 1  # bump in the SAME commit as any breaking change-home layout/schema change
+
+
+def _imp_commit(control_root: Path) -> str:
+    """For the refusal breadcrumb; empty string when git is absent or not a repo."""
+    proc = worktree._git(control_root, "rev-parse", "HEAD")
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+_MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {}
+
+
+def migrate(old_v: int, new_v: int, change_dir: Path) -> None:
+    """Raises LayoutMismatch when no migration path (old_v, new_v) is registered."""
+    fn = _MIGRATIONS.get((old_v, new_v))
+    if fn is None:
+        meta = json.loads((change_dir / "change.json").read_text())
+        raise LayoutMismatch(stored=old_v, engine=new_v,
+                             imp_commit=meta.get("imp_commit", ""),
+                             change_dir=change_dir)
+    fn(change_dir)
 
 
 @dataclass
@@ -116,6 +139,8 @@ class Change:
             "depends_on": list(depends_on or []),
             "project_root": str(wt_path),
             "materialized": True,
+            "layout_version": LAYOUT_VERSION,
+            "imp_commit": _imp_commit(control_root),
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -191,6 +216,8 @@ class Change:
             "project_root": str(control_root),
             "materialized": False,
             "base_head": base_head,
+            "layout_version": LAYOUT_VERSION,
+            "imp_commit": _imp_commit(control_root),
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -235,6 +262,10 @@ class Change:
         if not change_dir.is_dir():
             raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
+        stored = meta.get("layout_version", 0)
+        if stored != LAYOUT_VERSION:
+            migrate(stored, LAYOUT_VERSION, change_dir)
+            meta = json.loads((change_dir / "change.json").read_text())
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
             else (control_root / ".imp" / "worktrees" / change_id).resolve()

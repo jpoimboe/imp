@@ -44,7 +44,7 @@ from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
-from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import derive_handle, new_change_id
@@ -900,6 +900,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return rc
     try:
         change = Change.load(control, change_id)
+    except LayoutMismatch as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     except (LoadError, LoadErrors):
         return _resume_gone(control, change_id)
     state = State.load(change.state_dir)

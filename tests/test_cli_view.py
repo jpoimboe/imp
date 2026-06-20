@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
+from imp.engine.change import LAYOUT_VERSION
 
 # ── resume renders through LiveDriver (no replay) ────────────────────────────
 
@@ -34,7 +35,8 @@ def _make_change_worktree(control: Path, change_id: str, title: str,
     change_dir.mkdir(parents=True)
     (change_dir / "state").mkdir()
     (change_dir / "change.json").write_text(
-        json.dumps({"id": change_id, "title": title, "base_branch": "main"})
+        json.dumps({"id": change_id, "title": title, "base_branch": "main",
+                    "layout_version": LAYOUT_VERSION})
     )
     (change_dir / "events.jsonl").write_text("")
     state = State(id=change_id, status=status, step="spec", step_attempt=0)
@@ -119,7 +121,8 @@ def test_cli_log_pipes_through_narrative(
     change_dir = tmp_path / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
+                    "layout_version": LAYOUT_VERSION}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -162,7 +165,8 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     change_dir = tmp_path / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
+                    "layout_version": LAYOUT_VERSION}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -210,7 +214,8 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     change_dir = tmp_path / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": "sub", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "sub", "base_branch": "main",
+                    "layout_version": LAYOUT_VERSION}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -301,7 +306,8 @@ def test_cmd_log_auto_picks_latest_by_mtime(
         change_dir = tmp_path / ".imp" / "changes" / slug
         change_dir.mkdir(parents=True)
         (change_dir / "change.json").write_text(
-            json.dumps({"id": slug, "title": title, "base_branch": "main"}),
+            json.dumps({"id": slug, "title": title, "base_branch": "main",
+                        "layout_version": LAYOUT_VERSION}),
         )
         events_path = change_dir / "events.jsonl"
         events_path.write_text(
