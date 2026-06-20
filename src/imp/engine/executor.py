@@ -176,6 +176,7 @@ async def run_change(
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
     seed_opening: str | None = None,
+    opening_intent: str | None = None,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
@@ -228,6 +229,9 @@ async def run_change(
             _emit(log, "tiers_resolved",
                   {"tiers": details["tiers"], "steps": details["steps"]},
                   agent_id=None)
+            if opening_intent:
+                _emit(log, "opening_intent", {"text": opening_intent},
+                      agent_id=None)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
