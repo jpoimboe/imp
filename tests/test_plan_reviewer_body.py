@@ -27,11 +27,16 @@ def test_plan_reviewer_has_two_major_sharpenings() -> None:
     assert "behavioral impact" in low and "not file type" in low
 
 
-def test_plan_reviewer_softened_decisions_handling() -> None:
-    low = _body().lower()
-    # A user-confirmed decision contradicting an explicit spec AC is Major.
+def test_plan_reviewer_routes_recorded_scope_deviations_to_gate() -> None:
+    body = _body()
+    low = body.lower()
+    # A scope-contradicting decision still hinges on an explicit spec AC,
     assert "acceptance criterion" in low
-    assert "regardless" in low
+    # but a recorded deviation rides to the gate non-blocking,
+    assert "needs-decision" in low
+    assert "non-blocking" in low
+    # while an unrecorded sneak-by still blocks Major.
+    assert "sneak-by" in low
 
 
 def test_plan_reviewer_reads_only_newest_plan_and_spec() -> None:

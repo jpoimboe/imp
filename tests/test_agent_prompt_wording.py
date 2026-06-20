@@ -49,6 +49,15 @@ def test_plan_writer_decides_and_records_scope_contradictions() -> None:
     assert "authoritative for that point" not in body
 
 
+def test_both_prompts_route_recorded_scope_deviations_to_the_gate() -> None:
+    writer = _agent_prompt("plan-writer")
+    reviewer = _agent_prompt("plan-reviewer")
+    # No contradiction between the two: both route a recorded scope deviation to
+    # the merge gate rather than re-litigating it in the loop.
+    assert "ride to the" in writer
+    assert "ride to the" in reviewer
+
+
 def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     for name, agent in wf.agents.items():
