@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -1506,3 +1506,83 @@ def test_build_client_installs_session_isolation_on_real_arm(
     result = factory_runner._build_client("OPTS2")
     assert result == ("factory", "OPTS2")
     assert installed == [], "the test-factory arm must not install isolation"
+
+
+@pytest.mark.anyio
+async def test_task_tool_call_carries_subagent_label(tmp_path, monkeypatch) -> None:
+    from imp.agents.tools.context import ToolContext
+    from imp.providers import claude_code as cc
+
+    async def _fake_dispatch(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return "sub done"
+
+    async def _noop_sweep(ctx):
+        return None
+
+    monkeypatch.setattr(cc, "dispatch_task", _fake_dispatch)
+    monkeypatch.setattr(cc._bg, "_sweep_bg", _noop_sweep)
+
+    log = InMemoryEventLog()
+    explorer = replace(_agent_def(), name="explorer", label="exploring codebase")
+    ctx = ToolContext(
+        project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        subagent_defs={"explorer": explorer}, event_log=log)
+    state = cc._RunState(agent_id="step:p/s")
+
+    class _StubTool:
+        description = ""
+        input_schema: ClassVar[dict] = {}
+
+    def _fake_sdk_tool(name, desc, schema, annotations=None):
+        def deco(fn):
+            return fn
+        return deco
+
+    impl = cc._wrap_one("task", _StubTool(), ctx, state, _fake_sdk_tool)
+    await impl({"subagent_name": "explorer", "task_description": "go"})
+
+    call = next(e for e in log.read() if e["type"] == "tool_call")
+    assert call["payload"]["name"] == "task"
+    assert call["payload"]["label"] == "exploring codebase"
+
+
+@pytest.mark.anyio
+async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> None:
+    from imp.agents.tools.context import ToolContext
+    from imp.providers import claude_code as cc
+
+    async def _fake_dispatch(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return "sub done"
+
+    async def _noop_sweep(ctx):
+        return None
+
+    monkeypatch.setattr(cc, "dispatch_task", _fake_dispatch)
+    monkeypatch.setattr(cc._bg, "_sweep_bg", _noop_sweep)
+
+    log = InMemoryEventLog()
+    explorer = replace(_agent_def(), name="explorer", label=None)
+    ctx = ToolContext(
+        project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        subagent_defs={"explorer": explorer}, event_log=log)
+    state = cc._RunState(agent_id="step:p/s")
+
+    class _StubTool:
+        description = ""
+        input_schema: ClassVar[dict] = {}
+
+    def _fake_sdk_tool(name, desc, schema, annotations=None):
+        def deco(fn):
+            return fn
+        return deco
+
+    impl = cc._wrap_one("task", _StubTool(), ctx, state, _fake_sdk_tool)
+    # Case 1: subagent name not in subagent_defs
+    await impl({"subagent_name": "ghost", "task_description": "haunt"})
+    # Case 2: subagent exists but label=None
+    await impl({"subagent_name": "explorer", "task_description": "go"})
+
+    calls = [e for e in log.read() if e["type"] == "tool_call"]
+    assert len(calls) == 2
+    assert "label" not in calls[0]["payload"]
+    assert "label" not in calls[1]["payload"]
