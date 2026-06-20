@@ -60,6 +60,7 @@ class ToolContext:
     # rename_change tool mutates change.title + rewrites change.json through it.
     # Distinct from change_context, which is the FROZEN render-time snapshot.
     change: Any = None
+    change_home: Path | None = None
     # The runner injects this callable as the wait_for_user / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
@@ -181,6 +182,10 @@ class ToolContext:
 
     def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:
         check_permission(self.fs_permissions, op, virtual)
+
+
+def change_home_path(change_home: str | None) -> Path | None:
+    return Path(change_home) if change_home else None
 
 
 def _supports_killpg() -> bool:

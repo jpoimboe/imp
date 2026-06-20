@@ -345,3 +345,22 @@ def test_terminate_reaps_regrouped_descendant(tmp_path):
         assert gone, "re-grouped descendant survived the reaping path"
 
     anyio.run(go)
+
+
+def test_change_home_path_maps_empty_to_none() -> None:
+    from imp.agents.tools.context import change_home_path
+    assert change_home_path("") is None
+    assert change_home_path(None) is None
+    assert change_home_path("/c/.imp/changes/abc") == Path("/c/.imp/changes/abc")
+
+
+def test_tool_context_change_home_defaults_none(tmp_path: Path) -> None:
+    from imp.agents.tools.context import ToolContext
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "e.jsonl")
+    assert ctx.change_home is None
+    ctx.change_home = tmp_path / ".imp" / "changes" / "abc"
+    assert ctx.change_home == tmp_path / ".imp" / "changes" / "abc"
+    assert ToolContext(project_root=tmp_path, fs_permissions=(),
+                       events_path=tmp_path / "e.jsonl",
+                       change_home=tmp_path).change_home == tmp_path
