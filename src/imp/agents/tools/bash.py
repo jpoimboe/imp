@@ -16,6 +16,7 @@ import json
 import os
 import signal
 from dataclasses import dataclass
+from pathlib import Path
 from subprocess import PIPE
 
 import anyio
@@ -78,7 +79,8 @@ async def bash(
         change_id=src.id if src else "",
         change_handle=src.handle if src else "",
         change_title=src.title if src else "",
-        change_dir=getattr(src, "change_dir", None),
+        change_dir=(getattr(src, "change_dir", None)
+                    or (Path(h) if (h := getattr(src, "change_home", None)) else None)),
         verify_command=ctx.verify_command,
     )
     env = overlay_engine_env(os.environ, eng)
