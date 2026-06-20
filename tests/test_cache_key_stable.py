@@ -27,6 +27,8 @@ def test_cache_key_stable_across_title_rename() -> None:
     # Keyed on the immutable id: identical before/after the title rename.
     assert _prompt_cache_key(before.id, aid) == _prompt_cache_key(after.id, aid)
 
-    # Guard the keying choice: had the call site keyed on the (rotating) handle,
-    # the key WOULD have changed — proving id-keying is what buys stability.
-    assert _prompt_cache_key(before.handle, aid) != _prompt_cache_key(after.handle, aid)
+    # Guard the keying choice: a rotating title-derived string WOULD change the key,
+    # so keying on it (rather than the immutable id) would break stability.
+    assert _prompt_cache_key("first-name-fff666", aid) != _prompt_cache_key(
+        "second-name-fff666", aid
+    )

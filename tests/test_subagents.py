@@ -166,7 +166,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     assert inv.agent_def.name == "reviewer"
     assert inv.user_input_fn is None  # subagents are headless
     assert inv.provider_name == "anthropic"
-    assert inv.change_context.handle == "change-42"
+    assert inv.change_context.id == "change-42"
 
 
 @pytest.mark.anyio
