@@ -1391,8 +1391,8 @@ def _resume_gone(control: Path, change_id: str) -> int:
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
-_INFLIGHT = ("running", "paused", "errored", "merge_blocked")
-RESUMABLE = ("paused", "errored", "merge_blocked")
+_INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
+RESUMABLE = ("paused", "errored", "merge_blocked", "draft")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1450,6 +1450,18 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         return None
 
 
+def _draft_label(status: str, change_json: bytes) -> str:
+    """Returns "draft" for un-materialized paused changes; otherwise status."""
+    if status != "paused":
+        return status
+    try:
+        if json.loads(change_json).get("materialized", True) is False:
+            return "draft"
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return status
+
+
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = _change_home(control, change_id)
     # journal_show returns bytes | None; the live change-home branch always finds
@@ -1471,7 +1483,8 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
         return None
     # A live worktree may hold a crashed `running` run — re-derive against its
     # lock (journaled rows are terminal, so the check is a no-op there).
-    return (row[0], _effective_status(row[1], cdir), *row[2:])
+    status = _draft_label(_effective_status(row[1], cdir), change_json)
+    return (row[0], status, *row[2:])
 
 
 def _status_rows(control: Path) -> list[_Row]:
@@ -1484,7 +1497,7 @@ def _status_rows(control: Path) -> list[_Row]:
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
             continue
-        status = _effective_status(row[1], cdir)   # crashed `running` → `errored`
+        status = _draft_label(_effective_status(row[1], cdir), change_json)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue
