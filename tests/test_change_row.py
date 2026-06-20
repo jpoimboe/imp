@@ -117,3 +117,20 @@ def test_name_budget_floors_at_minimum(monkeypatch):
     monkeypatch.setattr("shutil.get_terminal_size",
                         lambda fallback=(80, 24): os.terminal_size((20, 24)))
     assert name_budget() == NAME_MIN
+
+
+def test_backlog_status_renders_dim():
+    from imp.cli.change_row import STATUS_COLORS
+    assert STATUS_COLORS["backlog"] == ("dim",)
+
+
+def test_long_step_truncates_to_column():
+    from datetime import UTC, datetime
+
+    from imp.cli import change_row
+    long_step = "blocked: 2026-06-16-aaaaaa, 2026-06-16-bbbbbb"
+    line = change_row.format_change_line(
+        change_id="2026-06-16-x", title="t", status="backlog", step=long_step,
+        last_iso=None, now=datetime(2026, 6, 20, tzinfo=UTC), color=False)
+    assert long_step not in line          # the full readiness was truncated
+    assert "blocked: 2026-06-16…" in line  # cut to text[:19] + "…" at STEP_W (20)

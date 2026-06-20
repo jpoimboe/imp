@@ -1800,18 +1800,15 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backlog_status_lines(control: Path, *, now: datetime) -> list[str]:
-    recs = sorted(backlog.list_records(control),
-                  key=lambda r: r.get("created_at", ""), reverse=True)
-    lines: list[str] = []
-    for rec in recs:
+def _backlog_rows(control: Path) -> list[_Row]:
+    rows: list[_Row] = []
+    for rec in backlog.list_records(control):
         ready, unmerged = backlog.readiness(control, rec["depends_on"])
-        state = "ready" if ready else f"blocked on {', '.join(unmerged)}"
-        age = change_row.relative_age(rec.get("created_at"), now=now)
-        lines.append(
-            f"  {rec['id']}  {state}  {age}  {rec['created_by']}  "
-            f"{rec['title'] or '(unnamed)'}")
-    return lines
+        step = "ready" if ready else f"blocked: {', '.join(unmerged)}"
+        created = rec.get("created_at", "")
+        rows.append((rec["id"], "backlog", step, created,
+                     rec.get("title") or "", created))
+    return rows
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -1825,9 +1822,9 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(f"imp: {_notice}")
     now = datetime.now(UTC)
     inflight = _sort_rows_newest_first(_status_rows(control))
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
-    backlog_lines = _backlog_status_lines(control, now=now)
-    if not inflight and not past and not backlog_lines:
+    if not inflight and not backlog_rows and not past:
         print(_NO_CHANGES_MESSAGE)
         return 0
     color = should_use_color(sys.stdout)
@@ -1837,19 +1834,17 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2],
             last_iso=r[3], now=now, color=color, name_width=name_w))
+    for r in backlog_rows:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color, name_width=name_w))
     if past:
-        if inflight:
+        if inflight or backlog_rows:
             print()
         for r in past:
             print(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
-    if backlog_lines:
-        if inflight or past:
-            print()
-        print("Backlog")
-        for line in backlog_lines:
-            print(line)
     return 0
 
 
