@@ -503,35 +503,24 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
             # something the human typed, so it never renders as a `>` turn.
             return
-        # The user's turn renders at the node's own depth (the step's content
-        # column), so the `> ` caret lines up with the step header / agent bullet
-        # rather than hanging out at the far-left margin. A bright-blue caret leads
-        # the first line; the typed text stays in the terminal's default fg.
-        # Continuation lines hang-indent under the text (a blank the width of the
-        # caret) so the message body aligns with ITSELF. Each line carries the
-        # subtle "entered input" background (the replacement for the old gray
-        # rule), opened AFTER the structural indent so the highlight hugs the
-        # content (not the indent): the caret returns to default fg (39), NOT a
-        # full reset, so the bg keeps painting under the text; one reset closes it.
+        # A blue ▌ left bar marks the human turn in the gutter on every line (no
+        # background fill → no trailing spaces, clean copy/paste, even left edge).
+        # First line: {indent}{▌} {> }{text}; continuations: {indent}{▌}   {text}
+        # (body aligned under the first line's text).
         indent = _gutter_indent(depth, gutters, color)
-        bg = pal.user_bg_open(enabled=color)
-        if color:
-            caret = pal.sgr(*pal.NODE_COLORS["user"], enabled=True) + pal.CARET + "\x1b[39m"
-        else:
-            caret = pal.CARET
-        hang = " " * len(pal.CARET)
-        avail = max(8, width - _INDENT_W * depth - len(pal.CARET))
+        bar = pal.user_bar(enabled=color)
+        caret = pal.caret(enabled=color)
+        avail = max(8, width - _INDENT_W * depth - 2 - len(pal.CARET))
         first = True
         for para in _caret_escape(node.text).split("\n"):
             if not para:
-                yield indent
+                yield indent + bar
                 continue
             for line in textwrap.wrap(para, width=avail) or [""]:
-                prefix = bg + (caret if first else hang)
-                # Close the line only when it opened an escape (a bg and/or the
-                # colored caret); a plain hang under the ansi theme / color-off
-                # stays bare — no dangling reset.
-                yield indent + prefix + line + ("\x1b[0m" if "\x1b" in prefix else "")
+                if first:
+                    yield indent + bar + " " + caret + line
+                else:
+                    yield indent + bar + "   " + line
                 first = False
         return
 
@@ -631,10 +620,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.SkillLoadNode):
-        # A loaded skill, shown once as a quiet `load skill {name}` line (the
+        # A loaded skill, shown once as a quiet `loading skill {name}` line (the
         # redundant `load_skill` tool call is dropped from the burst recap). No
         # checkmark — indented two cols like the other sub-detail chrome.
-        yield _line(f"  load skill {node.name}", depth, color,
+        yield _line(f"  loading skill {node.name}", depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 
@@ -705,7 +694,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     Mirrors what the live status line showed WHILE the burst ran, left behind as a
     quiet marker so a `prose → tools → prose` turn shows the work happened without
     expanding it. Three names are omitted: `load_skill` (it renders as its own
-    `load skill …` line, so counting it here would double up), the bare `tool`
+    `loading skill …` line, so counting it here would double up), the bare `tool`
     placeholder (the sentinel name for an orphan/unnamed result — no real tool
     info), and `wait_for_user` (a gate call, not a user-visible tool action).
     Returns None when nothing renderable remains."""

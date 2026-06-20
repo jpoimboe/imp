@@ -696,11 +696,10 @@ def test_refresh_status_no_output_on_non_tty() -> None:
     assert drv._prev_prose is True   # untouched
 
 
-def test_user_message_resets_status_span() -> None:
-    """The status-line elapsed timer measures 'time the agent has been working
-    since the last user reply' — across tools, thinks, and multiple
-    llm_responses within one interactive turn. So `restart_span()` fires on
-    `step_started` AND on `user_message`."""
+def test_status_span_restarts_on_prose_turns_steps_and_user_replies() -> None:
+    """The status timer measures the agent's working burst since it last spoke.
+    restart_span() fires on step_started, user_message, AND a genuine prose
+    llm_response — but NOT on an empty-text (tool-use-carrier) llm_response."""
     calls: list[str] = []
 
     class _CountingStatus(LiveStatus):
@@ -714,19 +713,20 @@ def test_user_message_resets_status_span() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),
-        ev("3", "tool_call", agent_id="a", id="b1", name="bash", input={}),
-        ev("4", "tool_result", agent_id="a", id="b1", content="ok"),
-        ev("5", "thinking", agent_id="a", content="hmm"),
+           model="m", provider="anthropic"),                              # restart
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "tool_use", "id": "t", "name": "bash",
+                             "input": {}}]}, usage={}),                    # NO restart (no prose)
+        ev("4", "tool_call", agent_id="a", id="t", name="bash", input={}),
+        ev("5", "tool_result", agent_id="a", id="t", content="ok"),
         ev("6", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),
-        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),
+           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),  # restart (prose)
+        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),  # restart
         ev("8", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),
+           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),  # restart (prose)
     ]:
         drv.on_event(e)
-    # restart_span fired exactly at step_started (e2) and user_message (e7).
-    assert calls == ["restart", "restart"]
+    assert calls == ["restart", "restart", "restart", "restart"]
 
 
 def test_compose_status_colors_count_detail_label() -> None:
@@ -778,7 +778,7 @@ def test_deferred_print_lines_held_then_flushed_before_user_turn() -> None:
     drv.on_event(ev("sk", "skill_load", agent_id="a", name="refactor", source="human"))
     assert out.getvalue() == base                       # nothing printed yet
     drv.flush_deferred()
-    assert "load skill refactor" in out.getvalue()      # flushed at prompt exit
+    assert "loading skill refactor" in out.getvalue()   # flushed at prompt exit
 
 
 def test_flush_deferred_clears_prompt_active_for_liveness() -> None:
@@ -954,12 +954,9 @@ def test_compose_status_returns_activity_content() -> None:
     assert "\x1b[90m" in result    # gray detail segment
 
 
-def test_compose_status_indented_to_frontier_depth_aligns_spinner_with_bullets() -> None:
-    """The transient status line is indented to the frontier depth so the spinner
-    glyph lands in the bullet column — the `• `/`▸ ` rows it sits beneath render
-    at this same depth. The indent lives in the driver, not the shared
-    compose_activity_status helper (so the --tui toolbar is unaffected)."""
-    from imp.cli import render_text as rt
+def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
+    """The transient status line renders flush-left — no gutter indent — even
+    while a step is streaming at a deeper frontier."""
     from imp.cli.live_driver import compose_activity_status
 
     out = _Pipe()
@@ -967,35 +964,13 @@ def test_compose_status_indented_to_frontier_depth_aligns_spinner_with_bullets()
     drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
     drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
-
-    # During a streaming step the bullets render at the frontier depth.
-    assert drv._frontier_depth() == 1
-    indent = rt._gutter_indent(1, (), False)
+    assert drv._frontier_depth() == 1                  # streaming below the margin
     raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
-    assert raw is not None and not raw.startswith(" ")   # helper itself is flush-left
-
     result = drv.compose_status(0, 1.0)
-    assert result == indent + raw
-    # spinner glyph sits exactly in the bullet column (after the depth indent).
-    assert result[:len(indent)] == indent
-    assert result[len(indent)] == "⠋"
+    assert result == raw                                # no indent added
+    assert not result.startswith(" ")                  # spinner at column 0
+    assert result[0] == "⠋"
 
-
-def test_compose_status_unindented_at_root_depth() -> None:
-    """No active phase/step → frontier at root (depth 0) → no indent prefix."""
-    from imp.cli import render_text as rt
-
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-                    input={"command": "ls"}))
-    # The shared helper is unconditionally flush-left regardless of depth.
-    from imp.cli.live_driver import compose_activity_status
-    raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
-    assert raw is not None
-    # depth-0 indent is empty, so a root-depth status would be the bare line.
-    assert rt._gutter_indent(0, (), False) == ""
 
 
 def test_interrupt_breadcrumb_in_live_path() -> None:
@@ -1209,9 +1184,9 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert "reviewing plan · thinking" in line
+    assert "reviewing plan · 18s" in line
+    assert "thinking" not in line                  # the thinking verb is dropped
     assert "review · reviewing plan" not in line   # the phase is NOT shown in the status line
-    assert "18s" in line
 
 
 def test_labeled_forward_goto_label_in_both_paths() -> None:
@@ -1285,50 +1260,43 @@ def test_quiet_goto_renders_nothing_in_live_path() -> None:
     assert body == _render_body(events)   # live == imp log, line for line
 
 
-def test_current_activity_anchors_timer_to_in_flight_call() -> None:
-    # Timer anchors to the running call (c2), not a resolved (c1) or killed (c3) call.
-    clock = [50.0]
-    b = nv.NarrativeBuilder(now=lambda: clock[0])
+def test_current_activity_detail_anchors_to_in_flight_call() -> None:
+    # Detail names the running call (c2), not a resolved (c1) or killed (c3) one.
+    b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p", label="searching"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="read_file",
-            input={"p": "x"}))           # stamped at clock=50.0
+            input={"p": "x"}))
     b.add(ev("r1", "tool_result", agent_id="a", id="c1", content="ok"))
-    clock[0] = 70.0
     b.add(ev("t2", "tool_call", agent_id="a", id="c2", name="bash",
-            input={"command": "ls"}))    # stamped at clock=70.0, still running
-    clock[0] = 71.0
+            input={"command": "ls"}))           # still running
     b.add(ev("t3", "tool_call", agent_id="a", id="c3", name="grep",
-            input={"q": "y"}))           # stamped at clock=71.0
-    b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))  # c3 killed
-    clock[0] = 73.0
+            input={"q": "y"}))
+    b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))
     act = b.current_activity()
     assert act is not None
-    assert act.step_label == "searching"  # the step display label
-    assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
-    assert act.count == "3 calls"        # retained Activity.count basis keeps killed
-    assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0
+    assert act.step_label == "searching"
+    assert act.detail == "bash ls"       # in-flight call (c2), not killed c3
+    assert act.count == "3 calls"        # count basis keeps killed
 
 
-def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
+def test_compose_activity_status_has_no_per_call_timer() -> None:
     from imp.cli.live_driver import compose_activity_status
 
-    clock = [100.0]
-    b = nv.NarrativeBuilder(now=lambda: clock[0])
+    b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl",
              label="implementing"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-            input={"command": "sleep 600"}))       # stamped at clock=100.0
-    clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
+            input={"command": "sleep 600"}))
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    expected = "implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
-    assert line.split(" ", 1)[1] == expected
+    # Only the single trailing burst timer (900s = 15m 0s); no per-call clock.
+    assert line.split(" ", 1)[1] == "implementing · 1 call · bash sleep 600 · 15m 0s"
 
 
 def test_status_spine_label_activity_elapsed() -> None:
     from imp.cli.live_driver import compose_activity_status
 
-    # labeled step, fallback (thinking) activity: label · activity · elapsed.
+    # labeled agent step: step_label · elapsed (no thinking verb).
     # The phase is deliberately omitted (it lives in the scrollback phase header).
     b = nv.NarrativeBuilder()
     for e in [
@@ -1339,9 +1307,9 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert line.split(" ", 1)[1] == "reviewing plan · thinking · 18s"
+    assert line.split(" ", 1)[1] == "reviewing plan · 18s"   # no thinking verb
 
-    # quiet/unlabeled step: the step segment is dropped -> activity · elapsed.
+    # quiet/unlabeled script step: no display label, no command -> bare timer.
     q = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1350,7 +1318,7 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
-    assert qline.split(" ", 1)[1] == "running · 4s"
+    assert qline.split(" ", 1)[1] == "4s"
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:

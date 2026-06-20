@@ -962,27 +962,22 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_blue_caret_then_fg_text_color_on() -> None:
-    """The user turn renders at the node's own depth (depth=1 → a 2-space indent,
-    aligning the caret with the step column): a bright-blue `> ` caret leads, then
-    returns to DEFAULT fg (39, not a full reset) so the body stays uncolored.
-    Continuation lines hang under the text (caret-width blank) so the body aligns
-    with itself. The ansi theme (the test default) has no subtle-slate background,
-    so only the caret colors the line and the bare hang carries no escape."""
+def test_user_message_blue_bar_then_caret_text_color_on() -> None:
+    """The user turn renders at the node's own depth (depth=1 → a 2-space indent),
+    with a blue ▌ left bar + a space gutter, then a bright-blue `> ` caret and the
+    body in default fg. Continuation lines repeat the bar + a 3-space pad so the
+    body aligns under itself. No background fill, no trailing spaces."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    # 2-space structural indent, then bright-blue caret, fg-only reset (39), body.
-    assert out[0] == "  \x1b[94m> \x1b[39mline one\x1b[0m"
-    assert "\x1b[104m" not in out[0]     # no background fill under the ansi theme
-    # Continuation: indent (2) + hang under the text (2), no opened escape → bare.
-    assert out[1] == "    line two"
+    assert out[0] == "  \x1b[94m▌\x1b[0m \x1b[94m> \x1b[0mline one"
+    assert out[1] == "  \x1b[94m▌\x1b[0m   line two"
+    assert "\x1b[48;2;" not in out[0] and "\x1b[104m" not in out[0]   # no bg
 
 
-def test_user_message_carries_subtle_bg_under_truecolor_theme() -> None:
-    """Under a truecolor theme the entered turn carries the subtle "entered input"
-    background (the replacement for the old gray rule): a 48;2 bg opens each line,
-    survives the caret's fg-only reset, and a single reset closes the line."""
+def test_user_message_blue_bar_no_bg_in_truecolor_theme() -> None:
+    """No background fill in any theme now — the blue ▌ bar marks the turn, so a
+    truecolor theme no longer paints a slate background."""
     pal.set_theme("dark")
     try:
         node = nv.UserMessageNode(text="hello", interactive=True)
@@ -990,17 +985,17 @@ def test_user_message_carries_subtle_bg_under_truecolor_theme() -> None:
     finally:
         pal.set_theme("ansi")
     assert len(out) == 1
-    assert out[0].startswith("\x1b[48;2;")          # subtle bg opens the line
-    assert "\x1b[39m" in out[0]                      # caret returns to default fg, bg persists
-    assert out[0].endswith("hello\x1b[0m")           # body then one closing reset
+    assert "\x1b[48;2;" not in out[0]               # no background fill
+    assert "\x1b[38;2;127;162;202m▌\x1b[0m" in out[0]  # truecolor blue left bar present
+    assert out[0].endswith("hello")                 # body last; no trailing reset/space
 
 
-def test_user_message_no_color_when_off_but_keeps_caret() -> None:
+def test_user_message_no_color_keeps_caret_and_blank_gutter() -> None:
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     joined = "\n".join(out)
-    assert "\x1b[94m" not in joined and "\x1b[104m" not in joined  # no color off-TTY
-    assert "> line one" in joined           # `> ` still anchors the speaker
+    assert "\x1b[94m" not in joined and "\x1b[104m" not in joined and "▌" not in joined
+    assert "> line one" in joined            # `> ` still anchors the speaker
 
 
 def test_lean_subagent_is_single_status_row() -> None:
@@ -1782,7 +1777,7 @@ def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
     assert "·" not in row
 
 
-def test_opening_intent_renders_flush_left_user_turn() -> None:
+def test_opening_intent_renders_user_turn_with_gutter() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
          "payload": {"handle": "h", "title": "t"}},
@@ -1790,7 +1785,7 @@ def test_opening_intent_renders_flush_left_user_turn() -> None:
          "payload": {"text": "add a flag"}},
     ])
     body = list(rt.render_tree(tree, full=False, color=False, width=80))
-    assert any(ln == "> add a flag" for ln in body)
+    assert any(ln == "  > add a flag" for ln in body)   # depth-0 + 2-col gutter
 
 
 def test_burst_summary_drops_sub_second_duration() -> None:
@@ -1800,3 +1795,11 @@ def test_burst_summary_drops_sub_second_duration() -> None:
         nv.ToolCall(call_id="b1", name="read_file", input={"p": "1"}))
     summary = rt._burst_summary(burst)
     assert summary == "1 call · read_file"
+
+
+def test_skill_load_renders_gerund() -> None:
+    node = nv.SkillLoadNode(name="refactor", source="human")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    joined = "\n".join(out)
+    assert "loading skill refactor" in joined
+    assert "load skill refactor" not in joined   # imperative form is gone

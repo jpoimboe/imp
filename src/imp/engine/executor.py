@@ -484,8 +484,11 @@ async def _dispatch_step(
 
 
 def _step_started_payload(step: Step) -> dict[str, Any]:
-    return {"step": step.name, "kind": step.kind, "phase": step.phase,
-            "quiet": step.quiet, "label": step.label}
+    payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
+               "quiet": step.quiet, "label": step.label}
+    if step.kind == "script":
+        payload["command"] = step.command
+    return payload
 
 
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:

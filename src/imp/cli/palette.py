@@ -126,40 +126,26 @@ def sgr(*codes: str, enabled: bool) -> str:
     return "".join(_ANSI[c] for c in codes)
 
 
-# Subtle "entered input" background, per truecolor theme — the quiet highlight
-# that marks a submitted user turn (replacing the old bright-blue fill and the
-# gray rule). The `ansi` 16-color theme has no good subtle slate, so it gets no
-# background; the bright-blue caret alone marks the turn there. dark: a hair
-# above a #1e1e1e surface; light: a pale blue tint on a near-white surface.
-_USER_BG_RGB: dict[str, tuple[int, int, int]] = {
-    "dark": (0x2B, 0x2F, 0x3A),
-    "light": (0xE4, 0xEA, 0xF2),
-}
-
-
-def user_bg_open(*, enabled: bool) -> str:
-    """The opening SGR for the entered-input background, or '' when color is off
-    or the active theme is `ansi` (no subtle slate in 16 colors)."""
-    if not enabled:
-        return ""
-    rgb = _USER_BG_RGB.get(_active_theme)
-    if rgb is None:
-        return ""
-    return "\x1b[48;2;{};{};{}m".format(*rgb)
-
-
-# The interactive input field. The bright-blue caret marks the user's turn; once
-# submitted, the typed line carries a subtle background (user_bg_open) so it reads
-# as input, not agent output — replacing the old bright-blue background fill and
-# the gray bracketing rules. bright_blue keeps the "user = blue" identity
-# (NODE_COLORS["user"]).
+# The interactive input field. A bright-blue ▌ left bar marks the user's turn
+# in the gutter; the bright-blue `> ` caret leads the first line of text.
+# bright_blue keeps the "user = blue" identity (NODE_COLORS["user"]).
 CARET = "> "
+BAR = "▌"
 
 
 def caret(*, enabled: bool) -> str:
     """The styled prompt caret as a raw ANSI string (callers that drive
     prompt_toolkit must wrap it in ANSI(); plain-stdout callers print it)."""
     return ansi(CARET, "bright_blue", enabled=enabled)
+
+
+def user_bar(*, enabled: bool) -> str:
+    """The blue ▌ left-rule that marks a user turn's gutter, or a single space
+    when color is off — keeps the gutter column blank so the live input
+    prompt's color-off appearance matches the reprinted turn."""
+    if not enabled:
+        return " "
+    return ansi(BAR, "bright_blue", enabled=True)
 
 
 def rule(width: int, *, enabled: bool) -> str:

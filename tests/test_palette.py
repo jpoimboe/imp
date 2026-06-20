@@ -213,6 +213,11 @@ def test_light_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
     assert _lum(light["blue"]) < _lum(light["step"]) < _lum(light["gray"])
 
 
+def test_user_bar_is_blue_glyph_under_color_and_space_off() -> None:
+    assert pal.user_bar(enabled=True) == "\x1b[94m▌\x1b[0m"
+    assert pal.user_bar(enabled=False) == " "   # blank gutter when color is off
+
+
 def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
     braille = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     assert pal.spinner_frame(0) == "⠋"

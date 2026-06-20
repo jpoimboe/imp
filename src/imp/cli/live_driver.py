@@ -47,8 +47,6 @@ def compose_activity_status(
         parts.append(pal.ansi(activity.count, enabled=color))
         if activity.detail:
             parts.append(pal.ansi(activity.detail, "gray", enabled=color))
-        if activity.call_elapsed is not None:
-            parts.append(pal.ansi(rt.fmt_seconds(activity.call_elapsed), enabled=color))
     elif activity.label:
         parts.append(pal.ansi(activity.label, enabled=color))
     parts.append(pal.ansi(rt.fmt_seconds(elapsed), "dim", enabled=color))
@@ -102,15 +100,20 @@ class LiveDriver:
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
-        if isinstance(event, dict) and event.get("type") in (
-                "step_started", "user_message"):
-            # §7: time-the-agent-working-since-the-last-user-reply. Reset on
-            # step_started AND user_message so the elapsed counter measures
-            # the current burst between user inputs (across tools, thinks, and
-            # multiple llm_response blocks within one interactive turn). Non-
-            # interactive runs never fire user_message, so today's per-step
-            # reset behavior is preserved as a side effect.
-            self._status.restart_span()
+        if isinstance(event, dict):
+            etype = event.get("type")
+            if etype in ("step_started", "user_message"):
+                # §7: time-the-agent-working-since-the-last-user-reply. Reset on
+                # step_started AND user_message so the elapsed counter measures
+                # the current burst between user inputs (across tools, thinks, and
+                # multiple llm_response blocks within one interactive turn). Non-
+                # interactive runs never fire user_message, so today's per-step
+                # reset behavior is preserved as a side effect.
+                self._status.restart_span()
+            elif etype == "llm_response":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and nv.llm_response_has_prose(payload):
+                    self._status.restart_span()
         self._walk()
         self._refresh_status()
 
@@ -121,19 +124,10 @@ class LiveDriver:
         self._status.reset()
 
     def compose_status(self, frame: int, elapsed: float) -> str | None:
-        line = compose_activity_status(
+        # The transient status line renders flush-left at the margin (it reads as
+        # narration, not as a bullet child).
+        return compose_activity_status(
             self._builder, frame=frame, elapsed=elapsed, color=self._color)
-        if line is None:
-            return None
-        # Indent the transient status line to the frontier depth so the spinner
-        # glyph lands in the bullet column — the `• `/`▸ ` rows it sits beneath
-        # render at this depth. The indent stays HERE (not in
-        # compose_activity_status) so the --tui bottom toolbar, which shares that
-        # helper via TuiDriver.status_text, keeps its flush-left layout. In the
-        # live path _gutters() is always (), so this is plain spaces.
-        indent = rt._gutter_indent(
-            self._frontier_depth(), self._gutters(), self._color)
-        return indent + line
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:
@@ -241,7 +235,7 @@ class LiveDriver:
             # The interactive prompt uses erase_when_done, so prompt_toolkit leaves
             # NO echo in scroll-back on a real terminal — we reprint the turn here
             # (no longer suppressed on a TTY). Rendered as a user turn: flush-left,
-            # bright-blue caret, subtle "entered input" background (render_text),
+            # bright-blue caret, blue ▌ left bar,
             # spaced like a chat message. The same path serves a non-TTY sink
             # (offline capture / `imp run | tee` / the snap-ui mockup), so live and
             # `imp log` show the user's turn identically.

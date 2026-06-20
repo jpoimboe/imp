@@ -5,10 +5,10 @@ spec
   
   • What change would you like to make?
   
-  > Add a top-level `--version` flag (with a `-V` short alias) to the `imp` CLI
-    that prints the installed imp version and exits 0, without requiring a
-    subcommand. Read the version from the installed package metadata
-    (importlib.metadata) so it stays in sync with pyproject.toml.
+    > Add a top-level `--version` flag (with a `-V` short alias) to the `imp`
+      CLI that prints the installed imp version and exits 0, without requiring a
+      subcommand. Read the version from the installed package metadata
+      (importlib.metadata) so it stays in sync with pyproject.toml.
   
   • Let me explore the CLI structure before proposing a design.
   
@@ -52,9 +52,9 @@ spec
   
     Does this look right, and which fallback do you want?
   
-  > Design looks right. Go with (a): on PackageNotFoundError, print `imp
-    unknown` and still exit 0 so --version never crashes. Please also assert
-    that fallback path in the test.
+    > Design looks right. Go with (a): on PackageNotFoundError, print `imp
+      unknown` and still exit 0 so --version never crashes. Please also assert
+      that fallback path in the test.
   
   • Naming this add-version-flag.
   
@@ -316,7 +316,7 @@ implement
   • Both reviewers approved. Let me load the receiving-code-review skill to
     formally adjudicate.
   
-    load skill receiving-code-review
+    loading skill receiving-code-review
   
   • Task 1 is clean — both reviewers found no blocking issues. One Minor finding
     (test doesn't verify the dist name argument) is deferred as a followup. Let
@@ -328,7 +328,7 @@ implement
   
     implementer · haiku · 1m 5s
   
-    load skill test-driven-development
+    loading skill test-driven-development
   
   • Let me verify the state.
   
@@ -355,7 +355,7 @@ implement
   
     1 call · bash · 3s
   
-    load skill verification-before-completion
+    loading skill verification-before-completion
   
   • All 5 tests pass. Both plan tasks are committed and verified. The plan is
     fully implemented.
@@ -495,7 +495,7 @@ review
     Would you like to merge this change, or send it back to implement with
     feedback?
   
-  > Merge it. The two items are non-blocking nits and the change is clean.
+    > Merge it. The two items are non-blocking nits and the change is clean.
   
     1 call · complete_step
   

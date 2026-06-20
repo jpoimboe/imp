@@ -14,14 +14,13 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
-# render elsewhere (load_skill → its own `load skill …` line) or are placeholders
+# render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
 # (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
 _OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
 
@@ -44,6 +43,12 @@ def _llm_response_is_turn_end(payload: dict[str, Any]) -> bool:
     if provider == "codex":
         return True
     return payload.get("stop_reason") in _TURN_END_STOP_REASONS
+
+
+def llm_response_has_prose(payload: dict[str, Any]) -> bool:
+    """True when an llm_response carries a visible prose block. A lone tool_use
+    carrier has empty extracted text and returns False."""
+    return bool(AgentTextNode(payload=payload).text.strip())
 
 
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
@@ -103,6 +108,7 @@ class StepNode:
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
     label: str | None = None           # step display label (step_started.payload.label)
+    command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     closed: bool = False
     interrupted: bool = False
@@ -160,7 +166,6 @@ class ToolCall:
     is_error: bool = False
     killed: bool = False
     call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
-    call_started: float | None = None  # monotonic anchor for the live per-call timer
     citations_footer: str = ""          # §2: rendered as the block's final line, outside the clip
 
 
@@ -193,7 +198,6 @@ class Activity:
     detail: str | None = None
     label: str | None = None
     step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
-    call_elapsed: float | None = None  # monotonic seconds for the in-flight call
 
 
 def activity_to_text(activity: Activity | None) -> str:
@@ -207,7 +211,7 @@ def activity_to_text(activity: Activity | None) -> str:
 @dataclass
 class SkillLoadNode:
     """A skill the agent pulled in mid-run (the skill_load event). Rendered as a
-    quiet `load skill {name}` line — distinct from the redundant `load_skill`
+    quiet `loading skill {name}` line — distinct from the redundant `load_skill`
     tool call, which the lean burst recap drops so the skill shows exactly once."""
     name: str
     source: str | None = None
@@ -361,8 +365,7 @@ class NarrativeBuilder:
       2. else dispatch by event type at the current open scope.
     """
 
-    def __init__(self, *, now: Callable[[], float] = time.monotonic) -> None:
-        self._now = now
+    def __init__(self) -> None:
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
         self._current_phase: PhaseNode | None = None
@@ -436,20 +439,21 @@ class NarrativeBuilder:
                     (c for c in reversed(basis)
                      if c.result is None and not c.killed), None)
                 detail = None
-                call_elapsed = None
                 if inflight is not None:
                     arg = _sanitize_activity_arg(
                         next(iter((inflight.input or {}).values()), ""))
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
-                    if inflight.call_started is not None:
-                        call_elapsed = self._now() - inflight.call_started
-                return Activity(count=count, detail=detail,
-                                step_label=step_label, call_elapsed=call_elapsed)
+                return Activity(count=count, detail=detail, step_label=step_label)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
-            verb = "running" if top.kind in CHROME_KINDS else "thinking"
-            return Activity(step_label=step_label, label=verb)
+            if top.kind in CHROME_KINDS:
+                # Name the running command (script steps carry one); command-less
+                # chrome kinds fall back to a bare label + timer.
+                return Activity(step_label=step_label, label=top.command)
+            # Pure-thinking agent turn: the spinner + step label already imply it,
+            # so emit no activity word.
+            return Activity(step_label=step_label, label=None)
         if self._current_phase is not None:
             return Activity(label="working")
         return None
@@ -727,6 +731,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.start_ts = event.get("timestamp")
             existing.agent_output = None
             existing.label = p.get("label")
+            existing.command = p.get("command")
             existing.resumed = bool(p.get("resumed", False))
             self._step_stack = [existing]
             return
@@ -739,6 +744,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     start_ts=event.get("timestamp"),
                     quiet=bool(p.get("quiet", False)),
                     label=p.get("label"),
+                    command=p.get("command"),
                     resumed=bool(p.get("resumed", False)))
     self._append(node)
     self._step_stack.append(node)
@@ -978,27 +984,27 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # Token accumulation already happened in add(); here we only build the node.
     # §8: an empty-text llm_response is a tool-use-turn carrier (a lone tool_use
     # block). It must NOT flush an open burst — otherwise consecutive tool calls
-    # each start a fresh burst and the status counter sticks at 1. Compute text
-    # FIRST, then flush+append only on a genuine prose turn (this reorders the
-    # original flush-before-compute).
+    # each start a fresh burst and the status counter sticks at 1. Gate on the
+    # shared prose predicate.
+    if not llm_response_has_prose(p):
+        return
     node = AgentTextNode(payload=p)
-    if node.text.strip():
-        self._flush_burst()
-        # A new narration is taking its place, so every EARLIER narration in this
-        # container is now settled (only the TRAILING one can still fold into the
-        # step conclusion). Un-hold them ALL — not just the immediately-adjacent
-        # one. The old `_last_narration_index`-only un-hold silently skipped any
-        # narration separated from the newcomer by a ThinkingFold / UserMessageNode
-        # (i.e. a normal tool/think turn — `_last_narration_index` only scans past
-        # ToolBurstFold), so interleaved prose left permanently-held nodes. In the
-        # live view a held node blocks the emit cursor, so a single stuck-held
-        # opening narration froze the whole run at its first step.
-        children = self._container().children
-        for c in children:
-            if isinstance(c, AgentTextNode) and c.held:
-                c.held = False
-        node.held = True
-        self._append(node)
+    self._flush_burst()
+    # A new narration is taking its place, so every EARLIER narration in this
+    # container is now settled (only the TRAILING one can still fold into the
+    # step conclusion). Un-hold them ALL — not just the immediately-adjacent
+    # one. The old `_last_narration_index`-only un-hold silently skipped any
+    # narration separated from the newcomer by a ThinkingFold / UserMessageNode
+    # (i.e. a normal tool/think turn — `_last_narration_index` only scans past
+    # ToolBurstFold), so interleaved prose left permanently-held nodes. In the
+    # live view a held node blocks the emit cursor, so a single stuck-held
+    # opening narration froze the whole run at its first step.
+    children = self._container().children
+    for c in children:
+        if isinstance(c, AgentTextNode) and c.held:
+            c.held = False
+    node.held = True
+    self._append(node)
 
 
 def _h_thinking(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1060,8 +1066,7 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     call = ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
-        input=p.get("input") or {}, call_ts=event.get("timestamp"),
-        call_started=self._now())
+        input=p.get("input") or {}, call_ts=event.get("timestamp"))
     burst.calls.append(call)
     if call.name == "wait_for_user":
         self._pending_wfu[call.call_id] = str((call.input or {}).get("prompt", ""))
@@ -1310,7 +1315,7 @@ NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
 def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # The agent pulled in a skill. Render it once, as its own `load skill …`
+    # The agent pulled in a skill. Render it once, as its own `loading skill …`
     # line; the matching `load_skill` tool call is dropped from the burst recap
     # (render_text) so the same action doesn't show up twice. Do NOT flush the
     # open burst: this event fires BETWEEN a tool_call and its tool_result (the

@@ -2065,3 +2065,16 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
     # policy so step 2 binds the worktree.
     assert sink[0] == str(tmp_path)
     assert sink[1] == str(wt)
+
+
+def test_step_started_payload_carries_command_only_for_script() -> None:
+    from imp.engine.executor import _step_started_payload
+    from imp.engine.types import Pause, SourceLoc, Step
+    loc = SourceLoc(file=Path("w.yaml"), line=1)
+    script = Step(name="gate", phase="verify", kind="script", rules=(),
+                  on_max_retries=Pause(), max_loops=1, source=loc,
+                  command="make check")
+    agent = Step(name="spec", phase="design", kind="agent", rules=(),
+                 on_max_retries=Pause(), max_loops=1, source=loc)
+    assert _step_started_payload(script)["command"] == "make check"
+    assert "command" not in _step_started_payload(agent)
