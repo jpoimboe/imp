@@ -313,9 +313,15 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         prev_prose = spaces_after(child, full=full)
 
 
+def _phase_rule(label: str) -> str:
+    """Fixed-width by design — the navigational landmark is the yellow
+    `lifecycle` color, not a full-width bar."""
+    return f"── {label} ───"
+
+
 def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
                           gutters: tuple[int, ...] = ()) -> str:
-    """The `✓ <phase> · <N>s` completion line, shared by both renderers (§7).
+    """The `── <phase> complete · <N>s ───` end rule, shared by both renderers (§7).
     `depth` is the phase HEADER's depth — pass `depth` from render_text and
     `cur.depth - 1` from the live driver; both equal the header level.
     This depth equivalence holds only because phases appear solely as direct
@@ -324,11 +330,8 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     elapsed = nv.phase_elapsed(node)
     done = fmt_seconds_done(elapsed)
     secs = f" · {done}" if done else ""
-    # No checkmark, and dark gray (the breadcrumb color) — identical treatment to
-    # the step-completion line, so the whole family of `<name> complete · …` lines
-    # reads consistently as quiet chrome rather than the bold blue of a phase header.
-    return _line(f"{node.name} complete{secs}", depth, color,
-                 *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+    return _line(_phase_rule(f"{node.name} complete{secs}"), depth, color,
+                 *pal.NODE_COLORS["lifecycle"], gutters=gutters)
 
 
 def header_line(node: Any, *, depth: int, color: bool,
@@ -341,7 +344,8 @@ def header_line(node: Any, *, depth: int, color: bool,
     for subagents — they emit `subagent_status_row`. This bare header survives only
     for the --full expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
-        return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
+        return _line(_phase_rule(node.name), depth, color,
+                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)

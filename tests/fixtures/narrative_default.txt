@@ -1,5 +1,5 @@
 
-design
+── design ───
   
   spec · claude-sonnet-4-6
   
@@ -13,7 +13,7 @@ design
   
   spec · complete
 
-implement
+── implement ───
   
   build · claude-sonnet-4-6
   

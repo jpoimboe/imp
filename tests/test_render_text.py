@@ -463,7 +463,7 @@ def test_header_line_matches_render_for_phase_and_step() -> None:
     phase = nv.PhaseNode(name="design")
     step = nv.StepNode(name="spec", kind="agent", interactive=True)
     branch = nv.StepNode(name="route", kind="branch")
-    assert rt.header_line(phase, depth=0, color=False) == "design"
+    assert rt.header_line(phase, depth=0, color=False) == "── design ───"
     assert rt.header_line(step, depth=1, color=False) == "  spec"
     # Every kind renders as the bare step name (no special-case label).
     assert rt.header_line(branch, depth=2, color=False) == "    route"
@@ -837,7 +837,7 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     assert "s" in spec_line    # e.g. "7s"
     assert "7" in spec_line    # computed from timestamps
     # the breadcrumb is at depth 0 (same as the phase header)
-    assert spec_line == "spec complete · 7s"
+    assert spec_line == "── spec complete · 7s ───"
 
 
 _ANSI_RE = _re.compile(r"\x1b\[[0-9;]*m")
@@ -1814,7 +1814,7 @@ def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
         name="spec", start_ts="2024-01-01T00:00:00",
         end_ts="2024-01-01T00:00:00.500000"))
     line = rt.phase_breadcrumb_line(pn, depth=0, color=False)
-    assert line == "design complete"
+    assert line == "── design complete ───"
     assert " · " not in line
 
     # 2) step breadcrumb: sub-second elapsed drops the duration, no dangling sep.
@@ -1955,6 +1955,27 @@ def test_pause_node_renders_lifecycle_yellow_in_all_themes() -> None:
             pal.set_theme("ansi")
 
 
+def test_phase_start_rule_is_lifecycle_yellow() -> None:
+    # The phase header is now the `── <phase> ───` rule in the lifecycle role
+    # (yellow, non-bold) — no longer the bare name in bold-blue `phase`.
+    # The role resolves per active theme, so assert it across ansi/dark/light (the
+    # AC names all three). pal._ANSI reflects the active theme, so the resolved
+    # yellow/blue comparison stays theme-relative.
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        try:
+            out = list(render_tree(nv.build_tree([
+                _ev("1", "change_created", title="t"),
+                _ev("2", "step_started", step="spec", kind="agent",
+                     phase="design", model="m"),
+            ]), full=False, color=True, width=80))
+            rule = next(ln for ln in out if "── design ───" in ln)
+            assert pal._ANSI["yellow"] in rule, theme
+            assert pal._ANSI["blue"] not in rule, theme   # not the bold-blue phase color
+        finally:
+            pal.set_theme("ansi")
+
+
 def test_outcome_line_renders_lifecycle_yellow_not_accent_by_verb() -> None:
     line = next(iter(rt._render(nv.OutcomeLine(action={"verb": "continue"}),
                                 depth=0, full=False, color=True, width=80)))
@@ -1974,3 +1995,24 @@ def test_outcome_line_renders_lifecycle_yellow_in_all_themes() -> None:
             assert pal._ANSI["green"] not in line
         finally:
             pal.set_theme("ansi")
+
+
+def test_phase_end_rule_collapses_when_subsecond() -> None:
+    # A sub-second phase drops the `· <elapsed>` suffix entirely: there must be no
+    # dangling `· ` before the tail dashes.
+    events = [
+        {"id": "e0", "agent_id": None, "type": "change_created", "payload": {"title": "t"}},
+        {"id": "e1", "agent_id": None, "type": "step_started",
+         "payload": {"step": "s1", "kind": "branch", "phase": "spec"},
+         "timestamp": "2026-06-03T00:00:00.0+00:00"},
+        {"id": "e2", "agent_id": None, "type": "step_completed",
+         "payload": {"step": "s1", "kind": "branch", "action": {"verb": "continue"}},
+         "timestamp": "2026-06-03T00:00:00.4+00:00"},
+        # Starting the plan phase forces the spec phase (0.4s) to close.
+        {"id": "e3", "agent_id": None, "type": "step_started",
+         "payload": {"step": "s2", "kind": "branch", "phase": "plan"},
+         "timestamp": "2026-06-03T00:00:00.4+00:00"},
+    ]
+    out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
+    line = next(ln for ln in out if "spec complete" in ln)
+    assert line == "── spec complete ───"
