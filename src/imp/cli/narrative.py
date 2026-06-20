@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
-# render elsewhere (load_skill → its own `load skill …` line) or are placeholders
+# render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
 # (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
 _OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
 
@@ -207,7 +207,7 @@ def activity_to_text(activity: Activity | None) -> str:
 @dataclass
 class SkillLoadNode:
     """A skill the agent pulled in mid-run (the skill_load event). Rendered as a
-    quiet `load skill {name}` line — distinct from the redundant `load_skill`
+    quiet `loading skill {name}` line — distinct from the redundant `load_skill`
     tool call, which the lean burst recap drops so the skill shows exactly once."""
     name: str
     source: str | None = None
@@ -1310,7 +1310,7 @@ NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
 def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # The agent pulled in a skill. Render it once, as its own `load skill …`
+    # The agent pulled in a skill. Render it once, as its own `loading skill …`
     # line; the matching `load_skill` tool call is dropped from the burst recap
     # (render_text) so the same action doesn't show up twice. Do NOT flush the
     # open burst: this event fires BETWEEN a tool_call and its tool_result (the

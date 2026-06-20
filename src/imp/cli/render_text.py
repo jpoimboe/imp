@@ -631,10 +631,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.SkillLoadNode):
-        # A loaded skill, shown once as a quiet `load skill {name}` line (the
+        # A loaded skill, shown once as a quiet `loading skill {name}` line (the
         # redundant `load_skill` tool call is dropped from the burst recap). No
         # checkmark — indented two cols like the other sub-detail chrome.
-        yield _line(f"  load skill {node.name}", depth, color,
+        yield _line(f"  loading skill {node.name}", depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 
@@ -705,7 +705,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     Mirrors what the live status line showed WHILE the burst ran, left behind as a
     quiet marker so a `prose → tools → prose` turn shows the work happened without
     expanding it. Three names are omitted: `load_skill` (it renders as its own
-    `load skill …` line, so counting it here would double up), the bare `tool`
+    `loading skill …` line, so counting it here would double up), the bare `tool`
     placeholder (the sentinel name for an orphan/unnamed result — no real tool
     info), and `wait_for_user` (a gate call, not a user-visible tool action).
     Returns None when nothing renderable remains."""

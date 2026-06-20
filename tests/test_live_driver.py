@@ -778,7 +778,7 @@ def test_deferred_print_lines_held_then_flushed_before_user_turn() -> None:
     drv.on_event(ev("sk", "skill_load", agent_id="a", name="refactor", source="human"))
     assert out.getvalue() == base                       # nothing printed yet
     drv.flush_deferred()
-    assert "load skill refactor" in out.getvalue()      # flushed at prompt exit
+    assert "loading skill refactor" in out.getvalue()   # flushed at prompt exit
 
 
 def test_flush_deferred_clears_prompt_active_for_liveness() -> None:

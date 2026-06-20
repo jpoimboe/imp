@@ -1800,3 +1800,11 @@ def test_burst_summary_drops_sub_second_duration() -> None:
         nv.ToolCall(call_id="b1", name="read_file", input={"p": "1"}))
     summary = rt._burst_summary(burst)
     assert summary == "1 call · read_file"
+
+
+def test_skill_load_renders_gerund() -> None:
+    node = nv.SkillLoadNode(name="refactor", source="human")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    joined = "\n".join(out)
+    assert "loading skill refactor" in joined
+    assert "load skill refactor" not in joined   # imperative form is gone

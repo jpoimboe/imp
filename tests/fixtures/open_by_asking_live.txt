@@ -316,7 +316,7 @@ implement
   • Both reviewers approved. Let me load the receiving-code-review skill to
     formally adjudicate.
   
-    load skill receiving-code-review
+    loading skill receiving-code-review
   
   • Task 1 is clean — both reviewers found no blocking issues. One Minor finding
     (test doesn't verify the dist name argument) is deferred as a followup. Let
@@ -328,7 +328,7 @@ implement
   
     implementer · haiku · 1m 5s
   
-    load skill test-driven-development
+    loading skill test-driven-development
   
   • Let me verify the state.
   
@@ -355,7 +355,7 @@ implement
   
     1 call · bash · 3s
   
-    load skill verification-before-completion
+    loading skill verification-before-completion
   
   • All 5 tests pass. Both plan tasks are committed and verified. The plan is
     fully implemented.
