@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Print (newline-free) the SHA that defines the review diff range:
-#   fork -> git merge-base <base_branch> HEAD   (the change's fork point)
-#   head -> git rev-parse HEAD                   (the current tip)
+#   fork -> change.json cur_base_head             (the change's recorded fork point)
+#   head -> git rev-parse HEAD                     (the current tip)
 # The closed expr language cannot trim strings, so this emits a clean SHA with no
 # trailing newline (printf %s); `set: {review_base: output.stdout}` then stores a
 # SHA that interpolates cleanly into `git diff {{ vars.review_base }}..HEAD`.
@@ -11,11 +11,8 @@ mode="${1:?usage: pin-review-base.sh <fork|head>}"
 case "$mode" in
   fork)
     : "${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-    BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])")
-    [ -n "$BASE" ] || { echo "empty base_branch in change.json" >&2; exit 1; }
-    git rev-parse --verify "${BASE}^{commit}" >/dev/null 2>&1 \
-      || { echo "base ref not found: $BASE" >&2; exit 1; }
-    result=$(git merge-base "$BASE" HEAD)
+    result=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
+    [ -n "$result" ] || { echo "empty cur_base_head in change.json" >&2; exit 1; }
     printf %s "$result"
     ;;
   head)
