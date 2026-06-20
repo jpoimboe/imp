@@ -124,19 +124,10 @@ class LiveDriver:
         self._status.reset()
 
     def compose_status(self, frame: int, elapsed: float) -> str | None:
-        line = compose_activity_status(
+        # The transient status line renders flush-left at the margin (it reads as
+        # narration, not as a bullet child).
+        return compose_activity_status(
             self._builder, frame=frame, elapsed=elapsed, color=self._color)
-        if line is None:
-            return None
-        # Indent the transient status line to the frontier depth so the spinner
-        # glyph lands in the bullet column — the `• `/`▸ ` rows it sits beneath
-        # render at this depth. The indent stays HERE (not in
-        # compose_activity_status) so the --tui bottom toolbar, which shares that
-        # helper via TuiDriver.status_text, keeps its flush-left layout. In the
-        # live path _gutters() is always (), so this is plain spaces.
-        indent = rt._gutter_indent(
-            self._frontier_depth(), self._gutters(), self._color)
-        return indent + line
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:
