@@ -44,6 +44,7 @@ def test_abandon_happy_path_tears_down_and_journals(tmp_path: Path) -> None:
     assert rc == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
+    assert not (tmp_path / ".imp" / "changes" / "feat").exists()   # root home dropped
 
     # Durable: change_abandoned event + abandoned status retrievable via journal.
     state_json = journal.journal_show(tmp_path, "feat", "state.json")
@@ -223,6 +224,7 @@ def test_tear_down_change_destroys_worktree_branch_and_journals(
 
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
+    assert not (tmp_path / ".imp" / "changes" / "feat").exists()   # root home dropped
     state_json = journal.journal_show(tmp_path, "feat", "state.json")
     assert state_json is not None and b'"abandoned"' in state_json
     events = journal.journal_show(tmp_path, "feat", "events.jsonl")

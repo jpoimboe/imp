@@ -9,7 +9,7 @@ import imp.cli.main as m
 def _empty_control(tmp_path: Path, monkeypatch) -> Path:
     # No worktrees and no journal → no Changes anywhere.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_list_change_worktrees", lambda c: [])
+    monkeypatch.setattr(m, "_list_change_homes", lambda c: [])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
     return tmp_path
 

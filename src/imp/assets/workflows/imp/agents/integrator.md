@@ -17,7 +17,7 @@ commit, no conflict markers, no rebase still in progress.
 
 In `bash`:
 - `git status` — does it say a rebase is in progress? Are there unmerged paths?
-- Read the base branch name: `BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")`.
+- Read the base branch name: `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`.
 - See the commit being replayed and the base-side context: `git log --oneline -8`
   and `git diff` (the conflicted hunks).
 
@@ -57,7 +57,7 @@ For each conflict or concern:
   arguments — the question lives in your prose). Attended, you'll get a reply and
   continue; headless, the run pauses cleanly for a human. Do not guess.
 
-## Record findings — `.imp/change/integration-notes.md`
+## Record findings — `{{ change.home }}/integration-notes.md`
 
 **Rewrite this file from scratch every time you run** (use `write_file`, not
 append) — it must reflect ONLY the current integrated state; prior rounds live in

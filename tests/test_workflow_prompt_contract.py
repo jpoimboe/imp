@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,19 @@ FALSIFIABILITY_MARKERS = [
     (SKILLS_DIR / "test-driven-development.md", "authoritative oracle"), # D: oracle note
     (SKILLS_DIR / "test-driven-development.md", "xfail"),                # E: xfail convention
 ]
+
+
+ALL_AGENT_FILES = sorted(p.name for p in AGENTS_DIR.glob("*.md"))
+
+
+@pytest.mark.parametrize("name", ALL_AGENT_FILES)
+def test_no_hardcoded_change_dir_literal(name: str) -> None:
+    text = (AGENTS_DIR / name).read_text()
+    # `.imp/change` not followed by 's' — catches `.imp/change/` and the bare
+    # `.imp/change` while allowing the relocated `.imp/changes/` home name.
+    assert not re.search(r"\.imp/change(?!s)", text), (
+        f"{name}: hardcoded '.imp/change' path — use the engine-resolved "
+        "change.home variable (the {{ change.home }} template) instead")
 
 
 @pytest.mark.parametrize(

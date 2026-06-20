@@ -22,7 +22,7 @@ def test_finalize_prompt_avoids_full_width_rules() -> None:
 
 def test_spec_writer_writes_to_artifacts_and_uses_commit_script() -> None:
     body = _agent_prompt("spec-writer")
-    assert ".imp/change/artifacts/spec/" in body
+    assert "{{ change.home }}/artifacts/spec/" in body
     assert "imp artifact-commit spec" in body
     # The old code-branch path and git-commit machinery are gone.
     assert "imp/specs/" not in body
@@ -31,7 +31,7 @@ def test_spec_writer_writes_to_artifacts_and_uses_commit_script() -> None:
 
 def test_plan_writer_writes_to_artifacts_and_uses_commit_script() -> None:
     body = _agent_prompt("plan-writer")
-    assert ".imp/change/artifacts/plans/" in body
+    assert "{{ change.home }}/artifacts/plans/" in body
     assert "imp artifact-commit plan" in body
     # No plan fixup / amend machinery survives.
     assert "--fixup" not in body

@@ -206,6 +206,7 @@ async def dispatch_task(
         change_id=cc.id,
         change_handle=cc.handle,
         change_title=cc.title,   # dispatch label is the title now [item 11]
+        change_home=cc.change_home,
         event_log=JsonlEventLog(ctx.events_path),
         vars=ctx.change_state.vars if ctx.change_state is not None else {},
         project_facts=cc.project_facts,

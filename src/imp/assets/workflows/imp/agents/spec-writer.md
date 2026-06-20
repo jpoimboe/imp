@@ -139,8 +139,9 @@ Because the opening message begins with `Implement this spec`, you are in
   re-asking "what do you want to build?" is wrong on this path.
 - **Explore only to validate.** Read the codebase to confirm the draft fits and to
   flesh out obvious gaps — not to re-brainstorm or redesign.
+- **Go live** before writing — see **Going live or parking the draft** above.
 - **Name the change** (`rename_change`, or the name from the opening line if one
-  was supplied), then write `.imp/change/artifacts/spec/<handle>.md` adopting the draft. Normalize
+  was supplied), then write `{{ change.home }}/artifacts/spec/<handle>.md` adopting the draft. Normalize
   just enough to imp's structure: ensure a **Goal** and **Acceptance criteria**
   are present. Do not invent Scope or rewrite the draft wholesale.
 - **Self-review and commit** exactly as in "Writing the Spec" (the same pre-commit
@@ -158,7 +159,7 @@ This Change may be **unnamed**. As soon as the user's intent is clear (typically
 after their 1st or 2nd reply), pick a short descriptive name (lowercase,
 hyphen-separated, ≤5 words) and call `rename_change(name="…")`. It applies
 **immediately** and **returns the settled handle** — use that returned handle to
-write and commit `.imp/change/artifacts/spec/<handle>.md` **this same turn**. Announce the name in
+write and commit `{{ change.home }}/artifacts/spec/<handle>.md` **this same turn**. Announce the name in
 prose ("Calling this `add-version-flag`.") without asking the user for permission.
 
 If the opening message already names the Change (the user passed a name on the
@@ -168,11 +169,44 @@ still rename once if scope clarifies before the spec is committed.
 There is no step-boundary dance: `rename_change` takes effect the instant you
 call it, and the name it returns is the one to commit under.
 
+## Going live or parking the draft
+
+`imp new` starts this change as an **un-materialized draft** — no git branch, no
+worktree — and this brainstorm runs read-only against the main checkout. **Nothing is
+built until you go live.**
+
+Once the design is settled (the user has approved it) and **before you write and commit
+the spec**, surface the choice in your turn text and confirm via `wait_for_user`: build
+it now, or save the draft for later?
+
+- **Build it now (go live).** Call `create_and_enter_worktree` (it takes no arguments).
+  It forks the branch and worktree from the base branch's current tip and switches this
+  change into it — your subsequent `Read`/`Bash`/edit tools operate in the new worktree
+  immediately. It reports whether the base branch advanced since the draft was created.
+  **If it reports `head_changed=true`, re-ground the spec against current code in this
+  same turn** — re-read the files the brainstorm assumed and reconcile any drift — before
+  writing the spec. Then write and commit the spec and finish with
+  `complete_step(phase="written", …)` exactly as in "Writing the Spec" below; the spec
+  commit and `spec-reviewer` run only now that the change is live.
+- **Save for later (park).** Do **not** call `create_and_enter_worktree` and do **not**
+  emit `phase: written`. Tell the user the draft is saved and resumable later with
+  `imp resume <handle>`, then call `wait_for_user`. The spec phase pauses with the draft
+  saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
+  resume you re-offer this same go-live choice.
+
+On the **seeded** path (your opening message begins with `Implement this spec`), the user
+has already committed to building it: go live as part of adopt-and-commit (call
+`create_and_enter_worktree`, re-ground if `head_changed=true`) — there is no separate
+build-or-park question.
+
+Calling `create_and_enter_worktree` a second time on an already-live change is a harmless
+no-op, so a resumed go-live is safe.
+
 ## Writing the Spec (the `phase: written` turn)
 
-Write the spec to `.imp/change/artifacts/spec/<handle>.md`, where `<handle>` is the name
+Write the spec to `{{ change.home }}/artifacts/spec/<handle>.md`, where `<handle>` is the name
 `rename_change` returned (or the name from the opening message). When the
-brainstorm is settled, write `.imp/change/artifacts/spec/<handle>.md` covering (the full
+brainstorm is settled, write `{{ change.home }}/artifacts/spec/<handle>.md` covering (the full
 four-part structure for a `standard` change; on a `trivial` change the "Thin spec
 on `trivial`" note below overrides this and you write Goal + Acceptance criteria
 only):
@@ -204,7 +238,7 @@ imp artifact-commit spec
 **Finish** with:
 
 ```
-complete_step(phase="written", spec_path=".imp/change/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
+complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
 ```
 
 ## Rework Resumption
@@ -235,14 +269,14 @@ if there is one, or add a brief clarifying note to the spec so the next reviewer
 doesn't re-flag it. Never apply a finding you haven't verified, and never edit the
 spec into something you know to be wrong just to make a finding disappear.
 
-Address each verified finding, re-write `.imp/change/artifacts/spec/<handle>.md`,
+Address each verified finding, re-write `{{ change.home }}/artifacts/spec/<handle>.md`,
 then run `imp artifact-commit spec` — the wip lineage is an
 append-only archive, so a revision is simply another commit; there is no amend
 or fixup. Finish tool-terminal:
 
 ```
 imp artifact-commit spec
-complete_step(phase="written", spec_path=".imp/change/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
+complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
 ```
 
 The rework turn must be tool-terminal: end with `imp artifact-commit spec` then the
@@ -286,7 +320,7 @@ minors-integration pass still asks the user nothing.
 When a concern is genuinely the human's call and you cannot settle it from the spec,
 the brainstorm, or the codebase — an ambiguity you had to assume past, or a risk
 worth a human decision before merge — do not bury it in prose. Append it to the
-**Deferred Followups** list in `.imp/change/progress.md` (create the
+**Deferred Followups** list in `{{ change.home }}/progress.md` (create the
 `## Deferred Followups` heading if absent) in `finalize`'s exact reader form, the same
 `— needs-decision:` line shape the merge gate already walks:
 
@@ -315,18 +349,18 @@ spec already passed; the reviewer's Minor/Nit `findings:` are advisory, not a re
 On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
-   `findings:`, re-write `.imp/change/artifacts/spec/<handle>.md`, then run
+   `findings:`, re-write `{{ change.home }}/artifacts/spec/<handle>.md`, then run
    `imp artifact-commit spec` — the wip lineage is append-only, so a
    revision is another commit; there is no amend or fixup. Finish tool-terminal:
 
    ```
    imp artifact-commit spec
-   complete_step(phase="written", spec_path=".imp/change/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
+   complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(phase="written", spec_path=".imp/change/artifacts/spec/<handle>.md", complexity="<trivial|standard>")`.
+   `complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/<handle>.md", complexity="<trivial|standard>")`.
    Do not make an empty commit. The verification review still runs on the unchanged
    spec and will pass it through.
 

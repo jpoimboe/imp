@@ -17,6 +17,7 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
 ) -> None:
     sentinel = "IMP_DOGFOOD_supp01"
     script = {"default": [{"text": "working", "tools": [
+        {"name": "create_and_enter_worktree", "input": {}},
         {"name": "bash", "input": {"command": (
             'cd "$IMP_PROJECT_ROOT" && mkdir -p src && '
             f'printf "# {sentinel}\\n" > src/marker.py && '

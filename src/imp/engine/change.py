@@ -1,9 +1,10 @@
 """Change lifecycle (spec §3, §5): immutable id identity, derived handle, worktree
-creation, state home inside the worktree at <worktree>/.imp/change/."""
+creation, permanent state home at <control_root>/.imp/changes/<id>/."""
 
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,9 @@ class Change:
     base_branch: str
     control_root: Path
     project_root: Path           # the worktree
-    change_dir: Path             # <worktree>/.imp/change
+    change_dir: Path             # permanent home <control_root>/.imp/changes/<id>
+    materialized: bool = True    # False only for an un-materialized draft (no worktree)
+    base_head: str = ""          # base branch tip recorded at draft creation (drafts only)
 
     @property
     def handle(self) -> str:
@@ -44,6 +47,32 @@ class Change:
                    payload={"id": self.id, "old_title": old_title,
                             "new_title": name, "handle": self.handle})
         return self.handle
+
+    def set_project_root(self, new_root: Path) -> None:
+        self.project_root = new_root
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["project_root"] = str(new_root)
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    def materialize(self) -> bool:
+        """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
+        flip project_root to the worktree, and persist both to change.json.
+        Returns head_changed — whether the base tip moved since draft creation.
+        Idempotent: a no-op returning False once already materialized."""
+        if self.materialized:
+            return False
+        current_tip = worktree.head_of(self.control_root, self.base_branch)
+        head_changed = current_tip != self.base_head
+        wt_path = worktree.create_worktree(self.control_root, self.id, self.base_branch)
+        self.project_root = wt_path
+        self.materialized = True
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["project_root"] = str(wt_path)
+        meta["materialized"] = True
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        return head_changed
 
     @property
     def live_workflow_dir(self) -> Path:
@@ -73,10 +102,11 @@ class Change:
         depends_on: list[str] | None = None,
     ) -> Change:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
-        internal state inside the worktree. Raises worktree.BranchExists on the
-        (effectively impossible) id collision — the caller reports a clean error."""
+        internal state at the control root (.imp/changes/<id>). Raises
+        worktree.BranchExists on the (effectively impossible) id collision —
+        the caller reports a clean error."""
         wt_path = worktree.create_worktree(control_root, change_id, base_branch)
-        change_dir = wt_path / ".imp" / "change"
+        change_dir = control_root / ".imp" / "changes" / change_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
 
@@ -84,6 +114,8 @@ class Change:
             "id": change_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
+            "project_root": str(wt_path),
+            "materialized": True,
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -112,6 +144,7 @@ class Change:
             # default-workflow: value) would otherwise leak the just-created
             # branch+worktree. Roll both back so a failed create leaves nothing.
             worktree.destroy_worktree(control_root, change_id)
+            shutil.rmtree(change_dir, ignore_errors=True)
             raise
         flat = workflow.flat_steps()
         State(
@@ -132,14 +165,84 @@ class Change:
         return change
 
     @classmethod
+    def create_draft(
+        cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
+        depends_on: list[str] | None = None,
+    ) -> Change:
+        """An un-materialized draft: NO branch, NO worktree. State is seeded at the
+        permanent home; project_root points at the main checkout so the spec
+        brainstorm runs read-only there. The base branch's current tip is recorded
+        as base_head for the later go-live head_changed check. Validates the
+        workflow against the main checkout; with no branch/worktree to roll back,
+        a bad/absent workflow drops the just-created home and re-raises."""
+        change_dir = control_root / ".imp" / "changes" / change_id
+        change_dir.mkdir(parents=True)
+        (change_dir / "state").mkdir()
+        try:
+            base_head = worktree.head_of(control_root, base_branch)
+        except RuntimeError:
+            shutil.rmtree(change_dir, ignore_errors=True)
+            raise
+
+        (change_dir / "change.json").write_text(json.dumps({
+            "id": change_id, "title": title, "base_branch": base_branch,
+            "created_at": datetime.now(UTC).isoformat(),
+            "depends_on": list(depends_on or []),
+            "project_root": str(control_root),
+            "materialized": False,
+            "base_head": base_head,
+        }, indent=2, sort_keys=True))
+
+        from imp.engine.loader import load_workflow
+        from imp.providers.config import apply_var_overrides, parse_default_workflow
+        from imp.providers.effective import load_effective_config
+
+        config = load_effective_config(
+            project_root=control_root, control_root=control_root,
+        ).config
+        try:
+            wf_name = parse_default_workflow(control_root / "imp" / "project.yaml")
+            workflow = load_workflow(
+                control_root / "imp" / "workflows" / wf_name,
+                configured_tiers=config.tier_names(),
+                project_keys=frozenset(config.project_facts),
+            )
+        except (LoadError, LoadErrors):
+            shutil.rmtree(change_dir, ignore_errors=True)
+            raise
+        flat = workflow.flat_steps()
+        State(
+            id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+            status="running",
+            vars=apply_var_overrides(workflow.vars, config.var_overrides),
+            loop_counts={},
+        ).save(change_dir / "state")
+
+        change = cls(
+            id=change_id, title=title, base_branch=base_branch,
+            control_root=control_root, project_root=control_root,
+            change_dir=change_dir, materialized=False, base_head=base_head,
+        )
+        change.event_log().append(
+            agent_id=None, type="change_created",
+            payload={"id": change_id, "handle": change.handle, "title": title},
+        )
+        return change
+
+    @classmethod
     def load(cls, control_root: Path, change_id: str) -> Change:
-        # .resolve() to match create (create_worktree returns a resolved path).
-        wt_path = (control_root / ".imp" / "worktrees" / change_id).resolve()
-        change_dir = wt_path / ".imp" / "change"
+        change_dir = control_root / ".imp" / "changes" / change_id
         if not change_dir.is_dir():
             raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
+        project_root = (
+            Path(meta["project_root"]) if meta.get("project_root")
+            else (control_root / ".imp" / "worktrees" / change_id).resolve()
+        )
         return cls(
             id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],
-            control_root=control_root, project_root=wt_path, change_dir=change_dir,
+            control_root=control_root, project_root=project_root,
+            change_dir=change_dir,
+            materialized=meta.get("materialized", True),
+            base_head=meta.get("base_head", ""),
         )

@@ -336,7 +336,8 @@ def _fake_change(tmp_path):
     (control / ".git").mkdir(parents=True, exist_ok=True)
     return _types.SimpleNamespace(
         project_root=wt, control_root=control, id="abc",
-        handle="abc-slug", title="Abc Title")
+        handle="abc-slug", title="Abc Title",
+        change_dir=wt / ".imp" / "change")
 
 
 def _fake_config(**over):
@@ -533,3 +534,19 @@ def test_argv_binds_match_bind_plan():
     p = _mirror_policy()
     argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
+
+
+def test_resolve_policy_binds_change_home_rw(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = control / ".imp" / "changes" / "abc"
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, change_dir=home,
+    )
+    assert pol.change_home == str(home)
+    # An artifact write under the home is permitted by the in-process mirror...
+    assert pol.allows_write(home / "artifacts" / "spec" / "x.md")
+    # ...and the bwrap argv carries the matching rw bind.
+    argv = " ".join(build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={}))
+    assert f"--bind {home} {home}" in argv

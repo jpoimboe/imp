@@ -72,6 +72,11 @@ def current_branch(root: Path) -> str:
     return _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
+def head_of(control_root: Path, ref: str) -> str:
+    """The commit sha `ref` resolves to (e.g. a branch tip)."""
+    return _git_ok(control_root, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+
+
 def branch_exists(control_root: Path, branch: str) -> bool:
     """True if refs/heads/<branch> exists. The imp new collision-error guard
     keys on this."""
@@ -444,7 +449,7 @@ def _write_exclude(control_root: Path) -> None:
 def ensure_imp_ignored(control_root: Path) -> None:
     """Guarantee .imp/ is ignored in a way fresh worktrees inherit (spec §8).
     Correctness depends on it: nested worktrees must not show as untracked, and
-    the inner .imp/change/ state must never be captured by `git add -A`."""
+    the inner .imp/changes/ state must never be captured by `git add -A`."""
     if _imp_ignored_durably(control_root):
         return
     with RepoGitLock(control_root).acquire():

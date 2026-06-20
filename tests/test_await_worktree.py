@@ -22,7 +22,7 @@ def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
     Change.create(tmp_path, title="Hello There", change_id="hello-there", base_branch="main")
     wt = _await_worktree(tmp_path, timeout=5.0)
     assert wt.name == "hello-there"
-    assert (wt / ".imp" / "change" / "change.json").exists()
+    assert (tmp_path / ".imp" / "changes" / "hello-there" / "change.json").exists()
 
 
 def test_await_worktree_ignores_merge_scratch(tmp_path: Path) -> None:

@@ -27,6 +27,7 @@ def _run(script: str, root: Path, slug: str) -> int:
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
         env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
+             "IMP_CHANGE_DIR": str(root / ".imp" / "change"),
              "PATH": __import__("os").environ["PATH"]},
         capture_output=True, text=True,
     ).returncode
@@ -48,6 +49,7 @@ def _run_id_capture(script: str, root: Path, slug: str, change_id: str):
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
         env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
              "IMP_CHANGE_ID": change_id,
+             "IMP_CHANGE_DIR": str(root / ".imp" / "change"),
              "PATH": __import__("os").environ["PATH"]},
         capture_output=True, text=True,
     )
@@ -353,3 +355,50 @@ def test_plan_verify_passes_plan_at_task_ceiling(tmp_path: Path) -> None:
     _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
     proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
     assert proc.returncode == 0
+
+
+def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
+    import os
+    import shutil
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    # change-home is a separate dir; remove the in-project copy so a script that
+    # still read $IMP_PROJECT_ROOT/.imp/change would find nothing.
+    shutil.rmtree(root / ".imp" / "change" / "artifacts")
+    home = tmp_path / "home"
+    (home / "artifacts" / "spec").mkdir(parents=True)
+    (home / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPTS / "spec-commit-verify.sh")], cwd=SCRIPTS,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": "2026-06-01-x",
+             "IMP_CHANGE_ID": "id1", "IMP_CHANGE_DIR": str(home),
+             "PATH": os.environ["PATH"]},
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_plan_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
+    import os
+    import shutil
+    root = _repo(tmp_path)
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    # Live plan exists ONLY at a separate change-home, not under the project tree.
+    shutil.rmtree(root / ".imp" / "change" / "artifacts")
+    home = tmp_path / "home"
+    (home / "artifacts" / "plans").mkdir(parents=True)
+    (home / "artifacts" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPTS / "plan-commit-verify.sh")], cwd=SCRIPTS,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": "2026-06-01-x",
+             "IMP_CHANGE_ID": "id1", "IMP_CHANGE_DIR": str(home),
+             "PATH": os.environ["PATH"]},
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr

@@ -18,6 +18,10 @@ AUTOSQUASH = Path("src/imp/assets/workflows/imp/scripts/autosquash.sh").resolve(
 VERIFY = AUTOSQUASH
 
 
+def _home(pr: Path) -> Path:
+    return pr.parent / ".imp" / "changes" / "x"
+
+
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
                           check=False, env={**os.environ, "GIT_EDITOR": "true"})
@@ -26,7 +30,8 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _run(script: Path, pr: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(script)], cwd=pr.parent,
-        env={**os.environ, "IMP_PROJECT_ROOT": str(pr)},
+        env={**os.environ, "IMP_PROJECT_ROOT": str(pr),
+             "IMP_CHANGE_DIR": str(_home(pr))},
         capture_output=True, text=True, check=False,
     )
 
@@ -42,7 +47,7 @@ def _init(pr: Path) -> None:
 
 
 def _record_change(pr: Path) -> None:
-    change_dir = pr / ".imp" / "change"
+    change_dir = _home(pr)
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps(
         {"id": "x", "title": "t", "base_branch": "main"}))
@@ -84,7 +89,7 @@ def _resolve(pr: Path, content: str) -> None:
 
 
 def _state(pr: Path) -> Path:
-    return pr / ".imp" / "change" / "state"
+    return _home(pr) / "state"
 
 
 def test_verify_passes_correct_resolution(tmp_path: Path) -> None:

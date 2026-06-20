@@ -11,7 +11,7 @@ def _seed_change(tmp_path: Path) -> str:
     """Create a minimal live Change worktree under tmp_path and return its id."""
     _seed_control(tmp_path)
     cid = "2026-06-14-aaaaaa"
-    cdir = tmp_path / ".imp" / "worktrees" / cid / ".imp" / "change"
+    cdir = tmp_path / ".imp" / "changes" / cid
     (cdir / "state").mkdir(parents=True)
     (cdir / "state" / "state.json").write_text(
         json.dumps({"status": "running", "step": "implement"}))
@@ -23,8 +23,7 @@ def _seed_change(tmp_path: Path) -> str:
 
 
 def _append_event(tmp_path: Path, cid: str, event: dict) -> None:
-    path = (tmp_path / ".imp" / "worktrees" / cid / ".imp" / "change"
-            / "events.jsonl")
+    path = tmp_path / ".imp" / "changes" / cid / "events.jsonl"
     with path.open("a") as f:
         f.write(json.dumps(event) + "\n")
 

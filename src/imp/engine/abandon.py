@@ -1,6 +1,8 @@
 """Abandon a Change: mark abandoned, remove from merge queue, journal, remove worktree + branch."""
 from __future__ import annotations
 
+import shutil
+
 from imp.engine import merge_queue, worktree
 from imp.engine.change import Change
 from imp.engine.state import ProjectLock, State
@@ -29,3 +31,4 @@ def tear_down_change(change: Change) -> None:
     # branch delete must happen after worktree removal (git forbids deleting a checked-out branch)
     worktree.remove_worktree(control, change_id, force=True)
     worktree.delete_branch(control, change_id)
+    shutil.rmtree(change.change_dir, ignore_errors=True)

@@ -752,16 +752,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
-        change = Change.create(control, title=title, change_id=change_id,
-                               base_branch=base)
+        change = Change.create_draft(control, title=title, change_id=change_id,
+                                     base_branch=base)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
-        return 2
-    except worktree.BranchExists:
-        # The random suffix makes this effectively impossible; surface a clean
-        # message rather than a raw git error (spec §2, AC 7).
-        print(f"imp: a Change with id {change_id!r} already exists; re-run `imp new`",
-              file=sys.stderr)
         return 2
 
     _warn_if_tui_unavailable(args, sys.stdout)
@@ -997,21 +991,24 @@ def _term_width() -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
-def _list_change_worktrees(control: Path) -> list[str]:
-    """Ids of in-flight Change worktrees under .imp/worktrees/ (excludes the
-    transient .merge-* scratch dirs)."""
-    root = control / ".imp" / "worktrees"
+def _list_change_homes(control: Path) -> list[str]:
+    """Ids of changes with a permanent root home under .imp/changes/."""
+    root = control / ".imp" / "changes"
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir()
                   if p.is_dir() and not p.name.startswith(".")
-                  and (p / ".imp" / "change" / "change.json").exists())
+                  and (p / "change.json").exists())
+
+
+def _change_home(control: Path, change_id: str) -> Path:
+    return control / ".imp" / "changes" / change_id
 
 
 def _iter_change_ids(control: Path) -> list[str]:
-    """All known Change ids: live worktrees first, then journaled ids not live,
+    """All known Change ids: permanent homes first, then journaled ids not live,
     then backlog ids not yet seen."""
-    live = _list_change_worktrees(control)
+    live = _list_change_homes(control)
     seen = set(live)
     out = list(live)
     for cid in journal.journal_ids(control):
@@ -1027,7 +1024,7 @@ def _iter_change_ids(control: Path) -> list[str]:
 
 def _title_for_id(control: Path, change_id: str) -> str | None:
     """Read a Change's current title (worktree first, backlog second, journal third)."""
-    cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    cdir = _change_home(control, change_id)
     cj = cdir / "change.json"
     if cj.exists():
         try:
@@ -1103,8 +1100,7 @@ def _show_handle(control: Path, change_id: str) -> str:
 
 
 def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
-    live = (control / ".imp" / "worktrees" / change_id / ".imp" / "change"
-            / "artifacts" / rel)
+    live = _change_home(control, change_id) / "artifacts" / rel
     if live.is_file():
         return live.read_bytes()
     return journal.journal_show(control, change_id, rel)
@@ -1121,8 +1117,7 @@ def _show_newest_plan_rel(control: Path, change_id: str, handle: str) -> str | N
                 best, pick = int(mobj.group(1)), name
         return pick
 
-    live_dir = (control / ".imp" / "worktrees" / change_id / ".imp" / "change"
-                / "artifacts" / "plans")
+    live_dir = _change_home(control, change_id) / "artifacts" / "plans"
     if live_dir.is_dir():
         pick = _newest([p.name for p in live_dir.iterdir() if p.is_file()])
         if pick:
@@ -1138,7 +1133,7 @@ def _show_newest_plan_rel(control: Path, change_id: str, handle: str) -> str | N
 
 
 def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
-    change = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    change = _change_home(control, change_id)
     live = change / "state" / "state.json" if name == "state.json" else change / name
     if live.is_file():
         return live.read_bytes()
@@ -1212,12 +1207,12 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
 
 
 def _resolve_default_id(control: Path) -> str | None:
-    """No-arg default: most-recent in-flight worktree, else most-recent
-    journaled id (by last-event timestamp), else None."""
-    wts = _list_change_worktrees(control)
-    if wts:
-        return max(wts, key=lambda s: (control / ".imp" / "worktrees" / s
-                                       / ".imp" / "change" / "events.jsonl").stat().st_mtime)
+    """No-arg default: most-recent change home by its events.jsonl mtime, else
+    most-recent journaled id (by last-event timestamp), else None."""
+    homes = _list_change_homes(control)
+    if homes:
+        return max(homes, key=lambda s: (_change_home(control, s)
+                                         / "events.jsonl").stat().st_mtime)
     journaled = journal.journal_ids(control)
     if not journaled:
         return None
@@ -1396,8 +1391,8 @@ def _resume_gone(control: Path, change_id: str) -> int:
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
-_INFLIGHT = ("running", "paused", "errored", "merge_blocked")
-RESUMABLE = ("paused", "errored", "merge_blocked")
+_INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
+RESUMABLE = ("paused", "errored", "merge_blocked", "draft")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1421,7 +1416,7 @@ def _effective_status(status: str, change_dir: Path) -> str:
     `errored` (in RESUMABLE) so `imp status` shows it and `imp resume` offers it.
 
     Only `running` is re-derived; every other status is authoritative. A MISSING
-    lock file is left as `running` (the microsecond between Change.create and the
+    lock file is left as `running` (the microsecond between Change.create_draft and the
     run acquiring the lock) — a real crash leaves the pid file behind."""
     if status != "running":
         return status
@@ -1455,10 +1450,22 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         return None
 
 
+def _draft_label(status: str, change_json: bytes) -> str:
+    """Returns "draft" for un-materialized paused changes; otherwise status."""
+    if status != "paused":
+        return status
+    try:
+        if json.loads(change_json).get("materialized", True) is False:
+            return "draft"
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+    return status
+
+
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
-    cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
-    # journal_show returns bytes | None; the live-worktree branch always finds the
-    # files. Annotate so the None-guard below stays reachable (not dead code).
+    cdir = _change_home(control, change_id)
+    # journal_show returns bytes | None; the live change-home branch always finds
+    # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     change_json: bytes | None
     if (cdir / "change.json").exists():
@@ -1476,20 +1483,21 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
         return None
     # A live worktree may hold a crashed `running` run — re-derive against its
     # lock (journaled rows are terminal, so the check is a no-op there).
-    return (row[0], _effective_status(row[1], cdir), *row[2:])
+    status = _draft_label(_effective_status(row[1], cdir), change_json)
+    return (row[0], status, *row[2:])
 
 
 def _status_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
-    for change_id in _list_change_worktrees(control):
-        cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    for change_id in _list_change_homes(control):
+        cdir = _change_home(control, change_id)
         state_json = (cdir / "state" / "state.json").read_bytes()
         change_json = (cdir / "change.json").read_bytes()
         last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
             continue
-        status = _effective_status(row[1], cdir)   # crashed `running` → `errored`
+        status = _draft_label(_effective_status(row[1], cdir), change_json)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue
@@ -1498,9 +1506,12 @@ def _status_rows(control: Path) -> list[_Row]:
 
 
 def _completed_rows(control: Path) -> list[_Row]:
-    """Journal-backed completed Changes: every journaled id NOT present as a
-    live worktree (in-flight takes precedence on the crash-window overlap)."""
-    live = set(_list_change_worktrees(control))
+    """Journal-backed completed Changes: every journaled id NOT currently surfaced as
+    an in-flight row. The dedup set is the IN-FLIGHT id set (exactly the ids
+    _status_rows emits), NOT every change home — a merged change keeps its home
+    but is `completed`, so it must fall through to this completed section rather than be
+    masked by mere home presence."""
+    live = {r[0] for r in _status_rows(control)}
     rows: list[_Row] = []
     for change_id in journal.journal_ids(control):
         if change_id in live:

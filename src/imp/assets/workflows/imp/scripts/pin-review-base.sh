@@ -10,7 +10,8 @@ cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 mode="${1:?usage: pin-review-base.sh <fork|head>}"
 case "$mode" in
   fork)
-    BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")
+    : "${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
+    BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])")
     [ -n "$BASE" ] || { echo "empty base_branch in change.json" >&2; exit 1; }
     git rev-parse --verify "${BASE}^{commit}" >/dev/null 2>&1 \
       || { echo "base ref not found: $BASE" >&2; exit 1; }

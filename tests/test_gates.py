@@ -185,6 +185,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
     change = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
     )
 
     async def main() -> None:
@@ -232,6 +233,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     change = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
     )
     step = Step(
         name="autosquash", phase="p", kind="script",
@@ -262,6 +264,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     change = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
     )
     step = Step(
         name="check", phase="p", kind="script",

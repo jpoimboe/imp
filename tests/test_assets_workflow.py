@@ -46,7 +46,8 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
-    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change"}
+    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change",
+                            "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"task"}
     subagents = {
         "implementer", "quality-reviewer",
@@ -568,7 +569,7 @@ def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
     perms = _steps(wf)["spec-writer"].fs_permissions
     write_paths = [p for perm in perms for p in perm.paths
                    if "write" in perm.operations]
-    assert any(".imp/change/artifacts/spec/" in p for p in write_paths)
+    assert any(".imp/changes/" in p and "/artifacts/spec/" in p for p in write_paths)
     assert all("imp/specs/" not in p for p in write_paths)
 
 
@@ -579,7 +580,7 @@ def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
     perms = _steps(wf)["plan-writer"].fs_permissions
     write_paths = [p for perm in perms for p in perm.paths
                    if "write" in perm.operations]
-    assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
+    assert any(".imp/changes/" in p and "/artifacts/plans/" in p for p in write_paths)
     assert all("imp/plans/" not in p for p in write_paths)
 
 
@@ -745,9 +746,9 @@ def test_spec_writer_can_write_progress(tmp_path: Path) -> None:
     perms = _steps(wf)["spec-writer"].fs_permissions
     write_paths = [p for perm in perms for p in perm.paths
                    if "write" in perm.operations]
-    assert ".imp/change/progress.md" in write_paths
+    assert ".imp/changes/*/progress.md" in write_paths
     # still scoped to its own artifact dir, not the whole tree
-    assert any(".imp/change/artifacts/spec/" in p for p in write_paths)
+    assert any(".imp/changes/" in p and "/artifacts/spec/" in p for p in write_paths)
     assert "**" not in write_paths
 
 
@@ -758,8 +759,8 @@ def test_plan_writer_can_write_progress(tmp_path: Path) -> None:
     perms = _steps(wf)["plan-writer"].fs_permissions
     write_paths = [p for perm in perms for p in perm.paths
                    if "write" in perm.operations]
-    assert ".imp/change/progress.md" in write_paths
-    assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
+    assert ".imp/changes/*/progress.md" in write_paths
+    assert any(".imp/changes/" in p and "/artifacts/plans/" in p for p in write_paths)
     assert "**" not in write_paths
 
 
@@ -845,6 +846,19 @@ def test_sweep_verify_green_clears_stale_carry() -> None:
                        output={"exit": 0, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Continue)
     assert m.var_mutations["sweep_tolerated_carry"] is False
+
+
+def test_spec_writer_prompt_has_go_live_park_branch() -> None:
+    # Verifies the go-live/park decision section exists in the spec-writer prompt.
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    assert "create_and_enter_worktree" in body          # names the go-live tool
+    assert "head_changed" in body                        # re-ground when base advanced
+    assert "go live" in lowered                          # the build-it branch
+    assert "save for later" in lowered or "park" in lowered  # the park branch
+    assert "spec phase pauses" in body.lower()           # park path pauses the spec phase
 
 
 def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:

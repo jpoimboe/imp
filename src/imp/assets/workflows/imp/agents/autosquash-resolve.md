@@ -18,7 +18,7 @@ not change the final content, only how the commits are organised. So there is a 
 correct answer: when the rebase finishes, `git rev-parse HEAD^{tree}` MUST equal the
 pre-autosquash tree. That tree is recorded for you:
 
-    cat .imp/change/state/autosquash-before-tree
+    cat {{ change.home }}/state/autosquash-before-tree
 
 A re-entry of `autosquash.sh` (triggered by the sentinel file) checks this byte-for-byte after you finish. You
 cannot "win" by editing freely — only by reproducing that exact tree with a clean,
@@ -32,7 +32,7 @@ branch already had.
    pre-autosquash tree holds for that path. Read the authoritative content of any path
    directly from the pre-autosquash commit:
 
-       git cat-file -p "$(cat .imp/change/state/autosquash-before-head):<path>"
+       git cat-file -p "$(cat {{ change.home }}/state/autosquash-before-head):<path>"
 
 3. `git add` each resolved path.
 4. Continue: `GIT_EDITOR=true git rebase --continue`.
@@ -51,7 +51,7 @@ branch already had.
 Self-check that you reproduced the oracle and left no rebase running:
 
     test ! -d "$(git rev-parse --git-path rebase-merge)" \
-      && [ "$(git rev-parse HEAD^{tree})" = "$(cat .imp/change/state/autosquash-before-tree)" ] \
+      && [ "$(git rev-parse HEAD^{tree})" = "$(cat {{ change.home }}/state/autosquash-before-tree)" ] \
       && echo OK
 
 End with `complete_step`: `status: Success` with a one-line `summary` of how many stops

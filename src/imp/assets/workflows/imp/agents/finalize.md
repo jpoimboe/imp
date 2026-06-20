@@ -20,17 +20,17 @@ at-head semantic review and (only on breakage/verify-fail) the bypass gate.
 
 ## 1. Summarize the whole change
 
-Read the spec, plans, and `.imp/change/progress.md`; inspect the change in `bash`
+Read the spec, plans, and `{{ change.home }}/progress.md`; inspect the change in `bash`
 (`git diff <base>..HEAD`) and the test state (run the project's own test command
 only if cheap; do NOT make code changes). Populate:
 - `built`: what was built, by plan/task, in prose. Add one informational rollup line
   counting the opportunistic improvements the `deferred-sweep` made — count the
   `— fixed <sha>` opportunistic lines under the `## Completed plans` section of
-  `.imp/change/progress.md` (the sweep records each fix there and prunes it from the
+  `{{ change.home }}/progress.md` (the sweep records each fix there and prunes it from the
   transient list), e.g. "plus N opportunistic improvements (see commits)".
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
-  step recorded in `.imp/change/progress.md`, and surface ONLY the
+  step recorded in `{{ change.home }}/progress.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-writer`/`plan-writer` appended directly in reader form (they reach you even on
   a `fast_path` change where `deferred-sweep` never ran); present them identically. Do **not** list
@@ -46,8 +46,8 @@ not the script you read at the gate. Present them as prose in §2.
 ## Surface tolerated verification failures
 
 Besides the `— needs-decision:` lines the `deferred-sweep` left in
-`.imp/change/progress.md`, read the change-local tolerated-failures record
-`.imp/change/tolerated-failures.md` if it exists. Each entry reads as
+`{{ change.home }}/progress.md`, read the change-local tolerated-failures record
+`{{ change.home }}/tolerated-failures.md` if it exists. Each entry reads as
 `<signature>: <justification>` — a failure the responsible agent judged not
 attributable to this change's diff (pre-existing on the base, or
 non-deterministic/environmental). Surface **every** such entry
@@ -107,7 +107,7 @@ record (§1); your prose is what the human reads.
 
 Then walk the **needs-decision** items ONE AT A TIME — these include the
 `— needs-decision: <why>` lines the `deferred-sweep` left in
-`.imp/change/progress.md`. For EACH item, in its own `wait_for_user` turn (one
+`{{ change.home }}/progress.md`. For EACH item, in its own `wait_for_user` turn (one
 item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,

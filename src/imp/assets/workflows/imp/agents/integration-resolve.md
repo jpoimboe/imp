@@ -50,7 +50,7 @@ writes nothing):
 sh -c "$IMP_VERIFY_COMMAND"
 ```
 
-Then read `.imp/change/tolerated-failures.md` (the recorded tolerated set — each entry a
+Then read `{{ change.home }}/tolerated-failures.md` (the recorded tolerated set — each entry a
 failure signature plus its one-line justification):
 
 - **Every current failure is within the recorded tolerated set** → decide `merge` **directly,
@@ -70,10 +70,10 @@ before `finalize`.
 ## Review the integration
 
 In `bash`:
-- `BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")`
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`
 - The base-side incoming diff is `git diff "$(git merge-base "$BASE" HEAD)" "$BASE"`;
   `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show the result.
-- Read `.imp/change/integration-notes.md` if present (the integrator's flagged,
+- Read `{{ change.home }}/integration-notes.md` if present (the integrator's flagged,
   reasoned-but-uncertain resolutions) and the verify output for a verify-fail.
 - For each region both sides touched, confirm the merged result preserves BOTH
   changes; reason about silent semantic breakage against the base-side incoming

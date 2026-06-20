@@ -217,6 +217,7 @@ async def run_change(
         log: EventLog = JsonlEventLog(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
         sandbox_policy = _build_sandbox_policy(change, config, log)
+        policy_root = change.project_root
 
         # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_change re-executes on every
@@ -262,6 +263,12 @@ async def run_change(
                 if pending_seed is not None
                 and step.kind == "agent" and not is_resume
                 else None)
+            # Go-live mid-run flips change.project_root to the freshly-forked
+            # worktree; the once-built policy is then rooted at the stale control
+            # root. Rebuild so the next step's gates and agents bind the worktree.
+            if change.project_root != policy_root:
+                sandbox_policy = _build_sandbox_policy(change, config, log)
+                policy_root = change.project_root
             # var_mutations was ALREADY applied to state.vars and logged inside the
             # _route_* body — run_change receives it for visibility only and must NOT
             # re-apply it (double-apply trap). The third element is otherwise unused.
@@ -426,7 +433,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         "change.json": change.change_dir / "change.json",
         "state.json": change.state_dir / "state.json",
     })
-    worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
+    worktree.remove_worktree(change.control_root, change.id)
+    shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
     return RunResult.COMPLETED
 
 
@@ -527,6 +535,7 @@ async def _route_script(
                                  change_id=change.id,
                                  change_handle=change.handle,
                                  change_title=change.title,
+                                 change_dir=change.change_dir,
                                  verify_command=verify_command,
                                  verify_timeout=verify_timeout),
             policy=sandbox_policy))
@@ -887,6 +896,7 @@ async def _run_agent_invocation(
         rendered = render_prompt(
             agent_def.prompt_template_source, build_context(
                 change_id=change.id, change_handle=change.handle, change_title=change.title,
+                change_home=str(change.change_dir),
                 event_log=log, vars=state.vars,
                 project_facts=project_facts, guidance=guidance,
             ),
@@ -925,6 +935,7 @@ async def _run_agent_invocation(
         initial_messages=initial_messages,
         change_context=ChangeContext(
             id=change.id, handle=change.handle, title=change.title,
+            change_home=str(change.change_dir),
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
         ),
@@ -982,9 +993,10 @@ def _emit_paused_event(
 
 
 def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
-    """Resolve the SandboxPolicy once per run (IMP_* are change-stable, so one
-    build matches every spawn point). Emit a durable posture event; on a hard-fail
-    posture, emit + re-raise so the run stops rather than silently running bare."""
+    """Resolve the SandboxPolicy for the current spawn point (IMP_* are
+    change-stable, but project_root can flip on go-live, triggering a rebuild).
+    Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
+    run stops rather than silently running bare."""
     raw = config.sandbox or {}
     cfg = SandboxConfig(
         enabled=raw.get("enabled", True),
@@ -1000,6 +1012,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,
                    change_handle=change.handle, change_title=change.title,
+                   change_dir=change.change_dir,
                    verify_command=config.verify_command,
                    verify_timeout=config.verify_timeout),
     )
@@ -1008,6 +1021,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
             worktree=change.project_root, control_root=change.control_root,
             change_id=change.id, cfg=cfg, engine_env_result=eng,
             environ=os.environ, available=sandbox_available(),
+            change_dir=change.change_dir,
         )
     except SandboxUnavailable as exc:
         _emit(log, "sandbox_unavailable", {"message": str(exc)}, agent_id=None)

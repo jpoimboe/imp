@@ -154,3 +154,31 @@ def test_overlay_dedups_worktree_src_already_in_inherited_pythonpath(
     env = overlay_engine_env(parent, overlay)
     assert env["PYTHONPATH"] == f"{src}{os.pathsep}/tmp/ambient"
     assert env["PYTHONPATH"].count(src) == 1
+
+
+def test_overlay_strips_inherited_change_dir_when_unset() -> None:
+    stale = {"IMP_CHANGE_DIR": "/old/home", "OTHER": "x"}
+    result = overlay_engine_env(
+        stale,
+        engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
+                   change_handle="s", change_title="t"),
+    )
+    assert "IMP_CHANGE_DIR" not in result
+
+
+def test_engine_env_includes_change_dir_when_given() -> None:
+    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
+                     change_handle="s", change_title="t",
+                     change_dir=Path("/ctl/.imp/changes/2026-06-04-eee555"))
+    assert env["IMP_CHANGE_DIR"] == "/ctl/.imp/changes/2026-06-04-eee555"
+
+
+def test_engine_env_omits_change_dir_when_absent() -> None:
+    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
+                     change_handle="s", change_title="t")
+    assert "IMP_CHANGE_DIR" not in env
+
+
+def test_change_dir_is_engine_managed() -> None:
+    from imp.engine.env import ENGINE_ENV_VARS
+    assert "IMP_CHANGE_DIR" in ENGINE_ENV_VARS

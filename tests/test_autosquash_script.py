@@ -19,6 +19,10 @@ from pathlib import Path
 AUTOSQUASH = Path("src/imp/assets/workflows/imp/scripts/autosquash.sh").resolve()
 
 
+def _home(project_root: Path) -> Path:
+    return project_root.parent / ".imp" / "changes" / "x"
+
+
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     # GIT_EDITOR=true: setup commits like `commit --squash=<sha>` (no -m) open
     # an interactive editor. Without this pin the test is environment-dependent:
@@ -35,7 +39,8 @@ def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(AUTOSQUASH)],
         cwd=project_root.parent,
-        env={**os.environ, "IMP_PROJECT_ROOT": str(project_root)},
+        env={**os.environ, "IMP_PROJECT_ROOT": str(project_root),
+             "IMP_CHANGE_DIR": str(_home(project_root))},
         capture_output=True, text=True, check=False,
     )
 
@@ -54,7 +59,7 @@ def _init(project_root: Path) -> None:
 
 
 def _record_change(project_root: Path) -> None:
-    change_dir = project_root / ".imp" / "change"
+    change_dir = _home(project_root)
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps(
         {"id": "x", "title": "t", "base_branch": "main"}))
@@ -161,7 +166,7 @@ def test_plain_path_hands_off_conflict_with_exit_2(tmp_path: Path) -> None:
     rebase_dir = _git(pr, "rev-parse", "--git-path", "rebase-merge").stdout.strip()
     assert (pr / rebase_dir).is_dir()                       # rebase left in progress
     assert _git(pr, "ls-files", "-u").stdout.strip() != ""  # unmerged paths present
-    state = pr / ".imp" / "change" / "state"
+    state = _home(pr) / "state"
     assert (state / "autosquash-before-tree").read_text().strip() == before_tree
     assert (state / "autosquash-before-head").read_text().strip() == before_head
 
@@ -171,7 +176,7 @@ def test_plain_path_clears_stale_attempts_file(tmp_path: Path) -> None:
     interrupted run's stale count cannot cause premature exhaustion."""
     pr = tmp_path / "wt"
     _build_plain_conflict(pr)
-    state = pr / ".imp" / "change" / "state"
+    state = _home(pr) / "state"
     state.mkdir(parents=True, exist_ok=True)
     (state / "autosquash-resolve-attempts").write_text("2\n")  # stale from prior run
 
@@ -191,4 +196,4 @@ def test_plain_path_non_conflict_failure_exits_1(tmp_path: Path) -> None:
 
     result = _run(pr)
     assert result.returncode == 1, result.stderr
-    assert not (pr / ".imp" / "change" / "state" / "autosquash-before-tree").exists()
+    assert not (_home(pr) / "state" / "autosquash-before-tree").exists()

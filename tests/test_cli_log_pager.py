@@ -16,9 +16,8 @@ from imp.cli.main import main
 
 
 def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
-    """Create a minimal on-disk worktree for a Change under control/.imp/worktrees/<slug>."""
-    wt = control / ".imp" / "worktrees" / slug
-    change_dir = wt / ".imp" / "change"
+    """Create a minimal on-disk Change home under control/.imp/changes/<slug>."""
+    change_dir = control / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": title, "base_branch": "main"}),
@@ -39,7 +38,7 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
                         "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
-    return wt
+    return change_dir
 
 
 def test_log_prints_rendered_lines_to_stdout(

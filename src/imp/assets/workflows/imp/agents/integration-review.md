@@ -16,12 +16,12 @@ with independent eyes, whether the integrated result silently breaks anything �
 ## Orient
 
 In `bash`:
-- `BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")`
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`
 - The base-side incoming diff — what base changed since this branch forked — is
   `git diff "$(git merge-base "$BASE" HEAD)" "$BASE"`.
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show what
   the rebase/resolution produced.
-- If `.imp/change/integration-notes.md` exists, the integrator resolved a textual
+- If `{{ change.home }}/integration-notes.md` exists, the integrator resolved a textual
   conflict and flagged reasoned-but-uncertain resolutions — read it and check each
   first; they are the likeliest to be wrong. Its absence means a clean rebase: you
   still review (the base moved), the notes are simply empty.

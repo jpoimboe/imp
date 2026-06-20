@@ -61,7 +61,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
     agents = root / "imp" / "workflows" / "imp" / "agents"
     agents.mkdir(parents=True)
     (agents / "coder.md").write_text(
-        "---\nname: coder\ntools: [bash, complete_step]\n"
+        "---\nname: coder\ntools: [bash, complete_step, create_and_enter_worktree]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nprompt body\n")
     (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
@@ -90,13 +90,14 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         return {"name": "complete_step", "input": {"status": "Success", "outcome": "ok", **fields}}
 
     spec_cmd = (
-        'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/spec && '
-        'printf "# Spec\\n\\nstub spec\\n" > ".imp/change/artifacts/spec/$IMP_CHANGE_HANDLE.md" && '
+        'mkdir -p "$IMP_CHANGE_DIR/artifacts/spec" && '
+        'printf "# Spec\\n\\nstub spec\\n"'
+        ' > "$IMP_CHANGE_DIR/artifacts/spec/$IMP_CHANGE_HANDLE.md" && '
         'imp artifact-commit spec'
     )
     plan_cmd = (
-        'cd "$IMP_PROJECT_ROOT" && mkdir -p .imp/change/artifacts/plans && '
-        'printf "# Plan 1\\n" > ".imp/change/artifacts/plans/$IMP_CHANGE_HANDLE-plan-1.md" && '
+        'mkdir -p "$IMP_CHANGE_DIR/artifacts/plans" && '
+        'printf "# Plan 1\\n" > "$IMP_CHANGE_DIR/artifacts/plans/$IMP_CHANGE_HANDLE-plan-1.md" && '
         'imp artifact-commit plan'
     )
     lead_cmd = (
@@ -108,6 +109,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         "steps": {
             "spec-writer": [{"text": "spec", "tools": [
                 {"name": "rename_change", "input": {"name": "demo change"}},
+                {"name": "create_and_enter_worktree", "input": {}},
                 bash(spec_cmd),
                 done(phase="written",
                      spec_path=".imp/change/artifacts/spec/SCRIPTED-STUB.md",

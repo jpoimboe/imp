@@ -72,6 +72,7 @@ class _ChangeNamespace:
     id: str
     handle: str
     title: str
+    home: str = ""
 
 
 class _ProjectNamespace:
@@ -110,12 +111,14 @@ class PromptContext:
 
 def build_context(
     change_handle: str, change_title: str, event_log: EventLog,
-    *, change_id: str = "", vars: dict[str, Any] | None = None,
+    *, change_id: str = "", change_home: str = "",
+    vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None, guidance: str = "",
 ) -> PromptContext:
     facts = {**(project_facts or {}), "guidance": guidance}
     return PromptContext(
-        change=_ChangeNamespace(id=change_id, handle=change_handle, title=change_title),
+        change=_ChangeNamespace(id=change_id, handle=change_handle,
+                                title=change_title, home=change_home),
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),

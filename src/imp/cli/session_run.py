@@ -18,10 +18,7 @@ from imp.remote.session.attach import build_session_attach
 
 
 def infer_session_result(change: Change) -> RunResult:
-    """Infer RunResult from disk: no worktree or completed status → COMPLETED, else PAUSED."""
-    worktree = change.control_root / ".imp" / "worktrees" / change.id
-    if not worktree.exists():
-        return RunResult.COMPLETED
+    """Read persisted state: 'completed' → COMPLETED, else PAUSED."""
     if State.load(change.state_dir).status == "completed":
         return RunResult.COMPLETED
     return RunResult.PAUSED

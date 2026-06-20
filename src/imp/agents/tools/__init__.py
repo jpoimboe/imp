@@ -116,6 +116,7 @@ def _register_builtins() -> None:
     from imp.agents.tools import (  # noqa: F401
         bash,
         bg,
+        create_and_enter_worktree,
         create_change,
         fs,
         nav,
