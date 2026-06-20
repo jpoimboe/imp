@@ -164,10 +164,14 @@ def _impl_repo(tmp_path: Path, *, n_tasks: int = 1) -> Path:
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
+    seed_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
     cdir = root / ".imp" / "change"
     cdir.mkdir(parents=True)
     (cdir / "change.json").write_text(
-        '{"base_branch": "main"}'
+        f'{{"base_branch": "main", "cur_base_head": "{seed_sha}"}}'
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "chore: init change metadata")

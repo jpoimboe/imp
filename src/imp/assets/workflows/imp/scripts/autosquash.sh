@@ -13,9 +13,9 @@
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])")
-# Rebase onto the FORK POINT, not the base tip — fold only this change's own commits.
-FORK=$(git merge-base "$BASE" HEAD)
+# Fold only this change's own commits: rebase onto the recorded fork point.
+FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
+[ -n "$FORK" ] || { echo "empty cur_base_head in change.json" >&2; exit 1; }
 STATE="$CHANGE_DIR/state"
 
 # grep -q in a pipeline with pipefail is unreliable: grep exits on first match, git log
@@ -72,7 +72,7 @@ if [ -f "$STATE/autosquash-before-tree" ]; then
     _cleanup
     echo "autosquash-resolve exhausted $MAX_ATTEMPTS attempts: $REASON" >&2
     echo "Restored the branch to its pre-autosquash state. Squash by hand, then resume:" >&2
-    echo "  git rebase -i --autosquash \"\$(git merge-base $BASE HEAD)\"" >&2
+    echo "  git rebase -i --autosquash $FORK" >&2
     echo "resolve each conflict so the fold preserves the tree, then \`imp resume\`." >&2
     exit 1
   fi
