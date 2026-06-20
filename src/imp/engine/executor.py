@@ -217,6 +217,7 @@ async def run_change(
         log: EventLog = JsonlEventLog(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
         sandbox_policy = _build_sandbox_policy(change, config, log)
+        policy_root = change.project_root
 
         # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_change re-executes on every
@@ -262,6 +263,12 @@ async def run_change(
                 if pending_seed is not None
                 and step.kind == "agent" and not is_resume
                 else None)
+            # Go-live mid-run flips change.project_root to the freshly-forked
+            # worktree; the once-built policy is then rooted at the stale control
+            # root. Rebuild so the next step's gates and agents bind the worktree.
+            if change.project_root != policy_root:
+                sandbox_policy = _build_sandbox_policy(change, config, log)
+                policy_root = change.project_root
             # var_mutations was ALREADY applied to state.vars and logged inside the
             # _route_* body — run_change receives it for visibility only and must NOT
             # re-apply it (double-apply trap). The third element is otherwise unused.
@@ -986,9 +993,10 @@ def _emit_paused_event(
 
 
 def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
-    """Resolve the SandboxPolicy once per run (IMP_* are change-stable, so one
-    build matches every spawn point). Emit a durable posture event; on a hard-fail
-    posture, emit + re-raise so the run stops rather than silently running bare."""
+    """Resolve the SandboxPolicy for the current spawn point (IMP_* are
+    change-stable, but project_root can flip on go-live, triggering a rebuild).
+    Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
+    run stops rather than silently running bare."""
     raw = config.sandbox or {}
     cfg = SandboxConfig(
         enabled=raw.get("enabled", True),

@@ -1982,3 +1982,86 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
     assert all(e["payload"]["label"] == "implementing" for e in coder_started)
     assert coder_started[0]["payload"]["resumed"] is False
     assert coder_started[1]["payload"]["resumed"] is True
+
+
+# ── sandbox policy rebuild on project_root flip ─────────────────────────────
+
+
+class _FlipRunner:
+    def __init__(self, sink: list[str], wt: Path) -> None:
+        self._sink = sink
+        self._wt = wt
+
+    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        self._sink.append(invocation.sandbox_policy.worktree)
+        if len(self._sink) == 1:                       # first step = go-live flip
+            invocation.change.project_root = self._wt
+        yield {"type": "agent_output",
+               "payload": {"outcome": "ok", "status": "Success"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _FlipProvider:
+    name = "fake"
+
+    def __init__(self, sink: list[str], wt: Path, model: str = "m") -> None:
+        self._sink = sink
+        self._wt = wt
+        self.model = model
+
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+        return _FlipRunner(self._sink, self._wt)
+
+
+def _register_flip(sink: list[str], wt: Path) -> None:
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _FlipProvider(sink, wt, model=model),
+    )
+
+
+def _seed_two_step_workflow(root: Path) -> Change:
+    wf_dir = root / "imp" / "workflows" / "imp"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "go {{ change.handle }}\n"
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: s1, file: agents/writer.md, tier: medium}\n"
+        "      - {name: s2, file: agents/writer.md, tier: medium}\n"
+    )
+    _write_fake_config(root)
+    return _make_change(root)
+
+
+@pytest.mark.anyio
+@pytest.mark.real_sandbox_policy
+async def test_sandbox_policy_rebuilt_after_project_root_flip(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+
+    change = _seed_two_step_workflow(tmp_path)
+    wt = tmp_path / ".imp" / "worktrees" / change.id
+    wt.mkdir(parents=True)
+    sink: list[str] = []
+    _register_flip(sink, wt)
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    # Step 1 ran under the control-root policy; the flip mid-step rebuilds the
+    # policy so step 2 binds the worktree.
+    assert sink[0] == str(tmp_path)
+    assert sink[1] == str(wt)
