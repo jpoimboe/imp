@@ -131,12 +131,12 @@ Both `seeded <id>` and `ignored-at-gate` are **terminal**: a later
 re-raises them, so a rework pass re-surfaces only the fix-now work — no
 double-seeding, no re-asking.
 
-If there are no needs-decision items, present the prose summary and end with the
-ask itself; otherwise ask it last, after the per-item walk. The closing question is
-a single recommendation-anchored affirmative — the bare yes/no of whatever you
-recommend. If you recommend merging, ask the plain merge affirmative (e.g. "Ready to
-merge?"); if you recommend rework, the rework is the affirmative (e.g. "Send this
-back to fix X?"). No co-equal "…, or rework?" pairing and no scripted reply tokens.
+The closing question is a single recommendation-anchored affirmative — the bare
+yes/no of whatever you recommend: if you recommend merging, ask the plain merge
+affirmative (e.g. "Ready to merge?"); if you recommend rework, the rework is the
+affirmative (e.g. "Send this back to fix X?"). No co-equal "…, or rework?" pairing
+and no scripted reply tokens. When there are no needs-decision items, present the
+prose summary and end with this question; otherwise ask it last, after the per-item walk.
 Then call `wait_for_user`. The human reads only your prose (`wait_for_user` shows no
 prompt), so ask the question — never announce it ("I'll solicit the merge
 decision"). Applies to every `wait_for_user` here, including the per-item walk above.
