@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 1
+# LAYOUT_VERSION: 2
 [paths]
 change.json
 events.jsonl
@@ -6,6 +6,7 @@ state/state.json
 [change.json]
 base_branch
 created_at
+cur_base_head
 depends_on
 id
 imp_commit

@@ -9,8 +9,8 @@ set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"   # empty ID → fail fast
 : "${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])")
-FORK=$(git merge-base "$BASE" HEAD)
+FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
+[ -n "$FORK" ] || { echo "empty cur_base_head in change.json" >&2; exit 1; }
 
 # Empty-range guard: a change always has spec+plan commits; an empty range means
 # base detection is wrong, not "nothing to stamp".

@@ -61,8 +61,9 @@ def _init(project_root: Path) -> None:
 def _record_change(project_root: Path) -> None:
     change_dir = _home(project_root)
     change_dir.mkdir(parents=True, exist_ok=True)
+    fork = _git(project_root, "rev-parse", "main").stdout.strip()
     (change_dir / "change.json").write_text(json.dumps(
-        {"id": "x", "title": "t", "base_branch": "main"}))
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
 def _subjects(pr: Path) -> list[str]:
@@ -183,6 +184,28 @@ def test_plain_path_clears_stale_attempts_file(tmp_path: Path) -> None:
     result = _run(pr)
     assert result.returncode == 2, result.stderr
     assert not (state / "autosquash-resolve-attempts").exists()
+
+
+def test_autosquash_noop_when_cur_base_head_is_head_despite_fixup(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _init(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("work\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "branch work")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "g.txt").write_text("work (fixed)\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    head = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    cd = _home(pr)
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "change.json").write_text(json.dumps(
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": head}))
+    res = _run(pr)
+    assert res.returncode == 0, res.stderr
+    # cur_base_head == HEAD => empty range => fast-path no-op; the fixup! survives.
+    assert any(s.startswith("fixup!") for s in _subjects(pr))
 
 
 def test_plain_path_non_conflict_failure_exits_1(tmp_path: Path) -> None:

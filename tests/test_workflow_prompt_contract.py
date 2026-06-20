@@ -318,11 +318,11 @@ def test_task_lead_documents_verify_triage() -> None:
 def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
     low = CODE_REVIEWER.read_text().lower()
     # The reviewer resolves its own range from the review cadence, not from a
-    # coordinator dispatch: per-batch over review_base, end-of-change over merge-base.
+    # coordinator dispatch: per-batch over review_base, end-of-change over cur_base_head.
     assert "review_scope" in low
     assert "review_base" in low                 # per-batch range
-    assert "git merge-base" in low              # end-of-change range
-    assert "base_branch" in low                 # <base> from change.json
+    assert "cur_base_head" in low               # end-of-change range from recorded fork
+    assert "git merge-base" not in low
     assert "pure advisor" not in low            # it routes now
     assert "final whole-change review" not in low
 
@@ -481,3 +481,18 @@ def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
     assert "recorded tolerated set" in low
     assert "[baseline]" not in text
     assert "[flaky]" not in text
+
+
+def test_integration_prompts_use_recorded_endpoints() -> None:
+    review = (AGENTS_DIR / "integration-review.md").read_text()
+    resolve = (AGENTS_DIR / "integration-resolve.md").read_text()
+    integ = (AGENTS_DIR / "integrator.md").read_text()
+    # Consumers parse the labeled endpoint lines, not a post-rebase merge-base diff.
+    for text in (review, resolve):
+        assert "Integration-fork:" in text
+        assert "Integration-base:" in text
+        assert 'git diff "$(git merge-base "$BASE" HEAD)" "$BASE"' not in text
+    # The integrator re-records the endpoints and replants cur_base_head.
+    assert "Integration-fork:" in integ
+    assert "Integration-base:" in integ
+    assert "cur_base_head" in integ

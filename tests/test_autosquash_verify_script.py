@@ -49,8 +49,9 @@ def _init(pr: Path) -> None:
 def _record_change(pr: Path) -> None:
     change_dir = _home(pr)
     change_dir.mkdir(parents=True, exist_ok=True)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
     (change_dir / "change.json").write_text(json.dumps(
-        {"id": "x", "title": "t", "base_branch": "main"}))
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
 def _build_and_handoff(pr: Path) -> tuple[str, str]:

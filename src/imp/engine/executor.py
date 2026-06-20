@@ -902,6 +902,7 @@ async def _run_agent_invocation(
             agent_def.prompt_template_source, build_context(
                 change_id=change.id, change_title=change.title,
                 change_home=str(change.change_dir),
+                cur_base_head=change.cur_base_head,
                 event_log=log, vars=state.vars,
                 project_facts=project_facts, guidance=guidance,
                 non_interactive=non_interactive,

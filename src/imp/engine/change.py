@@ -15,7 +15,7 @@ from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 1  # bump in the SAME commit as any breaking change-home layout/schema change
+LAYOUT_VERSION = 2  # bump in the SAME commit as any breaking change-home layout/schema change
 
 
 def _fold_phantom(phantom: Path, home: Path) -> None:
@@ -53,7 +53,25 @@ def _imp_commit(control_root: Path) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
-_MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {}
+def _migrate_v1_to_v2(change_dir: Path) -> None:
+    """v1->v2: rename base_head->orig_base_head and backfill cur_base_head via
+    `git merge-base base_branch HEAD` in the change's project_root."""
+    meta_path = change_dir / "change.json"
+    meta = json.loads(meta_path.read_text())
+    meta["orig_base_head"] = meta.pop("base_head", "")
+    cur = ""
+    project_root = meta.get("project_root", "")
+    base_branch = meta.get("base_branch", "")
+    if project_root and base_branch:
+        proc = worktree._git(Path(project_root), "merge-base", base_branch, "HEAD")
+        if proc.returncode == 0:
+            cur = proc.stdout.strip()
+    meta["cur_base_head"] = cur
+    meta["layout_version"] = 2
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+
+_MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {(1, 2): _migrate_v1_to_v2}
 
 
 def migrate(old_v: int, new_v: int, change_dir: Path) -> None:
@@ -76,7 +94,8 @@ class Change:
     project_root: Path           # the worktree
     change_dir: Path             # permanent home <control_root>/.imp/changes/<id>
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
-    base_head: str = ""          # base branch tip recorded at draft creation (drafts only)
+    orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
+    cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite change.json under the
@@ -102,20 +121,22 @@ class Change:
 
     def materialize(self) -> bool:
         """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
-        flip project_root to the worktree, and persist both to change.json.
+        flip project_root to the worktree, and persist project_root + cur_base_head.
         Returns head_changed — whether the base tip moved since draft creation.
         Idempotent: a no-op returning False once already materialized."""
         if self.materialized:
             return False
         current_tip = worktree.head_of(self.control_root, self.base_branch)
-        head_changed = current_tip != self.base_head
+        head_changed = current_tip != self.orig_base_head
         wt_path = worktree.create_worktree(self.control_root, self.id, self.base_branch)
         self.project_root = wt_path
         self.materialized = True
+        self.cur_base_head = current_tip
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["project_root"] = str(wt_path)
         meta["materialized"] = True
+        meta["cur_base_head"] = current_tip
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
         link_change_home(wt_path, self.change_dir)
         return head_changed
@@ -157,6 +178,7 @@ class Change:
         worktree.BranchExists on the (effectively impossible) id collision —
         the caller reports a clean error."""
         wt_path = worktree.create_worktree(control_root, change_id, base_branch)
+        cur_base_head = worktree.head_of(control_root, base_branch)
         change_dir = control_root / ".imp" / "changes" / change_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
@@ -167,6 +189,7 @@ class Change:
             "depends_on": list(depends_on or []),
             "project_root": str(wt_path),
             "materialized": True,
+            "cur_base_head": cur_base_head,
             "layout_version": LAYOUT_VERSION,
             "imp_commit": _imp_commit(control_root),
         }, indent=2, sort_keys=True))
@@ -211,6 +234,7 @@ class Change:
         change = cls(
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
+            cur_base_head=cur_base_head,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
@@ -226,14 +250,14 @@ class Change:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
         brainstorm runs read-only there. The base branch's current tip is recorded
-        as base_head for the later go-live head_changed check. Validates the
+        as orig_base_head for the later go-live head_changed check. Validates the
         workflow against the main checkout; with no branch/worktree to roll back,
         a bad/absent workflow drops the just-created home and re-raises."""
         change_dir = control_root / ".imp" / "changes" / change_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
         try:
-            base_head = worktree.head_of(control_root, base_branch)
+            orig_base_head = worktree.head_of(control_root, base_branch)
         except RuntimeError:
             shutil.rmtree(change_dir, ignore_errors=True)
             raise
@@ -244,7 +268,7 @@ class Change:
             "depends_on": list(depends_on or []),
             "project_root": str(control_root),
             "materialized": False,
-            "base_head": base_head,
+            "orig_base_head": orig_base_head,
             "layout_version": LAYOUT_VERSION,
             "imp_commit": _imp_commit(control_root),
         }, indent=2, sort_keys=True))
@@ -277,7 +301,7 @@ class Change:
         change = cls(
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
-            change_dir=change_dir, materialized=False, base_head=base_head,
+            change_dir=change_dir, materialized=False, orig_base_head=orig_base_head,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
@@ -304,5 +328,6 @@ class Change:
             control_root=control_root, project_root=project_root,
             change_dir=change_dir,
             materialized=meta.get("materialized", True),
-            base_head=meta.get("base_head", ""),
+            orig_base_head=meta.get("orig_base_head", ""),
+            cur_base_head=meta.get("cur_base_head", ""),
         )

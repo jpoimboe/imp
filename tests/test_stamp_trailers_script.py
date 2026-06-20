@@ -46,8 +46,9 @@ def _init(project_root: Path) -> None:
 def _record_change(project_root: Path) -> None:
     change_dir = project_root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
+    fork = _git(project_root, "rev-parse", "main").stdout.strip()
     (change_dir / "change.json").write_text(json.dumps(
-        {"id": "x", "title": "t", "base_branch": "main"}))
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
 def _commit(pr: Path, msg: str, *, stamped: bool = False) -> str:
@@ -88,14 +89,15 @@ def test_stamp_trailers_stamps_linear_range(tmp_path: Path) -> None:
     assert _change(pr, "HEAD") == ID     # feat: work
 
 
-def test_stamp_reads_base_branch_from_change_dir(tmp_path: Path) -> None:
+def test_stamp_reads_cur_base_head_from_change_dir(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _init(pr)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
     # change.json lives at a standalone change-home, NOT under the project tree.
     home = tmp_path / "home"
     home.mkdir()
     (home / "change.json").write_text(json.dumps(
-        {"id": "x", "title": "t", "base_branch": "main"}))
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("work\n")
     _git(pr, "add", "g.txt")
@@ -107,4 +109,21 @@ def test_stamp_reads_base_branch_from_change_dir(tmp_path: Path) -> None:
         capture_output=True, text=True, check=False)
     assert res.returncode == 0, res.stderr
     assert _change(pr, "HEAD") == ID
+
+
+def test_stamp_errors_when_cur_base_head_is_head(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _init(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("work\n")
+    _git(pr, "add", "g.txt")
+    _commit(pr, "feat: work")
+    head = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    change_dir = pr / ".imp" / "change"
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "change.json").write_text(json.dumps(
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": head}))
+    res = _run(pr)
+    assert res.returncode == 1                 # empty cur_base_head..HEAD range guard
+    assert "empty" in res.stderr.lower()
 

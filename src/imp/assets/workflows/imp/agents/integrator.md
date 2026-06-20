@@ -21,6 +21,14 @@ In `bash`:
 - Read the base branch name: `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`.
 - See the commit being replayed and the base-side context: `git log --oneline -8`
   and `git diff` (the conflicted hunks).
+- Capture the integration endpoints. `B=$(git rev-parse "${BASE}^{commit}")` is the base
+  tip you are replaying onto. On the **rebase-in-progress (exit-6)** state, the script left
+  `cur_base_head` untouched, so it still holds the pre-rebase fork:
+  `P=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['cur_base_head'])")`.
+  On the **resumed-after-verify** state (no rebase in progress), the endpoints were already
+  recorded by the prior integration — read `P` and `B` from the existing `Integration-fork:`
+  / `Integration-base:` lines in `{{ change.home }}/integration-notes.md` instead, and do
+  not change `cur_base_head`.
 
 There are exactly TWO states; detect which by whether a rebase is in progress
 (`rebase-merge`/`rebase-apply` present):
@@ -67,6 +75,20 @@ write a one-line file saying so. For each uncertain resolution and each semantic
 concern, record: the file and line, what base changed, what you did, and why it's
 uncertain. `finalize` reads this file and folds it into the change summary.
 
+**Always re-record the integration endpoints.** Because you rewrite this file from
+scratch, write these two labeled lines verbatim at the TOP of the file (one full
+40-char SHA each, on its own line), then your resolution notes below them:
+
+```
+Integration-fork: <P>
+Integration-base: <B>
+```
+
+`integration-review.md` and `integration-resolve.md` parse these to compute the
+base-side-incoming diff `git diff <P> <B>` — after the rebase
+`git merge-base "$BASE" HEAD` collapses to `$BASE`, so these endpoints are the only
+recoverable record.
+
 ## Finish
 
 Drive to a clean state, then verify it:
@@ -77,6 +99,12 @@ Drive to a clean state, then verify it:
   empty (this verifies the branch is genuinely linear — it is unrelated to the
   deleted autosquash merge-detection). **Never leave uncommitted changes** and
   never leave a rebase half-done.
+- If you drove a rebase to completion this round (the exit-6 state), record the new
+  plant after the branch is clean and linear on base: set `cur_base_head := B` in
+  `change.json`:
+  `python3 -c "import json,sys;p='{{ change.home }}/change.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
+  On the resumed-after-verify state the branch is already planted on `B`; leave
+  `cur_base_head` unchanged.
 
 ## Output
 

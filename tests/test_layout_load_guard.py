@@ -28,7 +28,7 @@ def test_migrate_always_raises_while_registry_empty(tmp_path: Path) -> None:
 def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", change_id="lo", base_branch="main")
-    _set_stored_version(ch.change_dir, LAYOUT_VERSION - 1)
+    _set_stored_version(ch.change_dir, 0)        # no (0, 2) migration -> refuse
     with pytest.raises(LayoutMismatch):
         Change.load(tmp_path, "lo")
 

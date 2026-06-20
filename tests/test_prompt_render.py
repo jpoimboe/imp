@@ -233,3 +233,16 @@ def test_missing_run_attr_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(PromptRenderError):
         render_prompt("{{ run.bogus }}", ctx)
+
+
+def test_renders_cur_base_head(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log, cur_base_head="deadbeef")
+    assert render_prompt("{{ change.cur_base_head }}", ctx) == "deadbeef"
+
+
+def test_cur_base_head_defaults_empty(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_title="t", event_log=_log(tmp_path / "events.jsonl", []),
+    )
+    assert render_prompt("{{ change.cur_base_head }}", ctx) == ""

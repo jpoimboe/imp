@@ -8,7 +8,7 @@ description: |
 # an ACCUMULATED-TASK cadence decided by plan-cycle-check, the sole coverage guard: a
 # single `code-reviewer` runs as the `code-reviewer` step directly — per batch
 # (review_base..HEAD) when tasks_since_review crosses review_batch_size, and once over
-# the whole change at change end (review_scope=change, merge-base..HEAD). deferred-sweep
+# the whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
 # is paired with each review; verify and plan-reviewer stay per-plan.
 
 vars:
@@ -199,7 +199,7 @@ phases:
 
       # The review step IS the code-reviewer (no coordinator/panel): per-batch it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
-      # merge-base..HEAD. It routes — verdict is approve | task_gap only (coverage is
+      # cur_base_head..HEAD. It routes — verdict is approve | task_gap only (coverage is
       # plan-cycle-check's call, never the reviewer's).
       - name: code-reviewer
         file: agents/code-reviewer.md

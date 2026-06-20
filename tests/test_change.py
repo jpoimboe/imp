@@ -65,7 +65,7 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert set(meta) == {"id", "title", "base_branch", "created_at",
                          "depends_on", "project_root", "materialized",
-                         "layout_version", "imp_commit"}
+                         "cur_base_head", "layout_version", "imp_commit"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
@@ -210,7 +210,7 @@ def test_load_defaults_materialized_true_when_absent(tmp_path: Path) -> None:
     meta_path.write_text(json.dumps(meta))
     loaded = Change.load(tmp_path, "mat2")
     assert loaded.materialized is True
-    assert loaded.base_head == ""
+    assert loaded.orig_base_head == ""
 
 
 def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
@@ -227,13 +227,15 @@ def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
     assert any(e["type"] == "change_created" for e in events)
 
 
-def test_create_draft_records_base_head(tmp_path: Path) -> None:
+def test_create_draft_records_orig_base_head(tmp_path: Path) -> None:
     import json
     _seed_control(tmp_path)
     tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Change.create_draft(tmp_path, title="X", change_id="drf2", base_branch="main")
     meta = json.loads((ch.change_dir / "change.json").read_text())
-    assert meta["base_head"] == tip
+    assert meta["orig_base_head"] == tip
+    assert "base_head" not in meta
+    assert "cur_base_head" not in meta
     assert meta["materialized"] is False
     assert meta["project_root"] == str(tmp_path)
 
@@ -304,3 +306,72 @@ def test_materialize_is_idempotent(tmp_path: Path) -> None:
     root_after_first = ch.project_root
     assert ch.materialize() is False                 # second call: no-op
     assert ch.project_root == root_after_first
+
+
+def test_create_persists_cur_base_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    ch = Change.create(tmp_path, title="X", change_id="cbh1", base_branch="main")
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["cur_base_head"] == tip
+    assert ch.cur_base_head == tip
+
+
+def test_materialize_persists_cur_base_head_and_reports_head_changed(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="cbh2", base_branch="main")
+    orig = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    head_changed = ch.materialize()
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["cur_base_head"] == orig
+    assert ch.cur_base_head == orig
+    assert head_changed == (meta["cur_base_head"] != meta["orig_base_head"])
+    assert head_changed is False
+
+
+def test_materialize_reports_head_changed_true(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    orig_tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    ch = Change.create_draft(tmp_path, title="X", change_id="hc1", base_branch="main")
+    assert ch.orig_base_head == orig_tip
+    # Add a commit to main so the base tip moves between draft and materialize.
+    (tmp_path / "extra.txt").write_text("extra\n")
+    _git(tmp_path, "add", "extra.txt")
+    _git(tmp_path, "commit", "-m", "extra commit")
+    new_tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    assert new_tip != orig_tip
+    head_changed = ch.materialize()
+    assert head_changed is True
+    assert ch.cur_base_head == new_tip
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["cur_base_head"] == new_tip
+
+
+def test_load_exposes_orig_and_cur_base_head(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="cbh3", base_branch="main")
+    ch.materialize()
+    loaded = Change.load(tmp_path, "cbh3")
+    assert loaded.orig_base_head == ch.orig_base_head
+    assert loaded.cur_base_head == ch.cur_base_head
+    assert loaded.cur_base_head != ""
+
+
+def test_migrate_v1_to_v2(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="mig1", base_branch="main")
+    meta_path = ch.change_dir / "change.json"
+    meta = json.loads(meta_path.read_text())
+    # Reconstruct a v1 change.json: old `base_head` key, no orig/cur, version 1.
+    old_tip = meta.pop("cur_base_head")
+    meta["base_head"] = old_tip
+    meta["layout_version"] = 1
+    meta_path.write_text(json.dumps(meta))
+    loaded = Change.load(tmp_path, "mig1")
+    migrated = json.loads(meta_path.read_text())
+    assert migrated["layout_version"] == 2
+    assert "base_head" not in migrated
+    assert migrated["orig_base_head"] == old_tip
+    assert migrated["cur_base_head"] == old_tip      # backfill = merge-base(main, branch HEAD)
+    assert loaded.orig_base_head == old_tip
+    assert loaded.cur_base_head == old_tip
