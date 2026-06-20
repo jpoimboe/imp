@@ -103,6 +103,7 @@ class StepNode:
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
     label: str | None = None           # step display label (step_started.payload.label)
+    command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     closed: bool = False
     interrupted: bool = False
@@ -727,6 +728,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.start_ts = event.get("timestamp")
             existing.agent_output = None
             existing.label = p.get("label")
+            existing.command = p.get("command")
             existing.resumed = bool(p.get("resumed", False))
             self._step_stack = [existing]
             return
@@ -739,6 +741,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     start_ts=event.get("timestamp"),
                     quiet=bool(p.get("quiet", False)),
                     label=p.get("label"),
+                    command=p.get("command"),
                     resumed=bool(p.get("resumed", False)))
     self._append(node)
     self._step_stack.append(node)

@@ -1988,3 +1988,32 @@ def test_lost_task_result_resume_closed_at_step_completed() -> None:
              timestamp="2026-06-19T11:00:30+00:00"))
     assert fold.running is False                      # backstop closed it
     assert fold.end_ts == "2026-06-19T11:00:30+00:00"  # stamped the step-end ts
+
+
+def test_step_node_command_populated_from_payload_fresh_node() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="gate", kind="script", phase="verify",
+             command="make check"))
+    step = b.tree.root.children[-1].children[0]
+    assert isinstance(step, nv.StepNode)
+    assert step.command == "make check"
+
+
+def test_step_node_command_populated_on_resume_reentry() -> None:
+    seed = [
+        ev("c", "change_created", change_id=1, title="t"),
+        ev("s1", "step_started", step="gate", kind="script", phase="verify",
+           command="make check"),
+        ev("wp", "workflow_paused", reason="ctrl-c"),
+        ev("wr", "workflow_resumed"),
+    ]
+    live = [
+        ev("s1b", "step_started", step="gate", kind="script", phase="verify",
+           command="make check"),
+    ]
+    b = nv.NarrativeBuilder()
+    for e in seed + live:
+        b.add(e)
+    step = b.tree.root.children[-1].children[0]
+    assert isinstance(step, nv.StepNode)
+    assert step.command == "make check"
