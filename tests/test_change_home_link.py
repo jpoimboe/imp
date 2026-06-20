@@ -122,3 +122,19 @@ def test_relink_home_noop_for_draft(tmp_path: Path) -> None:
     ch = Change.create_draft(tmp_path, title="X", change_id="heal2", base_branch="main")
     ch.relink_home()                              # must not raise, must not link
     assert not (ch.project_root / ".imp" / "changes" / "heal2").is_symlink()
+
+
+def test_relink_home_noop_when_project_root_is_control_root(tmp_path: Path) -> None:
+    change_dir = tmp_path / ".imp" / "changes" / "guard1"
+    change_dir.mkdir(parents=True)
+    ch = Change(
+        id="guard1",
+        title="X",
+        base_branch="main",
+        control_root=tmp_path,
+        project_root=tmp_path,
+        change_dir=change_dir,
+        materialized=True,
+    )
+    ch.relink_home()
+    assert not (tmp_path / ".imp" / "changes" / "guard1").is_symlink()
