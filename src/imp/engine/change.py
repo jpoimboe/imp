@@ -55,6 +55,25 @@ class Change:
         meta["project_root"] = str(new_root)
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
+    def materialize(self) -> bool:
+        """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
+        flip project_root to the worktree, and persist both to change.json.
+        Returns head_changed — whether the base tip moved since draft creation.
+        Idempotent: a no-op returning False once already materialized."""
+        if self.materialized:
+            return False
+        current_tip = worktree.head_of(self.control_root, self.base_branch)
+        head_changed = current_tip != self.base_head
+        wt_path = worktree.create_worktree(self.control_root, self.id, self.base_branch)
+        self.project_root = wt_path
+        self.materialized = True
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["project_root"] = str(wt_path)
+        meta["materialized"] = True
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        return head_changed
+
     @property
     def live_workflow_dir(self) -> Path:
         from imp.providers.config import parse_default_workflow

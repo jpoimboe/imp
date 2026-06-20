@@ -1,4 +1,5 @@
 # tests/test_change.py
+import json
 from pathlib import Path
 
 import pytest
@@ -242,3 +243,34 @@ def test_create_draft_refuses_bad_workflow_and_leaves_no_home(tmp_path: Path) ->
     with pytest.raises(LoadError):
         Change.create_draft(tmp_path, title="X", change_id="drf3", base_branch="main")
     assert not (tmp_path / ".imp" / "changes" / "drf3").exists()
+
+
+def test_materialize_forks_worktree_and_flips_root(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="mz1", base_branch="main")
+    head_changed = ch.materialize()
+    wt = tmp_path / ".imp" / "worktrees" / "mz1"
+    assert wt.exists()
+    assert "imp/mz1" in _git(tmp_path, "branch", "--list", "imp/mz1").stdout
+    assert ch.project_root == wt and ch.materialized is True
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["project_root"] == str(wt) and meta["materialized"] is True
+    assert head_changed is False          # base unchanged since draft creation
+
+
+def test_materialize_reports_head_changed_when_base_advanced(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="mz2", base_branch="main")
+    (tmp_path / "newfile.txt").write_text("x\n")     # advance the base branch tip
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "advance base")
+    assert ch.materialize() is True
+
+
+def test_materialize_is_idempotent(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="mz3", base_branch="main")
+    ch.materialize()
+    root_after_first = ch.project_root
+    assert ch.materialize() is False                 # second call: no-op
+    assert ch.project_root == root_after_first
