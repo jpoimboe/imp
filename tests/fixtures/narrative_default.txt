@@ -1,26 +1,26 @@
 
 ── design ───
-  
-  spec · claude-sonnet-4-6
-  
-  • Drafting the spec.
-  
-    2 calls · read_file · bash
-  
-    reviewer · claude-sonnet-4-6
-  
-  > Please add a section on token expiry.
-  
-  spec · complete
+
+spec · claude-sonnet-4-6
+
+• Drafting the spec.
+
+  2 calls · read_file · bash
+
+  reviewer · claude-sonnet-4-6
+
+> Please add a section on token expiry.
+
+spec · complete
 
 ── implement ───
-  
-  build · claude-sonnet-4-6
-  
-  error: [provider] rate limited
-  
-  warning: dropped block
-  
-  phase_exhausted  phase=implement
-  
-  paused (ctrl-c)
+
+build · claude-sonnet-4-6
+
+error: [provider] rate limited
+
+warning: dropped block
+
+phase_exhausted  phase=implement
+
+paused (ctrl-c)

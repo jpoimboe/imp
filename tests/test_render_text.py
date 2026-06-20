@@ -314,7 +314,7 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
             content=[{"type": "text", "text": "do the real thing"}]),
     ]))
     assert "begin" not in out
-    assert "  > do the real thing" in out   # caret-marked human turn
+    assert "> do the real thing" in out   # caret-marked human turn at column 0
 
 
 def test_interjected_user_message_renders_as_human_turn() -> None:
@@ -335,7 +335,7 @@ def test_interjected_user_message_renders_as_human_turn() -> None:
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "  > actually use postgres" in out   # caret-marked human turn
+    assert "> actually use postgres" in out   # caret-marked human turn at column 0
     step = tree.root.children[0].children[0]
     assert isinstance(step, nv.StepNode)
     um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
@@ -389,7 +389,7 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    assert "  > go ahead" in out   # caret-marked human turn
+    assert "> go ahead" in out   # caret-marked human turn at column 0
     # The re-emitted awaiting_user_input uniquely sets interactive=True on the
     # resumed step (resume re-entry resets it to False first, so only the
     # re-emitted event could have set it back). Assert directly on the node.
@@ -752,10 +752,39 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
     ], full=True)
-    # prose + outcome at depth 2 (aligned indent: the step no longer adds a
-    # level): col 0 plain + col 1 gutter.
-    assert any(ln == "  │ • looks good" for ln in out)
-    assert any(ln == "  │ → status=Success" for ln in out)
+    # prose + outcome at depth 1 (aligned indent: neither phase nor step adds a
+    # level): col 0 is the subagent's own gutter.
+    assert any(ln == "│ • looks good" for ln in out)
+    assert any(ln == "│ → status=Success" for ln in out)
+
+
+def test_steps_de_indent_to_column_zero() -> None:
+    # The phase indent level is dropped: a step header inside a phase renders flush
+    # at column 0 (was column 2), aligned with the phase rule.
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
+        _ev("3", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
+    ])
+    header = next(ln for ln in out if "spec · m" in ln)
+    assert header == "spec · m"                 # column 0, no leading indent
+
+
+def test_subagent_row_de_indents_to_column_two() -> None:
+    # The lean subagent status row shifts left with everything else: its own 2-col
+    # label offset now lands it at column 2 (was column 4 = phase + step + label).
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
+        _ev("3", "tool_call", agent_id="a", id="t1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "llm_response", agent_id="sub:3",
+            raw={"content": [{"type": "text", "text": "x"}]}, usage={}),
+        _ev("5", "tool_result", agent_id="a", id="t1", content='{"status":"Success"}'),
+    ])
+    row = next(ln for ln in out if ln.strip() == "reviewer")
+    assert row == "  reviewer"                  # column 2: step at col 0 + 2-space label
 
 
 def test_subagent_header_excludes_own_gutter() -> None:

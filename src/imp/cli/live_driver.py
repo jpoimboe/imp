@@ -148,11 +148,11 @@ class LiveDriver:
                         self._prev_prose = True
                         self._print_lines(
                             [rt.phase_breadcrumb_line(
-                                cur.container, depth=cur.depth - 1, color=self._color,
+                                cur.container, depth=cur.depth, color=self._color,
                                 gutters=self._gutters())],
                             prose=True,
                             separator_indent=rt._gutter_indent(
-                                cur.depth - 1, self._gutters(), self._color))
+                                cur.depth, self._gutters(), self._color))
                     self._frontier.pop()        # container drained + closed
                     continue
                 return                          # open container, no new children yet
@@ -162,10 +162,10 @@ class LiveDriver:
             cur.index += 1
             if _is_container(child):
                 # PhaseNode/StepNode: print the header now and descend, streaming
-                # the container's children as their events route in. A phase
-                # indents its steps (+1); a step's content flows at the step's
-                # OWN depth (no +1) so prose aligns under the header instead of
-                # burying it — must match render_text._render. (aligned indent)
+                # the container's children as their events route in. The transcript
+                # is flat: neither a phase nor a step adds depth, so prose aligns
+                # under the header instead of burying it — must match
+                # render_text._render. (aligned indent)
                 gutters = self._gutters()
                 if rt.spaces_before(child):
                     self._prev_prose = True
@@ -175,7 +175,7 @@ class LiveDriver:
                     depth=cur.depth, gutters=gutters)
                 if isinstance(child, (nv.StepNode, nv.PhaseNode)):
                     self._prev_prose = True
-                child_depth = cur.depth + 1 if isinstance(child, nv.PhaseNode) else cur.depth
+                child_depth = cur.depth
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:
                 self._emit_leaf(child, cur.depth, gutters=self._gutters())

@@ -323,7 +323,7 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
                           gutters: tuple[int, ...] = ()) -> str:
     """The `── <phase> complete · <N>s ───` end rule, shared by both renderers (§7).
     `depth` is the phase HEADER's depth — pass `depth` from render_text and
-    `cur.depth - 1` from the live driver; both equal the header level.
+    `cur.depth` from the live driver; both equal the header level.
     This depth equivalence holds only because phases appear solely as direct
     children of the root (single-level invariant) and would break if phases
     ever nested inside SubagentFolds."""
@@ -458,7 +458,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
         # priming the children walk so the first step gets a lead-in blank.
         yield header_line(node, depth=depth, color=color, gutters=gutters)
-        yield from _render_children(node.children, depth=depth + 1, full=full,
+        yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
                                     prime=True, live_viewer=live_viewer)
         if node.closed and nv.phase_elapsed(node) is not None:
@@ -475,9 +475,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # through here and renders its full block, just like a loud step.
         # A step's content flows at the step's OWN indent (no +1): the header is a
         # label and its prose/breadcrumb align directly beneath it, rather than
-        # indenting a further level and burying the agent's words. Phases still
-        # indent their steps (the +1 lives in PhaseNode above); subagent folds add
-        # their own level + gutter internally. (design: aligned indent)
+        # indenting a further level and burying the agent's words. Phases no longer
+        # indent their steps either — the transcript is flat at column 0; subagent
+        # folds add their own level + gutter internally. (design: aligned indent)
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
         # speaker label and the speech don't bunch (design: §5.4 air). Priming the
