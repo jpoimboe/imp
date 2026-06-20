@@ -232,8 +232,8 @@ class SubagentFold:
     running: bool = True
     outcome: str | None = None         # result summary when task tool_result lands
     is_error: bool = False
-    terminal_state: str | None = None  # 'stalled' (live via B.2); 'interrupted'
-                                       # is forward-compat scaffolding; else None
+    terminal_state: str | None = None  # 'stalled' or 'interrupted' (both providers
+                                       # now emit it via kind= or [bracket]); else None
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
     collapsible = True
