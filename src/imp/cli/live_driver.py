@@ -47,8 +47,6 @@ def compose_activity_status(
         parts.append(pal.ansi(activity.count, enabled=color))
         if activity.detail:
             parts.append(pal.ansi(activity.detail, "gray", enabled=color))
-        if activity.call_elapsed is not None:
-            parts.append(pal.ansi(rt.fmt_seconds(activity.call_elapsed), enabled=color))
     elif activity.label:
         parts.append(pal.ansi(activity.label, enabled=color))
     parts.append(pal.ansi(rt.fmt_seconds(elapsed), "dim", enabled=color))

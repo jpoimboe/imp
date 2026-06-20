@@ -522,7 +522,6 @@ def test_current_activity_reports_open_burst() -> None:
     assert act.count == "1 call"
     assert act.detail == "read_file config.py"
     assert act.step_label is None
-    assert act.call_elapsed is not None
 
 
 def test_current_activity_idle_gap_between_nodes() -> None:

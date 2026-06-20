@@ -14,7 +14,6 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -161,7 +160,6 @@ class ToolCall:
     is_error: bool = False
     killed: bool = False
     call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
-    call_started: float | None = None  # monotonic anchor for the live per-call timer
     citations_footer: str = ""          # §2: rendered as the block's final line, outside the clip
 
 
@@ -194,7 +192,6 @@ class Activity:
     detail: str | None = None
     label: str | None = None
     step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
-    call_elapsed: float | None = None  # monotonic seconds for the in-flight call
 
 
 def activity_to_text(activity: Activity | None) -> str:
@@ -362,8 +359,7 @@ class NarrativeBuilder:
       2. else dispatch by event type at the current open scope.
     """
 
-    def __init__(self, *, now: Callable[[], float] = time.monotonic) -> None:
-        self._now = now
+    def __init__(self) -> None:
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
         self._current_phase: PhaseNode | None = None
@@ -437,15 +433,11 @@ class NarrativeBuilder:
                     (c for c in reversed(basis)
                      if c.result is None and not c.killed), None)
                 detail = None
-                call_elapsed = None
                 if inflight is not None:
                     arg = _sanitize_activity_arg(
                         next(iter((inflight.input or {}).values()), ""))
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
-                    if inflight.call_started is not None:
-                        call_elapsed = self._now() - inflight.call_started
-                return Activity(count=count, detail=detail,
-                                step_label=step_label, call_elapsed=call_elapsed)
+                return Activity(count=count, detail=detail, step_label=step_label)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
@@ -1063,8 +1055,7 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     call = ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
-        input=p.get("input") or {}, call_ts=event.get("timestamp"),
-        call_started=self._now())
+        input=p.get("input") or {}, call_ts=event.get("timestamp"))
     burst.calls.append(call)
     if call.name == "wait_for_user":
         self._pending_wfu[call.call_id] = str((call.input or {}).get("prompt", ""))

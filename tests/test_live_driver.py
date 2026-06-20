@@ -1285,44 +1285,37 @@ def test_quiet_goto_renders_nothing_in_live_path() -> None:
     assert body == _render_body(events)   # live == imp log, line for line
 
 
-def test_current_activity_anchors_timer_to_in_flight_call() -> None:
-    # Timer anchors to the running call (c2), not a resolved (c1) or killed (c3) call.
-    clock = [50.0]
-    b = nv.NarrativeBuilder(now=lambda: clock[0])
+def test_current_activity_detail_anchors_to_in_flight_call() -> None:
+    # Detail names the running call (c2), not a resolved (c1) or killed (c3) one.
+    b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p", label="searching"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="read_file",
-            input={"p": "x"}))           # stamped at clock=50.0
+            input={"p": "x"}))
     b.add(ev("r1", "tool_result", agent_id="a", id="c1", content="ok"))
-    clock[0] = 70.0
     b.add(ev("t2", "tool_call", agent_id="a", id="c2", name="bash",
-            input={"command": "ls"}))    # stamped at clock=70.0, still running
-    clock[0] = 71.0
+            input={"command": "ls"}))           # still running
     b.add(ev("t3", "tool_call", agent_id="a", id="c3", name="grep",
-            input={"q": "y"}))           # stamped at clock=71.0
-    b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))  # c3 killed
-    clock[0] = 73.0
+            input={"q": "y"}))
+    b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))
     act = b.current_activity()
     assert act is not None
-    assert act.step_label == "searching"  # the step display label
-    assert act.detail == "bash ls"       # detail from the in-flight call (c2, not killed c3)
-    assert act.count == "3 calls"        # retained Activity.count basis keeps killed
-    assert act.call_elapsed == 3.0       # 73.0 (now) - 70.0 (c2 stamp), not c3's 71.0
+    assert act.step_label == "searching"
+    assert act.detail == "bash ls"       # in-flight call (c2), not killed c3
+    assert act.count == "3 calls"        # count basis keeps killed
 
 
-def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
+def test_compose_activity_status_has_no_per_call_timer() -> None:
     from imp.cli.live_driver import compose_activity_status
 
-    clock = [100.0]
-    b = nv.NarrativeBuilder(now=lambda: clock[0])
+    b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl",
              label="implementing"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-            input={"command": "sleep 600"}))       # stamped at clock=100.0
-    clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
+            input={"command": "sleep 600"}))
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    expected = "implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
-    assert line.split(" ", 1)[1] == expected
+    # Only the single trailing burst timer (900s = 15m 0s); no per-call clock.
+    assert line.split(" ", 1)[1] == "implementing · 1 call · bash sleep 600 · 15m 0s"
 
 
 def test_status_spine_label_activity_elapsed() -> None:
