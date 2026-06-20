@@ -11,7 +11,7 @@
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 5
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-BASE=$(python3 -c "import json;print(json.load(open('$CHANGE_DIR/change.json'))['base_branch'])") || exit 5
+BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])") || exit 5
 [ -n "$BASE" ] || exit 5
 
 # A bad base_branch makes `--is-ancestor` exit 128; verify the ref up front.

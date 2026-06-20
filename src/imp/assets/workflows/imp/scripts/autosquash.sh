@@ -13,7 +13,7 @@
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-BASE=$(python3 -c "import json;print(json.load(open('$CHANGE_DIR/change.json'))['base_branch'])")
+BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])")
 # Rebase onto the FORK POINT, not the base tip — fold only this change's own commits.
 FORK=$(git merge-base "$BASE" HEAD)
 STATE="$CHANGE_DIR/state"
