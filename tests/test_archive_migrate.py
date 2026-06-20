@@ -176,3 +176,57 @@ def test_retire_journal_deletes_ref_and_is_idempotent(tmp_path: Path) -> None:
 
     # Already absent: a no-op that reports False rather than erroring.
     assert migrate.retire_journal(tmp_path) is False
+
+
+def _journal_legacy_change(control: Path, cid: str) -> None:
+    stage = control / "stage"
+    stage.mkdir(parents=True, exist_ok=True)
+    files: dict[str, Path] = {}
+    (stage / "events.jsonl").write_bytes(_events_bytes(cid))
+    files["events.jsonl"] = stage / "events.jsonl"
+    (stage / "change.json").write_text(json.dumps({
+        "slug": cid, "title": cid.title(), "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00"}))
+    files["change.json"] = stage / "change.json"
+    (stage / "state.json").write_text(json.dumps({
+        "slug": cid, "status": "completed", "step": "finalize"}))
+    files["state.json"] = stage / "state.json"
+    worktree.journal_commit(control, cid, files)
+
+
+def test_import_change_runtime_injects_id_for_legacy_slug_only(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _journal_legacy_change(tmp_path, "2026-06-03-legacy")
+
+    assert migrate.import_change_runtime(tmp_path, "2026-06-03-legacy") is True
+
+    rec = record.read_record(records_root(tmp_path), "2026-06-03-legacy")
+    assert rec is not None
+    assert rec["id"] == "2026-06-03-legacy"
+    assert rec["title"] == "2026-06-03-Legacy"
+    assert rec["base"] == "main"
+
+
+def test_import_change_runtime_preserves_present_id(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    # The journal ENTRY NAME ("entryname") differs from the embedded `id`
+    # ("realid"), so a blind overwrite with change_id would change the record id.
+    stage = tmp_path / "stage"
+    stage.mkdir(parents=True, exist_ok=True)
+    files: dict[str, Path] = {}
+    (stage / "events.jsonl").write_bytes(_events_bytes("realid"))
+    files["events.jsonl"] = stage / "events.jsonl"
+    (stage / "change.json").write_text(json.dumps({
+        "id": "realid", "title": "Real", "base_branch": "main"}))
+    files["change.json"] = stage / "change.json"
+    (stage / "state.json").write_text(json.dumps({"status": "completed"}))
+    files["state.json"] = stage / "state.json"
+    worktree.journal_commit(tmp_path, "entryname", files)
+
+    assert migrate.import_change_runtime(tmp_path, "entryname") is True
+    # setdefault leaves the present id intact: the record is keyed "realid",
+    # NOT the entry name "entryname".
+    rec = record.read_record(records_root(tmp_path), "realid")
+    assert rec is not None
+    assert rec["id"] == "realid"
+    assert record.read_record(records_root(tmp_path), "entryname") is None
