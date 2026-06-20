@@ -221,6 +221,27 @@ def test_task_dispatch_suspension_propagates(
             ctx=ctx, state=state))
 
 
+def test_task_dispatch_suspension_marks_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SubagentSuspended re-raised with [interrupted] marker for renderer classification."""
+    from imp.engine.agent_run import SubagentSuspended
+
+    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
+        raise SubagentSuspended("subagent paused")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    state = RunState(cap=100)
+    with pytest.raises(SubagentSuspended) as ei:
+        asyncio.run(dispatch_tool(
+            tool=make_task_tool(),
+            args={"subagent_name": "impl", "task_description": "x"},
+            ctx=ctx, state=state))
+    assert "[interrupted]" in str(ei.value)
+
+
 def test_task_dispatch_generic_failure_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
