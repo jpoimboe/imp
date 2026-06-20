@@ -160,6 +160,16 @@ class ToolContext:
         denied op; returns the resolved Path.
         """
         resolved = self.resolve_path(path)
+        home = self.change_home
+        if home is not None:
+            home = home.resolve()
+            if resolved == home or resolved.is_relative_to(home):
+                virtual = f".imp/changes/{home.name}"
+                if resolved != home:
+                    virtual = f"{virtual}/{resolved.relative_to(home).as_posix()}"
+                for op in ops:
+                    self.check_fs_permission(op, virtual)
+                return resolved
         root = self.project_root.resolve()
         if resolved == root or resolved.is_relative_to(root):
             virtual = "." if resolved == root else resolved.relative_to(root).as_posix()
