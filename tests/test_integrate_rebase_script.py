@@ -23,6 +23,16 @@ def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
                           env=env, capture_output=True, text=True, check=False)
 
 
+def _endpoints(home: Path) -> tuple[str | None, str | None]:
+    fork = base = None
+    for line in (home / "integration-notes.md").read_text().splitlines():
+        if line.startswith("Integration-fork: "):
+            fork = line.split(": ", 1)[1].strip()
+        elif line.startswith("Integration-base: "):
+            base = line.split(": ", 1)[1].strip()
+    return fork, base
+
+
 def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
     project_root.mkdir(parents=True, exist_ok=True)
     _git(project_root, "init", "-b", "main")
@@ -38,6 +48,7 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
     (project_root / "g.txt").write_text("branch work\n")
     _git(project_root, "add", "g.txt")
     _git(project_root, "commit", "-m", "branch work")
+    fork = _git(project_root, "merge-base", "main", "HEAD").stdout.strip()
     if base_ahead:
         _git(project_root, "checkout", "main")
         (project_root / "f.txt").write_text(
@@ -51,7 +62,8 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
             _git(project_root, "commit", "-m", "branch edits f")
     cd = _home(project_root)
     cd.mkdir(parents=True, exist_ok=True)
-    (cd / "change.json").write_text(json.dumps({"id": "x", "title": "t", "base_branch": "main"}))
+    (cd / "change.json").write_text(json.dumps(
+        {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
 def test_base_unmoved_exits_2(tmp_path: Path) -> None:
@@ -107,3 +119,44 @@ def test_base_moved_conflict_exits_6(tmp_path: Path) -> None:
     rebase_active = (pr / ".git" / "rebase-merge").exists() or \
                     (pr / ".git" / "rebase-apply").exists()
     assert rebase_active, "rebase must be left in-progress for the integrator"
+
+
+def test_clean_rebase_records_endpoints_and_replants_cur_base_head(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=False)
+    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    r = _run(pr)
+    assert r.returncode == 0, r.stderr
+    p, b = _endpoints(_home(pr))
+    assert p == before                                          # P = pre-rebase fork
+    assert b == _git(pr, "rev-parse", "main").stdout.strip()    # B = base tip
+    meta = json.loads((_home(pr) / "change.json").read_text())
+    assert meta["cur_base_head"] == b                           # cur_base_head := B
+    # The base-side-incoming diff is recoverable from (P, B) though merge-base collapses.
+    assert _git(pr, "diff", "--quiet", p, b).returncode == 1    # non-empty
+    mb = _git(pr, "merge-base", "main", "HEAD").stdout.strip()
+    assert _git(pr, "diff", "--quiet", mb, "main").returncode == 0  # empty post-rebase
+
+
+def test_conflict_records_endpoints_and_keeps_cur_base_head(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=True)
+    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    r = _run(pr)
+    assert r.returncode == 6, r.stderr
+    p, b = _endpoints(_home(pr))
+    assert p == before                                          # P = pre-rebase fork
+    assert b == _git(pr, "rev-parse", "main").stdout.strip()
+    after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    assert after == before                                      # untouched on exit 6
+
+
+def test_base_unmoved_leaves_cur_base_head_and_no_endpoints(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    r = _run(pr)
+    assert r.returncode == 2
+    after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    assert after == before                                      # untouched on exit 2
+    assert not (_home(pr) / "integration-notes.md").exists()    # no endpoints recorded
