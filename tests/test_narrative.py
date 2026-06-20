@@ -1917,6 +1917,22 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
         folds["tester"].start_ts, folds["tester"].end_ts) == 19.0
 
 
+def test_opening_intent_becomes_interactive_user_turn_at_root() -> None:
+    tree = nv.build_tree([
+        {"id": "e1", "agent_id": None, "type": "change_created",
+         "payload": {"handle": "h", "title": "t"}},
+        {"id": "e2", "agent_id": None, "type": "opening_intent",
+         "payload": {"text": "add a --json flag"}},
+    ])
+    kids = tree.root.children
+    assert len(kids) == 1
+    node = kids[0]
+    assert isinstance(node, nv.UserMessageNode)
+    assert node.text == "add a --json flag"
+    # interactive=True is required, else render_text drops it as synthetic plumbing.
+    assert node.interactive is True
+
+
 def test_lost_task_result_resume_closed_at_step_completed() -> None:
     # Backstop: a `task` fold opens, the parent streams a mid-turn chunk (no
     # terminal stop_reason) so Task 1's guard keeps the fold open, and NO task

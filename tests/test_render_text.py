@@ -1769,6 +1769,17 @@ def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
     assert "·" not in row
 
 
+def test_opening_intent_renders_flush_left_user_turn() -> None:
+    tree = nv.build_tree([
+        {"id": "e1", "agent_id": None, "type": "change_created",
+         "payload": {"handle": "h", "title": "t"}},
+        {"id": "e2", "agent_id": None, "type": "opening_intent",
+         "payload": {"text": "add a flag"}},
+    ])
+    body = list(rt.render_tree(tree, full=False, color=False, width=80))
+    assert any(ln == "> add a flag" for ln in body)
+
+
 def test_burst_summary_drops_sub_second_duration() -> None:
     burst = nv.ToolBurstFold(
         start_ts="2024-01-01T00:00:00", end_ts="2024-01-01T00:00:00.500000")
