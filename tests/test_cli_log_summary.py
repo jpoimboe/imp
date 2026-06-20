@@ -7,6 +7,7 @@ import pytest
 
 import imp.cli.main as m
 from imp.cli.main import main
+from imp.engine.change import LAYOUT_VERSION
 
 
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
@@ -16,7 +17,8 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     (change_dir / "state").mkdir(parents=True)
     (change_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
-                    "created_at": "2026-01-01T00:00:00+00:00"}))
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "layout_version": LAYOUT_VERSION}))
     events = [
         {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
          "payload": {"step": "spec-writer", "phase": "spec"}},

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
+from imp.engine.change import LAYOUT_VERSION
 
 
 def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
@@ -20,7 +21,8 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
     change_dir = control / ".imp" / "changes" / slug
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": title, "base_branch": "main"}),
+        json.dumps({"id": slug, "title": title, "base_branch": "main",
+                    "layout_version": LAYOUT_VERSION}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({

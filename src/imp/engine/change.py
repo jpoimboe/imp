@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.engine import worktree
-from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
@@ -21,6 +22,20 @@ def _imp_commit(control_root: Path) -> str:
     """For the refusal breadcrumb; empty string when git is absent or not a repo."""
     proc = worktree._git(control_root, "rev-parse", "HEAD")
     return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+_MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {}
+
+
+def migrate(old_v: int, new_v: int, change_dir: Path) -> None:
+    """Forward-migrate a change home from old_v to new_v; raises LayoutMismatch when no path is registered."""
+    fn = _MIGRATIONS.get((old_v, new_v))
+    if fn is None:
+        meta = json.loads((change_dir / "change.json").read_text())
+        raise LayoutMismatch(stored=old_v, engine=new_v,
+                             imp_commit=meta.get("imp_commit", ""),
+                             change_dir=change_dir)
+    fn(change_dir)
 
 
 @dataclass
@@ -247,6 +262,10 @@ class Change:
         if not change_dir.is_dir():
             raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
+        stored = meta.get("layout_version", 0)
+        if stored != LAYOUT_VERSION:
+            migrate(stored, LAYOUT_VERSION, change_dir)
+            # if migrate() succeeds, meta is now stale; re-read change.json before use
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
             else (control_root / ".imp" / "worktrees" / change_id).resolve()

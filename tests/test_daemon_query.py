@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from imp.engine.change import LAYOUT_VERSION
 from imp.remote.daemon import discover
 from tests.conftest import _seed_control
 
@@ -17,7 +18,8 @@ def _seed_change(tmp_path: Path) -> str:
         json.dumps({"status": "running", "step": "implement"}))
     (cdir / "change.json").write_text(json.dumps({
         "id": cid, "title": "Dark mode", "base_branch": "main",
-        "created_at": "2026-06-14T00:00:00Z"}))
+        "created_at": "2026-06-14T00:00:00Z",
+        "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
     return cid
 
