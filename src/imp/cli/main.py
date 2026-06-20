@@ -47,7 +47,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import derive_handle, new_change_id
+from imp.engine.slug import new_change_id
 from imp.engine.state import LockHeld, State
 from imp.engine.workflow_lifecycle import (
     DriftState,
@@ -1047,15 +1047,12 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
 
 def _resolve_id(control: Path, token: str) -> str:
     """Resolve a user-typed token to a Change id (spec AC 7): it must be an
-    unambiguous substring of exactly one change's LIVE handle (recomputed from the
-    current title). The id is always a substring of its own handle, so a bare id
-    always resolves. Multiple matches exit non-zero listing candidates; none errors."""
+    unambiguous substring of exactly one change's id. Multiple matches exit
+    non-zero listing candidates; none errors."""
     if not token.strip():
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         raise SystemExit(2)
-    ids = _iter_change_ids(control)
-    matches = [cid for cid in ids
-               if token in derive_handle(_title_for_id(control, cid) or "", cid)]
+    matches = [cid for cid in _iter_change_ids(control) if token in cid]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -1095,12 +1092,6 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
-def _show_handle(control: Path, change_id: str) -> str:
-    """Current handle for a change, worktree-first then journal."""
-    title = _title_for_id(control, change_id) or ""
-    return derive_handle(title, change_id)
-
-
 def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     live = _change_home(control, change_id) / "artifacts" / rel
     if live.is_file():
@@ -1108,13 +1099,13 @@ def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
     return journal.journal_show(control, change_id, rel)
 
 
-def _show_newest_plan_rel(control: Path, change_id: str, handle: str) -> str | None:
-    """plans/<handle>-plan-N.md for the highest N, live worktree first then
-    journal. Returns None when no plan exists in either place."""
+def _show_newest_plan_rel(control: Path, change_id: str) -> str | None:
+    """plans/<id>-plan-N.md for the highest N, live worktree first then journal.
+    Returns None when no plan exists in either place."""
     def _newest(names: list[str]) -> str | None:
         best, pick = -1, None
         for name in names:
-            mobj = re.fullmatch(rf"{re.escape(handle)}-plan-(\d+)\.md", name)
+            mobj = re.fullmatch(rf"{re.escape(change_id)}-plan-(\d+)\.md", name)
             if mobj and int(mobj.group(1)) > best:
                 best, pick = int(mobj.group(1)), name
         return pick
@@ -1155,12 +1146,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
     except SystemExit:
         return 2
     resource = args.resource
-    if resource in ("spec", "plan"):
-        handle = _show_handle(control, change_id)
     if resource == "spec":
-        data = _show_artifact(control, change_id, f"spec/{handle}.md")
+        data = _show_artifact(control, change_id, f"spec/{change_id}.md")
     elif resource == "plan":
-        rel = _show_newest_plan_rel(control, change_id, handle)
+        rel = _show_newest_plan_rel(control, change_id)
         data = _show_artifact(control, change_id, rel) if rel else None
     elif resource == "events":
         data = _show_runtime(control, change_id, "events.jsonl")
