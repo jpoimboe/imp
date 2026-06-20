@@ -1,5 +1,6 @@
 ---
 name: explorer
+label: exploring codebase
 description: Fast read-only codebase exploration — find files, search code, answer questions about the codebase, and report findings with file:line citations.
 tools: [read_file, glob, grep, bash, query_events]
 output:

@@ -1,5 +1,6 @@
 ---
 name: integrator
+label: integrating
 description: Resolve a rebase that stopped on a conflict while replaying the change branch onto base — fix textual + semantic conflicts, record findings, drive the rebase to completion; escalate only what can't be safely reconciled.
 output:
   status: {type: enum, values: [Success, Error]}

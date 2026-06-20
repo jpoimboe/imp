@@ -1,5 +1,6 @@
 ---
 name: code-reviewer
+label: reviewing code
 description: Reviews the change's diff (a per-batch range, or the whole change) against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
 output:
   status: {type: enum, values: [Success, Error]}

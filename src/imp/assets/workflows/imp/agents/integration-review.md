@@ -1,5 +1,6 @@
 ---
 name: integration-review
+label: reviewing merge
 description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff. Non-soliciting; routes ok or breakage.
 output:
   status: {type: enum, values: [Success, Error]}

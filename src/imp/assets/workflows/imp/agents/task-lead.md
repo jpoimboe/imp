@@ -1,5 +1,6 @@
 ---
 name: task-lead
+label: implementing
 description: Implement-phase controller — pick the next task, dispatch implementer + one reviewer, adjudicate, commit one clean unit, record progress.
 subagents: [implementer, quality-reviewer]
 output:

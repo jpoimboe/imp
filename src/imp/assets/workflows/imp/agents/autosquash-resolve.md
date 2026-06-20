@@ -1,5 +1,6 @@
 ---
 name: autosquash-resolve
+label: resolving fixups
 description: Resolve a mid-flight fixup!-fold rebase conflict so the fold preserves the pre-autosquash tree, then drive the rebase to completion.
 output:
   status: {type: enum, values: [Success, Error]}

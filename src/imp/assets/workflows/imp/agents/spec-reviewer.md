@@ -1,5 +1,6 @@
 ---
 name: spec-reviewer
+label: reviewing spec
 description: Review the spec against the captured intent; severity-classified findings; blocking iff any Critical/Major.
 output:
   status: {type: enum, values: [Success, Error]}

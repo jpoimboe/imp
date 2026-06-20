@@ -861,6 +861,18 @@ def test_spec_writer_prompt_has_go_live_park_branch() -> None:
     assert "spec phase pauses" in body.lower()           # park path pauses the spec phase
 
 
+def test_dispatched_subagents_carry_frontmatter_labels() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.agents["explorer"].label == "exploring codebase"
+    assert wf.agents["researcher"].label == "researching"
+    assert wf.agents["implementer"].label == "implementing task"
+    assert wf.agents["quality-reviewer"].label == "reviewing changes"
+    for name, a in wf.agents.items():
+        assert a.label, f"agent {name!r} has no label"
+
+
 def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))

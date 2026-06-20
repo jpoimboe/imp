@@ -1,5 +1,6 @@
 ---
 name: plan-writer
+label: writing plan
 description: Write the next bite-sized plan from the spec and progress, then commit it.
 subagents: [explorer, researcher]
 output:

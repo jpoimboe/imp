@@ -1,5 +1,6 @@
 ---
 name: deferred-sweep
+label: resolving deferred items
 description: Drain the Deferred Followups list — re-evaluate each item on a risk gate and apply one of three dispositions (fixed / needs-decision / dismissed), trusting and logging low-risk fixes rather than surfacing them.
 subagents: [implementer, quality-reviewer]
 output:
