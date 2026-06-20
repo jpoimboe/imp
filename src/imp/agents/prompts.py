@@ -74,6 +74,7 @@ class _ChangeNamespace:
     id: str
     title: str
     home: str = ""
+    cur_base_head: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +120,7 @@ class PromptContext:
 def build_context(
     change_title: str, event_log: EventLog,
     *, change_id: str = "", change_home: str = "",
+    cur_base_head: str = "",
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None, guidance: str = "",
     non_interactive: bool = False,
@@ -126,7 +128,7 @@ def build_context(
     facts = {**(project_facts or {}), "guidance": guidance}
     return PromptContext(
         change=_ChangeNamespace(id=change_id, title=change_title,
-                                home=change_home),
+                                home=change_home, cur_base_head=cur_base_head),
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),

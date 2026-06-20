@@ -318,11 +318,11 @@ def test_task_lead_documents_verify_triage() -> None:
 def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
     low = CODE_REVIEWER.read_text().lower()
     # The reviewer resolves its own range from the review cadence, not from a
-    # coordinator dispatch: per-batch over review_base, end-of-change over merge-base.
+    # coordinator dispatch: per-batch over review_base, end-of-change over cur_base_head.
     assert "review_scope" in low
     assert "review_base" in low                 # per-batch range
-    assert "git merge-base" in low              # end-of-change range
-    assert "base_branch" in low                 # <base> from change.json
+    assert "cur_base_head" in low               # end-of-change range from recorded fork
+    assert "git merge-base" not in low
     assert "pure advisor" not in low            # it routes now
     assert "final whole-change review" not in low
 

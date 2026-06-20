@@ -212,11 +212,12 @@ def test_integrator_is_a_rebase_conflict_resolver() -> None:
     assert "wait_for_user" in text
 
 
-def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123") -> str:
+def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123",
+                     cur_base_head: str = "forkSHA") -> str:
     wf = _wf()
     body = wf.agents["code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log,
+    ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
                         vars={"review_scope": review_scope, "review_base": review_base,
                               "fast_path": False})
     return render_prompt(body, ctx)
@@ -224,8 +225,8 @@ def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123"
 
 def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
     out = _render_reviewer(tmp_path, review_scope="change")
-    assert "git merge-base" in out                 # whole-change diff, never review_base
-    assert "base_branch" in out                     # <base> resolved from change.json
+    assert "forkSHA..HEAD" in out                   # whole-change diff from recorded fork
+    assert "git merge-base" not in out
     assert "vars.review_base" not in out and "abc123" not in out
     assert "task(subagent_name=" not in out         # reviews directly, dispatches nothing
 
