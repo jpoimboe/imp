@@ -37,7 +37,7 @@ phases:
         label: writing spec
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/artifacts/spec/**", ".imp/change/progress.md"], mode: allow}
+          - {operations: [write], paths: [".imp/changes/*/artifacts/spec/**", ".imp/changes/*/progress.md"], mode: allow}
         rules:
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
@@ -76,7 +76,7 @@ phases:
         label: writing plan
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/artifacts/plans/**", ".imp/change/progress.md"], mode: allow}
+          - {operations: [write], paths: [".imp/changes/*/artifacts/plans/**", ".imp/changes/*/progress.md"], mode: allow}
 
       - name: plan-verify-commit
         quiet: true
@@ -208,7 +208,7 @@ phases:
         max_loops: 6
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations
+          - {operations: [write], paths: [".imp/changes/*/**"], mode: allow}   # append deferred observations
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}

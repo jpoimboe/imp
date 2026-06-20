@@ -28,7 +28,6 @@ from imp.agents.tools.ignore import (
     repo_root,
 )
 from imp.agents.tools.limits import (
-    ARTIFACTS_REL,
     EXCLUDED_DIRS,
     EXTERNAL_WALK_FILE_CAP,
     OUTPUT_TRUNCATION_MARKER,
@@ -46,8 +45,8 @@ def _iter_files(target: Path, policy: Any = None,
                 root: Path | None = None,
                 excluded: frozenset[str] = EXCLUDED_DIRS) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
-    (A3) — EXCEPT the per-change artifact subtree .imp/change/artifacts/, which is
-    surfaced (passed via `root`, the worktree root, so the carve-out is anchored
+    (A3) — EXCEPT the per-change artifact subtree .imp/changes/<id>/artifacts/, which
+    is surfaced (passed via `root`, the worktree root, so the carve-out is anchored
     there; `root=None` for external targets keeps the old exclude-everything
     behavior). `os.walk` with in-place `dirnames` pruning means the walk does not
     even *enumerate* inside `.imp/`/`.git/` beyond the carve-out. When `policy` is
@@ -105,14 +104,17 @@ def _iter_files(target: Path, policy: Any = None,
 
 def _git_files(unignored: set[Path], target: Path, root: Path,
                policy: Any) -> list[Path]:
-    """Normal in-worktree git path: the unignored set UNION the
-    .imp/change/artifacts/ carve-out portion under `target` (walked separately
-    since .imp is gitignored), restricted to regular files under `target`,
-    sandbox-masked, sorted (head_limit early-exit makes order observable)."""
+    """Normal in-worktree git path: the unignored set UNION each change's
+    .imp/changes/<id>/artifacts/ carve-out portion under `target` (walked
+    separately since .imp is gitignored), restricted to regular files under
+    `target`, sandbox-masked, sorted (head_limit early-exit makes order
+    observable)."""
     masking = policy is not None and policy.active
     candidates = set(unignored)
-    art = root / ARTIFACTS_REL
-    if art.is_dir() and (art.is_relative_to(target) or target.is_relative_to(art)):
+    for art in sorted((root / ".imp" / "changes").glob("*/artifacts")):
+        if not (art.is_dir()
+                and (art.is_relative_to(target) or target.is_relative_to(art))):
+            continue
         for dirpath, _dirnames, filenames in os.walk(art):
             base = Path(dirpath)
             for name in filenames:
@@ -158,7 +160,7 @@ async def _grep_file_source(target: Path, root: Path, inside: bool,
         "bash; in-worktree matches are reported relative to the root, external "
         "matches as absolute paths. Skips paths git ignores (build artifacts, "
         "caches, .venv, etc.) and the .git/ dir; the change's "
-        ".imp/change/artifacts/ subtree stays visible, and explicitly targeting "
+        ".imp/changes/<id>/artifacts/ subtree stays visible, and explicitly targeting "
         "an ignored path searches it anyway. Uses pathlib glob "
         "semantics — a bare *.py matches top-level files only; this differs "
         "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
@@ -264,7 +266,7 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "lines — never paste rows into edit_file/write_file. "
         "Skips paths git ignores (build artifacts, caches, .venv, etc.), the "
         ".git/ dir, and binary files (like ripgrep); the change's "
-        ".imp/change/artifacts/ subtree stays visible, and explicitly targeting "
+        ".imp/changes/<id>/artifacts/ subtree stays visible, and explicitly targeting "
         "an ignored path searches it anyway. "
         "Scans the first 5 MB per file; output capped "
         "at 50 KB. Absolute and out-of-worktree paths are accepted, bounded by "

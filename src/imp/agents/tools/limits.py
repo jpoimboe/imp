@@ -65,17 +65,24 @@ BG_WAIT_MAX_S = 1200.0                   # 20 min wait budget per bash_output ca
 # --- Control-dir + VCS exclusion (structured nav tools only) ----------------
 EXCLUDED_DIRS = frozenset({".imp", ".git"})
 
-ARTIFACTS_REL = Path(".imp/change/artifacts")
-
 
 def within_artifacts(rel: Path) -> bool:
-    """True when `rel` (relative to worktree root) IS the artifact subtree or sits inside it."""
-    return rel == ARTIFACTS_REL or ARTIFACTS_REL in rel.parents
+    """True when `rel` (worktree-relative) IS a change's artifacts subtree or sits
+    inside it: .imp/changes/<id>/artifacts[/...]."""
+    parts = rel.parts
+    return (len(parts) >= 4 and parts[0] == ".imp"
+            and parts[1] == "changes" and parts[3] == "artifacts")
 
 
 def leads_to_or_within_artifacts(rel: Path) -> bool:
-    """`within_artifacts` plus the ancestor dirs (`.imp`, `.imp/change`) that lead down to it."""
-    return within_artifacts(rel) or rel in ARTIFACTS_REL.parents
+    """`within_artifacts` plus the ancestor dirs (.imp, .imp/changes,
+    .imp/changes/<id>) that lead down to a change's artifacts subtree."""
+    parts = rel.parts
+    if parts in {(".imp",), (".imp", "changes")}:
+        return True
+    if len(parts) == 3 and parts[0] == ".imp" and parts[1] == "changes":
+        return True
+    return within_artifacts(rel)
 
 
 class ToolAborted(Exception):

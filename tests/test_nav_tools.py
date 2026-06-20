@@ -339,32 +339,32 @@ def test_grep_description_notes_sandbox_and_walk_cap() -> None:
 
 
 def test_glob_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:
-    plans = tmp_path / ".imp" / "change" / "artifacts" / "plans"
+    plans = tmp_path / ".imp" / "changes" / "c1" / "artifacts" / "plans"
     plans.mkdir(parents=True)
     (plans / "feat-plan-1.md").write_text("# plan 1\n")
     (plans / "feat-plan-2.md").write_text("# plan 2\n")
     (tmp_path / ".imp" / "events.jsonl").write_text("runtime log\n")  # must stay hidden
 
     out = _glob(_ctx(tmp_path),
-                pattern=".imp/change/artifacts/plans/feat-plan-*.md")
-    assert ".imp/change/artifacts/plans/feat-plan-1.md" in out
-    assert ".imp/change/artifacts/plans/feat-plan-2.md" in out
+                pattern=".imp/changes/c1/artifacts/plans/feat-plan-*.md")
+    assert ".imp/changes/c1/artifacts/plans/feat-plan-1.md" in out
+    assert ".imp/changes/c1/artifacts/plans/feat-plan-2.md" in out
 
     # A wildcard sweep surfaces the artifacts but never the runtime files.
     out_all = _glob(_ctx(tmp_path), pattern="**/*")
-    assert ".imp/change/artifacts/plans/feat-plan-1.md" in out_all
+    assert ".imp/changes/c1/artifacts/plans/feat-plan-1.md" in out_all
     assert "events.jsonl" not in out_all
 
 
 def test_grep_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:
-    art = tmp_path / ".imp" / "change" / "artifacts" / "spec"
+    art = tmp_path / ".imp" / "changes" / "c1" / "artifacts" / "spec"
     art.mkdir(parents=True)
     (art / "feat.md").write_text("the DECISION is X\n")
     # A runtime file with the same needle: it must remain excluded.
     (tmp_path / ".imp" / "events.jsonl").write_text("the DECISION leaked\n")
 
     out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
-    assert ".imp/change/artifacts/spec/feat.md" in out
+    assert ".imp/changes/c1/artifacts/spec/feat.md" in out
     assert "events.jsonl" not in out
 
 
@@ -439,13 +439,13 @@ def test_grep_escape_hatch_searches_explicit_ignored_dir(tmp_path: Path) -> None
 
 def test_grep_carveout_searched_in_repo(tmp_path: Path) -> None:
     _init_git_repo(tmp_path, ".imp/\n")
-    art = tmp_path / ".imp" / "change" / "artifacts" / "spec"
+    art = tmp_path / ".imp" / "changes" / "c1" / "artifacts" / "spec"
     art.mkdir(parents=True)
     (art / "feat.md").write_text("the DECISION is X\n")
     (tmp_path / ".imp" / "events.jsonl").write_text("the DECISION leaked\n")
 
     out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
-    assert ".imp/change/artifacts/spec/feat.md" in out
+    assert ".imp/changes/c1/artifacts/spec/feat.md" in out
     assert "events.jsonl" not in out
 
 
@@ -550,13 +550,13 @@ def test_glob_keeps_fresh_untracked_nonignored_file(tmp_path: Path) -> None:
 
 def test_glob_carveout_kept_in_repo(tmp_path: Path) -> None:
     _init_git_repo(tmp_path, ".imp/\n")
-    plans = tmp_path / ".imp" / "change" / "artifacts" / "plans"
+    plans = tmp_path / ".imp" / "changes" / "c1" / "artifacts" / "plans"
     plans.mkdir(parents=True)
     (plans / "feat-plan-1.md").write_text("")
     (tmp_path / ".imp" / "events.jsonl").write_text("")
 
     out = _glob(_ctx(tmp_path), pattern="**/*")
-    assert ".imp/change/artifacts/plans/feat-plan-1.md" in out
+    assert ".imp/changes/c1/artifacts/plans/feat-plan-1.md" in out
     assert "events.jsonl" not in out
 
 
@@ -571,7 +571,7 @@ def test_glob_escape_hatch_explicit_ignored_base(tmp_path: Path) -> None:
 def test_glob_description_documents_gitignore_skip() -> None:
     desc = get_registry()["glob"].description
     assert "git ignores" in desc
-    assert ".imp/change/artifacts/" in desc
+    assert ".imp/changes/<id>/artifacts/" in desc
     assert "searches it anyway" in desc
     # retained guarantees
     assert "bounded by the sandbox like bash" in desc
@@ -580,7 +580,7 @@ def test_glob_description_documents_gitignore_skip() -> None:
 def test_grep_description_documents_gitignore_and_binary() -> None:
     desc = get_registry()["grep"].description
     assert "git ignores" in desc
-    assert ".imp/change/artifacts/" in desc
+    assert ".imp/changes/<id>/artifacts/" in desc
     assert "searches it anyway" in desc
     assert "binary" in desc
     # retained guarantees
