@@ -11,7 +11,7 @@ import hashlib
 import os
 import tempfile
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 
 def hash_content(content: bytes) -> str:
@@ -19,7 +19,6 @@ def hash_content(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-@runtime_checkable
 class BlobStore(Protocol):
     def put(self, content: bytes) -> str: ...
     def get(self, digest: str) -> bytes | None: ...
