@@ -138,6 +138,8 @@ _env = jinja2.Environment(
     undefined=jinja2.StrictUndefined,
     autoescape=False,
     keep_trailing_newline=True,
+    trim_blocks=True,
+    lstrip_blocks=True,
 )
 
 
