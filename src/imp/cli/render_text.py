@@ -698,10 +698,12 @@ def _call_args_line(c: nv.ToolCall) -> str:
 
 def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     """One-line recap of a finished tool burst for the lean view: the distinct
-    tool names (first-seen order, capped), the call count, and the burst duration.
-    Mirrors what the live status line showed WHILE the burst ran, left behind as a
-    quiet marker so a `prose → tools → prose` turn shows the work happened without
-    expanding it. Three names are omitted: `load_skill` (it renders as its own
+    tool names (first-seen order, capped), the call count, and the burst
+    duration. The duration mirrors the live status timer's prose → prose span
+    (the heads-down interval between agent outputs), falling back to the
+    first-call → last-result tool span when a burst has no surrounding prose, so
+    the recap equals what the live timer read the instant the burst closed.
+    Three names are omitted: `load_skill` (it renders as its own
     `loading skill …` line, so counting it here would double up), the bare `tool`
     placeholder (the sentinel name for an orphan/unnamed result — no real tool
     info), and `wait_for_user` (a gate call, not a user-visible tool action).
@@ -714,7 +716,8 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)
     count = f"{n} call{'s' if n != 1 else ''}"
-    elapsed = nv.elapsed_seconds(burst.start_ts, burst.end_ts)
+    elapsed = nv.elapsed_seconds(burst.span_start_ts or burst.start_ts,
+                                 burst.span_end_ts or burst.end_ts)
     done = fmt_seconds_done(elapsed)
     secs = f" · {done}" if done else ""
     # Count-first (§3): the count leads, then the distinct names, then duration.

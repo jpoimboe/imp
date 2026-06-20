@@ -1859,6 +1859,55 @@ def test_burst_summary_drops_sub_second_duration() -> None:
     assert summary == "1 call · read_file"
 
 
+def test_burst_summary_duration_uses_prose_span_not_tool_span() -> None:
+    burst = nv.ToolBurstFold(
+        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
+        start_ts="2026-06-03T00:00:05+00:00",
+        end_ts="2026-06-03T00:00:06+00:00",          # tool span = 1s
+        span_start_ts="2026-06-03T00:00:00+00:00",
+        span_end_ts="2026-06-03T00:00:09+00:00",     # prose span = 9s
+    )
+    # The recap reports the 9s prose → prose span, not the 1s tool span.
+    assert rt._burst_summary(burst) == "1 call · bash · 9s"
+
+
+def test_burst_summary_falls_back_to_tool_span_when_no_prose_span() -> None:
+    burst = nv.ToolBurstFold(
+        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
+        start_ts="2026-06-03T00:00:00+00:00",
+        end_ts="2026-06-03T00:00:04+00:00",          # tool span = 4s
+        span_start_ts=None,
+        span_end_ts=None,
+    )
+    # No span boundaries → fall back to the tool span (4s) rather than dropping it.
+    assert rt._burst_summary(burst) == "1 call · bash · 4s"
+
+
+def test_burst_summary_sub_second_prose_span_drops_duration() -> None:
+    burst = nv.ToolBurstFold(
+        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
+        start_ts="2026-06-03T00:00:00+00:00",
+        end_ts="2026-06-03T00:00:05+00:00",                  # tool span 5s (would show if used)
+        span_start_ts="2026-06-03T00:00:00+00:00",
+        span_end_ts="2026-06-03T00:00:00.500000+00:00",      # prose span 0.5s
+    )
+    # Sub-second prose span → the fmt_seconds_done < 1s rule drops the suffix.
+    assert rt._burst_summary(burst) == "1 call · bash"
+
+
+def test_burst_summary_falls_back_to_tool_end_when_no_closing_prose() -> None:
+    burst = nv.ToolBurstFold(
+        calls=[nv.ToolCall(call_id="b1", name="bash", input={})],
+        start_ts="2026-06-03T00:00:02+00:00",
+        end_ts="2026-06-03T00:00:06+00:00",          # tool span end = 6s from step
+        span_start_ts="2026-06-03T00:00:00+00:00",   # step boundary
+        span_end_ts=None,                             # no closing prose
+    )
+    # span_start_ts set, span_end_ts=None → use span_start_ts and fall back to end_ts.
+    # Duration = 00:06 - 00:00 = 6s.
+    assert rt._burst_summary(burst) == "1 call · bash · 6s"
+
+
 def test_skill_load_renders_gerund() -> None:
     node = nv.SkillLoadNode(name="refactor", source="human")
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
