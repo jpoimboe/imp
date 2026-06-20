@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
 
 import pytest
 
-from imp.cli import main as m
 from imp.cli.main import _iso_from_line, _journal_last_iso, _last_event_iso
+from imp.engine import archive
 
 
 @pytest.mark.parametrize(
@@ -33,15 +34,23 @@ def test_last_event_iso_missing_file(tmp_path: Path):
     assert _last_event_iso(tmp_path / "nope.jsonl") is None
 
 
-def test_journal_last_iso_uses_last_line(monkeypatch, tmp_path: Path):
-    blob = (
+def test_journal_last_iso_uses_last_line(tmp_path: Path):
+    events = tmp_path / "e.jsonl"
+    events.write_bytes(
         b'{"timestamp":"2026-06-01T00:00:00+00:00"}\n'
         b'{"timestamp":"2026-06-05T12:00:00+00:00"}\n'
     )
-    monkeypatch.setattr(m.journal, "journal_show", lambda control, cid, name: blob)
+    cj = tmp_path / "c.json"
+    cj.write_text(json.dumps({
+        "id": "some-id", "title": "Some", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(json.dumps({"id": "some-id", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "some-id", events_path=events,
+        change_json_path=cj, state_json_path=sj)
     assert _journal_last_iso(tmp_path, "some-id") == "2026-06-05T12:00:00+00:00"
 
 
-def test_journal_last_iso_absent(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(m.journal, "journal_show", lambda control, cid, name: None)
+def test_journal_last_iso_absent(tmp_path: Path):
     assert _journal_last_iso(tmp_path, "x") is None
