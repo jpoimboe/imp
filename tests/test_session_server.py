@@ -548,7 +548,7 @@ async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
 
 
 @pytest.mark.anyio
-async def test_journaled_awaiting_input_is_replayed_once_not_doubled(
+async def test_journaled_gate_is_replayed_marked_plus_one_live_reemit(
     tmp_path: Path,
 ) -> None:
     events_path = tmp_path / "events.jsonl"
@@ -563,7 +563,7 @@ async def test_journaled_awaiting_input_is_replayed_once_not_doubled(
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         for r in recs:                  # broadcast before attach: lost to the client
             on_event(r)
-        return await user_chat_input_fn("")   # the still-open gate solicits on late attach
+        return await user_chat_input_fn("")   # still-open gate re-emits on late attach
 
     async with anyio.create_task_group() as tg:
         await server.open()
@@ -577,21 +577,21 @@ async def test_journaled_awaiting_input_is_replayed_once_not_doubled(
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
         with anyio.fail_after(5):
-            while len(seen) < 2:
+            while len(seen) < 3:        # e0 (marked), e1 (marked), e1 (live re-emit)
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
-        got_extra = False
-        with anyio.move_on_after(0.2):
-            await buf.receive_until(b"\n", 1 << 20)
-            got_extra = True
-        assert not got_extra, "unexpected third event (double-delivery)"
-        assert sum(1 for s in seen if s["type"] == "awaiting_user_input") == 1
-        assert server._pending_prompt is None
+        replayed_gates = [s for s in seen
+                          if s["type"] == "awaiting_user_input" and s.get("_replay")]
+        live_gates = [s for s in seen
+                      if s["type"] == "awaiting_user_input" and not s.get("_replay")]
+        assert replayed_gates == [{**recs[1], "_replay": True}]  # replayed once, marked
+        assert live_gates == [recs[1]]                           # one live, unmarked
         await client.send((encode_input("yes") + "\n").encode())
         with anyio.fail_after(5):
             while "r" not in result:
                 await anyio.sleep(0.02)
         assert result["r"] == "yes"            # reply flows back through the open gate
+        assert server._pending_prompt is None  # cleared on gate exit
         await client.aclose()
         tg.cancel_scope.cancel()
 
@@ -671,6 +671,50 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while "r" not in result:
                 await anyio.sleep(0.02)
+        await client1.aclose()
+        await client2.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_emit_chokepoint_registers_pending_prompt_for_late_attacher(
+    tmp_path: Path,
+) -> None:
+    # No manual set_pending_prompt: the _emit/_chat chokepoint registers the gate.
+    sock = str(tmp_path / "s.sock")
+    gate_reached = anyio.Event()
+    prompt_event = {"type": "awaiting_user_input", "payload": {"prompt": "go?"}}
+    server = SessionServer(sock, hibernate=True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        on_event(prompt_event)          # _emit records the gate event
+        gate_reached.set()
+        return await user_chat_input_fn("")   # _chat registers it as pending
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client1 = await _attach(sock, "c1")
+        await gate_reached.wait()
+        client2 = await _attach(sock, "c2")
+        buf2 = BufferedByteReceiveStream(client2)
+        with anyio.fail_after(5):
+            line = (await buf2.receive_until(b"\n", 1 << 20)).decode()
+        assert parse_event(line) == prompt_event   # late attacher gets the live gate
+        await client2.send((encode_input("yes") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "yes"                # and can answer it
+        assert server._pending_prompt is None  # cleared on gate exit
         await client1.aclose()
         await client2.aclose()
         tg.cancel_scope.cancel()
