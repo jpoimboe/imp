@@ -1130,3 +1130,51 @@ def test_parse_agent_file_non_string_label_raises_with_source(tmp_path):
         parse_agent_file(p)
     assert "label" in str(ei.value)
     assert ei.value.source is not None and ei.value.source.file == p
+
+
+def test_step_inherits_agent_label_when_step_omits_it(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "a.md").write_text(
+        "---\nname: a\nlabel: writing spec\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md}\n")    # no label: on the step
+    wf = load_workflow(wf_dir)
+    assert wf.flat_steps()[0].label == "writing spec"
+
+
+def test_step_label_overrides_agent_label(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "a.md").write_text(
+        "---\nname: a\nlabel: writing spec\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md, label: drafting}\n")
+    wf = load_workflow(wf_dir)
+    assert wf.flat_steps()[0].label == "drafting"
+
+
+def test_step_label_none_when_neither_present(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "a.md").write_text(
+        "---\nname: a\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md}\n")
+    wf = load_workflow(wf_dir)
+    assert wf.flat_steps()[0].label is None

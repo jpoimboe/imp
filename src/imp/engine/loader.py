@@ -608,6 +608,10 @@ def _parse_step(
     label = raw.get("label")
     if label is not None and not isinstance(label, str):
         raise LoadError("a step's `label:` must be a string", source)
+    if label is None and kind == "agent" and raw.get("file"):
+        agent_def = agents.get(Path(raw["file"]).stem)
+        if agent_def is not None:
+            label = agent_def.label
 
     max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
     max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops
