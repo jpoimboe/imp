@@ -162,8 +162,9 @@ def test_show_backlog_spec_errors(
 def test_backlog_card_omits_depends_on_when_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from datetime import UTC, datetime
+
     from imp.cli.main import _backlog_card
-    from datetime import datetime, UTC
     _seed_control(tmp_path)
     rec = {
         "id": "bk001", "title": "Do X", "description": "",
@@ -177,8 +178,9 @@ def test_backlog_card_omits_depends_on_when_empty(
 def test_backlog_card_omits_description_section_when_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from datetime import UTC, datetime
+
     from imp.cli.main import _backlog_card
-    from datetime import datetime, UTC
     _seed_control(tmp_path)
     rec = {
         "id": "bk001", "title": "Do X", "description": "",
@@ -192,8 +194,9 @@ def test_backlog_card_omits_description_section_when_empty(
 def test_backlog_card_includes_depends_on_when_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from datetime import UTC, datetime
+
     from imp.cli.main import _backlog_card
-    from datetime import datetime, UTC
     _seed_control(tmp_path)
     rec = {
         "id": "bk001", "title": "Do X", "description": "",
