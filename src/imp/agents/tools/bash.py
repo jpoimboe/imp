@@ -164,6 +164,8 @@ async def bash(
     # cancel the drains mid-flush (silent tail truncation). Not a long-lived-
     # task violation: scoped inside one call's own task group, exactly like
     # the drains.
+    # Skip ticker when empty: foreground bash owns the loop, so an empty registry stays empty.
+    has_bg = bool(ctx.background_processes)
     ticker_scope = anyio.CancelScope()
 
     async def _bg_ticker() -> None:
@@ -181,9 +183,11 @@ async def bash(
                     # they drive the S2 capped-stream marker (counter.which).
                     tg.start_soon(_drain, proc.stdout, stdout_chunks, "stdout")
                     tg.start_soon(_drain, proc.stderr, stderr_chunks, "stderr")
-                    tg.start_soon(_bg_ticker)
+                    if has_bg:
+                        tg.start_soon(_bg_ticker)
                     await proc.wait()
-                    ticker_scope.cancel()
+                    if has_bg:
+                        ticker_scope.cancel()
         except TimeoutError:
             # B.1: the call outran the wall clock. Kill the group, reap, and
             # surface a timeout the agent can react to (NOT a normal result).
