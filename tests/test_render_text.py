@@ -1514,3 +1514,25 @@ def test_header_line_appends_gray_resume_marker() -> None:
     no_model = nv.StepNode(name="commit-check", kind="script",
                            label="checking commit", resumed=True)
     assert rt.header_line(no_model, depth=0, color=False) == "checking commit (resume)"
+
+
+def test_caret_escape_maps_control_bytes_to_caret_notation() -> None:
+    # cat -v / less convention: c -> "^" + chr(ord(c) ^ 0x40).
+    assert rt._caret_escape("\x07") == "^G"   # BEL
+    assert rt._caret_escape("\x1b") == "^["    # ESC
+    assert rt._caret_escape("\x00") == "^@"    # NUL
+    assert rt._caret_escape("\x7f") == "^?"    # DEL
+    assert rt._caret_escape("\r") == "^M"      # bare CR rewrites the TTY line
+    assert rt._caret_escape("\x08") == "^H"    # BS
+
+
+def test_caret_escape_preserves_tab_newline_and_printable() -> None:
+    # \t and \n are load-bearing for layout — never escaped.
+    assert rt._caret_escape("\t") == "\t"
+    assert rt._caret_escape("\n") == "\n"
+    # Ordinary printable / non-ASCII multibyte text is unchanged.
+    assert rt._caret_escape("héllo · 世界") == "héllo · 世界"
+
+
+def test_caret_escape_only_touches_control_bytes_in_mixed_string() -> None:
+    assert rt._caret_escape("a\x07b\x1bc\nd") == "a^Gb^[c\nd"

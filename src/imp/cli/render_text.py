@@ -27,6 +27,27 @@ _INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUT
 _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 
 
+def _caret_escape(text: str) -> str:
+    """Map C0 control bytes (U+0000-U+001F) and DEL (U+007F) to caret notation
+    (the cat -v / less convention: c -> "^" + chr(ord(c) ^ 0x40)), so a stray
+    BEL/ESC/NUL/CR in content cannot beep or alter terminal state. \\t and \\n are
+    load-bearing for the renderer's wrapping/layout and pass through unescaped; \\r
+    IS escaped (a bare CR rewrites the current TTY line). Pure total function over
+    str — run on content-origin strings BEFORE imp wraps its own SGR codes around
+    them, never on the composed colored output."""
+    out: list[str] = []
+    for ch in text:
+        if ch in ("\t", "\n"):
+            out.append(ch)
+            continue
+        o = ord(ch)
+        if o <= 0x1F or o == 0x7F:
+            out.append("^" + chr(o ^ 0x40))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def fmt_seconds(seconds: float | int | None) -> str:
     """Format an elapsed-second count for a completion/recap line. Under a minute
     reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`) so a long
