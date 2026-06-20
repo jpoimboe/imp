@@ -18,6 +18,35 @@ from imp.engine.types import SourceLoc
 LAYOUT_VERSION = 1  # bump in the SAME commit as any breaking change-home layout/schema change
 
 
+def _fold_phantom(phantom: Path, home: Path) -> None:
+    """Move phantom-only files into home; home wins on collision."""
+    for src in phantom.rglob("*"):
+        if src.is_dir():
+            continue
+        dest = home / src.relative_to(phantom)
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(src, dest)
+
+
+def link_change_home(worktree_path: Path, change_dir: Path) -> None:
+    """Create idempotent id-scoped symlink <worktree>/.imp/changes/<id> → change_dir."""
+    link = worktree_path / ".imp" / "changes" / change_dir.name
+    target = change_dir.resolve()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink():
+        if link.resolve() == target:
+            return
+        link.unlink()
+    elif link.is_dir():
+        _fold_phantom(link, change_dir)
+        shutil.rmtree(link)
+    elif link.exists():
+        link.unlink()
+    link.symlink_to(target)
+
+
 def _imp_commit(control_root: Path) -> str:
     """For the refusal breadcrumb; empty string when git is absent or not a repo."""
     proc = worktree._git(control_root, "rev-parse", "HEAD")
