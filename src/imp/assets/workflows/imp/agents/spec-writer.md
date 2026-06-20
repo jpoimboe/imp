@@ -140,7 +140,7 @@ Because the opening message begins with `Implement this spec`, you are in
   re-asking "what do you want to build?" is wrong on this path.
 - **Explore only to validate.** Read the codebase to confirm the draft fits and to
   flesh out obvious gaps — not to re-brainstorm or redesign.
-- **Go live** before writing — see **Going live or parking the draft** above.
+- **Set up the workspace** before writing — see **Build now or save for later** above.
 - **Name the change** (`rename_change`, or the name from the opening line if one
   was supplied), then write `{{ change.home }}/artifacts/spec/{{ change.id }}.md` adopting the draft. Normalize
   just enough to imp's structure: ensure a **Goal** and **Acceptance criteria**
@@ -170,16 +170,16 @@ still rename once if scope clarifies before the spec is committed.
 There is no step-boundary dance: `rename_change` takes effect the instant you
 call it, and the id it returns is the stem to commit the spec under.
 
-## Going live or parking the draft
+## Build now or save for later
 
 `imp new` starts this change as an **un-materialized draft** — no git branch, no
-worktree — and this brainstorm runs read-only against the main checkout. **Nothing is
-built until you go live.**
+worktree — and this brainstorm runs read-only against the main checkout. Nothing is
+set up until you confirm the build.
 
 {% if run.non_interactive %}
 This is a **headless run** (`--non-interactive`): no human is present to answer a
-build-vs-park question, so the choice is predetermined — **build**. Once the design is
-settled, **do not** solicit a build-or-park choice from the user. Go live directly: call
+build-or-save question, so the choice is predetermined — **build**. Once the design is
+settled, **do not** solicit a build-or-save choice from the user. Set up the workspace directly: call
 `create_and_enter_worktree` (it takes no arguments). It forks the branch and worktree
 from the base branch's current tip and switches this change into it — your subsequent
 `Read`/`Bash`/edit tools operate in the new worktree immediately. It reports whether the
@@ -188,14 +188,16 @@ re-ground the spec against current code in this same turn** — re-read the file
 brainstorm assumed and reconcile any drift — before writing the spec. Then write and
 commit the spec and finish with `complete_step(phase="written", …)` exactly as in
 "Writing the Spec" below; the spec commit and `spec-reviewer` run only now that the
-change is live. (A genuine intent-fork escalation at the "Ask vs. decide" high bar still
-parks for a human even headless — only this build-vs-park gate auto-builds.)
+change is set up. (A genuine intent-fork escalation at the "Ask vs. decide" high bar still
+parks for a human even headless — only this build-or-save gate auto-builds.)
 {% else %}
 Once the design is settled (the user has approved it) and **before you write and commit
-the spec**, surface the choice in your turn text and confirm via `wait_for_user`: build
-it now, or save the draft for later?
+the spec**, surface the choice in your turn text and confirm via `wait_for_user`:
 
-- **Build it now (go live).** Call `create_and_enter_worktree` (it takes no arguments).
+> 1. **Build it now** — I'll set up the workspace and write the spec.
+> 2. **Save as a draft** — nothing is written yet; resume later with `imp resume <id>`.
+
+- **Option 1 — Build it now.** Call `create_and_enter_worktree` (it takes no arguments).
   It forks the branch and worktree from the base branch's current tip and switches this
   change into it — your subsequent `Read`/`Bash`/edit tools operate in the new worktree
   immediately. It reports whether the base branch advanced since the draft was created.
@@ -203,21 +205,21 @@ it now, or save the draft for later?
   same turn** — re-read the files the brainstorm assumed and reconcile any drift — before
   writing the spec. Then write and commit the spec and finish with
   `complete_step(phase="written", …)` exactly as in "Writing the Spec" below; the spec
-  commit and `spec-reviewer` run only now that the change is live.
-- **Save for later (park).** Do **not** call `create_and_enter_worktree` and do **not**
-  emit `phase: written`. Tell the user the draft is saved and resumable later with
-  `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with the draft
-  saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
-  resume you re-offer this same go-live choice.
+  commit and `spec-reviewer` run only now that the change is set up.
+- **Option 2 — Save as a draft.** Do **not** call `create_and_enter_worktree` and do
+  **not** emit `phase: written`. Tell the user the draft is saved and resumable later
+  with `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with the
+  draft saved as a distinct `draft` — nothing is built, no branch, no worktree. On a
+  later resume you re-offer this same build-or-save choice.
 {% endif %}
 
 On the **seeded** path (your opening message begins with `Implement this spec`), the user
-has already committed to building it: go live as part of adopt-and-commit (call
+has already chosen to build it: set up the workspace as part of adopt-and-commit (call
 `create_and_enter_worktree`, re-ground if `head_changed=true`) — there is no separate
-build-or-park question.
+question.
 
-Calling `create_and_enter_worktree` a second time on an already-live change is a harmless
-no-op, so a resumed go-live is safe.
+Calling `create_and_enter_worktree` a second time on an already-set-up change is a
+harmless no-op, so a resumed build is safe.
 
 ## Writing the Spec (the `phase: written` turn)
 
