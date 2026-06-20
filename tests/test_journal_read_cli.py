@@ -469,6 +469,57 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
         cwd=tmp_path, capture_output=True).returncode != 0
 
 
+def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
+    import io
+    import json as _json
+    import subprocess
+    from contextlib import redirect_stdout
+
+    import imp.cli.main as m
+    from imp.engine import archive, worktree
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"a-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"payload":{"id":"arch01"}}\n')
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "arch01", "title": "Arch", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "arch01", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    # Seed a DECOY journal entry with divergent status and NO events.jsonl so
+    # _resolve_id finds the id while the archive supplies the real bytes.
+    # If the journal were preferred, status would be "running" (not "completed"),
+    # and events would be absent.
+    decoy_state = tmp_path / "decoy-state.json"
+    decoy_state.write_text(_json.dumps({"id": "arch01", "status": "running"}))
+    decoy_change = tmp_path / "decoy-change.json"
+    decoy_change.write_text(_json.dumps({"id": "arch01", "title": "Arch"}))
+    worktree.journal_commit(tmp_path, "arch01", {
+        "state.json": decoy_state, "change.json": decoy_change})
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    def _run(*argv: str) -> str:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            assert m.main(list(argv)) == 0, buf.getvalue()
+        return buf.getvalue()
+
+    assert "change_created" in _run("show", "arch01", "events")
+    assert "completed" in _run("show", "arch01", "status")
+
+
 def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     from imp.engine import executor
     from imp.engine.state import JsonlEventLog
@@ -500,3 +551,55 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
         ["git", "rev-parse", "--verify", "--quiet",
          "refs/imp/journal-wip/doc-thing"],
         cwd=tmp_path, capture_output=True).returncode == 0
+
+
+def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None:
+    import json as _json
+
+    import imp.cli.main as m
+    from imp.engine import archive
+
+    # Set up a minimal git repo (not via _seed_control — no conftest dep needed).
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"log-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"payload":{"id":"logtest"}}\n'
+        '{"id":"log-e1","parent_id":"log-e0","agent_id":"plan-writer",'
+        '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'
+        '"payload":{"step":"plan-writer","phase":"plan"}}\n'
+    )
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "logtest", "title": "Log Test", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "logtest", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "logtest", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    # Seed a decoy journal entry with a different event type so we can tell which
+    # source _load_events_for_id prefers. If the journal were preferred, the output
+    # would mention "abandoned" instead of "plan-writer".
+    decoy = tmp_path / "decoy.jsonl"
+    decoy.write_text(
+        '{"id":"d-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_abandoned",'
+        '"payload":{}}\n'
+    )
+    worktree.journal_commit(tmp_path, "logtest", {"events.jsonl": decoy})
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = m.main(["log", "logtest"])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "plan-writer" in out    # from archive blob, not from decoy journal
+    assert "abandoned" not in out  # decoy journal event must NOT appear

@@ -1133,7 +1133,9 @@ def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
     live = change / "state" / "state.json" if name == "state.json" else change / name
     if live.is_file():
         return live.read_bytes()
-    return journal.journal_show(control, change_id, name)
+    if name == "state.json":
+        return archive_read.read_state_json(control, change_id)
+    return archive_read.read_events(control, change_id)
 
 
 _REVIEW_STEPS = frozenset({
@@ -1293,7 +1295,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
 
 def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] | None:
-    """Worktree first, journal second. Returns None if the id is in neither.
+    """Worktree first, archive second. Returns None if the id is in neither.
 
     Worktree-first is necessary, not merely preferred: an id lives in exactly
     one place (journal_commit runs once, concurrent with worktree removal), so
@@ -1305,7 +1307,7 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
         change = None
     if change is not None:
         return list(change.event_log().read())
-    raw = journal.journal_show(control, change_id, "events.jsonl")
+    raw = archive_read.read_events(control, change_id)
     if raw is None:
         return None
     return _parse_jsonl(raw)
@@ -1468,23 +1470,11 @@ def _last_event_iso(events_path: Path) -> str | None:
 
 
 def _journal_last_iso(control: Path, change_id: str) -> str | None:
-    raw = journal.journal_show(control, change_id, "events.jsonl")
-    if raw is None:
-        return None
-    line = _last_nonempty_line(raw)
-    if line is None:
-        return None
-    return _iso_from_line(line.decode("utf-8", errors="replace"))
+    return archive_read.last_event_iso(control, change_id)
 
 
 def _journal_status(control: Path, change_id: str) -> str | None:
-    raw = journal.journal_show(control, change_id, "state.json")
-    if raw is None:
-        return None
-    try:
-        return str(json.loads(raw)["status"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
+    return archive_read.status_of(control, change_id)
 
 
 def _resume_gone(control: Path, change_id: str) -> int:
