@@ -72,6 +72,11 @@ def current_branch(root: Path) -> str:
     return _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
+def head_of(control_root: Path, ref: str) -> str:
+    """The commit sha `ref` resolves to (e.g. a branch tip)."""
+    return _git_ok(control_root, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+
+
 def branch_exists(control_root: Path, branch: str) -> bool:
     """True if refs/heads/<branch> exists. The imp new collision-error guard
     keys on this."""

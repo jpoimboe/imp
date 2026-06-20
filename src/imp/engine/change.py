@@ -146,6 +146,67 @@ class Change:
         return change
 
     @classmethod
+    def create_draft(
+        cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
+        depends_on: list[str] | None = None,
+    ) -> Change:
+        """An un-materialized draft: NO branch, NO worktree. State is seeded at the
+        permanent home; project_root points at the main checkout so the spec
+        brainstorm runs read-only there. The base branch's current tip is recorded
+        as base_head for the later go-live head_changed check. Validates the
+        workflow against the main checkout; with no branch/worktree to roll back,
+        a bad/absent workflow drops the just-created home and re-raises."""
+        change_dir = control_root / ".imp" / "changes" / change_id
+        change_dir.mkdir(parents=True)
+        (change_dir / "state").mkdir()
+        base_head = worktree.head_of(control_root, base_branch)
+
+        (change_dir / "change.json").write_text(json.dumps({
+            "id": change_id, "title": title, "base_branch": base_branch,
+            "created_at": datetime.now(UTC).isoformat(),
+            "depends_on": list(depends_on or []),
+            "project_root": str(control_root),
+            "materialized": False,
+            "base_head": base_head,
+        }, indent=2, sort_keys=True))
+
+        from imp.engine.loader import load_workflow
+        from imp.providers.config import apply_var_overrides, parse_default_workflow
+        from imp.providers.effective import load_effective_config
+
+        config = load_effective_config(
+            project_root=control_root, control_root=control_root,
+        ).config
+        try:
+            wf_name = parse_default_workflow(control_root / "imp" / "project.yaml")
+            workflow = load_workflow(
+                control_root / "imp" / "workflows" / wf_name,
+                configured_tiers=config.tier_names(),
+                project_keys=frozenset(config.project_facts),
+            )
+        except (LoadError, LoadErrors):
+            shutil.rmtree(change_dir, ignore_errors=True)
+            raise
+        flat = workflow.flat_steps()
+        State(
+            id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+            status="running",
+            vars=apply_var_overrides(workflow.vars, config.var_overrides),
+            loop_counts={},
+        ).save(change_dir / "state")
+
+        change = cls(
+            id=change_id, title=title, base_branch=base_branch,
+            control_root=control_root, project_root=control_root,
+            change_dir=change_dir, materialized=False, base_head=base_head,
+        )
+        change.event_log().append(
+            agent_id=None, type="change_created",
+            payload={"id": change_id, "handle": change.handle, "title": title},
+        )
+        return change
+
+    @classmethod
     def load(cls, control_root: Path, change_id: str) -> Change:
         change_dir = control_root / ".imp" / "changes" / change_id
         if not change_dir.is_dir():

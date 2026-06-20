@@ -10,9 +10,8 @@ from tests.conftest import _git, _init_repo, _seed_control
 
 
 def _seed_control_without_workflow(root: Path) -> None:
-    """A repo with committed imp/config.yaml but NO imp/workflows/imp — so
-    Change.create gets past create_worktree and config load, then fails the seed
-    workflow load."""
+    """Seeds the control root with imp/config.yaml but NO imp/workflows/imp,
+    so that workflow loading raises LoadError."""
     _init_repo(root)
     (root / "imp").mkdir()
     (root / "imp" / "config.yaml").write_text(
@@ -211,3 +210,35 @@ def test_load_defaults_materialized_true_when_absent(tmp_path: Path) -> None:
     loaded = Change.load(tmp_path, "mat2")
     assert loaded.materialized is True
     assert loaded.base_head == ""
+
+
+def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="drf1", base_branch="main")
+    assert ch.materialized is False
+    assert ch.project_root == tmp_path                       # the main checkout
+    assert not (tmp_path / ".imp" / "worktrees" / "drf1").exists()
+    assert "imp/drf1" not in _git(tmp_path, "branch", "--list", "imp/drf1").stdout
+    state = State.load(ch.change_dir / "state")
+    assert state.step == "s" and state.status == "running"   # seeded at the first step
+    events_text = (ch.change_dir / "events.jsonl").read_text()
+    events = [json.loads(line) for line in events_text.splitlines() if line.strip()]
+    assert any(e["type"] == "change_created" for e in events)
+
+
+def test_create_draft_records_base_head(tmp_path: Path) -> None:
+    import json
+    _seed_control(tmp_path)
+    tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+    ch = Change.create_draft(tmp_path, title="X", change_id="drf2", base_branch="main")
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["base_head"] == tip
+    assert meta["materialized"] is False
+    assert meta["project_root"] == str(tmp_path)
+
+
+def test_create_draft_refuses_bad_workflow_and_leaves_no_home(tmp_path: Path) -> None:
+    _seed_control_without_workflow(tmp_path)
+    with pytest.raises(LoadError):
+        Change.create_draft(tmp_path, title="X", change_id="drf3", base_branch="main")
+    assert not (tmp_path / ".imp" / "changes" / "drf3").exists()
