@@ -1206,8 +1206,13 @@ def test_labeled_forward_goto_label_in_both_paths() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("finalize · complete" in ln and ln.rstrip().endswith(
-        "→ entering the merge queue") for ln in body)
+    # the route label leads its own line, two lines above the completion line.
+    lbl_i = next(i for i, ln in enumerate(body)
+                 if ln.strip() == "→ entering the merge queue")
+    bc_i = next(i for i, ln in enumerate(body) if "finalize · complete" in ln)
+    assert bc_i == lbl_i + 2
+    assert body[lbl_i + 1].strip() == ""
+    assert "→ entering the merge queue" not in body[bc_i]
     assert body == _render_body(events)
 
 

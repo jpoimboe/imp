@@ -584,15 +584,17 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         done = fmt_seconds_done(node.elapsed_s)
         if done:
             parts.append(done)
-        # The completion body recedes in gray; a workflow route label rides
-        # inline after it, keeping its own non-bold yellow. Each segment is
-        # colored before joining so both hues coexist on the one shared line
-        # (`_line` with no codes just prepends the gutter/indent, untouched).
-        body = pal.ansi(" · ".join(parts), *pal.NODE_COLORS["breadcrumb"], enabled=color)
+        # A workflow route label leads its own three-line block — the non-bold
+        # yellow "→ <label>", a (gutter-bearing) blank, then the gray completion
+        # line — so the route announces what comes next, set off by air above the
+        # step it just completed. Without a label (or when blocked/interrupted)
+        # the completion line stands alone, as before.
         if node.label and not (node.interrupted or blocked):
-            body += " " + pal.ansi(f"→ {node.label}",
-                                   *pal.NODE_COLORS["warning"], enabled=color)
-        yield _line(body, depth, color, gutters=gutters)
+            yield _line(f"→ {node.label}", depth, color,
+                        *pal.NODE_COLORS["warning"], gutters=gutters)
+            yield _gutter_indent(depth, gutters, color)
+        yield _line(" · ".join(parts), depth, color,
+                    *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 
     if isinstance(node, nv.PauseNode):
