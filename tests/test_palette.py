@@ -116,6 +116,7 @@ def test_node_colors_calm_scheme() -> None:
     # Semantic colors untouched.
     assert pal.NODE_COLORS["error"] == ("bold", "red")
     assert pal.NODE_COLORS["warning"] == ("yellow",)
+    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
 
 
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
