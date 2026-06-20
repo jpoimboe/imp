@@ -26,38 +26,47 @@ def _make(tmp_path: Path, title: str = "") -> tuple[Change, State]:
     return ch, State.load(ch.state_dir)
 
 
-def test_rename_applies_immediately_and_returns_handle(tmp_path: Path) -> None:
+def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     tool = get_registry()["rename_change"]
-    msg = tool.invoke(_ctx(ch, state), {"name": "Add OAuth"})
+    msg = tool.invoke(_ctx(ch, state), {"name": "Add version flag"})
 
-    assert ch.title == "Add OAuth"
-    assert ch.handle == "add-oauth-bbb111"
-    assert "add-oauth-bbb111" in msg
-    assert f"{ch.change_dir}/artifacts/spec/add-oauth-bbb111.md" in msg
+    assert ch.title == "Add version flag"            # stored verbatim
+    assert "bbb111" in msg                           # returns the id
+    assert f"{ch.change_dir}/artifacts/spec/bbb111.md" in msg
     meta = json.loads((ch.change_dir / "change.json").read_text())
-    assert meta["title"] == "Add OAuth"
+    assert meta["title"] == "Add version flag"
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
-    assert renamed and renamed[-1]["payload"]["new_title"] == "Add OAuth"
+    assert renamed and renamed[-1]["payload"]["new_title"] == "Add version flag"
+    # NB: the change_renamed payload still carries a "handle" key here — Change.rename
+    # strips it in Task 5, where test_change_rename_is_content_only asserts the exact
+    # no-handle payload. Asserting its absence now would fail at this commit.
 
 
-def test_rename_noop_when_handle_unchanged(tmp_path: Path) -> None:
+def test_rename_strips_outer_whitespace(tmp_path: Path) -> None:
+    ch, state = _make(tmp_path)
+    tool = get_registry()["rename_change"]
+    tool.invoke(_ctx(ch, state), {"name": "  Add OAuth  "})
+    assert ch.title == "Add OAuth"
+
+
+def test_rename_noop_when_title_unchanged(tmp_path: Path) -> None:
     ch, state = _make(tmp_path, title="Add OAuth")
     tool = get_registry()["rename_change"]
-    # A different title that slugifies identically must NOT churn (handle equality).
-    msg = tool.invoke(_ctx(ch, state), {"name": "add  oauth"})
+    # Same title after stripping outer whitespace must NOT churn.
+    msg = tool.invoke(_ctx(ch, state), {"name": "  Add OAuth  "})
     assert "already named" in msg.lower()
     assert [e for e in ch.event_log().read() if e["type"] == "change_renamed"] == []
 
 
-def test_double_rename_compares_against_live_handle(tmp_path: Path) -> None:
+def test_double_rename_to_same_title_is_noop(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     ctx = _ctx(ch, state)
     tool = get_registry()["rename_change"]
-    tool.invoke(ctx, {"name": "First Name"})
-    msg2 = tool.invoke(ctx, {"name": "first name"})   # same handle as the FIRST call
+    tool.invoke(ctx, {"name": "First Title"})
+    msg2 = tool.invoke(ctx, {"name": "First Title"})   # identical title
     assert "already named" in msg2.lower()
-    assert ch.handle == "first-name-bbb111"
+    assert ch.title == "First Title"
     emitted = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
     assert len(emitted) == 1                          # only the first applied
 
@@ -66,7 +75,7 @@ def test_rename_rejects_empty(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     tool = get_registry()["rename_change"]
     with pytest.raises(ValueError):
-        tool.invoke(_ctx(ch, state), {"name": "!!!"})
+        tool.invoke(_ctx(ch, state), {"name": "   "})   # whitespace-only → empty
 
 
 def test_rename_description_drops_hardcoded_change_dir() -> None:
