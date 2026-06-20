@@ -2112,3 +2112,23 @@ def test_tool_use_carrier_llm_response_does_not_split_span() -> None:
     assert [c.name for c in bursts[0].calls] == ["bash", "grep"]
     assert bursts[0].span_start_ts == "2026-06-03T00:00:01+00:00"
     assert bursts[0].span_end_ts is None
+
+
+def test_burst_span_restarts_on_user_message() -> None:
+    tree = nv.build_tree([
+        ev("s", "step_started", step="s", kind="agent", phase="p",
+           model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
+        ev("u", "user_message", text="go on", timestamp="2026-06-03T00:00:08+00:00"),
+        ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={},
+           timestamp="2026-06-03T00:00:09+00:00"),
+        ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
+           timestamp="2026-06-03T00:00:10+00:00"),
+        ev("c", "step_completed", step="s", kind="agent",
+           action={"verb": "continue"}, var_mutations={},
+           timestamp="2026-06-03T00:00:11+00:00"),
+    ])
+    step = tree.root.children[0].children[0]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    # The reply restarts the span: the burst measures from 00:08, not the
+    # step_started boundary at 00:00.
+    assert burst.span_start_ts == "2026-06-03T00:00:08+00:00"

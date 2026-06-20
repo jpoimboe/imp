@@ -974,6 +974,7 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
 
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    self._span_start_ts = event.get("timestamp")
     interactive, self._awaiting_reply = self._awaiting_reply, False
     text = _user_message_text(p)
     if interactive and not text.strip():
