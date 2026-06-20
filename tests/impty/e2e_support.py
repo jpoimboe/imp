@@ -92,12 +92,12 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
     spec_cmd = (
         'mkdir -p "$IMP_CHANGE_DIR/artifacts/spec" && '
         'printf "# Spec\\n\\nstub spec\\n"'
-        ' > "$IMP_CHANGE_DIR/artifacts/spec/$IMP_CHANGE_HANDLE.md" && '
+        ' > "$IMP_CHANGE_DIR/artifacts/spec/$IMP_CHANGE_ID.md" && '
         'imp artifact-commit spec'
     )
     plan_cmd = (
         'mkdir -p "$IMP_CHANGE_DIR/artifacts/plans" && '
-        'printf "# Plan 1\\n" > "$IMP_CHANGE_DIR/artifacts/plans/$IMP_CHANGE_HANDLE-plan-1.md" && '
+        'printf "# Plan 1\\n" > "$IMP_CHANGE_DIR/artifacts/plans/$IMP_CHANGE_ID-plan-1.md" && '
         'imp artifact-commit plan'
     )
     lead_cmd = (

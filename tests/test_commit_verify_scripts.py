@@ -23,10 +23,10 @@ def _repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _run(script: str, root: Path, slug: str) -> int:
+def _run(script: str, root: Path, change_id: str) -> int:
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_ID": change_id,
              "IMP_CHANGE_DIR": str(root / ".imp" / "change"),
              "PATH": __import__("os").environ["PATH"]},
         capture_output=True, text=True,
@@ -44,19 +44,18 @@ def _wip_commit(root: Path, change_id: str, rel: str, body: str) -> None:
     worktree.artifact_commit(root, change_id, files, message="artifact: test")
 
 
-def _run_id_capture(script: str, root: Path, slug: str, change_id: str):
+def _run_id_capture(script: str, root: Path, change_id: str):
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": slug,
-             "IMP_CHANGE_ID": change_id,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_ID": change_id,
              "IMP_CHANGE_DIR": str(root / ".imp" / "change"),
              "PATH": __import__("os").environ["PATH"]},
         capture_output=True, text=True,
     )
 
 
-def _run_id(script: str, root: Path, slug: str, change_id: str) -> int:
-    return _run_id_capture(script, root, slug, change_id).returncode
+def _run_id(script: str, root: Path, change_id: str) -> int:
+    return _run_id_capture(script, root, change_id).returncode
 
 
 def test_spec_verify_passes_when_wip_matches_live(tmp_path: Path) -> None:
@@ -65,16 +64,16 @@ def test_spec_verify_passes_when_wip_matches_live(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
-    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
+    _wip_commit(root, "id1", "spec/id1.md", "# spec\n")
+    assert _run_id("spec-commit-verify.sh", root, "id1") == 0
 
 
 def test_spec_verify_fails_when_wip_ref_absent(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
-    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    (root / ".imp" / "change" / "artifacts" / "spec" / "id1.md").write_text("# spec\n")
     # No artifact_commit -> no wip ref.
-    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+    assert _run_id("spec-commit-verify.sh", root, "id1") != 0
 
 
 def test_spec_verify_fails_when_blob_absent_from_wip(tmp_path: Path) -> None:
@@ -84,12 +83,12 @@ def test_spec_verify_fails_when_blob_absent_from_wip(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    # Commit only a plan artifact — spec/<slug>.md is absent from the wip tree.
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan\n")
+    # Commit only a plan artifact — spec/<id>.md is absent from the wip tree.
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan\n")
     # Live spec file exists but was never committed to the wip tree.
     (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
-    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
-    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+    (root / ".imp" / "change" / "artifacts" / "spec" / "id1.md").write_text("# spec\n")
+    assert _run_id("spec-commit-verify.sh", root, "id1") != 0
 
 
 def test_spec_verify_fails_when_live_differs_from_committed(tmp_path: Path) -> None:
@@ -98,10 +97,10 @@ def test_spec_verify_fails_when_live_differs_from_committed(tmp_path: Path) -> N
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    _wip_commit(root, "id1", "spec/id1.md", "# spec\n")
     # The agent edited the live file after committing it -> blob mismatch.
-    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# edited\n")
-    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+    (root / ".imp" / "change" / "artifacts" / "spec" / "id1.md").write_text("# edited\n")
+    assert _run_id("spec-commit-verify.sh", root, "id1") != 0
 
 
 def test_plan_verify_passes_on_newest_committed_plan(tmp_path: Path) -> None:
@@ -110,9 +109,9 @@ def test_plan_verify_passes_on_newest_committed_plan(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-2.md", "# plan 2\n")
-    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/id1-plan-2.md", "# plan 2\n")
+    assert _run_id("plan-commit-verify.sh", root, "id1") == 0
 
 
 def test_plan_verify_fails_when_newest_plan_uncommitted(tmp_path: Path) -> None:
@@ -121,11 +120,11 @@ def test_plan_verify_fails_when_newest_plan_uncommitted(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
     # A newer plan file exists live but was never committed to the wip ref.
     (root / ".imp" / "change" / "artifacts" / "plans"
-     / "2026-06-01-x-plan-2.md").write_text("# plan 2\n")
-    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+     / "id1-plan-2.md").write_text("# plan 2\n")
+    assert _run_id("plan-commit-verify.sh", root, "id1") != 0
 
 
 def test_plan_verify_passes_after_plan_revision(tmp_path: Path) -> None:
@@ -136,9 +135,9 @@ def test_plan_verify_passes_after_plan_revision(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1 (revised)\n")
-    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1 (revised)\n")
+    assert _run_id("plan-commit-verify.sh", root, "id1") == 0
 
 
 def test_plan_verify_fails_when_live_plan_differs_from_committed(tmp_path: Path) -> None:
@@ -147,11 +146,11 @@ def test_plan_verify_fails_when_live_plan_differs_from_committed(tmp_path: Path)
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
     # Agent edited the live plan after committing it -> blob mismatch.
     (root / ".imp" / "change" / "artifacts" / "plans"
-     / "2026-06-01-x-plan-1.md").write_text("# plan 1 edited\n")
-    assert _run_id("plan-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
+     / "id1-plan-1.md").write_text("# plan 1 edited\n")
+    assert _run_id("plan-commit-verify.sh", root, "id1") != 0
 
 
 def _impl_repo(tmp_path: Path, *, n_tasks: int = 1) -> Path:
@@ -288,10 +287,10 @@ def test_stamp_trailers_is_idempotent(tmp_path: Path) -> None:
     assert body.count("Change: 2026-06-01-x") == 1   # not duplicated
 
 
-def test_stamp_trailers_fails_on_empty_handle(tmp_path: Path) -> None:
+def test_stamp_trailers_fails_on_empty_id(tmp_path: Path) -> None:
     root = _impl_repo(tmp_path, n_tasks=1)
     _src_commit(root, "f.py", "feat: task 1")
-    assert _run("stamp-trailers.sh", root, "") != 0   # ${IMP_CHANGE_HANDLE:?}
+    assert _run("stamp-trailers.sh", root, "") != 0   # ${IMP_CHANGE_ID:?}
 
 
 def test_stamp_trailers_fails_on_empty_range(tmp_path: Path) -> None:
@@ -322,8 +321,8 @@ def test_plan_verify_rejects_plan_over_task_ceiling(tmp_path: Path) -> None:
     _git(root, "commit", "-m", "seed")
     body = "# plan 1\n\n" + "".join(
         f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 14))   # 13 tasks
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
-    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
     assert proc.returncode != 0
     assert "split" in proc.stderr.lower()
     assert "13" in proc.stderr
@@ -338,8 +337,8 @@ def test_plan_verify_passes_plan_within_task_ceiling(tmp_path: Path) -> None:
     _git(root, "commit", "-m", "seed")
     body = "# plan 1\n\n" + "".join(
         f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 9))    # 8 tasks
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
-    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
     assert proc.returncode == 0
 
 
@@ -352,8 +351,8 @@ def test_plan_verify_passes_plan_at_task_ceiling(tmp_path: Path) -> None:
     _git(root, "commit", "-m", "seed")
     body = "# plan 1\n\n" + "".join(
         f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 13))    # 12 tasks
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", body)
-    proc = _run_id_capture("plan-commit-verify.sh", root, "2026-06-01-x", "id1")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
+    proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
     assert proc.returncode == 0
 
 
@@ -365,16 +364,16 @@ def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    _wip_commit(root, "id1", "spec/id1.md", "# spec\n")
     # change-home is a separate dir; remove the in-project copy so a script that
     # still read $IMP_PROJECT_ROOT/.imp/change would find nothing.
     shutil.rmtree(root / ".imp" / "change" / "artifacts")
     home = tmp_path / "home"
     (home / "artifacts" / "spec").mkdir(parents=True)
-    (home / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    (home / "artifacts" / "spec" / "id1.md").write_text("# spec\n")
     proc = subprocess.run(
         ["bash", str(SCRIPTS / "spec-commit-verify.sh")], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": "2026-06-01-x",
+        env={"IMP_PROJECT_ROOT": str(root),
              "IMP_CHANGE_ID": "id1", "IMP_CHANGE_DIR": str(home),
              "PATH": os.environ["PATH"]},
         capture_output=True, text=True)
@@ -389,15 +388,15 @@ def test_plan_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan 1\n")
+    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
     # Live plan exists ONLY at a separate change-home, not under the project tree.
     shutil.rmtree(root / ".imp" / "change" / "artifacts")
     home = tmp_path / "home"
     (home / "artifacts" / "plans").mkdir(parents=True)
-    (home / "artifacts" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1\n")
+    (home / "artifacts" / "plans" / "id1-plan-1.md").write_text("# plan 1\n")
     proc = subprocess.run(
         ["bash", str(SCRIPTS / "plan-commit-verify.sh")], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_HANDLE": "2026-06-01-x",
+        env={"IMP_PROJECT_ROOT": str(root),
              "IMP_CHANGE_ID": "id1", "IMP_CHANGE_DIR": str(home),
              "PATH": os.environ["PATH"]},
         capture_output=True, text=True)
