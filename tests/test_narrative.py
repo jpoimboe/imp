@@ -2032,3 +2032,24 @@ def test_step_node_command_populated_on_resume_reentry() -> None:
     step = b.tree.root.children[-1].children[0]
     assert isinstance(step, nv.StepNode)
     assert step.command == "make check"
+
+
+def test_burst_span_start_defaults_to_step_started_when_no_preceding_prose() -> None:
+    tree = nv.build_tree([
+        ev("s", "step_started", step="s", kind="agent", phase="p",
+           model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
+        ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={},
+           timestamp="2026-06-03T00:00:02+00:00"),
+        ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
+           timestamp="2026-06-03T00:00:03+00:00"),
+        ev("c", "step_completed", step="s", kind="agent",
+           action={"verb": "continue"}, var_mutations={},
+           timestamp="2026-06-03T00:00:05+00:00"),
+    ])
+    step = tree.root.children[0].children[0]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    # No preceding prose: the span opens at the step_started boundary, distinct
+    # from the first tool_call timestamp the tool-span field records.
+    assert burst.span_start_ts == "2026-06-03T00:00:00+00:00"
+    assert burst.start_ts == "2026-06-03T00:00:02+00:00"
+    assert burst.span_end_ts is None
