@@ -1073,7 +1073,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             continue
         print(change_row.format_change_line(
             change_id=row[0], title=row[4], status=row[1], step=row[2],
-            last_iso=row[3], now=now, color=color), file=sys.stderr)
+            last_iso=row[3], now=now, color=color,
+            name_width=change_row.name_budget()), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1554,10 +1555,11 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(change_row.header_line(color=color), file=sys.stderr)
+    name_w = change_row.name_budget()
     for r in rows:
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2],
-            last_iso=r[3], now=now, color=color), file=sys.stderr)
+            last_iso=r[3], now=now, color=color, name_width=name_w), file=sys.stderr)
     return 2
 
 
@@ -1821,18 +1823,19 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(_NO_CHANGES_MESSAGE)
         return 0
     color = should_use_color(sys.stdout)
+    name_w = change_row.name_budget()
     print(change_row.header_line(color=color))
     for r in inflight:
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2],
-            last_iso=r[3], now=now, color=color))
+            last_iso=r[3], now=now, color=color, name_width=name_w))
     if past:
         if inflight:
             print()
         for r in past:
             print(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=r[1], step=r[2],
-                last_iso=r[3], now=now, color=color, dim=True))
+                last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
     if backlog_lines:
         if inflight or past:
             print()

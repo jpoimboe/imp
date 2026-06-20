@@ -37,6 +37,6 @@ def test_exit_ambiguous_renders_each_candidate_via_formatter(
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "is ambiguous" in err
-    assert "TITLE" in err                         # shared header row
+    assert "NAME" in err                          # shared header row
     assert "paused" in err                        # STATUS via the formatter
     assert "aaa111" in err and "bbb222" in err    # resume tokens, one row each

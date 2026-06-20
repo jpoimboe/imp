@@ -2,7 +2,13 @@ from datetime import UTC, datetime
 
 import pytest
 
-from imp.cli.change_row import format_change_line, header_line, relative_age
+from imp.cli.change_row import (
+    NAME_MIN,
+    format_change_line,
+    header_line,
+    name_budget,
+    relative_age,
+)
 
 _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
 
@@ -36,10 +42,18 @@ def test_format_columns_plain():
     line = format_change_line(**_row(), color=False)
     assert "\x1b[" not in line
     assert line.startswith("yaitd7")        # ID first
-    assert "Add version flag" in line       # TITLE
+    assert "Add version flag" in line       # NAME
     assert "running" in line
     assert "implement" in line
     assert "15m" in line                    # relative AGE
+
+
+def test_name_is_final_column():
+    line = format_change_line(**_row(), color=False)
+    # NAME now trails every other column.
+    assert line.index("Add version flag") > line.index("running")
+    assert line.index("Add version flag") > line.index("implement")
+    assert line.index("Add version flag") > line.index("15m")
 
 
 def test_format_unnamed_shows_id_and_unnamed_label():
@@ -48,15 +62,22 @@ def test_format_unnamed_shows_id_and_unnamed_label():
     assert "(unnamed)" in line
 
 
-def test_header_line_leads_with_id_then_title():
+def test_header_line_leads_with_id_ends_with_name():
     h = header_line(color=False)
     assert h.startswith("ID")
-    assert "TITLE" in h
+    assert h.rstrip().endswith("NAME")
+    assert "TITLE" not in h
     assert "HANDLE" not in h
 
 
-def test_format_truncates_long_title():
-    line = format_change_line(**_row(title="x" * 40), color=False)
+def test_format_does_not_truncate_name_within_budget():
+    line = format_change_line(**_row(title="x" * 40), color=False, name_width=48)
+    assert "x" * 40 in line
+    assert "…" not in line
+
+
+def test_format_truncates_name_past_budget():
+    line = format_change_line(**_row(title="x" * 40), color=False, name_width=24)
     # Truncated to 24 display cols: 23 chars + ellipsis.
     assert "x" * 23 + "…" in line
     assert "x" * 24 not in line
@@ -77,3 +98,22 @@ def test_format_dim_wraps_whole_row():
 def test_merged_status_renders_green():
     line = format_change_line(**_row(status="merged"), color=True)
     assert "\x1b[32mmerged\x1b[0m" in line
+
+
+def test_name_budget_fills_remaining_width(monkeypatch):
+    import os
+
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((120, 24)))
+    # 120 cols - 51 fixed prefix = 69 left for the name.
+    assert name_budget() == 69
+    # An indent (e.g. the resume picker's marker) shrinks the budget.
+    assert name_budget(indent=2) == 67
+
+
+def test_name_budget_floors_at_minimum(monkeypatch):
+    import os
+
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((20, 24)))
+    assert name_budget() == NAME_MIN

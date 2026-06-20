@@ -41,12 +41,13 @@ class ResumePicker:
 
     def render(self) -> str:
         out = []
+        name_w = change_row.name_budget(indent=2)  # the 2-char selection marker
         for i, c in enumerate(self.candidates):
             marker = "▸ " if i == self.index else "  "
             out.append(marker + change_row.format_change_line(
                 change_id=c.change_id, title=c.title,
                 status=c.status, step=c.step, last_iso=c.last_iso,
-                now=self.now, color=self.color))
+                now=self.now, color=self.color, name_width=name_w))
         return "\n".join(out)
 
 

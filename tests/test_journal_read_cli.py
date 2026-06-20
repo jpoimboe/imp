@@ -417,7 +417,7 @@ def test_status_default_inflight_columns_and_color(
     lines = out.splitlines()
     plain_header = re.sub(r"\x1b\[[0-9;]*m", "", lines[0])
     assert plain_header.startswith("ID")
-    assert "TITLE" in plain_header
+    assert "NAME" in plain_header
     assert "STATUS" in plain_header
     assert "Add version flag" in out
     assert "\x1b[32mrunning\x1b[0m" in out
