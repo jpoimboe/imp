@@ -42,6 +42,7 @@ from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.abandon import tear_down_change
+from imp.engine.archive import migrate as archive_migrate
 from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
@@ -1885,6 +1886,42 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon(control, change_id, assume_yes=args.yes)
 
 
+def _cmd_migrate_journal(
+    args: argparse.Namespace, *,
+    input_fn: Callable[[str], str] = input,
+    interactive: bool | None = None,
+) -> int:
+    control = _control_root()
+    ids = journal.journal_ids(control)
+    if not ids:
+        print("imp: refs/imp/journal is absent or empty; nothing to migrate.")
+        return 0
+    print(f"About to migrate {len(ids)} Change(s) from refs/imp/journal into the "
+          "archive, then retire the ref.")
+    print("Confirm that no in-flight Changes remain (drain them first).")
+    do_prompt = not args.yes and (
+        _interactive() if interactive is None else interactive)
+    if do_prompt:
+        try:
+            ans = input_fn(
+                "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        except EOFError:
+            ans = ""
+        if ans not in ("y", "yes"):
+            print("Migration cancelled; refs/imp/journal left intact.")
+            return 1
+    imported = archive_migrate.import_journal(control)
+    if len(imported) != len(ids):
+        skipped = sorted(set(ids) - set(imported))
+        print(f"imp: {len(skipped)} Change(s) could not be imported "
+              f"({', '.join(skipped)}); refs/imp/journal NOT retired. "
+              "Investigate the skipped Change(s) before retrying.")
+        return 1
+    archive_migrate.retire_journal(control)
+    print(f"Migrated {len(imported)} Change(s); refs/imp/journal retired.")
+    return 0
+
+
 def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     control = _control_root()
     change_id = os.environ.get("IMP_CHANGE_ID")
@@ -2271,6 +2308,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
+
+    p_migrate = sub.add_parser(
+        "migrate-journal",
+        help="Import the legacy refs/imp/journal into the archive and retire the ref",
+    )
+    p_migrate.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt",
+    )
+    p_migrate.set_defaults(func=_cmd_migrate_journal)
 
     p_artifact = sub.add_parser(
         "artifact-commit",
