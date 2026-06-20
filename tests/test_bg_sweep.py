@@ -238,10 +238,7 @@ def test_ticker_no_regression_baseline(tmp_path: Path) -> None:
 def test_no_ticker_started_when_no_background_processes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gating: with an empty background registry, the per-call ticker is never
-    started, so _sweep_bg is not invoked across a quiet foreground command that
-    outlives the 1 s tick interval. Before the gate the ticker fired _sweep_bg
-    once at ~1 s; the gate must drop that path entirely for the no-bg case."""
+    """Ticker must not start when background registry is empty; _sweep_bg stays cold."""
     async def main() -> None:
         import imp.agents.tools.bg as bg_mod
         ctx = _ctx(tmp_path)
