@@ -343,12 +343,12 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
 5. **Event-log check:** the Change's event log is at a deterministic path —
 
    ```bash
-   ev="$WT/.imp/worktrees/<id>/.imp/change/events.jsonl"
+   ev="$WT/.imp/changes/<id>/events.jsonl"
    test -f "$ev" || ev=$(find "$WT" -path '*'"<id>"'*' -name 'events.jsonl' 2>/dev/null | head -1)  # fallback
    grep -o '"kind":"interrupted"' "$ev" | head     # expect a hit after an agent-phase interrupt
    grep -o '"category":"unknown"'  "$ev" | tail     # expect NONE caused by the interrupt
    ```
-   (`change_dir` is `<worktree>/.imp/change` and `events_path` is `events.jsonl` within it. If
+   (`change_dir` is `<control_root>/.imp/changes/<id>` and `events_path` is `events.jsonl` within it. If
    you still can't locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what
    it surfaces; note the limitation.)
 6. **Record the change id** for resume + abandon. The authoritative source is
