@@ -81,3 +81,15 @@ def import_change_artifacts(control_root: Path, change_id: str) -> bool:
         worktree.artifact_commit(
             control_root, change_id, files, message=f"migrate: {change_id}")
     return True
+
+
+def import_journal(control_root: Path) -> list[str]:
+    """Import every Change in refs/imp/journal into the archive (record + events
+    blob + index rows) and materialize each one's artifact ref. Idempotent.
+    Returns the ids that were imported."""
+    imported: list[str] = []
+    for change_id in journal.journal_ids(control_root):
+        if import_change_runtime(control_root, change_id):
+            import_change_artifacts(control_root, change_id)
+            imported.append(change_id)
+    return imported

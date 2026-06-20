@@ -7,7 +7,7 @@ from pathlib import Path
 from imp.engine import archive, worktree
 from imp.engine.archive import index, migrate, record, records_root
 from imp.engine.archive.blobstore import hash_content
-from imp.engine.archive.read import newest_plan_name, read_artifact
+from imp.engine.archive.read import archived_ids, newest_plan_name, read_artifact
 
 
 def _git_init(root: Path) -> None:
@@ -125,3 +125,35 @@ def test_import_change_artifacts_no_artifacts_returns_false(tmp_path: Path) -> N
     _journal_change(tmp_path, "alpha", "completed")  # runtime files only
     assert migrate.import_change_artifacts(tmp_path, "alpha") is False
     assert not _wip_ref_exists(tmp_path, "alpha")
+
+
+def test_import_journal_imports_every_change_and_is_idempotent(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _journal_change(tmp_path, "alpha", "completed", artifacts={
+        "spec/alpha.md": b"# alpha\n"})
+    _journal_change(tmp_path, "beta", "abandoned")  # runtime only, no artifacts
+
+    imported = migrate.import_journal(tmp_path)
+    assert imported == ["alpha", "beta"]
+
+    # Both Changes are now served from the index; the one with artifacts has a
+    # per-Change ref, the runtime-only one does not.
+    assert archived_ids(tmp_path) == ["alpha", "beta"]
+    assert _wip_ref_exists(tmp_path, "alpha")
+    assert not _wip_ref_exists(tmp_path, "beta")
+
+    # Re-running does not duplicate index rows or error.
+    again = migrate.import_journal(tmp_path)
+    assert again == ["alpha", "beta"]
+    conn = index.connect(archive.index_path(tmp_path))
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT COUNT(*) FROM events WHERE change_id='alpha'").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_import_journal_empty_ref_returns_empty(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    assert migrate.import_journal(tmp_path) == []
