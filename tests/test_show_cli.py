@@ -116,3 +116,54 @@ def test_show_missing_change_returns_error(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["show", "nonexistent-change-id", "spec"])
     assert rc == 2
+
+
+def test_show_backlog_default_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine import backlog
+    _seed_control(tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="wire up OAuth login", depends_on=[], created_by="human")
+    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111")
+    assert "Add OAuth" in out
+    assert "backlog" in out
+    assert "ready" in out
+    assert "wire up OAuth login" in out
+
+
+def test_show_backlog_status_prints_bare_word(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine import backlog
+    _seed_control(tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="d", depends_on=[], created_by="human")
+    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
+    assert out.strip() == "backlog"
+
+
+def test_show_backlog_spec_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+    from imp.engine import backlog
+    _seed_control(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    backlog.write_record(
+        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
+        description="d", depends_on=[], created_by="human")
+    rc = main(["show", "2026-06-16-bkg111", "spec"])
+    assert rc == 2
+
+
+def test_show_live_default_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    _seed_with_artifacts(tmp_path, _ID, "Feat")
+    out = _run(monkeypatch, tmp_path, "show", _ID)
+    assert "Feat" in out
+    assert "running" in out

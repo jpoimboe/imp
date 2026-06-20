@@ -1250,6 +1250,22 @@ def _cmd_show(args: argparse.Namespace) -> int:
     except SystemExit:
         return 2
     resource = args.resource
+    rec = backlog.read_record(control, change_id)
+    if rec is not None:
+        if resource is None:
+            for line in _detail_card(control, change_id, now=datetime.now(UTC)):
+                print(line)
+            return 0
+        if resource == "status":
+            print("backlog")
+            return 0
+        print(f"imp: {change_id} is in the backlog (not started); "
+              f"no {resource} yet", file=sys.stderr)
+        return 2
+    if resource is None:
+        for line in _detail_card(control, change_id, now=datetime.now(UTC)):
+            print(line)
+        return 0
     if resource == "spec":
         data = _show_artifact(control, change_id, f"spec/{change_id}.md")
     elif resource == "plan":
@@ -2201,9 +2217,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_show.add_argument("token", help="Change id or its short token.")
     p_show.add_argument(
-        "resource", nargs="?", default="status",
+        "resource", nargs="?", default=None,
         choices=["spec", "plan", "review", "events", "status"],
-        help="Which artifact to print (default: status).")
+        help="Which artifact to print (default: a detail card).")
     p_show.set_defaults(func=_cmd_show)
 
     p_status = sub.add_parser(
