@@ -58,3 +58,20 @@ def archive_change(
         index.ingest(conn, rec, _parse_events(events_bytes))
     finally:
         conn.close()
+
+
+def rebuild_index(control_root: Path) -> None:
+    """Reconstruct index.db from record files + locally present blobs."""
+    index_path(control_root).unlink(missing_ok=True)
+    store = LocalBlobStore(blobs_root(control_root))
+    conn = index.connect(index_path(control_root))
+    try:
+        for cid in record.list_record_ids(records_root(control_root)):
+            rec = record.read_record(records_root(control_root), cid)
+            if rec is None:
+                continue
+            blob = store.get(rec["events_hash"])
+            events = _parse_events(blob) if blob is not None else []
+            index.ingest(conn, rec, events)
+    finally:
+        conn.close()
