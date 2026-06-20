@@ -157,3 +157,22 @@ def test_import_journal_imports_every_change_and_is_idempotent(tmp_path: Path) -
 def test_import_journal_empty_ref_returns_empty(tmp_path: Path) -> None:
     _git_init(tmp_path)
     assert migrate.import_journal(tmp_path) == []
+
+
+def _journal_ref_exists(control: Path) -> bool:
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal"],
+        cwd=control, capture_output=True, text=True)
+    return proc.returncode == 0
+
+
+def test_retire_journal_deletes_ref_and_is_idempotent(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _journal_change(tmp_path, "alpha", "completed")
+    assert _journal_ref_exists(tmp_path)
+
+    assert migrate.retire_journal(tmp_path) is True
+    assert not _journal_ref_exists(tmp_path)
+
+    # Already absent: a no-op that reports False rather than erroring.
+    assert migrate.retire_journal(tmp_path) is False

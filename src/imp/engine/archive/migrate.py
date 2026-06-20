@@ -83,6 +83,21 @@ def import_change_artifacts(control_root: Path, change_id: str) -> bool:
     return True
 
 
+def retire_journal(control_root: Path) -> bool:
+    """Delete refs/imp/journal. Idempotent: a no-op returning False when the ref
+    is already absent. Once deleted, the Part-2 read-path union over the journal
+    yields nothing, so reads no longer consult it (spec AC 15)."""
+    present = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal"],
+        cwd=control_root, capture_output=True, text=True)
+    if present.returncode != 0:
+        return False
+    subprocess.run(
+        ["git", "update-ref", "-d", "refs/imp/journal"],
+        cwd=control_root, check=True, capture_output=True, text=True)
+    return True
+
+
 def import_journal(control_root: Path) -> list[str]:
     """Import every Change in refs/imp/journal into the archive (record + events
     blob + index rows) and materialize each one's artifact ref. Idempotent.
