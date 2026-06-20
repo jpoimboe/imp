@@ -219,6 +219,17 @@ def test_user_bar_is_blue_glyph_under_color_and_space_off() -> None:
     assert pal.user_bar(enabled=False) == " "   # blank gutter when color is off
 
 
+def test_lifecycle_role_is_nonbold_yellow_in_all_themes() -> None:
+    # named role over yellow, non-bold — must resolve identically in all themes.
+    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        assert pal.ansi("x", *pal.NODE_COLORS["lifecycle"], enabled=True) == \
+            pal.ansi("x", "yellow", enabled=True)
+        assert pal._ANSI["bold"] not in pal.ansi("x", *pal.NODE_COLORS["lifecycle"],
+                                                 enabled=True)
+
+
 def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
     braille = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     assert pal.spinner_frame(0) == "⠋"

@@ -284,6 +284,7 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "metadata": ("dim",),              # --full only
     "error": ("bold", "red"),          # semantic
     "warning": ("yellow",),            # semantic
+    "lifecycle": ("yellow",),          # run-spine: merge / pause / route / waiting / outcome
     "user": ("bright_blue",),          # bright-blue caret/text marks the user's turn
     "agent": (),                       # calm baseline — plain default fg; eye rests
 }
