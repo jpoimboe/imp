@@ -23,6 +23,8 @@ def write_record(
     control_root: Path, *, change_id: str, title: str, description: str,
     depends_on: list[str], created_by: str,
 ) -> Path:
+    if not title.strip():
+        raise ValueError("backlog record title must be non-empty")
     d = _dir(control_root)
     d.mkdir(parents=True, exist_ok=True)
     path = record_path(control_root, change_id)

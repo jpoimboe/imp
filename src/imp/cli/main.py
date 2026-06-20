@@ -615,12 +615,16 @@ async def _run_tui_session(
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
     change_id = new_change_id()
-    backlog.write_record(
-        control, change_id=change_id,
-        title=getattr(args, "title", None) or "",
-        description=args.backlog,
-        depends_on=list(getattr(args, "depends_on", None) or []),
-        created_by="human")
+    try:
+        backlog.write_record(
+            control, change_id=change_id,
+            title=args.backlog,
+            description=getattr(args, "description", None) or "",
+            depends_on=list(getattr(args, "depends_on", None) or []),
+            created_by="human")
+    except ValueError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     print(f"imp: recorded backlog Change {change_id} "
           f"(start it with `imp resume {change_id}`)")
     return 0
@@ -691,6 +695,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
     if getattr(args, "backlog", None) is not None:
+        if getattr(args, "title", None):
+            print("imp: --backlog and --title cannot be combined "
+                  "(--backlog is the title)", file=sys.stderr)
+            return 2
         return _record_backlog(args, control)
 
     try:
@@ -2010,10 +2018,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
-    p_new.add_argument("--backlog", metavar="BRIEF", default=None,
-                       help="Record a backlog Change with this brief WITHOUT "
-                            "starting it; prints its id. Start it later with "
-                            "`imp resume <id>`.")
+    p_new.add_argument("--backlog", metavar="TITLE", default=None,
+                       help="Record a backlog Change with this TITLE WITHOUT "
+                            "starting it; prints its id. Add --description for a "
+                            "longer brief. Start it later with `imp resume <id>`.")
+    p_new.add_argument("--description", metavar="TEXT", default=None,
+                       help="Optional longer description for a --backlog Change "
+                            "(may be empty).")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A change id this backlog Change depends on "

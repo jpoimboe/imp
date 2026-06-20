@@ -30,7 +30,7 @@ def test_title_for_id_returns_backlog_title(tmp_path: Path) -> None:
 
 def test_iter_change_ids_includes_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="2026-06-16-bkg111", title="",
+    backlog.write_record(tmp_path, change_id="2026-06-16-bkg111", title="Iter test",
                          description="b", depends_on=[], created_by="human")
     assert "2026-06-16-bkg111" in main._iter_change_ids(tmp_path)
 

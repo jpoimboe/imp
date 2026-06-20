@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.engine import backlog, journal
 
 
@@ -88,3 +90,10 @@ def test_seed_opening_title_only_when_description_empty() -> None:
 def test_seed_opening_joins_title_and_description() -> None:
     rec = {"title": "Add OAuth", "description": "wire up OAuth login"}
     assert backlog.seed_opening(rec) == "Add OAuth\n\nwire up OAuth login"
+
+
+def test_write_record_rejects_blank_title(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        backlog.write_record(
+            tmp_path, change_id="aaa111", title="   ",
+            description="anything", depends_on=[], created_by="human")
