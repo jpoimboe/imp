@@ -212,3 +212,25 @@ def test_show_live_default_renders_card(
     out = _run(monkeypatch, tmp_path, "show", _ID)
     assert "Feat" in out
     assert "running" in out
+
+
+def test_show_journaled_default_renders_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    files = {str(p.relative_to(ch.change_dir / "artifacts")): p
+             for p in sorted((ch.change_dir / "artifacts").rglob("*")) if p.is_file()}
+    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
+    st = State.load(ch.state_dir)
+    st.status = "completed"
+    st.save(ch.state_dir)
+    worktree.fold_wip_into_journal(tmp_path, _ID, {
+        "events.jsonl": ch.events_path,
+        "change.json": ch.change_dir / "change.json",
+        "state.json": ch.state_dir / "state.json",
+    })
+    worktree.remove_worktree(tmp_path, _ID)
+    out = _run(monkeypatch, tmp_path, "show", _ID)
+    assert "Feat" in out
+    assert "completed" in out
