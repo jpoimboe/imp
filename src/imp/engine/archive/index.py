@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS changes ("
@@ -27,3 +30,31 @@ def connect(index_path: Path) -> sqlite3.Connection:
         conn.execute(stmt)
     conn.commit()
     return conn
+
+
+def ingest(
+    conn: sqlite3.Connection, record: dict[str, Any], events: list[dict[str, Any]],
+) -> None:
+    """Idempotently load one Change's record + events into the index."""
+    cid = record["id"]
+    conn.execute("DELETE FROM changes WHERE id = ?", (cid,))
+    conn.execute("DELETE FROM deps WHERE change_id = ?", (cid,))
+    conn.execute("DELETE FROM events WHERE change_id = ?", (cid,))
+    final_state = record.get("final_state") or {}
+    conn.execute(
+        "INSERT INTO changes (id, title, base, created_at, status, step,"
+        " events_hash, ingested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (cid, record.get("title"), record.get("base"), record.get("created_at"),
+         final_state.get("status"), final_state.get("step"),
+         record.get("events_hash"), datetime.now(UTC).isoformat()))
+    for dep in record.get("depends_on") or []:
+        conn.execute("INSERT INTO deps (change_id, depends_on_id) VALUES (?, ?)",
+                     (cid, dep))
+    for seq, ev in enumerate(events):
+        conn.execute(
+            "INSERT INTO events (change_id, seq, event_id, parent_id, agent_id,"
+            " ts, type, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (cid, seq, ev.get("id"), ev.get("parent_id"), ev.get("agent_id"),
+             ev.get("timestamp"), ev.get("type"),
+             json.dumps(ev.get("payload"))))
+    conn.commit()
