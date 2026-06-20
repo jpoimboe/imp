@@ -192,25 +192,28 @@ change is set up. (A genuine intent-fork escalation at the "Ask vs. decide" high
 parks for a human even headless — only this build-or-save gate auto-builds.)
 {% else %}
 Once the design is settled (the user has approved it) and **before you write and commit
-the spec**, surface the choice in your turn text and confirm via `wait_for_user`:
+the spec**, ask exactly one question at this gate — the bare build affirmative, e.g.
+**"Want me to build this out now?"** Do not present a numbered Build/Save list, do not
+pair it with "…, or save?", and do not script reply tokens. As a follow-on to the
+question (not a co-equal option), name plainly what declining does: it saves the work as
+a draft you can resume later with `imp resume <id>`. There is no separate "does this
+sound right?" approval question here — design approval was settled continuously through
+the brainstorm. Surface the question in your turn text and confirm via `wait_for_user`.
 
-> 1. **Build it now** — I'll set up the workspace and write the spec.
-> 2. **Save as a draft** — nothing is written yet; resume later with `imp resume <id>`.
-
-- **Option 1 — Build it now.** Call `create_and_enter_worktree` (it takes no arguments).
-  It forks the branch and worktree from the base branch's current tip and switches this
-  change into it — your subsequent `Read`/`Bash`/edit tools operate in the new worktree
-  immediately. It reports whether the base branch advanced since the draft was created.
-  **If it reports `head_changed=true`, re-ground the spec against current code in this
-  same turn** — re-read the files the brainstorm assumed and reconcile any drift — before
-  writing the spec. Then write and commit the spec and finish with
+- **If the user agrees, build it now.** Call `create_and_enter_worktree` (it takes no
+  arguments). It forks the branch and worktree from the base branch's current tip and
+  switches this change into it — your subsequent `Read`/`Bash`/edit tools operate in the
+  new worktree immediately. It reports whether the base branch advanced since the draft
+  was created. **If it reports `head_changed=true`, re-ground the spec against current
+  code in this same turn** — re-read the files the brainstorm assumed and reconcile any
+  drift — before writing the spec. Then write and commit the spec and finish with
   `complete_step(phase="written", …)` exactly as in "Writing the Spec" below; the spec
   commit and `spec-reviewer` run only now that the change is set up.
-- **Option 2 — Save as a draft.** Do **not** call `create_and_enter_worktree` and do
-  **not** emit `phase: written`. Tell the user the draft is saved and resumable later
-  with `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with the
-  draft saved as a distinct `draft` — nothing is built, no branch, no worktree. On a
-  later resume you re-offer this same build-or-save choice.
+- **If the user declines, save it as a draft.** Do **not** call
+  `create_and_enter_worktree` and do **not** emit `phase: written`. Tell the user the
+  draft is saved and resumable later with `imp resume <id>`, then call `wait_for_user`.
+  The spec phase pauses with the draft saved as a distinct `draft` — nothing is built, no
+  branch, no worktree. On a later resume you re-offer this same build question.
 {% endif %}
 
 On the **seeded** path (your opening message begins with `Implement this spec`), the user

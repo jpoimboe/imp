@@ -854,12 +854,15 @@ def test_spec_writer_prompt_has_build_or_save_section() -> None:
     lowered = body.lower()
     assert "create_and_enter_worktree" in body
     assert "head_changed" in body
-    assert "build now" in lowered
-    assert "save as a draft" in lowered
+
+    assert "build this out now" in lowered
+    assert "1. **Build it now**" not in body
+    assert "2. **Save as a draft**" not in body
+
+    assert "imp resume <id>" in body
     assert "spec phase pauses" in lowered
-    assert "1. **Build it now**" in body
-    assert "2. **Save as a draft**" in body
-    assert "Going live or parking the draft" not in body
+
+    assert "going live or parking the draft" not in lowered
     assert "go live" not in lowered
     assert "go-live" not in lowered
 
