@@ -24,7 +24,7 @@ def test_new_backlog_records_and_prints_id(tmp_path: Path, monkeypatch, capsys) 
     assert len(ids) == 1
     rec = backlog.read_record(tmp_path, ids[0])
     assert rec is not None
-    assert rec["brief"] == "wire OAuth login"
+    assert rec["description"] == "wire OAuth login"
     assert rec["depends_on"] == ["2026-06-16-dep001"]
     assert rec["created_by"] == "human"
     assert rec["title"] == ""

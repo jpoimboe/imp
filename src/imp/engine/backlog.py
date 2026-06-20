@@ -20,14 +20,14 @@ def record_path(control_root: Path, change_id: str) -> Path:
 
 
 def write_record(
-    control_root: Path, *, change_id: str, title: str, brief: str,
+    control_root: Path, *, change_id: str, title: str, description: str,
     depends_on: list[str], created_by: str,
 ) -> Path:
     d = _dir(control_root)
     d.mkdir(parents=True, exist_ok=True)
     path = record_path(control_root, change_id)
     path.write_text(json.dumps({
-        "id": change_id, "title": title, "brief": brief,
+        "id": change_id, "title": title, "description": description,
         "depends_on": list(depends_on), "created_by": created_by,
         "created_at": datetime.now(UTC).isoformat(),
     }, indent=2, sort_keys=True))
@@ -39,6 +39,13 @@ def read_record(control_root: Path, change_id: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return cast(dict[str, Any], json.loads(path.read_text()))
+
+
+def seed_opening(rec: dict[str, Any]) -> str:
+    description = rec.get("description") or ""
+    if description:
+        return f"{rec['title']}\n\n{description}"
+    return str(rec["title"])
 
 
 def list_ids(control_root: Path) -> list[str]:

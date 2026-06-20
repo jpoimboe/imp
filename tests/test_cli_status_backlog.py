@@ -11,9 +11,9 @@ from tests.conftest import _seed_control
 def test_backlog_status_lines_ready_and_blocked(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="2026-06-16-rdy111", title="Ready one",
-                         brief="b", depends_on=[], created_by="human")
+                         description="b", depends_on=[], created_by="human")
     backlog.write_record(tmp_path, change_id="2026-06-16-blk222", title="Blocked one",
-                         brief="b", depends_on=["2026-06-16-missing"],
+                         description="b", depends_on=["2026-06-16-missing"],
                          created_by="step:finalize")
 
     lines = main._backlog_status_lines(tmp_path, now=datetime.now(UTC))
@@ -37,7 +37,7 @@ def test_cmd_status_prints_backlog_section(tmp_path: Path, monkeypatch, capsys) 
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     backlog.write_record(tmp_path, change_id="2026-06-16-rdy111", title="Ready one",
-                         brief="b", depends_on=[], created_by="human")
+                         description="b", depends_on=[], created_by="human")
     import argparse
     rc = main._cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0

@@ -236,7 +236,7 @@ def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         brief="do a thing", depends_on=[], created_by="human")
+                         description="do a thing", depends_on=[], created_by="human")
     rc = _abandon(tmp_path, "bk1", assume_yes=True)
     assert rc == 0
     assert backlog.read_record(tmp_path, "bk1") is None
@@ -249,7 +249,7 @@ def test_abandon_backlog_reports_message(
 
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         brief="do a thing", depends_on=[], created_by="human")
+                         description="do a thing", depends_on=[], created_by="human")
     _abandon(tmp_path, "bk1", assume_yes=True)
     assert "abandoned backlog item bk1" in capsys.readouterr().out
 
@@ -259,7 +259,7 @@ def test_abandon_backlog_decline_leaves_record_intact(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         brief="do a thing", depends_on=[], created_by="human")
+                         description="do a thing", depends_on=[], created_by="human")
     rc = _abandon(tmp_path, "bk1", interactive=True, input_fn=lambda _p: "n")
     assert rc == 1
     assert backlog.read_record(tmp_path, "bk1") is not None
@@ -270,7 +270,7 @@ def test_abandon_backlog_non_interactive_skips_prompt(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         brief="do a thing", depends_on=[], created_by="human")
+                         description="do a thing", depends_on=[], created_by="human")
     rc = _abandon(
         tmp_path, "bk1", interactive=False,
         input_fn=lambda _p: (_ for _ in ()).throw(AssertionError("should not prompt")))
@@ -284,7 +284,7 @@ def test_abandon_live_change_wins_over_same_id_backlog_record(tmp_path: Path) ->
     _seed_control(tmp_path)
     Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     backlog.write_record(tmp_path, change_id="feat", title="brief",
-                         brief="b", depends_on=[], created_by="human")
+                         description="b", depends_on=[], created_by="human")
     rc = _abandon(tmp_path, "feat", assume_yes=True)
     assert rc == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()   # live torn down
@@ -297,7 +297,7 @@ def test_abandon_backlog_eoferror_at_confirm_cancels(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         brief="do a thing", depends_on=[], created_by="human")
+                         description="do a thing", depends_on=[], created_by="human")
     rc = _abandon(
         tmp_path, "bk1", interactive=True,
         input_fn=lambda _p: (_ for _ in ()).throw(EOFError()))

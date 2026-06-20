@@ -618,7 +618,7 @@ def _record_backlog(args: argparse.Namespace, control: Path) -> int:
     backlog.write_record(
         control, change_id=change_id,
         title=getattr(args, "title", None) or "",
-        brief=args.backlog,
+        description=args.backlog,
         depends_on=list(getattr(args, "depends_on", None) or []),
         created_by="human")
     print(f"imp: recorded backlog Change {change_id} "
@@ -852,7 +852,7 @@ async def _maybe_resume_backlog(
               f"record was left behind; delete `.imp/backlog/{change_id}.json` and "
               f"resume the existing Change", file=sys.stderr)
         return 2
-    return await _run_fresh_session(change, args=args, seed_opening=rec["brief"])
+    return await _run_fresh_session(change, args=args, seed_opening=backlog.seed_opening(rec))
 
 
 def _validate_from_target(
