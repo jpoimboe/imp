@@ -942,6 +942,6 @@ def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
     # Standard path: say nothing about the classification.
     assert "say nothing to the user about the classification" in lowered
     # Trivial path: a plain-language heads-up, never naming the internal label.
-    assert "this is small enough that i'll just make the change directly" in lowered
+    assert "brief plain-language heads-up" in lowered
     assert "never name the internal" in lowered
 
