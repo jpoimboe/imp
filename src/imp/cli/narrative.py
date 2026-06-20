@@ -997,7 +997,10 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     if not llm_response_has_prose(p):
         return
     node = AgentTextNode(payload=p)
+    if self._current_burst is not None:
+        self._current_burst.span_end_ts = event.get("timestamp")
     self._flush_burst()
+    self._span_start_ts = event.get("timestamp")
     # A new narration is taking its place, so every EARLIER narration in this
     # container is now settled (only the TRAILING one can still fold into the
     # step conclusion). Un-hold them ALL — not just the immediately-adjacent
