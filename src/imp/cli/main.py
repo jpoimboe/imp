@@ -1020,12 +1020,12 @@ def _change_home(control: Path, change_id: str) -> Path:
 
 
 def _iter_change_ids(control: Path) -> list[str]:
-    """All known Change ids: permanent homes first, then journaled ids not live,
+    """All known Change ids: permanent homes first, then archived ids not live,
     then backlog ids not yet seen."""
     live = _list_change_homes(control)
     seen = set(live)
     out = list(live)
-    for cid in journal.journal_ids(control):
+    for cid in archive_read.archived_ids(control):
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
@@ -1037,7 +1037,7 @@ def _iter_change_ids(control: Path) -> list[str]:
 
 
 def _title_for_id(control: Path, change_id: str) -> str | None:
-    """Read a Change's current title (worktree first, backlog second, journal third)."""
+    """Read a Change's current title (worktree first, backlog second, archive third)."""
     cdir = _change_home(control, change_id)
     cj = cdir / "change.json"
     if cj.exists():
@@ -1048,7 +1048,7 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
     rec = backlog.read_record(control, change_id)
     if rec is not None:
         return str(rec["title"])
-    raw = journal.journal_show(control, change_id, "change.json")
+    raw = archive_read.read_change_json(control, change_id)
     if raw is None:
         return None
     try:
@@ -1315,15 +1315,15 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
 
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent change home by its events.jsonl mtime, else
-    most-recent journaled id (by last-event timestamp), else None."""
+    most-recent archived id (by last-event timestamp), else None."""
     homes = _list_change_homes(control)
     if homes:
         return max(homes, key=lambda s: (_change_home(control, s)
                                          / "events.jsonl").stat().st_mtime)
-    journaled = journal.journal_ids(control)
-    if not journaled:
+    archived = archive_read.archived_ids(control)
+    if not archived:
         return None
-    return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
+    return max(archived, key=lambda s: _journal_last_iso(control, s) or "")
 
 
 _NO_CHANGES_MESSAGE = "No changes."
@@ -1490,7 +1490,7 @@ def _resume_gone(control: Path, change_id: str) -> int:
     return 2
 
 
-# Spec §10: in-flight statuses; completed Changes live in the journal.
+# Spec §10: in-flight statuses; completed Changes live in the archive.
 _INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
 RESUMABLE = ("paused", "errored", "merge_blocked", "draft")
 
@@ -1564,7 +1564,7 @@ def _draft_label(status: str, change_json: bytes) -> str:
 
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = _change_home(control, change_id)
-    # journal_show returns bytes | None; the live change-home branch always finds
+    # archive_read returns bytes | None; the live change-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     change_json: bytes | None
@@ -1573,8 +1573,8 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
         change_json = (cdir / "change.json").read_bytes()
         last = _last_event_iso(cdir / "events.jsonl") or ""
     else:
-        state_json = journal.journal_show(control, change_id, "state.json")
-        change_json = journal.journal_show(control, change_id, "change.json")
+        state_json = archive_read.read_state_json(control, change_id)
+        change_json = archive_read.read_change_json(control, change_id)
         if state_json is None or change_json is None:
             return None
         last = _journal_last_iso(control, change_id) or ""
@@ -1606,25 +1606,30 @@ def _status_rows(control: Path) -> list[_Row]:
 
 
 def _completed_rows(control: Path) -> list[_Row]:
-    """Journal-backed completed Changes: every journaled id NOT currently surfaced as
-    an in-flight row. The dedup set is the IN-FLIGHT id set (exactly the ids
-    _status_rows emits), NOT every change home — a merged change keeps its home
-    but is `completed`, so it must fall through to this completed section rather than be
-    masked by mere home presence."""
+    """Completed/abandoned Changes NOT currently surfaced in-flight. Archived rows
+    come from a SINGLE indexed query (spec AC 7); legacy journaled ids are folded
+    in via the transition fan-out until the importer retires refs/imp/journal."""
     live = {r[0] for r in _status_rows(control)}
     rows: list[_Row] = []
+    seen: set[str] = set()
+    for row in archive_read.completed_rows(control):
+        if row[0] in live or row[1] in _INFLIGHT:
+            continue
+        rows.append(row)
+        seen.add(row[0])
     for change_id in journal.journal_ids(control):
-        if change_id in live:
+        if change_id in live or change_id in seen:
             continue
         state_json = journal.journal_show(control, change_id, "state.json")
         change_json = journal.journal_show(control, change_id, "change.json")
         if state_json is None or change_json is None:
             continue
         last = _journal_last_iso(control, change_id) or ""
-        row = _status_row(change_id, state_json, change_json, last)
-        if row is None or row[1] in _INFLIGHT:
-            continue  # belt-and-suspenders; journaled rows are completed
-        rows.append(row)
+        jrow = _status_row(change_id, state_json, change_json, last)
+        if jrow is None or jrow[1] in _INFLIGHT:
+            continue
+        rows.append(jrow)
+        seen.add(change_id)
     return rows
 
 
@@ -1865,10 +1870,10 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     except SystemExit:
         # _resolve_id scans live worktrees only. A Change whose worktree was
         # already removed (crash between abandon's remove and branch-delete)
-        # is unresolvable there — but abandon journaled the id before removal,
-        # so recover it from the journal to still reap an orphaned branch
+        # is unresolvable there — but abandon archived the id before removal,
+        # so recover it from the archive to still reap an orphaned branch
         # (AC #12). Exact id, else unique suffix match.
-        ids = journal.journal_ids(control)
+        ids = archive_read.archived_ids(control)
         token = args.token
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]

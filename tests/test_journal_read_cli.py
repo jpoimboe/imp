@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.engine import journal, worktree
+from imp.engine import worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -555,12 +555,12 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
 
 def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None:
     import json as _json
+    import subprocess
 
     import imp.cli.main as m
     from imp.engine import archive
 
     # Set up a minimal git repo (not via _seed_control — no conftest dep needed).
-    import subprocess
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
@@ -603,3 +603,54 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
     assert rc == 0, out
     assert "plan-writer" in out    # from archive blob, not from decoy journal
     assert "abandoned" not in out  # decoy journal event must NOT appear
+
+
+def test_status_all_lists_archived_and_legacy(tmp_path, monkeypatch) -> None:
+    import io
+    import json as _json
+    from contextlib import redirect_stdout
+
+    import imp.cli.main as m
+    from imp.engine import archive, worktree
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+
+    # An archived (index) completed Change with no in-flight home.
+    events = tmp_path / "e.jsonl"
+    events.write_text(
+        '{"id":"x-e0","timestamp":"2026-06-02T00:00:00+00:00",'
+        '"type":"change_created","payload":{}}\n')
+    cj = tmp_path / "c.json"
+    cj.write_text(_json.dumps({
+        "id": "arch01", "title": "Archived One", "base_branch": "main",
+        "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
+    sj = tmp_path / "s.json"
+    sj.write_text(_json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "arch01", events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+    # A legacy journaled completed Change (transition window).
+    levents = tmp_path / "le.jsonl"
+    levents.write_text(
+        '{"id":"l-e0","timestamp":"2026-06-01T00:00:00+00:00",'
+        '"type":"change_created","payload":{}}\n')
+    lcj = tmp_path / "lc.json"
+    lcj.write_text(_json.dumps({
+        "id": "leg01", "title": "Legacy One", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    lsj = tmp_path / "ls.json"
+    lsj.write_text(_json.dumps({"id": "leg01", "status": "completed", "step": None}))
+    worktree.journal_commit(tmp_path, "leg01", {
+        "events.jsonl": levents, "change.json": lcj, "state.json": lsj})
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert m.main(["status", "--all"]) == 0
+    out = buf.getvalue()
+    assert "arch01" in out
+    assert "leg01" in out
+    assert "Archived One" in out
+    assert "Legacy One" in out
