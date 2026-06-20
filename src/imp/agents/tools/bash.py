@@ -164,11 +164,7 @@ async def bash(
     # cancel the drains mid-flush (silent tail truncation). Not a long-lived-
     # task violation: scoped inside one call's own task group, exactly like
     # the drains.
-    # Gate the registry sweep on there being something to sweep: a foreground
-    # bash holds the tool loop exclusively, so no background process can be
-    # spawned mid-call and an empty registry at the start stays empty. An idle
-    # ticker's only effect is a teardown (cancel of a sleeping task) that can
-    # stall under heavy load, so don't start it when there's nothing to sweep.
+    # Skip ticker when empty: foreground bash owns the loop, so an empty registry stays empty.
     has_bg = bool(ctx.background_processes)
     ticker_scope = anyio.CancelScope()
 
