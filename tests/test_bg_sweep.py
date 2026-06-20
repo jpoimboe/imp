@@ -235,6 +235,36 @@ def test_ticker_no_regression_baseline(tmp_path: Path) -> None:
     anyio.run(main)
 
 
+def test_no_ticker_started_when_no_background_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gating: with an empty background registry, the per-call ticker is never
+    started, so _sweep_bg is not invoked across a quiet foreground command that
+    outlives the 1 s tick interval. Before the gate the ticker fired _sweep_bg
+    once at ~1 s; the gate must drop that path entirely for the no-bg case."""
+    async def main() -> None:
+        import imp.agents.tools.bg as bg_mod
+        ctx = _ctx(tmp_path)
+        assert ctx.background_processes == {}
+        calls = 0
+        orig = bg_mod._sweep_bg
+
+        async def _counting_sweep(c):
+            nonlocal calls
+            calls += 1
+            return await orig(c)
+
+        # _bg_ticker imports _sweep_bg from the module at call time, so patching
+        # the module attribute is picked up if (and only if) the ticker runs.
+        monkeypatch.setattr(bg_mod, "_sweep_bg", _counting_sweep)
+        raw = await get_registry()["bash"].async_invoke(
+            ctx, {"command": "sleep 1.2"})
+        out = json.loads(raw)
+        assert out["returncode"] == 0
+        assert calls == 0
+    anyio.run(main)
+
+
 def test_sweep_fires_on_non_bash_tool_dispatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
