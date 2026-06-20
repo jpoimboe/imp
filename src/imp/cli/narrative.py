@@ -174,6 +174,8 @@ class ToolBurstFold:
     calls: list[ToolCall] = field(default_factory=list)
     start_ts: str | None = None        # first tool_call.timestamp (burst timing)
     end_ts: str | None = None          # last tool_result.timestamp
+    span_start_ts: str | None = None   # surrounding-prose span start (mirrors live timer)
+    span_end_ts: str | None = None     # surrounding-prose span end (mirrors live timer)
     collapsible = True
 
 
@@ -377,6 +379,7 @@ class NarrativeBuilder:
         # normal step — there is no nested gate container.
         self._step_stack: list[StepNode] = []
         self._current_burst: ToolBurstFold | None = None
+        self._span_start_ts: str | None = None
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
         # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
@@ -682,6 +685,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
 
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    self._span_start_ts = event.get("timestamp")
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
@@ -970,6 +974,7 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
 
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    self._span_start_ts = event.get("timestamp")
     interactive, self._awaiting_reply = self._awaiting_reply, False
     text = _user_message_text(p)
     if interactive and not text.strip():
@@ -993,7 +998,10 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     if not llm_response_has_prose(p):
         return
     node = AgentTextNode(payload=p)
+    if self._current_burst is not None:
+        self._current_burst.span_end_ts = event.get("timestamp")
     self._flush_burst()
+    self._span_start_ts = event.get("timestamp")
     # A new narration is taking its place, so every EARLIER narration in this
     # container is now settled (only the TRAILING one can still fold into the
     # step conclusion). Un-hold them ALL — not just the immediately-adjacent
@@ -1056,7 +1064,7 @@ NarrativeBuilder._HANDLERS["agent_output"] = _h_agent_output
 
 def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:
     if self._current_burst is None:
-        self._current_burst = ToolBurstFold()
+        self._current_burst = ToolBurstFold(span_start_ts=self._span_start_ts)
         self._append(self._current_burst)
     return self._current_burst
 
