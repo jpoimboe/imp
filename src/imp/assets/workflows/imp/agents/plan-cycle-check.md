@@ -11,8 +11,8 @@ output:
 
 You judge whether the change needs another plan, AND you advance the review
 cadence counter. Read the spec at
-`{{ change.home }}/artifacts/spec/{{ change.handle }}.md`, every plan
-`{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md`, `{{ change.home }}/progress.md`,
+`{{ change.home }}/artifacts/spec/{{ change.id }}.md`, every plan
+`{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`, `{{ change.home }}/progress.md`,
 and the committed code (use glob/grep to spot-check).
 
 ## 1. Coverage decision — you are the SOLE completeness guard
@@ -36,7 +36,7 @@ The engine fires review on an accumulated-task cadence and uses your
 1. Take the current counter: `{{ vars.tasks_since_review }}` (0 at change start, or
    the value carried since the last review fired).
 2. Count the tasks in the **just-implemented plan file** — the newest
-   `{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md` (highest N). The plan
+   `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` (highest N). The plan
    file is the authoritative task list (count its `## Task` sections); do NOT count
    from `progress.md`, whose per-task narrative is intentionally bounded.
 3. Emit `running_tasks` = the sum.

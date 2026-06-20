@@ -42,9 +42,9 @@ range above.
 
 ## Context to Load
 
-- **Spec:** `{{ change.home }}/artifacts/spec/{{ change.handle }}.md` — the requirements this
+- **Spec:** `{{ change.home }}/artifacts/spec/{{ change.id }}.md` — the requirements this
   change must satisfy.
-- **Plans:** `{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md` — what was planned
+- **Plans:** `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` — what was planned
   and intended for each phase.
 - **Progress:** `{{ change.home }}/progress.md` — completed tasks, deferred followups, and
   deviation notes.

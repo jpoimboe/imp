@@ -18,8 +18,8 @@ never touched — and you log what you do rather than asking the human to bless 
 
 Read first:
 - `{{ change.home }}/progress.md` — the **Deferred Followups** list (the work source).
-- The spec at `{{ change.home }}/artifacts/spec/{{ change.handle }}.md` and the newest plan
-  `{{ change.home }}/artifacts/plans/{{ change.handle }}-plan-*.md` for grounding.
+- The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the newest plan
+  `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` for grounding.
 
 ## The pinned line format
 

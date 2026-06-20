@@ -165,7 +165,7 @@ Then route on the dispositions:
 
 Always emit the summary fields (`built` / `verify_status` / `open_items` /
 `next_steps`) on every `complete_step`, whichever decision you make — they land in
-the event log and are queryable via `imp log {{ change.handle }}`. Do not write
+the event log and are queryable via `imp log {{ change.id }}`. Do not write
 files (other than the `progress.md` line rewrites above); do not commit.
 
 ---
