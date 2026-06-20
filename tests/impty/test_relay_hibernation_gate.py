@@ -88,7 +88,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
     agents.mkdir(parents=True)
     (agents / "gate.md").write_text(
         "---\nname: gate\ndescription: calls wait_for_user.\n"
-        "tools: [bash, wait_for_user, complete_step]\n"
+        "tools: [bash, wait_for_user, complete_step, create_and_enter_worktree]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nAsk the human something, then wait.\n")
     (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
@@ -106,6 +106,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
         {"default": [
             {"text": "waiting for you",
              "tools": [
+                 {"name": "create_and_enter_worktree", "input": {}},
                  {"name": "bash", "input": {"command": _ATTACH_POLL}},
                  {"name": "wait_for_user", "input": {}},
              ]},

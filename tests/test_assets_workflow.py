@@ -848,6 +848,19 @@ def test_sweep_verify_green_clears_stale_carry() -> None:
     assert m.var_mutations["sweep_tolerated_carry"] is False
 
 
+def test_spec_writer_prompt_has_go_live_park_branch() -> None:
+    # Verifies the go-live/park decision section exists in the spec-writer prompt.
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    assert "create_and_enter_worktree" in body          # names the go-live tool
+    assert "head_changed" in body                        # re-ground when base advanced
+    assert "go live" in lowered                          # the build-it branch
+    assert "save for later" in lowered or "park" in lowered  # the park branch
+    assert "wait_for_user" in body                       # park pauses the spec phase
+
+
 def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))

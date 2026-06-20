@@ -61,7 +61,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
     agents = root / "imp" / "workflows" / "imp" / "agents"
     agents.mkdir(parents=True)
     (agents / "coder.md").write_text(
-        "---\nname: coder\ntools: [bash, complete_step]\n"
+        "---\nname: coder\ntools: [bash, complete_step, create_and_enter_worktree]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nprompt body\n")
     (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
@@ -109,6 +109,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         "steps": {
             "spec-writer": [{"text": "spec", "tools": [
                 {"name": "rename_change", "input": {"name": "demo change"}},
+                {"name": "create_and_enter_worktree", "input": {}},
                 bash(spec_cmd),
                 done(phase="written",
                      spec_path=".imp/change/artifacts/spec/SCRIPTED-STUB.md",
