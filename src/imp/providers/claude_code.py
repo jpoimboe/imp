@@ -54,6 +54,7 @@ from imp.agents.runner import (
     ToolUseBlock,
 )
 from imp.agents.subagents import (
+    SubagentSuspended,
     dispatch_task,
     make_task_tool,
     raise_if_suspended,
@@ -517,13 +518,15 @@ def _wrap_one(
                     # re-raise; the outer except in _impl degrades it to an
                     # is_error tool_response (a clean unwind through the SDK loop is
                     # not reachable, so a child suspension becomes an is_error result
-                    # — the run is not paused).
+                    # — the run is not paused). A SubagentSuspended-origin degrade is
+                    # marked kind="interrupted" so the fold renders (interrupted).
                     if ctx.event_log is not None:
                         err_text = f"{type(exc).__name__}: {exc}"
+                        kind = "interrupted" if isinstance(exc, SubagentSuspended) else None
                         ctx.event_log.append_tool_result(
                             agent_id=state.agent_id,
                             block=ToolResultBlock(minted, err_text, is_error=True),
-                            id_ns="block")
+                            id_ns="block", kind=kind)
                     raise
                 if ctx.event_log is not None:
                     # Success close: the canonical, outcome-carrying tool_result for
