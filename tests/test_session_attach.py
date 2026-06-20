@@ -171,7 +171,7 @@ async def test_build_session_attach_threads_seed_into_spawn(
 
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            from_target: str | None = None,
+            from_target: str | None = None, opening_intent: str | None = None,
         ) -> None:
             captured["change"] = ch
             captured["seed_opening"] = seed_opening
@@ -225,7 +225,8 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     spawned: list[Change] = []
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
-        lambda ch, *, seed_opening=None, resume=False, from_target=None: spawned.append(ch))
+        lambda ch, *, seed_opening=None, resume=False, from_target=None,
+        opening_intent=None: spawned.append(ch))
 
     received: list[dict[str, Any]] = []
     server = SessionSocket(sock)
@@ -340,7 +341,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
 
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            from_target: str | None = None,
+            from_target: str | None = None, opening_intent: str | None = None,
         ) -> None:
             captured["resume"] = resume
             tg.start_soon(_start_server)
@@ -357,6 +358,28 @@ async def test_build_session_attach_threads_resume_into_spawn(
         await client.aclose()
         await holder["server"].close()
         tg.cancel_scope.cancel()
+
+
+def test_spawn_session_daemon_includes_opening_intent_when_provided(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(change, opening_intent="add a --json flag")
+    assert "--opening-intent=add a --json flag" in captured["argv"]
+
+
+def test_spawn_session_daemon_omits_opening_intent_when_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(change)
+    assert not any(a.startswith("--opening-intent") for a in captured["argv"])
 
 
 @pytest.mark.anyio
@@ -379,7 +402,7 @@ async def test_build_session_attach_threads_from_target_into_spawn(
 
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            from_target: str | None = None,
+            from_target: str | None = None, opening_intent: str | None = None,
         ) -> None:
             captured["from_target"] = from_target
             tg.start_soon(_start_server)
@@ -391,6 +414,45 @@ async def test_build_session_attach_threads_from_target_into_spawn(
         client = await attach(lambda _e: None)
 
         assert captured["from_target"] == "review"
+        with anyio.fail_after(5):
+            while holder.get("server") is None or holder["server"].attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.aclose()
+        await holder["server"].close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_build_session_attach_threads_opening_intent_into_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.remote.session import attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-oi")
+    sock = str(session_socket_path(change.control_root, change.id))
+    captured: dict[str, Any] = {}
+    holder: dict[str, SessionSocket] = {}
+
+    async with anyio.create_task_group() as tg:
+        async def _start_server() -> None:
+            server = SessionSocket(sock)
+            await server.open()
+            holder["server"] = server
+            await server.serve()
+
+        def fake_spawn(
+            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+            from_target: str | None = None, opening_intent: str | None = None,
+        ) -> None:
+            captured["opening_intent"] = opening_intent
+            tg.start_soon(_start_server)
+
+        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
+
+        attach = attach_mod.build_session_attach(change, opening_intent="add a flag")
+        client = await attach(lambda _e: None)
+
+        assert captured["opening_intent"] == "add a flag"
         with anyio.fail_after(5):
             while holder.get("server") is None or holder["server"].attached_count != 1:
                 await anyio.sleep(0.02)

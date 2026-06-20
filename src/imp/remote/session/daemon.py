@@ -60,6 +60,7 @@ async def serve_change_session(
     seed_opening: str | None = None,
     resume: bool = False,
     from_target: str | None = None,
+    opening_intent: str | None = None,
 ) -> Any:
     # Validate from_target before opening the socket: a bad target raises
     # RewindError cleanly here, leaving no orphaned journal entry and no
@@ -120,8 +121,11 @@ async def serve_change_session(
                 # step_rewound follows workflow_resumed in the append-only log.
                 apply_rewind(_rewind_plan, _rewind_workflow, state, log)
             state.save(change.state_dir)
-        first_kwargs = (
-            {"seed_opening": seed_opening} if seed_opening is not None else {})
+        first_kwargs: dict[str, Any] = {}
+        if seed_opening is not None:
+            first_kwargs["seed_opening"] = seed_opening
+        if opening_intent is not None:
+            first_kwargs["opening_intent"] = opening_intent
         result = await run_fn(
             change,
             on_event=on_event,
@@ -175,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--change-id", required=True)
     parser.add_argument("--seed-opening", default=None)
+    parser.add_argument("--opening-intent", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--from", dest="from_target", default=None)
     ns = parser.parse_args(argv)
@@ -186,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
     kwargs: dict[str, Any] = {}
     if ns.seed_opening is not None:
         kwargs["seed_opening"] = ns.seed_opening
+    if ns.opening_intent is not None:
+        kwargs["opening_intent"] = ns.opening_intent
     if ns.resume:
         kwargs["resume"] = True
     if ns.from_target is not None:
