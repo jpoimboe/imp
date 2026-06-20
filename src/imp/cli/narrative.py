@@ -185,13 +185,14 @@ def display_tool_name(name: str) -> str:
 
 @dataclass
 class Activity:
-    """The structured live-status description (§3): phase + step display label spine,
+    """The structured live-status description (§3): step display label spine,
     a count phrase, gray detail (tool name + arg), and a fallback label. Any field may
-    be None. Plain text — the driver colors the segments (live_driver.compose_status)."""
+    be None. Plain text — the driver colors the segments (live_driver.compose_status).
+    The phase is intentionally NOT carried here: the live status line omits it (the
+    phase is already shown by the standalone phase header in the scrollback)."""
     count: str | None = None
     detail: str | None = None
     label: str | None = None
-    phase: str | None = None         # current phase name (spine head)
     step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
     call_elapsed: float | None = None  # monotonic seconds for the in-flight call
 
@@ -414,7 +415,6 @@ class NarrativeBuilder:
 
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
-        phase = self._current_phase.name if self._current_phase else None
         step_label = self._step_stack[-1].label if self._step_stack else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
@@ -423,7 +423,7 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} more {noun})"
-            return Activity(phase=phase, step_label=step_label, label=label)
+            return Activity(step_label=step_label, label=label)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
@@ -444,15 +444,15 @@ class NarrativeBuilder:
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
                     if inflight.call_started is not None:
                         call_elapsed = self._now() - inflight.call_started
-                return Activity(count=count, detail=detail, phase=phase,
+                return Activity(count=count, detail=detail,
                                 step_label=step_label, call_elapsed=call_elapsed)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
             verb = "running" if top.kind in CHROME_KINDS else "thinking"
-            return Activity(phase=phase, step_label=step_label, label=verb)
+            return Activity(step_label=step_label, label=verb)
         if self._current_phase is not None:
-            return Activity(phase=phase, label="working")
+            return Activity(label="working")
         return None
 
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:

@@ -1209,7 +1209,8 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert "review · reviewing plan · thinking" in line
+    assert "reviewing plan · thinking" in line
+    assert "review · reviewing plan" not in line   # the phase is NOT shown in the status line
     assert "18s" in line
 
 
@@ -1320,14 +1321,15 @@ def test_compose_activity_status_shows_per_call_timer_as_primary() -> None:
     clock[0] = 100.0 + 312                          # 5m 12s into the in-flight call
     line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
     assert line is not None
-    expected = "impl · implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
+    expected = "implementing · 1 call · bash sleep 600 · 5m 12s · 15m 0s"
     assert line.split(" ", 1)[1] == expected
 
 
-def test_status_spine_phase_label_activity_elapsed() -> None:
+def test_status_spine_label_activity_elapsed() -> None:
     from imp.cli.live_driver import compose_activity_status
 
-    # labeled step, fallback (thinking) activity: phase · label · activity · elapsed.
+    # labeled step, fallback (thinking) activity: label · activity · elapsed.
+    # The phase is deliberately omitted (it lives in the scrollback phase header).
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1337,9 +1339,9 @@ def test_status_spine_phase_label_activity_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert line.split(" ", 1)[1] == "plan · reviewing plan · thinking · 18s"
+    assert line.split(" ", 1)[1] == "reviewing plan · thinking · 18s"
 
-    # quiet/unlabeled step: the step segment is dropped -> phase · activity · elapsed.
+    # quiet/unlabeled step: the step segment is dropped -> activity · elapsed.
     q = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1348,7 +1350,7 @@ def test_status_spine_phase_label_activity_elapsed() -> None:
     ]:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
-    assert qline.split(" ", 1)[1] == "implement · running · 4s"
+    assert qline.split(" ", 1)[1] == "running · 4s"
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:

@@ -41,8 +41,6 @@ def compose_activity_status(
         return None
     spin = pal.ansi(pal.spinner_frame(frame), "cyan", enabled=color)
     parts: list[str] = []
-    if activity.phase:
-        parts.append(pal.ansi(activity.phase, enabled=color))
     if activity.step_label:
         parts.append(pal.ansi(activity.step_label, enabled=color))
     if activity.count is not None:
