@@ -89,6 +89,21 @@ for quick checks; fan deep mapping out to the subagents.
 
 **Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get the user's confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with the user via `wait_for_user` rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
 
+**Final readback before committing.** Once the brainstorm has converged
+and before you write and commit the spec, present **one** consolidated
+summary of the design you are about to commit — Goal, Scope, the key
+decisions made, and the acceptance criteria in brief — and call
+`wait_for_user` once asking whether it all sounds right. Incorporate any
+correction, then write and commit. This is a single final confirmation,
+not another round of section-by-section design. **Skip this readback
+entirely** on the seeded / adopt-with-light-review path, on a `trivial`
+change (it asked no questions and made no design choices), and on any
+rework / minors / gate-discussion resume (those turns are tool-terminal
+and non-soliciting). In a headless run there is no human to confirm, so
+skip the readback there too and write + commit directly — the standing
+rule that `wait_for_user` is only for when you genuinely need a human
+applies here as everywhere.
+
 **Design for clarity.** Prefer units with clear boundaries and well-defined
 interfaces; follow the codebase's existing patterns; fold in *targeted*
 improvements to the code this change touches, but do not propose unrelated refactoring.
@@ -106,7 +121,10 @@ criteria) and its emphasis on concrete, testable Acceptance criteria.
 
 **One closing summary.** Emit a single closing summary after the spec is
 committed — do not restate the same conclusion in two near-identical messages.
-The CLI streams every line, so a repeated summary just adds noise.
+The CLI streams every line, so a repeated summary just adds noise. Keep it
+brief and do **not** restate the pre-commit **Final readback** — that readback
+already summarized the design, so two near-identical summaries are the exact
+noise this rule guards against.
 
 ## Seeded with a draft spec
 
