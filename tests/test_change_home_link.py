@@ -98,3 +98,27 @@ def test_relative_edit_after_golive_lands_in_home(tmp_path: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("via-symlink\n")
     assert (ch.change_dir / "artifacts" / "note.txt").read_text() == "via-symlink\n"
+
+
+def test_relink_home_self_heals_legacy_phantom(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="heal1", base_branch="main")
+    link = ch.project_root / ".imp" / "changes" / "heal1"
+    # Simulate an in-flight change whose worktree carries a legacy phantom dir
+    # instead of the symlink (e.g. created before this feature shipped).
+    link.unlink()
+    (link / "artifacts").mkdir(parents=True)
+    (link / "artifacts" / "stale.txt").write_text("stale\n")
+
+    ch.relink_home()
+
+    assert link.is_symlink()
+    assert link.resolve() == ch.change_dir.resolve()
+    assert (ch.change_dir / "artifacts" / "stale.txt").read_text() == "stale\n"
+
+
+def test_relink_home_noop_for_draft(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="heal2", base_branch="main")
+    ch.relink_home()                              # must not raise, must not link
+    assert not (ch.project_root / ".imp" / "changes" / "heal2").is_symlink()

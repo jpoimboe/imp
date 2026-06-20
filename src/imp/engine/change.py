@@ -120,6 +120,11 @@ class Change:
         link_change_home(wt_path, self.change_dir)
         return head_changed
 
+    def relink_home(self) -> None:
+        if not self.materialized or self.project_root == self.control_root:
+            return
+        link_change_home(self.project_root, self.change_dir)
+
     @property
     def live_workflow_dir(self) -> Path:
         from imp.providers.config import parse_default_workflow
