@@ -72,11 +72,20 @@ incomplete implementations:
 The plan may end with a `## Decisions` audit trail marked "*(decided during
 planning)*" / "*(user-confirmed during planning)*". This is expected plan format —
 do not flag it as a placeholder defect, and defer to it on questions of approach
-(which library, how to structure). But the marker is generated during planning and
-is not a reliable signal of user intent on scope: if a decision contradicts an
-explicit spec acceptance criterion — especially a scope or out-of-scope boundary —
-flag it as Major regardless of the "user-confirmed" label, and let the human gate
-decide.
+(which library, how to structure). The marker is generated during planning and is
+not a reliable signal of user intent on scope — but a scope-contradicting decision
+is **the human's call at the merge gate, not yours to block on**, provided it is
+surfaced. So when a decision contradicts an explicit spec acceptance criterion —
+especially a scope or out-of-scope boundary — your job is to verify it is recorded
+as a `— needs-decision:` Deferred Followup open item in `progress.md`:
+
+- **Recorded** — the deviation rides to the merge gate as a `— needs-decision:`
+  open item: do **not** raise a Critical/Major finding. Note it **non-blocking**
+  and let it ride to the merge gate, where `finalize` ratifies it once.
+- **Unrecorded** — a scope contradiction is present in the plan but has no
+  corresponding `— needs-decision:` open item (a sneak-by): flag it **Major**. The
+  missing open item is the real defect — without it the human never ratifies the
+  deviation at the gate.
 
 ## Severity & output
 
