@@ -1253,7 +1253,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     rec = backlog.read_record(control, change_id)
     if rec is not None:
         if resource is None:
-            for line in _detail_card(control, change_id, now=datetime.now(UTC)):
+            for line in _backlog_card(rec, control, now=datetime.now(UTC)):
                 print(line)
             return 0
         if resource == "status":
@@ -1378,7 +1378,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if events is None:
         rec = backlog.read_record(control, change_id)
         if rec is not None:
-            for line in _detail_card(control, change_id, now=datetime.now(UTC)):
+            for line in _backlog_card(rec, control, now=datetime.now(UTC)):
                 print(line)
             return 0
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
