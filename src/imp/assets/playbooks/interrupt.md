@@ -1,25 +1,26 @@
 ---
-description: Fire Ctrl-C / ESC / Ctrl-D at imp across agent states and surfaces, judging clean-pause behavior (live, via the impty driver).
+description: Fire Ctrl-C / Ctrl-D at imp across agent states and surfaces, judging clean-pause behavior (live, via the impty driver).
 ---
 
-# imp interrupt playbook — Ctrl-C / ESC / Ctrl-D acceptance test (impty MCP)
+# imp interrupt playbook — Ctrl-C / Ctrl-D acceptance test (impty MCP)
 
 > **You are the test driver.** This file is your full instruction set. You drive `imp`
 > *through the impty MCP server* (`mcp__impty__start` / `send` / `send_signal` / `view` /
 > `wait` / `snapshot` / `stop`) — a real pty with a faithful pyte render — fire interrupts
-> (Ctrl-C, **ESC**, Ctrl-D) at well-defined points for a **single provider** and several agent
+> (Ctrl-C, Ctrl-D) at well-defined points for a **single provider** and several agent
 > states (model thinking, **a tool running**, an in-turn prompt, a subagent, resume), judge
 > whether imp behaves and *speaks* correctly, and write every defect to a bug report. This
 > playbook is **surface-selectable**: run it against the **CLI** (cooked-mode) interrupt paths
 > or the **TUI** (`--tui`, raw-mode) interrupt paths — the surface flips which keys are
-> faithful and what ESC does at a prompt (§0). Work in a throwaway standalone `git clone` and
+> faithful (§0). ESC is a no-op in both modes (prompt_toolkit owns it at a prompt; ignored
+> while thinking — it never pauses). Work in a throwaway standalone `git clone` and
 > abandon everything at the end.
 >
 > This is the acceptance test for the **esc-and-clean-interrupt** feature
 > (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`); the TUI mode also covers the `--tui`
 > interrupt bindings from **tui-run-viewer** (`imp/specs/2026-06-11-tui-run-viewer.md`). Both
 > are **on `master`**. The "expected" behavior below is those features' target. If you somehow
-> run an older build that predates them, the ESC / pause-reason / clean-classification (and
+> run an older build that predates them, the pause-reason / clean-classification (and
 > `--tui`) checks are *expected* to fail — record them as to-dos, not surprises.
 >
 > **Scope: one provider per run (default `claude_code`).** Run this playbook against a single
@@ -41,31 +42,27 @@ description: Fire Ctrl-C / ESC / Ctrl-D at imp across agent states and surfaces,
 Pick the surface **before** §3 and keep it fixed for the whole run:
 
 - **CLI mode** (the existing cooked-mode paths) — spawn `imp new` / `imp resume` (no `--tui`).
-  ESC while thinking is caught by the `EscKeyReader` on `/dev/tty`; **ESC at a prompt is a
-  negative** (prompt_toolkit eats it); a mid-run Ctrl-C keystroke is unreliable, so use
-  `send_signal(2)`. Use the **CLI spawn** (§5).
+  A mid-run Ctrl-C keystroke is unreliable, so use `send_signal(2)`. ESC is a no-op (at a
+  prompt prompt_toolkit owns it; while thinking it is ignored — it never pauses). Use the
+  **CLI spawn** (§5).
 - **TUI mode** (the `--tui` full-screen viewer, raw mode) — spawn `imp new --tui` /
-  `imp resume <id> --tui`. The app owns the tty in raw mode and binds the keys itself: there
-  is **no** `EscKeyReader` and **no** cooked-mode signal receiver in the loop. **ESC pauses at
-  a prompt too** (app binding), and the **Ctrl-C keystroke `\x03` is faithful**. Use the
+  `imp resume <id> --tui`. The app owns the tty in raw mode and binds the keys itself, and the
+  **Ctrl-C keystroke `\x03` is faithful**. ESC is a no-op (the app does not bind it). Use the
   **TUI spawn** (§5).
 
 The surface flips the interrupt semantics:
 
 | Aspect | CLI mode (existing) | TUI mode (new) |
 |---|---|---|
-| ESC while thinking | `EscKeyReader` → pause | app key binding → pause |
-| ESC at a prompt | **negative** (prompt_toolkit eats it) | app binding → **pause** |
 | Ctrl-C mid-run | `send_signal(2)` (keystroke unreliable) | keystroke `\x03` is faithful |
-| Reader path | cooked-mode signal receiver | app owns raw mode, no `EscKeyReader` |
+| Reader path | cooked-mode signal receiver | app owns raw mode |
 
-### 0b. The three interrupt triggers and how impty delivers them
+### 0b. The interrupt triggers and how impty delivers them
 
 impty claims its pty slave as the child's controlling terminal, so keystrokes you `send` are
-delivered to imp's controlling tty. **For Ctrl-C and ESC we send keystrokes on purpose** — to
+delivered to imp's controlling tty. **For Ctrl-C we send a keystroke (TUI) on purpose** — to
 exercise imp's real tty paths (prompt_toolkit's `KeyboardInterrupt` at a prompt, the
-`EscKeyReader` on `/dev/tty` in CLI mode, the app key bindings in TUI mode). ESC has **no**
-signal equivalent, so the keystroke is the only faithful test there. There is also an
+cooked-mode signal receiver in CLI mode, the app key bindings in TUI mode). There is also an
 out-of-band signal tool, `send_signal(sig=…)` (SIGINT=2, SIGTERM=15), which bypasses the tty
 and signals imp's process group directly — exactly like a real Ctrl-C. Fire keystroke
 interrupts with `wait=False` so they go immediately, then read with `wait` / `view` /
@@ -74,23 +71,25 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 > **impty mid-run fidelity caveat (mode-dependent).** `send("\x03")` only becomes a SIGINT when
 > the tty line discipline has ISIG on (cooked/cbreak); at a prompt_toolkit prompt it is just a
 > raw byte. impty also degrades prompt_toolkit's CPR (cursor-position) handshake.
-> - **CLI mode:** mid-run keystroke Ctrl-C/ESC delivery is unreliable to validate through the
+> - **CLI mode:** mid-run keystroke Ctrl-C delivery is unreliable to validate through the
 >   harness. For the cooked-mode points (B thinking, C tool-running, E subagent) deliver Ctrl-C
 >   deterministically with `send_signal(2)` (or `bash: kill -INT -<pgid>`); keep **keystroke**
->   `send` for the prompt-state tests (A Ctrl-C/Ctrl-D, the A/D ESC negatives) and **all** ESC
->   tests, where it is the only faithful path. If a mid-run keystroke gives a messy result,
->   suspect an impty artifact and re-confirm with `send_signal` before filing an imp defect.
+>   `send` for the prompt-state tests (A Ctrl-C/Ctrl-D). If a mid-run keystroke gives a messy
+>   result, suspect an impty artifact and re-confirm with `send_signal` before filing an imp
+>   defect.
 > - **TUI mode:** the full-screen app owns the tty in **raw mode** and binds the keys itself,
->   so `send("\x1b")` (ESC) and `send("\x03")` (Ctrl-C) are delivered as **keys** and are the
->   correct test — **not** `send_signal`. Two caveats: a bare `ESC` is held by prompt_toolkit's
->   escape-flush timeout (~0.5s) before it fires (`send("\x1b")` then `wait()`); and impty can
->   drop the odd keystroke — re-send once, record only if it persists.
+>   so `send("\x03")` (Ctrl-C) is delivered as a **key** and is the correct test — **not**
+>   `send_signal`. Caveat: impty can drop the odd keystroke — re-send once, record only if it
+>   persists.
 
 | Trigger | `send` data | Path through imp |
 |---------|-------------|------------------|
 | **Ctrl-C** | `"\x03"` | Raw byte at a prompt → prompt_toolkit `KeyboardInterrupt`. Real SIGINT while an agent runs (CLI/cooked mode) → `anyio.open_signal_receiver` → `InterruptCoordinator.signal_pause("ctrl-c")`. In TUI mode the app's key binding drives the same coordinator. |
-| **ESC** | `"\x1b"` | A bare ESC byte. While an agent is *thinking* (no prompt active) the `EscKeyReader` on `/dev/tty` (CLI) or the app binding (TUI) catches it → `InterruptCoordinator.signal_pause("esc")`. At a prompt_toolkit prompt it is **not** intercepted **in CLI mode** (emacs meta-prefix / vi exit — the negative in §6); **in TUI mode the app binding pauses even at a prompt**. |
 | **Ctrl-D** | `"\x04"` | EOF at a prompt → `EOFError` → `pause_and_exit(reason="ctrl-d")`. (Only meaningful at a prompt; CLI mode.) |
+
+> **ESC is a no-op.** A bare ESC byte (`"\x1b"`) never pauses imp: at a prompt prompt_toolkit
+> owns it (emacs meta-prefix / vi exit), and while an agent is thinking it is ignored. Do not
+> expect a `paused (esc)` line anywhere — if ESC ever pauses a run, that is a regression.
 
 > `SIGTERM` → `paused (sigterm)` is also part of the feature. Deliver it in one call with
 > `send_signal(sig=15)` — it signals imp's process group directly, no pid scraping. Run it
@@ -104,7 +103,6 @@ A correct imp does **all** of:
 - **Pauses cleanly and exits** — process ends (`alive=False` in the impty status header),
   exit code **130**, with a clear final line whose reason matches the trigger:
   - Ctrl-C → `⏸ Change <id>: paused (ctrl-c)`
-  - ESC → `⏸ Change <id>: paused (esc)`
   - Ctrl-D → `⏸ Change <id>: paused (ctrl-d)`
   - (`⏸` shows only with color; otherwise the same text without the glyph.)
   - In **TUI mode** the alt-screen also restores on the clean pause: `regime` goes
@@ -114,7 +112,7 @@ A correct imp does **all** of:
   must **not** appear. The interrupt is a clean, expected stop — not an error.
 - **The event log records it as an interrupt, not an unknown error.** Two distinct records
   are written on an agent-phase interrupt — don't confuse them:
-  - a **`workflow_paused`** event carrying `payload.reason` (`ctrl-c|esc|ctrl-d|sigterm`) —
+  - a **`workflow_paused`** event carrying `payload.reason` (`ctrl-c|ctrl-d|sigterm`) —
     written by the pause itself;
   - an **`error`** event with `payload.category == "config"` and
     `payload.kind == "interrupted"`, never `category == "unknown"` — written by the provider
@@ -291,7 +289,7 @@ mcp__impty__start(argv=["bash","-lc",
   "export ANTHROPIC_API_KEY=$(cat ~/.anthropic-key); export OPENAI_API_KEY=$(cat ~/.openai-key); exec imp resume <id>"],
   cwd="<WT>", cols=100, rows=30)
 ```
-`exec` is required — without it bash, not imp, leads the foreground group and `\x03`/ESC would
+`exec` is required — without it bash, not imp, leads the foreground group and `\x03` would
 not reach imp.
 
 ### Spawn imp — TUI mode (`--tui`; `TERM` + `exec` both mandatory)
@@ -325,12 +323,11 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
 ### **`INTERRUPT-AND-VERIFY(trigger, expected_reason)`** — the core check
 
 1. Deliver one interrupt only.
-   - **CLI mode:** keystroke `send(trigger, wait=False)` for prompt-state and ESC tests; for a
+   - **CLI mode:** keystroke `send(trigger, wait=False)` for prompt-state tests; for a
      **mid-run** Ctrl-C (points B/C/E) use `send_signal(2)` for deterministic delivery (see the
      §0 fidelity caveat).
    - **TUI mode:** keystroke `send(trigger, wait=False)` for **all** triggers, including mid-run
-     Ctrl-C/ESC — the app's raw-mode bindings make keystrokes faithful. After an ESC, `wait()`
-     for the escape-flush timeout before reading.
+     Ctrl-C — the app's raw-mode bindings make keystrokes faithful.
 2. `wait()` then `view()` + `view(full=True)`.
 3. Assert the bar from §0: `alive=False`; final line `paused (<expected_reason>)`; no
    `unclassified provider error` / `Cannot write to terminated process` / `paused: unknown`;
@@ -376,10 +373,10 @@ everything else is shared. Keep a tally (point × trigger → outcome) for the r
 | # | Point (imp state) | How to reach it | Trigger(s) | Expected (mode-aware) |
 |---|-------------------|-----------------|-----------|----------|
 | **A** | Opening prompt | **CLI:** `imp new`; `wait()` until parked at the first prompt. **TUI:** `imp new --tui`; the opening intent is the in-app bottom buffer | **Ctrl-C**, then in a fresh run **Ctrl-D** (CLI); **Ctrl-C** (TUI) | `paused (ctrl-c)`; CLI also A2 `paused (ctrl-d)`. **No `interrupted` event here** — nothing was running to classify. Clean `paused` line, `alive=False`, exit 130, resumable. |
-| **B** | Model thinking / streaming | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **CLI:** Ctrl-C via `send_signal(2)`; ESC via keystroke. **TUI:** both via keystroke. In-flight model request torn down (orphan check). |
-| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **The tool subprocess is killed** — orphan check must be clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
-| **D** | In-turn user-chat prompt (agent asks *you* mid-turn) | Use an interactive step where the agent prompts you back; wait until parked at *that* prompt | **Ctrl-C**; separately **ESC** | Ctrl-C → `paused (ctrl-c)`. **ESC is mode-dependent: the ESC-at-prompt negative applies in CLI mode** (ESC must NOT pause — prompt_toolkit consumes it; `alive=True`, a normal reply still submits), **and becomes a pause in TUI mode** (the app binding fires → `paused (esc)`). |
-| **E** | Subagent running (nested) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C** or **ESC** | Pauses the whole run cleanly (`paused (…)`), unwinds the subagent (SubagentSuspended path), resumable. Orphan check clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
+| **B** | Model thinking / streaming | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C** | `paused (ctrl-c)`. **CLI:** Ctrl-C via `send_signal(2)`. **TUI:** keystroke. In-flight model request torn down (orphan check). |
+| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C** | `paused (ctrl-c)`. **The tool subprocess is killed** — orphan check must be clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
+| **D** | In-turn user-chat prompt (agent asks *you* mid-turn) | Use an interactive step where the agent prompts you back; wait until parked at *that* prompt | **Ctrl-C** | Ctrl-C → `paused (ctrl-c)`. **ESC at this prompt is a no-op** in both modes (prompt_toolkit owns it; `alive=True`, a normal reply still submits). |
+| **E** | Subagent running (nested) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C** | Pauses the whole run cleanly (`paused (…)`), unwinds the subagent (SubagentSuspended path), resumable. Orphan check clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
 
 After the matrix: run `RESUME-AND-VERIFY` on the last paused change. Then deliver
 `send_signal(sig=15)` (SIGTERM) on a fresh `imp new` run mid-execution and verify
@@ -449,9 +446,5 @@ per point, headline defects (or "none"), report path.
 | **Ctrl-C** (at prompt) | `"\x03"` | — | prompt_toolkit `KeyboardInterrupt` |
 | **Ctrl-C** (mid-run, CLI) | unreliable | `send_signal(2)` | `SIGINT` → coordinator |
 | **Ctrl-C** (mid-run, TUI) | `"\x03"` | — | app binding → coordinator |
-| **ESC** (thinking, CLI) | `"\x1b"` | — | `EscKeyReader` → coordinator |
-| **ESC** (thinking, TUI) | `"\x1b"` | — | app binding → coordinator |
-| **ESC** (at prompt, CLI) | `"\x1b"` | — | **negative** — prompt_toolkit eats it |
-| **ESC** (at prompt, TUI) | `"\x1b"` | — | app binding → coordinator (pauses) |
 | **Ctrl-D** (at prompt) | `"\x04"` | — | `EOFError` → `pause_and_exit` |
 | **SIGTERM** | — | `send_signal(15)` | coordinator |
