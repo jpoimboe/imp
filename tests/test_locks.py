@@ -32,7 +32,9 @@ def test_contention_blocks(tmp_path: Path) -> None:
     sync = tmp_path / "release.flag"
     ready = tmp_path / "ready.flag"
 
-    p = mp.Process(target=_hold_lock, args=(str(lock_path), str(sync), str(ready)))
+    p = mp.get_context("spawn").Process(
+        target=_hold_lock, args=(str(lock_path), str(sync), str(ready))
+    )
     p.start()
     try:
         deadline = time.monotonic() + 10.0
