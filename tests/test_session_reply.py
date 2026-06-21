@@ -79,7 +79,6 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
         events_path.write_text(json.dumps(prompt_ev) + "\n")
         on_event(prompt_ev)
         # Late clients get replay (_replay=True, ignored) plus this live pending prompt.
-        server.set_pending_prompt(prompt_ev)
         gate_emitted.set()
         reply = await user_chat_input_fn("")
         got.append(reply)
