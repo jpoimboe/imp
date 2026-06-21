@@ -67,7 +67,9 @@ def _write_serialize_workflow(root: Path, touch_cmd: str) -> None:
     _git(root, "commit", "-qm", "serialize workflow")
 
 
-def test_pause_in_held_region_evicts_and_rewinds(tmp_path: Path) -> None:
+def test_pause_in_held_region_evicts_and_rewinds(tmp_path: Path, provider_registry) -> None:
+    from tests.test_executor_rename import _FakeProvider
+    provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_control(tmp_path)
     _write_serialize_workflow(tmp_path, "false")   # touch-base fails -> pause
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
@@ -79,7 +81,9 @@ def test_pause_in_held_region_evicts_and_rewinds(tmp_path: Path) -> None:
     assert mq.read(tmp_path) == []                 # the sole holder was popped
 
 
-def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path) -> None:
+def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path, provider_registry) -> None:
+    from tests.test_executor_rename import _FakeProvider
+    provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_control(tmp_path)
     _write_serialize_workflow(tmp_path, "true")    # touch-base succeeds
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")

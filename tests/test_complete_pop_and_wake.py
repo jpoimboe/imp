@@ -61,7 +61,8 @@ def test_complete_finalizes_even_when_next_head_vanishes(tmp_path, monkeypatch) 
 
     state = State.load(a.state_dir)
     log = JsonlEventLog(a.events_path)
-    anyio.run(_route_merge_and_exit_worktree, _merge_step(), a, state, log)   # perform the real merge
+    # perform the real merge
+    anyio.run(_route_merge_and_exit_worktree, _merge_step(), a, state, log)
     assert state.merge_commit is not None                   # finalize path will run
 
     # Next head's records vanish in the pop->spawn window.

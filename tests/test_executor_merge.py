@@ -1,9 +1,10 @@
 # tests/test_executor_merge.py — import _git/_seed_control from tests.conftest
 #
 # B3 cutover: the authoritative merge moved out of _complete into the routable
-# `merge-to-base` step (_route_merge). These tests drive _route_merge to perform
-# the merge (stashing State.merge_commit) and then _complete to finalize
-# (journal + remove worktree + mark completed), mirroring the run_change flow.
+# `merge-to-base` step (_route_merge_and_exit_worktree). These tests drive
+# _route_merge_and_exit_worktree to perform the merge (stashing State.merge_commit)
+# and then _complete to finalize (journal + remove worktree + mark completed),
+# mirroring the run_change flow.
 from pathlib import Path
 
 import anyio
@@ -22,7 +23,7 @@ def _run_merge(step, ch, state, log):
 
 
 def _merge_step():
-    """The shipped `merge-to-base` step (kind: merge) with its real rules."""
+    """The shipped `merge-to-base` step (kind: merge_and_exit_worktree) with its real rules."""
     wf = load_workflow(
         Path(__file__).resolve().parents[1]
         / "src" / "imp" / "assets" / "workflows" / "imp")

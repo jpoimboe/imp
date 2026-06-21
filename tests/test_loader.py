@@ -707,7 +707,7 @@ def test_feedback_string_parsed_and_bool_rejected(tmp_path: Path) -> None:
 
 
 def test_merge_kind_parses_and_routes_on_merge_output(tmp_path: Path) -> None:
-    # A minimal workflow with a `kind: merge` step that routes on `merge:`.
+    # A minimal workflow with a `kind: merge_and_exit_worktree` step that routes on `merge:`.
     wf = _write(tmp_path, """\
         name: t
         description: t
@@ -715,21 +715,21 @@ def test_merge_kind_parses_and_routes_on_merge_output(tmp_path: Path) -> None:
           - name: p
             steps:
               - name: m
-                kind: merge
+                kind: merge_and_exit_worktree
                 rules:
-                  - {if: {merge: STALE}, goto: m}
+                  - {if: {merge: MERGED}, goto: m}
                   - {else: true, continue: true}
         """)
     workflow = load_workflow(wf)
     step = workflow.flat_steps()[0]
-    assert step.kind == "merge"
+    assert step.kind == "merge_and_exit_worktree"
     assert len(step.rules) == 2
-    # Rule 0: `if: {merge: STALE}` → Binary("==", Name("merge"), StrLit("STALE"))
+    # Rule 0: `if: {merge: MERGED}` → Binary("==", Name("merge"), StrLit("MERGED"))
     # Rule 1: `else: true` → condition is None (else-rule); action is Continue
     stale_rule = step.rules[0]
-    assert stale_rule.condition == Binary("==", Name("merge"), StrLit("STALE"))
+    assert stale_rule.condition == Binary("==", Name("merge"), StrLit("MERGED"))
     assert isinstance(stale_rule.action, Goto)
-    assert stale_rule.action.target == "m"   # STALE self-loop routes back to the merge step
+    assert stale_rule.action.target == "m"
 
 
 def test_merge_kind_requires_rules(tmp_path: Path) -> None:
@@ -740,7 +740,7 @@ def test_merge_kind_requires_rules(tmp_path: Path) -> None:
           - name: p
             steps:
               - name: m
-                kind: merge
+                kind: merge_and_exit_worktree
         """)
     with pytest.raises((LoadError, LoadErrors), match="requires a rules"):
         load_workflow(wf)

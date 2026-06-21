@@ -27,11 +27,11 @@ def test_two_changes_isolated(tmp_path: Path) -> None:
 
 def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
     """Two changes merge in sequence; the second picks up what the first committed.
-    B3: the merge runs through the engine-native merge-to-base step (_route_merge),
-    then _complete finalizes."""
+    B3: the merge runs through the engine-native merge-to-base step
+    (_route_merge_and_exit_worktree), then _complete finalizes."""
     import anyio
 
-    from imp.engine.executor import _route_merge
+    from imp.engine.executor import _route_merge_and_exit_worktree
     from imp.engine.loader import load_workflow
 
     _seed_control(tmp_path)
@@ -50,7 +50,7 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
     for ch in (a, b):
         st = State.load(ch.state_dir)
         log = JsonlEventLog(ch.events_path)
-        anyio.run(_route_merge, merge_step, ch, st, log)
+        anyio.run(_route_merge_and_exit_worktree, merge_step, ch, st, log)
         assert st.merge_commit is not None              # merged under the lock
         result = _complete(ch, st, log)
         assert result is RunResult.COMPLETED

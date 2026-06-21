@@ -1329,7 +1329,8 @@ def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
 
 def test_merge_step_pause_breadcrumb_pipeline() -> None:
     tree = nv.build_tree([
-        _ev("1", "step_started", step="merge-to-base", kind="merge_and_exit_worktree", phase="review"),
+        _ev("1", "step_started", step="merge-to-base",
+            kind="merge_and_exit_worktree", phase="review"),
         _ev("2", "step_completed", step="merge-to-base", kind="merge_and_exit_worktree",
             action={"verb": "pause"}, var_mutations={}),
     ])

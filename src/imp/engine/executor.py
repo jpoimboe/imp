@@ -485,16 +485,8 @@ async def _dispatch_step(
     if step.acquire is not None:
         return await _route_acquire(step, change, state, log, wait_for_turn_fn)
 
-    if step.kind == "wait_for_head":
-        if wait_for_turn_fn is None:
-            raise RuntimeError("wait_for_turn_fn is required for wait_for_head steps")
-        return await _route_wait_for_head(step, change, state, log, wait_for_turn_fn)
-    if step.kind == "dequeue_wake":
-        return _route_dequeue_wake(step, change, state, log)
     if step.kind == "branch":
         return _route_branch(step, state, log)
-    if step.kind == "merge":
-        return await _route_merge(step, change, state, log)
     if step.kind == "merge_and_exit_worktree":
         return await _route_merge_and_exit_worktree(step, change, state, log)
     if step.kind == "script":
@@ -617,50 +609,6 @@ async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
     raise AwaitingUserInput()
 
 
-async def _route_wait_for_head(
-    step: Step, change: Change, state: State, log: EventLog,
-    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]],
-) -> tuple[Action, str | None, dict[str, object]]:
-    """Enqueue-if-absent, then proceed when head; otherwise wait. A non-head
-    change with a client attached stays resident (wait_for_turn_fn polls the
-    queue and watches detach); with no client it hibernates (AwaitingUserInput ->
-    a clean paused exit, rehydrated later by the popping head's `imp resume`)."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-    from imp.engine import merge_queue
-    _emit_started(log, step)
-    merge_queue.enqueue_if_absent(change.control_root, change.id, change.base_branch)
-
-    def _is_head() -> bool:
-        return merge_queue.is_head(change.control_root, change.id, change.base_branch)
-
-    if not _is_head():
-        ahead = merge_queue.position(change.control_root, change.id, change.base_branch)
-        _emit(log, "waiting_for_head", {"base": change.base_branch, "ahead": ahead})
-        try:
-            await wait_for_turn_fn(_is_head)
-        except AwaitingUserInput:
-            pause = Pause(reason="awaiting_turn")
-            _emit(log, "step_completed", {
-                "step": step.name, "kind": step.kind,
-                "action": _action_payload(pause), "var_mutations": {}})
-            return pause, None, {}
-
-    match = evaluate_rules(step.rules, vars=state.vars, output=None)
-    state.vars.update(match.var_mutations)
-    return _finish(log, step, match)
-
-
-def _route_dequeue_wake(
-    step: Step, change: Change, state: State, log: EventLog,
-) -> tuple[Action, str | None, dict[str, object]]:
-    from imp.engine import merge_queue
-    _emit_started(log, step)
-    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
-    match = evaluate_rules(step.rules, vars=state.vars, output=None)
-    state.vars.update(match.var_mutations)
-    return _finish(log, step, match)
-
-
 def _resolve_lane(value: str, change: Change) -> str:
     if value == "base":
         return change.base_branch
@@ -676,6 +624,7 @@ async def _route_acquire(
     from imp.engine import merge_queue
     if wait_for_turn_fn is None:
         raise RuntimeError("wait_for_turn_fn is required for acquire steps")
+    assert step.acquire is not None
     lane = _resolve_lane(step.acquire, change)
     _emit_started(log, step)
     merge_queue.enqueue_if_absent(change.control_root, change.id, lane)
@@ -707,6 +656,7 @@ async def _route_acquire(
 def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
     """Pop the lane before the step body, clearing the hold mark."""
     from imp.engine import merge_queue
+    assert step.release is not None
     lane = _resolve_lane(step.release, change)
     merge_queue.pop_and_wake(change.control_root, change.id, lane)
     state.held_lane = None
@@ -729,64 +679,6 @@ def _evict_if_holding(change: Change, state: State, log: EventLog) -> bool:
     state.resume_pending = None
     _emit(log, "lane_evicted", {"base": lane, "rewind_to": acquire_step})
     return True
-
-
-async def _route_merge(
-    step: Step, change: Change, state: State, log: EventLog,
-) -> tuple[Action, str | None, dict[str, object]]:
-    """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
-    merge_to_base), re-asserts a clean worktree (DIRTY) under the lock, performs
-    the merge, and routes on the result via the step's rules. On MERGED it stashes
-    the commit in State.merge_commit; the actual finalize (archive + worktree
-    removal + mark completed) happens when the run falls through to _complete."""
-    from imp.engine import worktree
-    _emit_started(log, step)
-
-    # Idempotent resume (crash-safety): if a prior run already merged (the commit
-    # is durable on base) but crashed before _complete finalized, do NOT re-merge.
-    if state.merge_commit:
-        match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
-        state.vars.update(match.var_mutations)
-        return _finish(log, step, match)
-
-    # merge_to_base holds RepoGitLock and shells out to git (merge/commit); a
-    # large or conflict-heavy merge can take seconds-to-minutes. Offload it to a
-    # worker thread so the event loop keeps turning — same rationale as the
-    # script gate (see _route_script). The surrounding emits and state.save stay
-    # on the loop thread (single terminal writer / no cross-thread state race).
-    spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
-    body = _decisions_body(spec_path)
-    result = await anyio.to_thread.run_sync(
-        functools.partial(
-            worktree.merge_to_base,
-            change.control_root, change.id, change.base_branch, title=change.title,
-            body=body, project_root=change.project_root))
-    if result.status == "MERGED":
-        state.merge_commit = result.merge_commit
-        state.save(change.state_dir)
-
-    # Preserve the pre-B3 merge_blocked surfacing (review finding #2). Before the
-    # cutover, _complete emitted a `merge_blocked` event and set
-    # status="merge_blocked"; the CLI keys remediation, resumability, and status
-    # color on BOTH. The declared `{else: pause: true}` rule would produce a
-    # reason-less pause -> status="paused" -> all of that goes dead. So for
-    # blocking outcomes, emit the event ourselves and return a *reasoned* Pause;
-    # run_change's pause handler maps reason=="merge_blocked" to the merge_blocked
-    # status (Step 4b). DIRTY reuses the worktree_dirty reason the old H1 net emitted.
-    if result.status in ("CONFLICT", "REFUSED", "DIRTY"):
-        reason = "worktree_dirty" if result.status == "DIRTY" else result.status.lower()
-        _emit(log, "merge_blocked",
-              {"reason": reason, "base": change.base_branch, "detail": result.detail})
-        pause = Pause(reason="merge_blocked", kind=reason)
-        _emit(log, "step_completed",
-              {"step": step.name, "kind": "merge",
-               "action": _action_payload(pause), "var_mutations": {}})
-        return pause, None, {}
-
-    # MERGED -> continue (falls through to finalize).
-    match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
-    state.vars.update(match.var_mutations)
-    return _finish(log, step, match)
 
 
 def _exit_worktree(change: Change) -> None:

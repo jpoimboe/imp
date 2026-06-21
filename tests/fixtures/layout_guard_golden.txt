@@ -18,6 +18,8 @@ title
 completion_pending
 current_step
 guidance
+held_acquire_step
+held_lane
 id
 loop_counts
 merge_commit

@@ -38,7 +38,8 @@ def test_merge_and_exit_removes_worktree_and_flips_root(tmp_path: Path) -> None:
 def test_merge_and_exit_pauses_on_conflict(tmp_path: Path, monkeypatch) -> None:
     from imp.engine import worktree
     monkeypatch.setattr(worktree, "merge_to_base",
-                        lambda *a, **k: worktree.MergeResult(status="CONFLICT", merge_commit=None, detail="test"))
+                        lambda *a, **k: worktree.MergeResult(
+                            status="CONFLICT", merge_commit=None, detail="test"))
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
@@ -57,7 +58,8 @@ def test_merge_and_exit_pauses_on_conflict(tmp_path: Path, monkeypatch) -> None:
 def test_merge_and_exit_pauses_on_refused(tmp_path: Path, monkeypatch) -> None:
     from imp.engine import worktree
     monkeypatch.setattr(worktree, "merge_to_base",
-                        lambda *a, **k: worktree.MergeResult(status="REFUSED", merge_commit=None, detail="test"))
+                        lambda *a, **k: worktree.MergeResult(
+                            status="REFUSED", merge_commit=None, detail="test"))
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
@@ -76,7 +78,8 @@ def test_merge_and_exit_pauses_on_refused(tmp_path: Path, monkeypatch) -> None:
 def test_merge_and_exit_pauses_on_dirty(tmp_path: Path, monkeypatch) -> None:
     from imp.engine import worktree
     monkeypatch.setattr(worktree, "merge_to_base",
-                        lambda *a, **k: worktree.MergeResult(status="DIRTY", merge_commit=None, detail="test"))
+                        lambda *a, **k: worktree.MergeResult(
+                            status="DIRTY", merge_commit=None, detail="test"))
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
