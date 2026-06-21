@@ -290,9 +290,9 @@ phases:
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
-          - {if: {exit: 2}, goto: merge-to-base}
-          - {if: {exit: 0}, goto: integration-reviewer}
-          - {if: {exit: 6}, continue: true}
+          - {if: {exit: 2}, goto: assert-stamped}                                  # base unmoved, merge directly: implement-phase cleanup already stamped
+          - {if: {exit: 0}, set: {review_base: "''"}, goto: integration-reviewer}  # clean replant onto a moved base -> clear the pin so cleanup-merge folds/stamps the whole change
+          - {if: {exit: 6}, set: {review_base: "''"}, continue: true}              # rebase stopped on a conflict -> integrator; the replant rewrote history, clear the pin
           - {else: true, pause: true}
 
       - name: integrator
@@ -315,9 +315,33 @@ phases:
         command: ./scripts/run-verify.sh
         label: testing
         rules:
-          - {if: {exit: 0}, goto: merge-to-base}
+          - {if: {exit: 0}, continue: true}        # green -> cleanup-merge folds+stamps, then assert-stamped, then merge
           - {if: {exit: 124}, pause: true}
           - {else: true, goto: integration-resolver}
+
+      # Fold + stamp the change over (review_base or fork)..HEAD before it merges. By
+      # now integrate-rebase has cleared review_base on a replant, so this folds/stamps
+      # the whole change from the fork; the re-stamp is content-idempotent. Mirrors
+      # cleanup-implement/cleanup-sweep. exit 0 skips the resolver to assert-stamped.
+      - name: cleanup-merge
+        quiet: true
+        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        rules:
+          - {if: {exit: 0}, goto: assert-stamped}   # clean fold+stamp -> pre-merge backstop
+          - {if: {exit: 2}, continue: true}         # resolvable fold conflict -> resolver
+          - {if: {exit: 3}, resume: integrator}     # dirty tree: the integrator left work
+          - {else: true, pause: true}               # hard failure / out-of-range fixup
+
+      - name: autosquash-resolve-merge
+        file: agents/autosquash-resolve.md
+        tier: high
+        label: resolving fixups
+        max_loops: 6
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+        rules:
+          - {else: true, goto: cleanup-merge}
 
       - name: integration-resolver
         file: agents/integration-resolve.md
@@ -328,6 +352,17 @@ phases:
         rules:
           - {if: {decision: merge},  goto: wait-for-head}
           - {if: {decision: rework}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {else: true, pause: true}
+
+      # Read-only PRE-MERGE backstop: no rebase, no mutation. Asserts every non-merge
+      # commit in fork..HEAD carries Change: <id> and no fixup!/squash!/amend! subject
+      # remains. cleanup guarantees this on every normal path; this catches a future
+      # path that reaches merge-to-base without passing through cleanup. exit 0 -> merge.
+      - name: assert-stamped
+        quiet: true
+        command: ./scripts/assert-stamped.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
       - name: merge-to-base

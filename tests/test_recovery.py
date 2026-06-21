@@ -23,7 +23,9 @@ def test_gate_steps_in_span_merge_phase() -> None:
     # assertion is stable across the implement-phase step shuffle.
     lo, hi = _idx(wf, "integrate-rebase"), _idx(wf, "merge-to-base")
     assert gate_steps_in_span(wf, lo, hi) == (
-        "integrate-rebase", "integration-verify", "integration-resolver", "merge-to-base",
+        "integrate-rebase", "integration-verify", "cleanup-merge",
+        "autosquash-resolve-merge", "integration-resolver", "assert-stamped",
+        "merge-to-base",
     )
 
 
@@ -81,7 +83,8 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("wait-for-head"), "merge-to-base")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integration-verify", "integration-resolver",
+        "integrate-rebase", "integration-verify", "cleanup-merge",
+        "autosquash-resolve-merge", "integration-resolver", "assert-stamped",
     )
     msg = str(exc.value)
     assert "integrate-rebase" in msg

@@ -8,9 +8,9 @@ _QUIET = {
     # spec/plan/implement plumbing
     "spec-verify-commit", "plan-verify-commit",
     # per-batch fold+stamp + diff-base pinning (mechanical git, no narrative)
-    "cleanup-implement", "cleanup-sweep", "review-base-repin",
+    "cleanup-implement", "cleanup-sweep", "cleanup-merge", "review-base-repin",
     # review/merge plumbing: mechanical git scripts + pure routing gates
-    "stamp-trailers",
+    "stamp-trailers", "assert-stamped",
     "integrate-rebase",
 }
 
@@ -29,6 +29,7 @@ def test_substantive_steps_stay_loud() -> None:
     for name in ("spec-writer", "plan-writer", "task-lead", "spec-reviewer",
                  "verify", "code-reviewer", "deferred-sweep",
                  "autosquash-resolve-implement", "autosquash-resolve-sweep",
+                 "autosquash-resolve-merge",
                  "integrator", "integration-reviewer",
                  "integration-resolver", "finalize", "merge-to-base",
                  "wait-for-head"):

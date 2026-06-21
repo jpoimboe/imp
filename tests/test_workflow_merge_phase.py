@@ -24,7 +24,9 @@ def test_merge_phase_linear_queue_flow() -> None:
     names = [s.name for s in steps]
     assert names == [
         "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
-        "integration-verify", "integration-resolver", "merge-to-base",
+        "integration-verify", "cleanup-merge", "autosquash-resolve-merge",
+        "integration-resolver", "assert-stamped", "merge-to-base",
+
     ]
     by = {s.name: s for s in steps}
     assert by["wait-for-head"].kind == "branch"
@@ -45,9 +47,9 @@ def test_integrate_rebase_routing() -> None:
     wf = load_workflow(WF)
     rules = next(s for s in wf.flat_steps() if s.name == "integrate-rebase").rules
     _BASE = {}
-    # exit 2 -> merge directly (no review)
+    # exit 2 -> base unmoved, merge directly via the pre-merge backstop
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 2})
-    assert isinstance(m.action, Goto) and m.action.target == "merge-to-base"
+    assert isinstance(m.action, Goto) and m.action.target == "assert-stamped"
     # exit 0 -> semantic review
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 0})
     assert isinstance(m.action, Goto) and m.action.target == "integration-reviewer"
@@ -76,7 +78,7 @@ def test_integration_verify_routing() -> None:
     rules = next(s for s in wf.flat_steps() if s.name == "integration-verify").rules
     _BASE = {}
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 0})
-    assert isinstance(m.action, Goto) and m.action.target == "merge-to-base"
+    assert isinstance(m.action, Continue)        # -> cleanup-merge (the next step)
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 124})
     assert isinstance(m.action, Pause)
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 1})
@@ -116,3 +118,49 @@ def test_finalize_rework_and_pause_routing() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
     m = evaluate_rules(rules, vars=_BASE, output={**base, "decision": "other"})
     assert isinstance(m.action, Pause)
+
+
+def test_cleanup_merge_routes_by_exit_code() -> None:
+    wf = load_workflow(WF)
+    step = next(s for s in wf.flat_steps() if s.name == "cleanup-merge")
+    assert step.kind == "script"
+    assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
+    r = step.rules
+    m0 = evaluate_rules(r, vars={}, output={"exit": 0})
+    assert isinstance(m0.action, Goto) and m0.action.target == "assert-stamped"
+    m2 = evaluate_rules(r, vars={}, output={"exit": 2})
+    assert isinstance(m2.action, Continue)               # fall through into the resolver
+    m3 = evaluate_rules(r, vars={}, output={"exit": 3})
+    assert isinstance(m3.action, Goto) and m3.action.target == "integrator"
+    assert m3.action.resume is True
+    m1 = evaluate_rules(r, vars={}, output={"exit": 1})
+    assert isinstance(m1.action, Pause)
+    resolver = next(s for s in wf.flat_steps() if s.name == "autosquash-resolve-merge")
+    assert resolver.kind == "agent" and resolver.tier == "high"
+    assert resolver.file is not None and resolver.file.name == "autosquash-resolve.md"
+    assert resolver.rules[-1].action.target == "cleanup-merge"
+    assert resolver.max_loops == 6
+
+
+def test_assert_stamped_is_readonly_gate_before_merge() -> None:
+    wf = load_workflow(WF)
+    names = [s.name for s in _phase(wf, "merge").steps]
+    assert names.index("assert-stamped") == names.index("merge-to-base") - 1
+    step = next(s for s in wf.flat_steps() if s.name == "assert-stamped")
+    assert step.kind == "script"
+    assert step.command == "./scripts/assert-stamped.sh"
+    m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
+    assert isinstance(m0.action, Continue)
+    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
+    assert isinstance(m1.action, Pause)
+
+
+def test_integrate_rebase_clears_review_base_on_rewrite() -> None:
+    wf = load_workflow(WF)
+    rules = next(s for s in wf.flat_steps() if s.name == "integrate-rebase").rules
+    m0 = evaluate_rules(rules, vars={}, output={"exit": 0})
+    assert m0.var_mutations.get("review_base") == ""     # clean replant clears the pin
+    m6 = evaluate_rules(rules, vars={}, output={"exit": 6})
+    assert m6.var_mutations.get("review_base") == ""     # conflict-replant clears it too
+    m2 = evaluate_rules(rules, vars={}, output={"exit": 2})
+    assert "review_base" not in m2.var_mutations          # base unmoved: no rewrite, no clear

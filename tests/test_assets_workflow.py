@@ -99,7 +99,8 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert wf.phases[-1].name == "merge"
     assert [s.name for s in wf.phases[-1].steps] == [
         "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
-        "integration-verify", "integration-resolver", "merge-to-base"]
+        "integration-verify", "cleanup-merge", "autosquash-resolve-merge",
+        "integration-resolver", "assert-stamped", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
 
 
