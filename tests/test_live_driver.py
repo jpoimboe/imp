@@ -1661,3 +1661,25 @@ def test_anchored_resume_suppresses_old_opening_intent(tmp_path):
     body = _body(out)
     assert not any("build the parser" in ln for ln in body)
     assert body[0] == "── plan phase ───"
+
+
+def test_resume_anchor_reads_change_events_path(tmp_path):
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+    ]
+    change.events_path.parent.mkdir(parents=True, exist_ok=True)
+    change.events_path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # The resume path reads change.events_path and anchors at the current phase.
+    assert compute_start_phase(change.events_path) == "plan"
