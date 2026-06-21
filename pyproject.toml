@@ -57,6 +57,7 @@ filterwarnings = [
     # issues we fixed, never on unrelated third-party / Python deprecations or
     # the (deliberately deferred) resource-warning backlog.
     "error:.*use of fork\\(\\) may lead to deadlocks in the child:DeprecationWarning",
+    "error:There is no current event loop:DeprecationWarning",
 ]
 
 [tool.ruff]
