@@ -24,7 +24,7 @@ def test_capture_frames_every_complete_line(tmp_path: Path) -> None:
     recs = [{"id": str(i), "type": "x", "payload": {"i": i}} for i in range(5)]
     _write_jsonl(p, recs)
     lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
-    assert [parse_event(ln) for ln in lines] == recs
+    assert [parse_event(ln) for ln in lines] == [{**r, "_replay": True} for r in recs]
 
 
 def test_capture_includes_lines_that_never_broadcast(tmp_path: Path) -> None:
@@ -54,7 +54,7 @@ def test_capture_ignores_partial_trailing_line(tmp_path: Path) -> None:
     good = json.dumps({"id": "a", "type": "x", "payload": {}})
     p.write_text(good + "\n" + '{"id":"b","type":"part')  # partial, no newline
     lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
-    assert [parse_event(ln) for ln in lines] == [json.loads(good)]
+    assert [parse_event(ln) for ln in lines] == [{**json.loads(good), "_replay": True}]
 
 
 def test_capture_missing_file_yields_empty_and_warns(
@@ -75,7 +75,7 @@ def test_on_attach_pulse_returns_snapshot_of_current_disk(tmp_path: Path) -> Non
     snap = server._on_attach_pulse(None, sent.append)   # no open(): pulse is a no-op
     assert snap is not None
     lines = snap.wire_bytes().decode().splitlines()
-    assert [parse_event(ln) for ln in lines] == recs
+    assert [parse_event(ln) for ln in lines] == [{**r, "_replay": True} for r in recs]
 
 
 def test_on_attach_pulse_without_events_path_returns_none(tmp_path: Path) -> None:
@@ -188,3 +188,29 @@ async def test_resume_attach_replays_entire_prior_journal(tmp_path: Path) -> Non
         assert [s["id"] for s in seen] == [f"p{i}" for i in range(20)] + ["wr", "n1"]
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def test_capture_marks_every_record_as_replay(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    recs = [{"id": "a", "type": "awaiting_user_input", "payload": {"prompt": "q"}}]
+    _write_jsonl(p, recs)
+    [line] = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
+    event = parse_event(line)
+    assert event["_replay"] is True
+    assert event["type"] == "awaiting_user_input"
+    assert event["payload"] == {"prompt": "q"}
+
+
+def test_replay_marker_does_not_change_rendering() -> None:
+    from imp.cli.narrative import build_tree
+    from imp.cli.render_text import render_tree
+
+    events = [
+        {"type": "change_created", "payload": {"id": "x", "title": "T"}},
+        {"type": "step_started", "payload": {"step": "spec"}},
+        {"type": "agent_output", "payload": {"text": "hi"}},
+    ]
+    marked = [{**e, "_replay": True} for e in events]
+    plain = list(render_tree(build_tree(events), full=False, color=False, width=80))
+    with_marker = list(render_tree(build_tree(marked), full=False, color=False, width=80))
+    assert with_marker == plain

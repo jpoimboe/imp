@@ -26,7 +26,7 @@ async def deliver_session_reply(
         max_buffer_size=1)
 
     def _on_event(event: dict[str, Any]) -> None:
-        if event.get("type") == "awaiting_user_input":
+        if event.get("type") == "awaiting_user_input" and not event.get("_replay"):
             gate_send.send_nowait("")
 
     client = await attach(_on_event)

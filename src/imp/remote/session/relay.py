@@ -55,11 +55,12 @@ class SessionRelay:
             await client.aclose()
 
     def _on_event(self, event: dict[str, Any]) -> None:
-        # Forward the curated event BEFORE signalling detach, so the gate event
-        # itself reaches the sink as the session hibernates.
         curated = self._curator.curate(event)
+        # sink-forward before gate signal: gate event must reach sink before detach
         if curated is not None:
             self._sink(curated)
-        if event.get("type") == "awaiting_user_input" and self._gate_send is not None:
+        if (event.get("type") == "awaiting_user_input"
+                and not event.get("_replay")
+                and self._gate_send is not None):
             self.gated = True
             self._gate_send.send_nowait(None)

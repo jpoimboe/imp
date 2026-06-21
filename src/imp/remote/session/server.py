@@ -42,6 +42,7 @@ class SessionServer:
         self._abandon_requested = False
         self._serve_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
+        self._last_gate_event: dict[str, Any] | None = None
         # Initialized in open() because anyio.Event needs a running event loop.
         self._attach_changed: anyio.Event | None = None
         self._socket = SessionSocket(
@@ -89,15 +90,19 @@ class SessionServer:
         return result
 
     def _emit(self, event: dict[str, Any]) -> None:
+        if event.get("type") == "awaiting_user_input":
+            self._last_gate_event = event
         self._socket.broadcast(event)
 
     async def _chat(self, _query: str) -> str:
+        self.set_pending_prompt(self._last_gate_event)
         try:
             if self._hibernate:
                 return await self._hibernation_gate()
             return await self._socket.next_input()
         finally:
             self.set_pending_prompt(None)
+            self._last_gate_event = None
 
     async def _hibernation_gate(self) -> str:
         from imp.agents.tools.wait_for_user import AwaitingUserInput

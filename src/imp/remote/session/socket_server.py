@@ -51,7 +51,8 @@ class ReplaySnapshot:
                     except json.JSONDecodeError:
                         _log.warning("replay: corrupt line in %s; truncating replay", events_path)
                         break
-                    framed.append((encode_event(record) + "\n").encode("utf-8"))
+                    framed.append(
+                        (encode_event({**record, "_replay": True}) + "\n").encode("utf-8"))
         except OSError:
             _log.warning(
                 "replay: cannot read %s; client gets the live stream only",

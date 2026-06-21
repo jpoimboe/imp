@@ -137,14 +137,11 @@ async def serve_change_session(
         while _is_interrupt_pause(result, coordinator):
             prompt_event = {"type": "awaiting_user_input",
                             "payload": {"prompt": _RESUME_PROMPT}}
-            server.set_pending_prompt(prompt_event)
             on_event(prompt_event)
             try:
                 reply = await user_chat_input_fn("")
             except AwaitingUserInput:
                 return result
-            finally:
-                server.set_pending_prompt(None)
             coordinator.reset()
             if reply.strip():
                 coordinator.enqueue_interject(reply)

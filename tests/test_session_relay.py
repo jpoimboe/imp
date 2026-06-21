@@ -82,6 +82,41 @@ async def test_relay_detaches_at_gate_so_session_can_hibernate(
 
 
 @pytest.mark.anyio
+async def test_relay_does_not_detach_on_replayed_gate(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    sink: list[dict[str, Any]] = []
+    relay = SessionRelay(
+        socket_path=sock, change_id="cid", title="T",
+        events=("all",), sink=sink.append)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        tg.start_soon(relay.run)
+
+        with anyio.fail_after(5):
+            while socket.attached_count == 0:
+                await anyio.sleep(0.02)
+        # Replayed (marked) gate: relay must NOT detach on it.
+        socket.broadcast({"type": "awaiting_user_input",
+                          "payload": {"prompt": "old"}, "_replay": True})
+        await anyio.sleep(0.1)
+        assert any(s.get("payload", {}).get("prompt") == "old" for s in sink)
+        assert socket.attached_count == 1   # still attached
+        assert relay.gated is False
+        # Live (unmarked) gate detaches the relay.
+        socket.broadcast({"type": "awaiting_user_input",
+                          "payload": {"prompt": "live"}})
+        with anyio.fail_after(5):
+            while socket.attached_count != 0:
+                await anyio.sleep(0.02)
+        tg.cancel_scope.cancel()
+    await socket.close()
+    assert relay.gated is True
+    assert sink[-1]["type"] == "awaiting_user_input"
+
+
+@pytest.mark.anyio
 async def test_relay_run_raises_when_no_session_is_resident(tmp_path: Path) -> None:
     # The relay attaches to a resident session ONLY; it never spawns one
     # (subscription does not pin residency). No live socket → OSError, not a spawn.
