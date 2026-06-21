@@ -350,16 +350,19 @@ def header_line(node: Any, *, depth: int, color: bool,
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.label or node.name
+    route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
+                      enabled=color)
+             if node.route_label else "")
     if not node.resumed:
         text = f"{label} · {node.model}" if node.model else label
-        return _line(text, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
-    # Resumed re-entry: a gray " (resume)" after the label, before the model suffix.
+        return _line(text, depth, color, *pal.NODE_COLORS["step"],
+                     gutters=gutters) + route
     indent = _gutter_indent(depth, gutters, color)
     parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
              pal.ansi(" (resume)", "gray", enabled=color)]
     if node.model:
         parts.append(pal.ansi(f" · {node.model}", *pal.NODE_COLORS["step"], enabled=color))
-    return indent + "".join(parts)
+    return indent + "".join(parts) + route
 
 
 def _subagent_model(sub: nv.SubagentFold) -> str | None:

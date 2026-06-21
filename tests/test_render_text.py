@@ -2027,6 +2027,28 @@ def test_outcome_line_renders_lifecycle_yellow_in_all_themes() -> None:
             pal.set_theme("ansi")
 
 
+def test_header_line_appends_route_label_suffix() -> None:
+    # Forward-routed header: yellow " · <reason>" rides last, after the model.
+    fwd = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                      model="opus", route_label="addressing review feedback")
+    assert rt.header_line(fwd, depth=0, color=False) == \
+        "implementing the plan · opus · addressing review feedback"
+    # Resume header: " (resume)", then the model, then the reason — always last.
+    res = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                      model="opus", resumed=True,
+                      route_label="addressing review feedback")
+    assert rt.header_line(res, depth=0, color=False) == \
+        "implementing the plan (resume) · opus · addressing review feedback"
+    # The reason segment is painted lifecycle (yellow), distinct from the step color.
+    colored = rt.header_line(fwd, depth=0, color=True)
+    assert pal.ansi(" · addressing review feedback",
+                    *pal.NODE_COLORS["lifecycle"]) in colored
+    # No route_label → byte-identical to today (no trailing segment).
+    bare = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                       model="opus")
+    assert rt.header_line(bare, depth=0, color=False) == "implementing the plan · opus"
+
+
 def test_phase_end_rule_collapses_when_subsecond() -> None:
     # A sub-second phase drops the `· <elapsed>` suffix entirely: there must be no
     # dangling `· ` before the tail dashes.
