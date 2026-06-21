@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
+from imp.engine.state import JsonlEventLog
 
 
 def _agent_prompt(name: str) -> str:
@@ -64,3 +66,28 @@ def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
         body = agent.prompt_template_source
         assert "imp/specs/" not in body, f"{name} still references imp/specs/"
         assert "imp/plans/" not in body, f"{name} still references imp/plans/"
+
+
+def test_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
+    body = _agent_prompt("code-reviewer")
+    assert "..HEAD" not in body
+    assert body.count("..imp/{{ change.id }}") == 2
+
+
+def test_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -> None:
+    body = _agent_prompt("code-reviewer")
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+
+    whole = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", cur_base_head="BASE",
+        vars={"review_scope": "change", "review_base": "RB"}))
+    assert "git diff BASE..imp/abc" in whole
+    assert "..HEAD" not in whole
+
+    batch = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", cur_base_head="BASE",
+        vars={"review_scope": "plan", "review_base": "RB"}))
+    assert "git diff RB..imp/abc" in batch
+    assert "..HEAD" not in batch
