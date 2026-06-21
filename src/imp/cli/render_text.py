@@ -330,7 +330,7 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     elapsed = nv.phase_elapsed(node)
     done = fmt_seconds_done(elapsed)
     secs = f" · {done}" if done else ""
-    return _line(_phase_rule(f"{node.name} complete{secs}"), depth, color,
+    return _line(_phase_rule(f"{node.name} phase complete{secs}"), depth, color,
                  *pal.NODE_COLORS["lifecycle"], gutters=gutters)
 
 
@@ -344,7 +344,7 @@ def header_line(node: Any, *, depth: int, color: bool,
     for subagents — they emit `subagent_status_row`. This bare header survives only
     for the --full expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
-        return _line(_phase_rule(node.name), depth, color,
+        return _line(_phase_rule(f"{node.name} phase"), depth, color,
                      *pal.NODE_COLORS["lifecycle"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,

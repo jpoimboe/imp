@@ -1,5 +1,5 @@
 
-── spec ───
+── spec phase ───
 
 spec-writer · opus
 
@@ -154,9 +154,9 @@ spec-verify-commit
 
 spec-verify-commit · complete
 
-── spec complete · 3m 9s ───
+── spec phase complete · 3m 9s ───
 
-── plan ───
+── plan phase ───
 
 plan-writer · opus
 
@@ -282,9 +282,9 @@ plan-verify-commit
 
 plan-verify-commit · complete
 
-── plan complete · 4m 7s ───
+── plan phase complete · 4m 7s ───
 
-── implement ───
+── implement phase ───
 
 task-lead · sonnet
 
@@ -390,9 +390,9 @@ plan-cycle-check · sonnet
 
 plan-cycle-check · complete · 41s
 
-── implement complete · 10m 17s ───
+── implement phase complete · 10m 17s ───
 
-── review ───
+── review phase ───
 
 autosquash
 

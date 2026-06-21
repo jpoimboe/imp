@@ -463,7 +463,7 @@ def test_header_line_matches_render_for_phase_and_step() -> None:
     phase = nv.PhaseNode(name="design")
     step = nv.StepNode(name="spec", kind="agent", interactive=True)
     branch = nv.StepNode(name="route", kind="branch")
-    assert rt.header_line(phase, depth=0, color=False) == "── design ───"
+    assert rt.header_line(phase, depth=0, color=False) == "── design phase ───"
     assert rt.header_line(step, depth=1, color=False) == "  spec"
     # Every kind renders as the bare step name (no special-case label).
     assert rt.header_line(branch, depth=2, color=False) == "    route"
@@ -861,12 +861,12 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
     joined = "\n".join(out)
     # closed spec phase gets a breadcrumb with seconds suffix
-    assert "spec complete" in joined
-    spec_line = next(ln for ln in out if "spec complete" in ln)
+    assert "spec phase complete" in joined
+    spec_line = next(ln for ln in out if "spec phase complete" in ln)
     assert "s" in spec_line    # e.g. "7s"
     assert "7" in spec_line    # computed from timestamps
     # the breadcrumb is at depth 0 (same as the phase header)
-    assert spec_line == "── spec complete · 7s ───"
+    assert spec_line == "── spec phase complete · 7s ───"
 
 
 _ANSI_RE = _re.compile(r"\x1b\[[0-9;]*m")
@@ -1843,7 +1843,7 @@ def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
         name="spec", start_ts="2024-01-01T00:00:00",
         end_ts="2024-01-01T00:00:00.500000"))
     line = rt.phase_breadcrumb_line(pn, depth=0, color=False)
-    assert line == "── design complete ───"
+    assert line == "── design phase complete ───"
     assert " · " not in line
 
     # 2) step breadcrumb: sub-second elapsed drops the duration, no dangling sep.
@@ -1998,7 +1998,7 @@ def test_phase_start_rule_is_lifecycle_yellow() -> None:
                 _ev("2", "step_started", step="spec", kind="agent",
                      phase="design", model="m"),
             ]), full=False, color=True, width=80))
-            rule = next(ln for ln in out if "── design ───" in ln)
+            rule = next(ln for ln in out if "── design phase ───" in ln)
             assert pal._ANSI["yellow"] in rule, theme
             assert pal._ANSI["blue"] not in rule, theme   # not the bold-blue phase color
         finally:
@@ -2043,5 +2043,5 @@ def test_phase_end_rule_collapses_when_subsecond() -> None:
          "timestamp": "2026-06-03T00:00:00.4+00:00"},
     ]
     out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
-    line = next(ln for ln in out if "spec complete" in ln)
-    assert line == "── spec complete ───"
+    line = next(ln for ln in out if "spec phase complete" in ln)
+    assert line == "── spec phase complete ───"

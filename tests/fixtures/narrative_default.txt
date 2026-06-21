@@ -1,5 +1,5 @@
 
-── design ───
+── design phase ───
 
 spec · claude-sonnet-4-6
 
@@ -13,7 +13,7 @@ spec · claude-sonnet-4-6
 
 spec · complete
 
-── implement ───
+── implement phase ───
 
 build · claude-sonnet-4-6
 

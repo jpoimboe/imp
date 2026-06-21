@@ -538,9 +538,9 @@ def test_phase_breadcrumb_identical_in_live_and_log() -> None:
     for e in events:
         drv.on_event(e)
     drv.finish()
-    live_line = next(ln for ln in out.getvalue().splitlines() if "spec complete" in ln)
+    live_line = next(ln for ln in out.getvalue().splitlines() if "spec phase complete" in ln)
     log_lines = render_tree(nv.build_tree(events), full=False, color=False, width=80)
-    log_line = next(ln for ln in log_lines if "spec complete" in ln)
+    log_line = next(ln for ln in log_lines if "spec phase complete" in ln)
     assert live_line == log_line   # byte-identical indent + content across both paths
 
 
@@ -1381,7 +1381,7 @@ def test_prompt_indent_empty_when_no_open_step() -> None:
 def test_multiphase_subagent_reentry_live_log_parity() -> None:
     # A multi-phase run with a subagent and an implement-loop re-entry: the live body
     # must be byte-equal to the imp log body, the re-entry must print a second
-    # `── implement ───` start rule, and a closed phase's end rule must land at column 0.
+    # `── implement phase ───` start rule, and a closed phase's end rule must land at column 0.
     events = [
         ev("e0", "change_created", change_id=1, title="t", timestamp="2026-06-03T00:00:00+00:00"),
         ev("e1", "step_started", step="spec", kind="agent", phase="design",
@@ -1412,6 +1412,6 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
     drv.finish()
     body = _body(out)
     assert body == _render_body(events)                       # live == imp log, byte-for-byte
-    assert sum(1 for ln in body if ln.strip() == "── implement ───") == 2  # re-entry rule
-    end_rule = next(ln for ln in body if "implement complete" in ln)
-    assert end_rule.startswith("── implement complete")       # end rule flush at column 0
+    assert sum(1 for ln in body if ln.strip() == "── implement phase ───") == 2  # re-entry rule
+    end_rule = next(ln for ln in body if "implement phase complete" in ln)
+    assert end_rule.startswith("── implement phase complete")  # end rule flush at column 0

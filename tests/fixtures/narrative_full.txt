@@ -4,7 +4,7 @@ tiers resolved:
   high   → openai/gpt-5.5
     differ from medium: tier 1, vendor jump
 
-── design ───
+── design phase ───
 
 spec · claude-sonnet-4-6
 
@@ -38,7 +38,7 @@ spec · claude-sonnet-4-6
 
 spec · complete · status=Success · summary=Spec drafted
 
-── implement ───
+── implement phase ───
 
 build · claude-sonnet-4-6
 
