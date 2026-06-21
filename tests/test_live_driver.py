@@ -1527,3 +1527,137 @@ def test_compute_start_phase_empty_journal_is_none(tmp_path):
 
 def test_compute_start_phase_missing_file_is_none(tmp_path):
     assert compute_start_phase(tmp_path / "nope.jsonl") is None
+
+
+def _two_phase_events():
+    return [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00"},
+    ]
+
+
+def test_suppresses_output_before_anchor_phase_header():
+    events = _two_phase_events()
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase="plan")
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    # Nothing from the earlier "spec" phase: not its header, breadcrumb, or step.
+    assert not any("spec" in ln or "draft" in ln for ln in body)
+    # The anchor phase header is the FIRST line — no leading blank precedes it.
+    assert body[0] == "── plan phase ───"
+    # The anchor phase's own content renders normally.
+    assert any("refine" in ln for ln in body)
+
+
+def test_frontier_advances_past_suppressed_nodes_no_redump():
+    events = _two_phase_events()
+    # Reference: full live render with no suppression.
+    fout = _Pipe()
+    fdrv = LiveDriver(stream=fout, color=False, width=80,
+                      status=LiveStatus(fout), start_phase=None)
+    for e in events:
+        fdrv.on_event(e)
+    fdrv.finish()
+    full = _body(fout)
+    # Anchored resume at the "plan" phase.
+    sout = _Pipe()
+    sdrv = LiveDriver(stream=sout, color=False, width=80,
+                      status=LiveStatus(sout), start_phase="plan")
+    for e in events:
+        sdrv.on_event(e)
+    sdrv.finish()
+    supp = _body(sout)
+    # No earlier-phase node is ever (re-)emitted, even on the first live walk
+    # after suppression lifts — cursors were advanced through the suppressed nodes.
+    assert all("spec" not in ln and "draft" not in ln for ln in supp)
+    # The anchor phase onward is byte-identical to the tail of the full render.
+    anchor = full.index("── plan phase ───")
+    assert supp == full[anchor:]
+
+
+def test_start_phase_none_renders_full_history():
+    events = _two_phase_events()
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase=None)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    # Regression guard: start_phase=None reproduces the full batch render path.
+    assert _body(out) == _render_body(events)
+
+
+def _opening_intent_events():
+    # opening_intent is emitted BEFORE the first step_started, so its
+    # UserMessageNode lands at the workflow root, before the first phase header.
+    return [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "opening_intent", "agent_id": None,
+         "payload": {"text": "build the parser"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e2", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+    ]
+
+
+def test_first_phase_resume_keeps_opening_intent_prompt(tmp_path):
+    # End-to-end guard against the dropped-prompt regression: a still-in-first-phase
+    # resume must NOT discard the user's original prompt. compute_start_phase returns
+    # None for a single-phase journal, so LiveDriver does not suppress and the
+    # root-level opening prompt renders.
+    events = _opening_intent_events()
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    sp = compute_start_phase(path)
+    assert sp is None
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase=sp)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert any("build the parser" in ln for ln in _body(out))
+
+
+def test_anchored_resume_suppresses_old_opening_intent(tmp_path):
+    # Once the run has moved past the first phase, the opening prompt is old context
+    # at root (before the first phase header) and IS suppressed.
+    events = [*_opening_intent_events(), {
+        "type": "step_started", "agent_id": None,
+        "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+        "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00",
+    }]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    sp = compute_start_phase(path)
+    assert sp == "plan"
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase=sp)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert not any("build the parser" in ln for ln in body)
+    assert body[0] == "── plan phase ───"

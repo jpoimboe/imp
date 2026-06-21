@@ -107,12 +107,15 @@ def _container_closed(container: Any) -> bool:
 
 
 class LiveDriver:
-    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus) -> None:
+    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
+                 start_phase: str | None = None) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
         self._width = width
         self._status = status
+        self._start_phase = start_phase
+        self._suppressing = start_phase is not None
         # True after the last emitted block was agent prose, so the next prose
         # block gets one blank-line separator — matching render_text's lean spacing
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
@@ -197,6 +200,10 @@ class LiveDriver:
                 gutters = self._gutters()
                 if rt.spaces_before(child):
                     self._prev_prose = True
+                if (self._suppressing and isinstance(child, nv.PhaseNode)
+                        and child.name == self._start_phase):
+                    self._suppressing = False
+                    self._prev_prose = False
                 self._stream_or_hold(
                     rt.header_line(child, depth=cur.depth, color=self._color,
                                    gutters=gutters),
@@ -297,6 +304,8 @@ class LiveDriver:
         # mode thinking/tool turn between two prose blocks doesn't break their
         # pairing). While a prompt is active, non-empty emissions are deferred
         # to flush_deferred() so the prompt screen stays clean (§5a).
+        if self._suppressing:
+            return
         if not lines:
             return
         if self._prompt_active:
