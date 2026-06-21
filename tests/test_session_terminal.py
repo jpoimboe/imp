@@ -536,7 +536,9 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
         return "answer"
 
     class _Driver:
-        def on_event(self, _event: dict[str, Any]) -> None: ...
+        event_count = 0
+        def on_event(self, _event: dict[str, Any]) -> None:
+            _Driver.event_count += 1
         def finish(self) -> None: ...
 
     coord = InterruptCoordinator()
@@ -558,3 +560,4 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
 
     assert prompts == ["live?"]      # only the live gate solicited
     assert result["r"] == "answer"   # the reply reached the still-open gate
+    assert _Driver.event_count == 4  # 3 replayed + 1 live gate all flow to driver
