@@ -303,6 +303,28 @@ def test_state_load_forward_compatible_without_outcome_history(tmp_path: Path) -
     assert State.load(tmp_path).outcome_history == {}
 
 
+def test_state_step_label_roundtrips(tmp_path: Path) -> None:
+    s = State(id="c1", step="write_spec", step_attempt=0, status="running",
+              step_label="writing spec")
+    s.save(tmp_path)
+    back = State.load(tmp_path)
+    assert back.step_label == "writing spec"
+
+
+def test_state_step_label_defaults_none() -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="running")
+    assert s.step_label is None
+
+
+def test_state_load_forward_compatible_without_step_label(tmp_path: Path) -> None:
+    # A state.json written before this field existed must load with step_label=None.
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "c1", "step": "coder", "step_attempt": 0, "status": "running",
+        "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
+    }))
+    assert State.load(tmp_path).step_label is None
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json

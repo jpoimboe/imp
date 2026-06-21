@@ -60,6 +60,7 @@ class State:
     project_facts: dict[str, str] | None = None
     guidance: str | None = None
     merge_commit: str | None = None
+    step_label: str | None = None
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
 
@@ -108,6 +109,7 @@ class State:
         payload = {
             "id": self.id,
             "step": self.step,
+            "step_label": self.step_label,
             "step_attempt": self.step_attempt,
             "status": self.status,
             "vars": self.vars,
