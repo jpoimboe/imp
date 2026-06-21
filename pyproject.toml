@@ -52,6 +52,18 @@ timeout_method = "signal"
 markers = [
     "real_sandbox_policy: opt out of the no-bwrap sandbox fallback fixture (tests asserting the raw sandbox posture)",
 ]
+filterwarnings = [
+    # Regression guards — message-scoped so they fire ONLY on the specific
+    # issues we fixed, never on unrelated third-party / Python deprecations or
+    # the (deliberately deferred) resource-warning backlog.
+    "error:.*use of fork\\(\\) may lead to deadlocks in the child:DeprecationWarning",
+    "error:There is no current event loop:DeprecationWarning",
+    # Third-party, not fixable here: uvicorn imports deprecated websockets.legacy,
+    # pulled in transitively by the codex SDK test server. Re-evaluate on a
+    # uvicorn / codex-SDK bump.
+    "ignore:websockets.legacy is deprecated:DeprecationWarning",
+    "ignore:websockets.server.WebSocketServerProtocol is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

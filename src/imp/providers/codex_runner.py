@@ -1312,9 +1312,9 @@ async def _ping_mcp_server(
     import asyncio
 
     import httpx
-    deadline = asyncio.get_event_loop().time() + timeout_seconds
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
     last_exc: Exception | None = None
-    while asyncio.get_event_loop().time() < deadline:
+    while asyncio.get_running_loop().time() < deadline:
         try:
             async with httpx.AsyncClient(timeout=0.5) as client:
                 r = await client.post(

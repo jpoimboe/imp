@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import multiprocessing as mp
 import signal
 import socket
 import unittest.mock
@@ -42,17 +42,24 @@ def test_stop_daemon_reports_when_none_running(tmp_path: Path) -> None:
     assert runner.stop_daemon(tmp_path) == 1
 
 
+def _pause_until_signalled() -> None:
+    signal.pause()
+
+
 def test_stop_daemon_signals_the_recorded_pid(tmp_path: Path) -> None:
     (tmp_path / ".imp").mkdir()
     # Record a real, signalable child as the "daemon"; stop must SIGTERM it.
-    pid = os.fork()
-    if pid == 0:                # child: pause until signalled, then exit
-        signal.pause()
-        os._exit(0)
-    runner.pid_path(tmp_path).write_text(str(pid))
-    assert runner.stop_daemon(tmp_path) == 0
-    _, status = os.waitpid(pid, 0)
-    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGTERM
+    p = mp.get_context("spawn").Process(target=_pause_until_signalled)
+    p.start()
+    try:
+        runner.pid_path(tmp_path).write_text(str(p.pid))
+        assert runner.stop_daemon(tmp_path) == 0
+        p.join(timeout=5)
+        assert p.exitcode == -signal.SIGTERM
+    finally:
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=5)
 
 
 def test_start_daemon_refuses_without_remote_driver(
