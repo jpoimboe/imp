@@ -1965,20 +1965,57 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
         folds["tester"].start_ts, folds["tester"].end_ts) == 19.0
 
 
-def test_opening_intent_becomes_interactive_user_turn_at_root() -> None:
+def test_opening_intent_reparents_under_first_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
          "payload": {"handle": "h", "title": "t"}},
         {"id": "e2", "agent_id": None, "type": "opening_intent",
          "payload": {"text": "add a --json flag"}},
+        _ev("e3", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
     ])
-    kids = tree.root.children
-    assert len(kids) == 1
-    node = kids[0]
+    # The intent is NOT a child of root.
+    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    node = step.children[0]
     assert isinstance(node, nv.UserMessageNode)
     assert node.text == "add a --json flag"
     # interactive=True is required, else render_text drops it as synthetic plumbing.
     assert node.interactive is True
+
+
+def test_no_opening_intent_yields_no_user_message_node() -> None:
+    tree = nv.build_tree([
+        _ev("e1", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+    ])
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
+    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
+
+
+def test_opening_intent_only_injected_under_first_step_not_later_ones() -> None:
+    tree = nv.build_tree([
+        {"id": "e1", "agent_id": None, "type": "change_created",
+         "payload": {"handle": "h", "title": "t"}},
+        {"id": "e2", "agent_id": None, "type": "opening_intent",
+         "payload": {"text": "add a --json flag"}},
+        _ev("s1", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("s1c", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("s2", "step_started", step="writing-plans", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+    ])
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    steps = [c for c in phase.children if isinstance(c, nv.StepNode)]
+    assert len(steps) == 2
+    # First step has the intent.
+    assert any(isinstance(c, nv.UserMessageNode) for c in steps[0].children)
+    # Second step does not.
+    assert not any(isinstance(c, nv.UserMessageNode) for c in steps[1].children)
 
 
 def test_lost_task_result_resume_closed_at_step_completed() -> None:

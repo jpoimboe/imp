@@ -415,6 +415,8 @@ class NarrativeBuilder:
         # Unresolved wait_for_user calls: id → that call's input.prompt. Drives
         # the §1 orphan-result net.
         self._pending_wfu: dict[str, str] = {}
+        self._opening_intent_node: UserMessageNode | None = None
+        self._first_step: StepNode | None = None
 
     # -- public API -----------------------------------------------------------
     @property
@@ -780,6 +782,9 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     route_label=p.get("route_label"))
     self._append(node)
     self._step_stack.append(node)
+    if self._first_step is None:
+        self._first_step = node
+        _inject_opening_intent(self, node)
 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1074,8 +1079,17 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         children[narration_idx].held = False
 
 
+def _inject_opening_intent(self: NarrativeBuilder, step: StepNode) -> None:
+    if self._opening_intent_node is None:
+        return
+    self._root.children = [c for c in self._root.children if c is not self._opening_intent_node]
+    step.children.insert(0, self._opening_intent_node)
+
+
 def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    self._append(UserMessageNode(text=p.get("text", ""), interactive=True))
+    node = UserMessageNode(text=p.get("text", ""), interactive=True)
+    self._opening_intent_node = node
+    self._append(node)
 
 
 NarrativeBuilder._HANDLERS["opening_intent"] = _h_opening_intent
