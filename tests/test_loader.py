@@ -1181,3 +1181,90 @@ def test_step_label_none_when_neither_present(tmp_path):
         "      - {name: s, file: agents/a.md}\n")
     wf = load_workflow(wf_dir)
     assert wf.flat_steps()[0].label is None
+
+
+# ── acquire/release lane step attribute tests ─────────────────────────────────
+
+_STUB_AGENT = """\
+---
+name: stub
+tools: [complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_acquire_release_attributes_parse(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                acquire: base
+                rules:
+                  - {else: true, continue: true}
+              - name: resolver
+                file: agents/stub.md
+                release: base
+        """, agents={"stub": _STUB_AGENT})
+    workflow = load_workflow(wf)
+    steps = {s.name: s for s in workflow.flat_steps()}
+    assert steps["lane"].kind == "branch"      # rules-only -> inferred branch
+    assert steps["lane"].acquire == "base"
+    assert steps["lane"].release is None
+    assert steps["resolver"].kind == "agent"
+    assert steps["resolver"].release == "base"
+    assert steps["resolver"].acquire is None
+
+
+def test_acquire_rejects_unknown_lane_keyword(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                acquire: trunk
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="lane keyword"):
+        load_workflow(wf)
+
+
+def test_acquire_rejects_non_branch_kind(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: touch
+                acquire: base
+                command: "true"
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="acquire: only valid"):
+        load_workflow(wf)
+
+
+def test_release_rejects_non_agent_kind(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                release: base
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="release: only valid"):
+        load_workflow(wf)

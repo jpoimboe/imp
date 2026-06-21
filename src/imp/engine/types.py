@@ -187,6 +187,8 @@ class Step:
     timeout_seconds: int | None = None
     quiet: bool = False
     label: str | None = None
+    acquire: str | None = None  # lane keyword "base" → change.base_branch; branch steps only
+    release: str | None = None  # runs before step body; agent steps only
 
 
 @dataclass(frozen=True, slots=True)
