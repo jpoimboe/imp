@@ -17,10 +17,6 @@ def _steps(tree: nv.NarrativeTree) -> dict[str, nv.StepNode]:
     return found
 
 
-def _breadcrumb(node: nv.StepNode) -> nv.BreadcrumbLine:
-    return next(c for c in node.children if isinstance(c, nv.BreadcrumbLine))
-
-
 def test_quiet_flag_lands_on_the_step_node() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
@@ -32,10 +28,9 @@ def test_quiet_flag_lands_on_the_step_node() -> None:
     assert _steps(tree)["commit-check"].quiet is True
 
 
-def test_workflow_route_label_lands_on_the_breadcrumb() -> None:
-    # The rule's `label` rides step_completed.payload.label onto the breadcrumb,
-    # where the renderer turns it into the inline yellow "→ <label>" that rides
-    # on the same completion line.
+def test_route_label_lands_on_target_step_node() -> None:
+    # The rule's label rides the NEXT step's step_started.payload.route_label onto
+    # that target StepNode, where the renderer paints it as the yellow header suffix.
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="code-reviewer", kind="agent",
@@ -44,11 +39,14 @@ def test_workflow_route_label_lands_on_the_breadcrumb() -> None:
            action={"verb": "goto", "target": "task-lead",
                    "resume": False, "rework": True},
            var_mutations={}, label="addressing review feedback"),
+        ev("4", "step_started", step="task-lead", kind="agent",
+           phase="implement", model="opus", provider="anthropic",
+           route_label="addressing review feedback"),
     ])
-    assert _breadcrumb(_steps(tree)["code-reviewer"]).label == "addressing review feedback"
+    assert _steps(tree)["task-lead"].route_label == "addressing review feedback"
 
 
-def test_unlabeled_goto_has_no_route_label() -> None:
+def test_forward_step_without_route_label_has_none() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
@@ -57,5 +55,7 @@ def test_unlabeled_goto_has_no_route_label() -> None:
            action={"verb": "goto", "target": "plan-writer",
                    "resume": False, "rework": False},
            var_mutations={}, label=None),
+        ev("4", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
     ])
-    assert _breadcrumb(_steps(tree)["spec-reviewer"]).label is None
+    assert _steps(tree)["plan-writer"].route_label is None

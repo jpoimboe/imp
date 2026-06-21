@@ -350,16 +350,19 @@ def header_line(node: Any, *, depth: int, color: bool,
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.label or node.name
+    route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
+                      enabled=color)
+             if node.route_label else "")
     if not node.resumed:
         text = f"{label} · {node.model}" if node.model else label
-        return _line(text, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
-    # Resumed re-entry: a gray " (resume)" after the label, before the model suffix.
+        return _line(text, depth, color, *pal.NODE_COLORS["step"],
+                     gutters=gutters) + route
     indent = _gutter_indent(depth, gutters, color)
     parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
              pal.ansi(" (resume)", "gray", enabled=color)]
     if node.model:
         parts.append(pal.ansi(f" · {node.model}", *pal.NODE_COLORS["step"], enabled=color))
-    return indent + "".join(parts)
+    return indent + "".join(parts) + route
 
 
 def _subagent_model(sub: nv.SubagentFold) -> str | None:
@@ -590,18 +593,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         done = fmt_seconds_done(node.elapsed_s)
         if done:
             parts.append(done)
-        # A completed step prints its gray completion line first, then — for a
-        # labeled non-interrupted/non-blocked completion — a (gutter-bearing) blank
-        # and the non-bold yellow "→ <label>" route line beneath it, so the route
-        # announcing where the run goes next prints after the line saying the step
-        # is done. Without a label (or when blocked/interrupted) the completion
-        # line stands alone, as before.
+        # Route reason rides the next step's header, not a line beneath the completion.
         yield _line(" · ".join(parts), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
-        if node.label and not (node.interrupted or blocked):
-            yield _gutter_indent(depth, gutters, color)
-            yield _line(f"→ {node.label}", depth, color,
-                        *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.PauseNode):

@@ -187,7 +187,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
     step = _merge_step()
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={}, merge_commit=None,
+        state = types.SimpleNamespace(vars={}, merge_commit=None, route_label=None,
                                       save=lambda *a, **k: None)
         log = InMemoryEventLog()
 

@@ -434,6 +434,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.held_acquire_step = None
     state.step = None
     state.step_label = None
+    state.route_label = None
     from imp.engine import merge_queue
     if not state.merge_commit:
         merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
@@ -502,22 +503,26 @@ async def _dispatch_step(
         project_facts=project_facts, guidance=guidance)
 
 
-def _step_started_payload(step: Step) -> dict[str, Any]:
+def _step_started_payload(step: Step, state: State) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "quiet": step.quiet, "label": step.label}
     if step.kind == "script":
         payload["command"] = step.command
+    # Consume-on-read: transfer route_label from the prior step's _finish, then clear it.
+    if state.route_label is not None:
+        payload["route_label"] = state.route_label
+        state.route_label = None
     return payload
 
 
-def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
+def _emit_started(log: EventLog, step: Step, state: State, **extra: Any) -> dict[str, Any]:
     return _emit(log, "step_started",
-                 {**_step_started_payload(step), **extra},
+                 {**_step_started_payload(step, state), **extra},
                  agent_id=None)
 
 
 def _finish(
-    log: EventLog, step: Step, match: Any
+    log: EventLog, step: Step, match: Any, state: State
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit(log, "step_completed", {
         "step": step.name, "kind": step.kind,
@@ -525,16 +530,18 @@ def _finish(
         "var_mutations": match.var_mutations,
         "label": match.rule.label if match.rule is not None else None,
     })
+    # Thread the label to the next step_started; None-write clears a prior labeled route.
+    state.route_label = match.rule.label if match.rule is not None else None
     return match.action, None, match.var_mutations
 
 
 def _route_branch(
     step: Step, state: State, log: EventLog
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step)
+    _emit_started(log, step, state)
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
-    return _finish(log, step, match)            # branch goto carries NO feedback
+    return _finish(log, step, match, state)            # branch goto carries NO feedback
 
 
 async def _route_script(
@@ -542,7 +549,7 @@ async def _route_script(
     *, verify_command: str | None = None, verify_timeout: int | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step)
+    _emit_started(log, step, state)
     # The script gate's subprocess runs to completion under a blocking
     # proc.communicate() (gates.run_script). Offload it to a worker thread so the
     # event loop keeps turning — otherwise a multi-minute verify gate starves
@@ -562,7 +569,7 @@ async def _route_script(
             policy=sandbox_policy))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
-    action, _, muts = _finish(log, step, match)
+    action, _, muts = _finish(log, step, match, state)
     feedback = None
     if isinstance(action, Goto):
         assert step.command is not None, "script step must have a command"
@@ -625,7 +632,7 @@ async def _route_acquire(
         raise RuntimeError("wait_for_turn_fn is required for acquire steps")
     assert step.acquire is not None
     lane = _resolve_lane(step.acquire, change)
-    _emit_started(log, step)
+    _emit_started(log, step, state)
     merge_queue.enqueue_if_absent(change.control_root, change.id, lane)
 
     def _is_head() -> bool:
@@ -649,7 +656,7 @@ async def _route_acquire(
     _emit(log, "lane_acquired", {"base": lane, "step": step.name})
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
-    return _finish(log, step, match)
+    return _finish(log, step, match, state)
 
 
 def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
@@ -692,13 +699,13 @@ async def _route_merge_and_exit_worktree(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     from imp.engine import worktree
-    _emit_started(log, step)
+    _emit_started(log, step, state)
 
     if state.merge_commit:
         _exit_worktree(change)
         match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
         state.vars.update(match.var_mutations)
-        return _finish(log, step, match)
+        return _finish(log, step, match, state)
 
     spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
     body = _decisions_body(spec_path)
@@ -724,7 +731,7 @@ async def _route_merge_and_exit_worktree(
 
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
     state.vars.update(match.var_mutations)
-    return _finish(log, step, match)
+    return _finish(log, step, match, state)
 
 
 async def _route_agent(
@@ -778,7 +785,7 @@ async def _route_agent(
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={
-                **_step_started_payload(step), "resumed": is_resume},
+                **_step_started_payload(step, state), "resumed": is_resume},
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
@@ -864,7 +871,7 @@ async def _route_agent(
     state.vars.update(match.var_mutations)
     state.current_step = None
     state.save(change.state_dir)
-    action, _, muts = _finish(log, step, match)
+    action, _, muts = _finish(log, step, match, state)
     feedback = None
     if isinstance(action, Goto) and action.feedback is not None:
         feedback = f"{action.feedback}\n{render_output_fields(result.output)}"

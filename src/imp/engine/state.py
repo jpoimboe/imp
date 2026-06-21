@@ -63,6 +63,7 @@ class State:
     step_label: str | None = None
     held_lane: str | None = None          # lane key (base branch) this change holds
     held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
+    route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
 
@@ -112,6 +113,7 @@ class State:
             "id": self.id,
             "step": self.step,
             "step_label": self.step_label,
+            "route_label": self.route_label,
             "step_attempt": self.step_attempt,
             "status": self.status,
             "vars": self.vars,

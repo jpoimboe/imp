@@ -2231,8 +2231,9 @@ def test_step_started_payload_carries_command_only_for_script() -> None:
                   command="make check")
     agent = Step(name="spec", phase="design", kind="agent", rules=(),
                  on_max_retries=Pause(), max_loops=1, source=loc)
-    assert _step_started_payload(script)["command"] == "make check"
-    assert "command" not in _step_started_payload(agent)
+    state = State(id="t", step=None, step_attempt=0, status="running")
+    assert _step_started_payload(script, state)["command"] == "make check"
+    assert "command" not in _step_started_payload(agent, state)
 
 
 @pytest.mark.anyio
@@ -2293,3 +2294,48 @@ async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
     # worktree-anchored: relative, never absolute, never a parent escape.
     assert not inv.change_context.change_home.startswith("/")
     assert ".." not in inv.change_context.change_home
+
+
+@pytest.mark.anyio
+async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
+    """A labeled rule on `writer` makes the NEXT step's step_started carry
+    route_label; an unlabeled continue leaves it absent, and consume-on-read
+    prevents the reason bleeding into the step after that."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: writer\n"
+        "        file: agents/writer.md\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {else: true, continue: true, label: \"addressing review feedback\"}\n"
+        "      - {name: second, file: agents/writer.md, tier: medium}\n"
+        "      - {name: third, file: agents/writer.md, tier: medium}\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    started = {
+        e["payload"]["step"]: e["payload"]
+        for e in events if e["type"] == "step_started"
+    }
+    # The emitter (writer) entered with no prior labeled route → no suffix.
+    assert "route_label" not in started["writer"]
+    # The labeled route carries the reason onto the TARGET step's start.
+    assert started["second"]["route_label"] == "addressing review feedback"
+    # Consume-on-read: the unlabeled continue off `second` leaves `third` clean.
+    assert "route_label" not in started["third"]

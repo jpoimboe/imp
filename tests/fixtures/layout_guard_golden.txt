@@ -29,6 +29,7 @@ resolved_steps
 resolved_tiers
 resume_pending
 retry_feedback
+route_label
 status
 step
 step_attempt

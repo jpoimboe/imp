@@ -627,20 +627,14 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
                                elapsed_s=5.0, action={"verb": "continue"}, extras=[])
     assert "\n".join(rt._render(bc_lbl, depth=1, full=False, color=False, width=80)) \
         == "  reviewing plan · complete · 5s"
-    # goto WITH a workflow route label: the gray completion line prints first,
-    # then a (gutter-bearing) blank, then the non-bold yellow "→ <label>" route
-    # line beneath it — so the route announcing what's next prints after the line
-    # saying the step is done.
+    # A workflow route label no longer renders beneath the completion; a labeled
+    # completion is the single gray completion line (the reason rides the next header).
     bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "task-lead",
                                     "resume": False, "rework": True},
                             label="addressing review feedback", extras=["status=Success"])
     lines2 = list(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert lines2 == [
-        "  code-reviewer · complete · 41s",
-        "  ",
-        "  → addressing review feedback",
-    ]
+    assert lines2 == ["  code-reviewer · complete · 41s"]
     # goto WITHOUT a route label: only the completion line, no extra line, no empty gap.
     bc3 = nv.BreadcrumbLine(step_name="spec-reviewer", elapsed_s=2.0,
                             action={"verb": "goto", "target": "plan-writer",
@@ -1536,7 +1530,7 @@ def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
     assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)
 
 
-def test_breadcrumb_renders_route_label_below_completion() -> None:
+def test_breadcrumb_with_label_has_no_route_line() -> None:
     lines = list(rt._render(
         nv.BreadcrumbLine(
             step_name="finalize", kind="agent", elapsed_s=2,
@@ -1544,28 +1538,7 @@ def test_breadcrumb_renders_route_label_below_completion() -> None:
                     "resume": False, "rework": False},
             label="entering the merge queue"),
         depth=0, full=False, color=False, width=80))
-    assert lines == [
-        "finalize · complete · 2s",
-        "",
-        "→ entering the merge queue",
-    ]
-
-
-def test_breadcrumb_route_label_keeps_yellow_below_completion() -> None:
-    # colors and arrow are preserved: the gray completion line prints first, then
-    # a (blank) separator, then the yellow "→ <label>" route line below it.
-    lines = list(rt._render(
-        nv.BreadcrumbLine(
-            step_name="finalize", kind="agent", elapsed_s=2,
-            action={"verb": "goto", "target": "wait-for-head",
-                    "resume": False, "rework": False},
-            label="entering the merge queue"),
-        depth=0, full=False, color=True, width=80))
-    assert len(lines) == 3
-    body, blank, label_line = lines
-    assert body == pal.ansi("finalize · complete · 2s", "gray")
-    assert blank == ""
-    assert label_line == pal.ansi("→ entering the merge queue", "yellow")
+    assert lines == ["finalize · complete · 2s"]
 
 
 def test_breadcrumb_without_label_has_no_route_line() -> None:
@@ -1581,29 +1554,26 @@ def test_breadcrumb_without_label_has_no_route_line() -> None:
     assert not any(" ·  · " in ln for ln in lines)   # no empty segment
 
 
-def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
+def test_route_reason_rides_target_step_header() -> None:
     events = [
         _ev("1", "change_created", change_id=1, title="x"),
-        _ev("2", "step_started", step="finalize", kind="agent", phase="review",
+        _ev("2", "step_started", step="code-reviewer", kind="agent", phase="review",
             model="m", provider="anthropic"),
-        _ev("3", "step_completed", step="finalize", kind="agent",
-            action={"verb": "goto", "target": "wait-for-head",
-                    "resume": False, "rework": False},
-            var_mutations={}, label="entering the merge queue"),
-        _ev("4", "step_started", step="wait-for-head", kind="branch",
-            phase="merge", model="m", provider="anthropic"),
-        _ev("5", "step_completed", step="wait-for-head", kind="branch",
-            action={"verb": "continue"}, var_mutations={}, label=None),
+        _ev("3", "step_completed", step="code-reviewer", kind="agent",
+            action={"verb": "goto", "target": "task-lead",
+                    "resume": False, "rework": True},
+            var_mutations={}, label="addressing review feedback"),
+        _ev("4", "step_started", step="task-lead", kind="agent", phase="implement",
+            model="opus", provider="anthropic",
+            route_label="addressing review feedback"),
     ]
     rendered = _lines(events)
-    # the finalize completion line prints first, then a blank, then the route
-    # label two lines below it.
-    bc_i = next(i for i, ln in enumerate(rendered) if "finalize · complete" in ln)
-    lbl_i = next(i for i, ln in enumerate(rendered)
-                 if ln.strip() == "→ entering the merge queue")
-    assert lbl_i == bc_i + 2
-    assert rendered[bc_i + 1].strip() == ""
-    assert "→ entering the merge queue" not in rendered[bc_i]
+    # No "→ addressing review feedback" route line anywhere.
+    assert not any(ln.strip().startswith("→ addressing review feedback")
+                   for ln in rendered)
+    # The reason rides the task-lead header as the yellow suffix (last segment).
+    hdr = next(ln for ln in rendered if "task-lead" in ln and "complete" not in ln)
+    assert hdr.strip().endswith("· addressing review feedback")
 
 
 def test_header_line_uses_step_label_and_falls_back_to_id() -> None:
@@ -1946,19 +1916,16 @@ def test_skill_load_renders_gerund() -> None:
     assert "load skill refactor" not in joined   # imperative form is gone
 
 
-def test_route_label_renders_lifecycle_yellow() -> None:
-    bc = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
-                           action={"verb": "goto", "target": "task-lead",
-                                   "resume": False, "rework": True},
-                           label="addressing review feedback")
+def test_route_label_header_suffix_renders_lifecycle_yellow() -> None:
+    node = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                       model="opus", route_label="addressing review feedback")
     with unittest.mock.patch.dict(pal.NODE_COLORS, {"lifecycle": ("cyan",)}):
         for theme in ("ansi", "dark", "light"):
             pal.set_theme(theme)
             try:
-                lines = list(rt._render(bc, depth=1, full=False, color=True, width=80))
-                route = next(ln for ln in lines if "→ addressing review feedback" in ln)
-                assert pal._ANSI["cyan"] in route
-                assert pal._ANSI["yellow"] not in route
+                hdr = rt.header_line(node, depth=0, color=True)
+                assert pal.ansi(" · addressing review feedback", "cyan") in hdr
+                assert pal._ANSI["yellow"] not in hdr.split("opus", 1)[-1]
             finally:
                 pal.set_theme("ansi")
 
@@ -2025,6 +1992,28 @@ def test_outcome_line_renders_lifecycle_yellow_in_all_themes() -> None:
             assert pal._ANSI["green"] not in line
         finally:
             pal.set_theme("ansi")
+
+
+def test_header_line_appends_route_label_suffix() -> None:
+    # Forward-routed header: yellow " · <reason>" rides last, after the model.
+    fwd = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                      model="opus", route_label="addressing review feedback")
+    assert rt.header_line(fwd, depth=0, color=False) == \
+        "implementing the plan · opus · addressing review feedback"
+    # Resume header: " (resume)", then the model, then the reason — always last.
+    res = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                      model="opus", resumed=True,
+                      route_label="addressing review feedback")
+    assert rt.header_line(res, depth=0, color=False) == \
+        "implementing the plan (resume) · opus · addressing review feedback"
+    # The reason segment is painted lifecycle (yellow), distinct from the step color.
+    colored = rt.header_line(fwd, depth=0, color=True)
+    assert pal.ansi(" · addressing review feedback",
+                    *pal.NODE_COLORS["lifecycle"]) in colored
+    # No route_label → byte-identical to today (no trailing segment).
+    bare = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
+                       model="opus")
+    assert rt.header_line(bare, depth=0, color=False) == "implementing the plan · opus"
 
 
 def test_phase_end_rule_collapses_when_subsecond() -> None:
