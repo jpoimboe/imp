@@ -6,7 +6,7 @@ import io
 import json
 
 from imp.cli import narrative as nv
-from imp.cli.live_driver import LiveDriver
+from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
 from tests._event_fixtures import ev
@@ -1459,3 +1459,71 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
     assert sum(1 for ln in body if ln.strip() == "── implement phase ───") == 2  # re-entry rule
     end_rule = next(ln for ln in body if "implement phase complete" in ln)
     assert end_rule.startswith("implement phase complete")  # gray end line flush at column 0
+
+
+def test_compute_start_phase_returns_last_step_started_phase(tmp_path):
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # The anchor is the phase of the MOST RECENT step_started, not the first.
+    assert compute_start_phase(path) == "plan"
+
+
+def test_compute_start_phase_single_phase_is_none(tmp_path):
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # Anchor == the journal's first (only) phase, so return None: the driver must
+    # NOT suppress, or it would discard the root-level opening_intent prompt that
+    # renders before the first phase header.
+    assert compute_start_phase(path) is None
+
+
+def test_compute_start_phase_returns_none_when_anchor_equals_first_phase(tmp_path):
+    # spec -> plan -> spec: the most-recent phase ("spec") equals the first phase
+    # present, so return None and render full history rather than lift suppression
+    # at the earlier "spec" PhaseNode (phases are matched by name).
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "revise", "kind": "branch", "phase": "spec"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:09+00:00"},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    assert compute_start_phase(path) is None
+
+
+def test_compute_start_phase_empty_journal_is_none(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text("")
+    assert compute_start_phase(path) is None
+
+
+def test_compute_start_phase_missing_file_is_none(tmp_path):
+    assert compute_start_phase(tmp_path / "nope.jsonl") is None

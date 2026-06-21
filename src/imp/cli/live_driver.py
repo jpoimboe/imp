@@ -24,13 +24,41 @@ cancellation-sentinel leak).
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus
+
+
+def compute_start_phase(events_path: Path) -> str | None:
+    try:
+        raw = events_path.read_bytes()
+    except FileNotFoundError:
+        return None
+    first: str | None = None
+    last: str | None = None
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "step_started":
+            payload = event.get("payload")
+            if isinstance(payload, dict) and isinstance(payload.get("phase"), str):
+                if first is None:
+                    first = payload["phase"]
+                last = payload["phase"]
+    if last is None or last == first:
+        return None
+    return last
 
 
 def compose_activity_status(
