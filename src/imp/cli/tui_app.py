@@ -12,7 +12,7 @@ from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 from imp.cli.tui_driver import TuiDriver
 from imp.cli.tui_viewport import ViewportState
 
-HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ESC/^C pause"
+HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ^C pause"
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _STATUS_SEP = "   "
@@ -115,9 +115,6 @@ class TuiApp:
         self._invalidate()
 
     # -- pause / interrupt (same coordinator as streaming mode) --------------
-    async def pause_run(self) -> None:
-        await self._coord.signal_pause(reason="esc")
-
     async def interrupt_run(self) -> None:
         await self._coord.signal_pause(reason="ctrl-c")
 
@@ -177,10 +174,6 @@ class TuiApp:
         @kb.add(Keys.ScrollDown)
         def _(event: Any) -> None:
             self.scroll_down_lines()
-
-        @kb.add("escape", filter=not_prompt)
-        async def _(event: Any) -> None:
-            await self.pause_run()
 
         @kb.add("c-c", filter=not_prompt)
         async def _(event: Any) -> None:

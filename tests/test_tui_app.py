@@ -93,14 +93,6 @@ def test_scroll_wheel_lines_change_offset() -> None:
 
 
 @pytest.mark.anyio
-async def test_pause_run_routes_esc_to_coordinator() -> None:
-    coord = _FakeCoord()
-    app = TuiApp(coord=coord, color=False, width=80)
-    await app.pause_run()
-    assert coord.pauses == ["esc"]
-
-
-@pytest.mark.anyio
 async def test_interrupt_run_routes_ctrl_c_to_coordinator() -> None:
     coord = _FakeCoord()
     app = TuiApp(coord=coord, color=False, width=80)
@@ -115,8 +107,9 @@ def test_build_app_registers_all_bindings() -> None:
     app._build_app()
     bound = {k for b in app._app.key_bindings.bindings for k in b.keys}
     for key in (Keys.PageUp, Keys.PageDown, Keys.End, Keys.ControlO,
-                Keys.Escape, Keys.ControlC, Keys.ScrollUp, Keys.ScrollDown):
+                Keys.ControlC, Keys.ScrollUp, Keys.ScrollDown):
         assert key in bound, key
+    assert Keys.Escape not in bound          # ESC is no longer an interrupt gesture
     assert app._app.full_screen is True
     assert app._app.mouse_support() is True
 
