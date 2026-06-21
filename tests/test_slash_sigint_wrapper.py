@@ -48,20 +48,11 @@ class _KbiPrompt:
 class _FakeCoord:
     def __init__(self) -> None:
         self.exit_reason = None
-        self._esc_reader = None
         self._exit_event = None
         self.at_prompt_calls: list[bool] = []
 
     def set_at_prompt(self, value: bool) -> None:
         self.at_prompt_calls.append(value)
-
-    def tty_quiesced(self):
-        # Async context manager — mirrors InterruptCoordinator.tty_quiesced()
-        @contextlib.asynccontextmanager
-        async def _c():
-            yield
-
-        return _c()
 
     def rearm_signal_handlers(self) -> None: ...
 

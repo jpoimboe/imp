@@ -256,15 +256,17 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
     assert status.suspend_calls == 1   # hoisted: still just one suspend
 
 
-def test_hint_and_help_agree_on_esc_ctrlc_vocabulary(tmp_path: Path) -> None:
+def test_hint_and_help_describe_ctrlc_pause_without_esc(tmp_path: Path) -> None:
     change = _FakeChange(tmp_path)
     out: list[str] = []
     handle_slash_line("/help", change=change, output_fn=out.append)
     ctrl_c_line = next(line for line in out if "Ctrl+C" in line)
 
-    # Both surfaces describe ESC/Ctrl-C with "pause", neither with "interrupt".
+    # Both surfaces describe Ctrl-C with "pause", neither with "interrupt", and
+    # neither advertises ESC as a pause key anymore.
     assert "pause" in ctrl_c_line.lower()
-    assert "Esc" in ctrl_c_line          # Esc is explicitly listed in /help
+    assert "Esc" not in ctrl_c_line
     assert "interrupt" not in ctrl_c_line.lower()
     assert "pause" in HINT.lower()
     assert "interrupt" not in HINT.lower()
+    assert "esc" not in HINT.lower()
