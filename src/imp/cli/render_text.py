@@ -321,7 +321,7 @@ def _phase_rule(label: str) -> str:
 
 def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
                           gutters: tuple[int, ...] = ()) -> str:
-    """The `── <phase> complete · <N>s ───` end rule, shared by both renderers (§7).
+    """The quiet gray `<phase> phase complete · <N>s` end line, shared by both renderers (§7).
     `depth` is the phase HEADER's depth — pass `depth` from render_text and
     `cur.depth` from the live driver; both equal the header level.
     This depth equivalence holds only because phases appear solely as direct
@@ -330,8 +330,8 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     elapsed = nv.phase_elapsed(node)
     done = fmt_seconds_done(elapsed)
     secs = f" · {done}" if done else ""
-    return _line(_phase_rule(f"{node.name} phase complete{secs}"), depth, color,
-                 *pal.NODE_COLORS["lifecycle"], gutters=gutters)
+    return _line(f"{node.name} phase complete{secs}", depth, color,
+                 *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
 
 
 def header_line(node: Any, *, depth: int, color: bool,

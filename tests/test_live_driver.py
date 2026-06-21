@@ -1458,4 +1458,4 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
     assert body == _render_body(events)                       # live == imp log, byte-for-byte
     assert sum(1 for ln in body if ln.strip() == "── implement phase ───") == 2  # re-entry rule
     end_rule = next(ln for ln in body if "implement phase complete" in ln)
-    assert end_rule.startswith("── implement phase complete")  # end rule flush at column 0
+    assert end_rule.startswith("implement phase complete")  # gray end line flush at column 0

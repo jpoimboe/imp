@@ -154,7 +154,7 @@ spec-verify-commit
 
 spec-verify-commit · complete
 
-── spec phase complete · 3m 9s ───
+spec phase complete · 3m 9s
 
 ── plan phase ───
 
@@ -282,7 +282,7 @@ plan-verify-commit
 
 plan-verify-commit · complete
 
-── plan phase complete · 4m 7s ───
+plan phase complete · 4m 7s
 
 ── implement phase ───
 
@@ -390,7 +390,7 @@ plan-cycle-check · sonnet
 
 plan-cycle-check · complete · 41s
 
-── implement phase complete · 10m 17s ───
+implement phase complete · 10m 17s
 
 ── review phase ───
 

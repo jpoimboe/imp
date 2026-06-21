@@ -865,8 +865,8 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     spec_line = next(ln for ln in out if "spec phase complete" in ln)
     assert "s" in spec_line    # e.g. "7s"
     assert "7" in spec_line    # computed from timestamps
-    # the breadcrumb is at depth 0 (same as the phase header)
-    assert spec_line == "── spec phase complete · 7s ───"
+    # the breadcrumb is at depth 0 (same as the phase header), plain gray, no rule
+    assert spec_line == "spec phase complete · 7s"
 
 
 _ANSI_RE = _re.compile(r"\x1b\[[0-9;]*m")
@@ -1843,7 +1843,7 @@ def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
         name="spec", start_ts="2024-01-01T00:00:00",
         end_ts="2024-01-01T00:00:00.500000"))
     line = rt.phase_breadcrumb_line(pn, depth=0, color=False)
-    assert line == "── design phase complete ───"
+    assert line == "design phase complete"
     assert " · " not in line
 
     # 2) step breadcrumb: sub-second elapsed drops the duration, no dangling sep.
@@ -2044,4 +2044,4 @@ def test_phase_end_rule_collapses_when_subsecond() -> None:
     ]
     out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
     line = next(ln for ln in out if "spec phase complete" in ln)
-    assert line == "── spec phase complete ───"
+    assert line == "spec phase complete"
