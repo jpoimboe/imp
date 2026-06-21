@@ -168,8 +168,9 @@ phases:
           # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
           - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
              goto: plan-writer, label: "write next plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
-          # coverage complete, trivial change -> no panel, straight to integration via stamp-trailers
-          - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: stamp-trailers}
+          # coverage complete, trivial change -> no panel, straight to finalize
+          # (the per-batch cleanup already folded+stamped this batch)
+          - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: finalize}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
           # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD diff
           # (review_scope='plan'), not a fresh whole-change panel each round.
@@ -239,32 +240,21 @@ phases:
 
       # After a batch's review + sweep settle, advance the diff base to HEAD and reset
       # the counter. The end-of-change pass (review_scope==change) is the last review,
-      # so route it to integration (via stamp-trailers); a per-batch
+      # so route it to finalize (the per-batch cleanup already stamped); a per-batch
       # pass returns to plan-writer for the next plan.
       - name: review-base-repin
         quiet: true
         command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
         rules:
-          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
+          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: finalize}
           # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
           # never re-enters with more_plans:true; every post-panel per-batch settle is therefore
           # terminal -> route a corrective/gap-fix batch to finalize, not the next plan. (This keys
           # solely on change_panel_done; it is correct only while more_plans means uncovered SPEC
           # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
           # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
-          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
+          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: finalize}
           - {if: {exit: 0}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: plan-writer}
-          - {else: true, pause: true}
-
-      # Stamp the Change: trailer on every run commit ONCE, before integration. Content-
-      # idempotent; a plain rebase preserves the trailer, so re-integration rounds need
-      # no re-stamp. Reached from plan-cycle-check (fast-path) and review-base-repin
-      # (end-of-change), so it runs on every path into integration.
-      - name: stamp-trailers
-        quiet: true
-        command: ./scripts/stamp-trailers.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
       - name: finalize

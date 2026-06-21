@@ -242,13 +242,14 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_stamp_trailers_tails_the_implement_phase() -> None:
+def test_finalize_tails_the_implement_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
-    assert "stamp-trailers" in names and "finalize" in names
-    assert names.index("stamp-trailers") == names.index("finalize") - 1
+    assert "stamp-trailers" not in names
+    assert names[-1] == "finalize"
+    assert names[-2] == "review-base-repin"
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -656,11 +657,11 @@ def test_review_base_repin_corrective_batch_routes_to_finalize() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["review-base-repin"].rules
     # A per-batch review settling AFTER the full panel (guard latched) means coverage
-    # is complete: route to stamp-trailers -> finalize, NOT back to plan-writer.
+    # is complete: route to finalize, NOT back to plan-writer.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": True},
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "stamp-trailers"
+    assert isinstance(m.action, Goto) and m.action.target == "finalize"
 
 
 def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:

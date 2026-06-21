@@ -171,7 +171,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
     # Quiet plumbing steps stay label-free.
     for name in ("spec-verify-commit", "plan-verify-commit",
                  "cleanup-implement", "cleanup-sweep", "cleanup-merge", "review-base-repin",
-                 "stamp-trailers", "assert-stamped", "integrate-rebase"):
+                 "assert-stamped", "integrate-rebase"):
         assert by[name].label is None, name
 
 

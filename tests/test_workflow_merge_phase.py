@@ -11,10 +11,11 @@ def _phase(wf, name):
     return next(p for p in wf.phases if p.name == name)
 
 
-def test_stamp_and_finalize_tail_the_implement_phase() -> None:
+def test_finalize_tails_the_implement_phase() -> None:
     wf = load_workflow(WF)
     impl = [s.name for s in _phase(wf, "implement").steps]
-    assert impl[-2:] == ["stamp-trailers", "finalize"]
+    assert impl[-2:] == ["review-base-repin", "finalize"]
+    assert "stamp-trailers" not in impl
     assert not any(p.name == "review" for p in wf.phases)
 
 

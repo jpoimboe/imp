@@ -10,7 +10,7 @@ _QUIET = {
     # per-batch fold+stamp + diff-base pinning (mechanical git, no narrative)
     "cleanup-implement", "cleanup-sweep", "cleanup-merge", "review-base-repin",
     # review/merge plumbing: mechanical git scripts + pure routing gates
-    "stamp-trailers", "assert-stamped",
+    "assert-stamped",
     "integrate-rebase",
 }
 

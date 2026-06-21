@@ -33,12 +33,12 @@ def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # cleanup-implement gates via its `else: pause` rule; stamp-trailers via
-    # `pause: true`. Each is the sole gate at its own flat index.
+    # cleanup-implement gates via its `else: pause` rule; assert-stamped via its
+    # `else: pause`. Each is the sole gate at its own flat index.
     i = _idx(wf, "cleanup-implement")
     assert gate_steps_in_span(wf, i, i) == ("cleanup-implement",)
-    j = _idx(wf, "stamp-trailers")
-    assert gate_steps_in_span(wf, j, j) == ("stamp-trailers",)
+    j = _idx(wf, "assert-stamped")
+    assert gate_steps_in_span(wf, j, j) == ("assert-stamped",)
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:

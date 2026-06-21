@@ -3,7 +3,7 @@ INSIDE the per-plan implement loop; plan-cycle-check decides coverage AND cadenc
 single `code-reviewer` runs as the `code-reviewer` step directly, over review_base..HEAD
 per batch and over merge-base..HEAD once at change end (review_scope=change).
 deferred-sweep + sweep-verify + review-base-repin trail each review batch.
-stamp-trailers and finalize tail the implement phase (no separate review phase)."""
+review-base-repin and finalize tail the implement phase (no separate review phase)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -46,7 +46,7 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
         "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
         "code-reviewer", "deferred-sweep", "sweep-verify",
         "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
-        "stamp-trailers", "finalize",
+        "finalize",
     ]
 
 
@@ -54,7 +54,7 @@ def test_no_separate_review_phase_stamp_and_finalize_tail_implement() -> None:
     wf = _wf()
     assert not any(p.name == "review" for p in wf.phases)
     impl = next(p for p in wf.phases if p.name == "implement")
-    assert [s.name for s in impl.steps][-2:] == ["stamp-trailers", "finalize"]
+    assert [s.name for s in impl.steps][-2:] == ["review-base-repin", "finalize"]
     names = {s.name for s in wf.flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers",
@@ -181,7 +181,7 @@ def test_plan_cycle_check_routes_cadence_and_coverage() -> None:
     m_fast = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                             output={"status": "Success", "more_plans": False,
                                     "running_tasks": 1, "rationale": "x"})
-    assert isinstance(m_fast.action, Goto) and m_fast.action.target == "stamp-trailers"
+    assert isinstance(m_fast.action, Goto) and m_fast.action.target == "finalize"
     m_cov = evaluate_rules(rules, vars=_BASE_VARS,
                            output={"status": "Success", "more_plans": False,
                                    "running_tasks": 3, "rationale": "x"})
@@ -252,7 +252,7 @@ def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
     m_change = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "change",
                                            "tasks_since_review": 9},
                               output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
-    assert isinstance(m_change.action, Goto) and m_change.action.target == "stamp-trailers"
+    assert isinstance(m_change.action, Goto) and m_change.action.target == "finalize"
     assert m_change.var_mutations["tasks_since_review"] == 0
     assert m_change.var_mutations["review_base"] == "deadbeef"
     m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan",
