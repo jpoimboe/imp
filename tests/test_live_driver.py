@@ -6,7 +6,7 @@ import io
 import json
 
 from imp.cli import narrative as nv
-from imp.cli.live_driver import LiveDriver
+from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
 from tests._event_fixtures import ev
@@ -1459,3 +1459,247 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
     assert sum(1 for ln in body if ln.strip() == "── implement phase ───") == 2  # re-entry rule
     end_rule = next(ln for ln in body if "implement phase complete" in ln)
     assert end_rule.startswith("implement phase complete")  # gray end line flush at column 0
+
+
+def test_compute_start_phase_returns_last_step_started_phase(tmp_path):
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # The anchor is the phase of the MOST RECENT step_started, not the first.
+    assert compute_start_phase(path) == "plan"
+
+
+def test_compute_start_phase_single_phase_is_none(tmp_path):
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # Anchor == the journal's first (only) phase, so return None: the driver must
+    # NOT suppress, or it would discard the root-level opening_intent prompt that
+    # renders before the first phase header.
+    assert compute_start_phase(path) is None
+
+
+def test_compute_start_phase_returns_none_when_anchor_equals_first_phase(tmp_path):
+    # spec -> plan -> spec: the most-recent phase ("spec") equals the first phase
+    # present, so return None and render full history rather than lift suppression
+    # at the earlier "spec" PhaseNode (phases are matched by name).
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "revise", "kind": "branch", "phase": "spec"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:09+00:00"},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    assert compute_start_phase(path) is None
+
+
+def test_compute_start_phase_empty_journal_is_none(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text("")
+    assert compute_start_phase(path) is None
+
+
+def test_compute_start_phase_missing_file_is_none(tmp_path):
+    assert compute_start_phase(tmp_path / "nope.jsonl") is None
+
+
+def test_compute_start_phase_ignores_malformed_phase_field(tmp_path):
+    events = [
+        {"type": "step_started", "agent_id": None, "id": "e0",
+         "payload": {"step": "a", "phase": "spec"}},
+        {"type": "step_started", "agent_id": None, "id": "e1", "payload": None},
+        {"type": "step_started", "agent_id": None, "id": "e2",
+         "payload": {"step": "b"}},
+        {"type": "step_started", "agent_id": None, "id": "e3",
+         "payload": {"step": "c", "phase": None}},
+        {"type": "step_started", "agent_id": None, "id": "e4",
+         "payload": {"step": "d", "phase": 42}},
+        {"type": "step_started", "agent_id": None, "id": "e5",
+         "payload": {"step": "e", "phase": "plan"}},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # Malformed entries are skipped; first valid = "spec", last valid = "plan".
+    assert compute_start_phase(path) == "plan"
+
+
+def _two_phase_events():
+    return [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00"},
+    ]
+
+
+def test_suppresses_output_before_anchor_phase_header():
+    events = _two_phase_events()
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase="plan")
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    # Nothing from the earlier "spec" phase: not its header, breadcrumb, or step.
+    assert not any("spec" in ln or "draft" in ln for ln in body)
+    # The anchor phase header is the FIRST line — no leading blank precedes it.
+    assert body[0] == "── plan phase ───"
+    # The anchor phase's own content renders normally.
+    assert any("refine" in ln for ln in body)
+
+
+def test_frontier_advances_past_suppressed_nodes_no_redump():
+    events = _two_phase_events()
+    # Reference: full live render with no suppression.
+    fout = _Pipe()
+    fdrv = LiveDriver(stream=fout, color=False, width=80,
+                      status=LiveStatus(fout), start_phase=None)
+    for e in events:
+        fdrv.on_event(e)
+    fdrv.finish()
+    full = _body(fout)
+    # Anchored resume at the "plan" phase.
+    sout = _Pipe()
+    sdrv = LiveDriver(stream=sout, color=False, width=80,
+                      status=LiveStatus(sout), start_phase="plan")
+    for e in events:
+        sdrv.on_event(e)
+    sdrv.finish()
+    supp = _body(sout)
+    # No earlier-phase node is ever (re-)emitted, even on the first live walk
+    # after suppression lifts — cursors were advanced through the suppressed nodes.
+    assert all("spec" not in ln and "draft" not in ln for ln in supp)
+    # The anchor phase onward is byte-identical to the tail of the full render.
+    anchor = full.index("── plan phase ───")
+    assert supp == full[anchor:]
+
+
+def test_start_phase_none_renders_full_history():
+    events = _two_phase_events()
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase=None)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    # Regression guard: start_phase=None reproduces the full batch render path.
+    assert _body(out) == _render_body(events)
+
+
+def _opening_intent_events():
+    # opening_intent is emitted BEFORE the first step_started, so its
+    # UserMessageNode lands at the workflow root, before the first phase header.
+    return [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "opening_intent", "agent_id": None,
+         "payload": {"text": "build the parser"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e2", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+    ]
+
+
+def test_first_phase_resume_keeps_opening_intent_prompt(tmp_path):
+    # End-to-end guard against the dropped-prompt regression: a still-in-first-phase
+    # resume must NOT discard the user's original prompt. compute_start_phase returns
+    # None for a single-phase journal, so LiveDriver does not suppress and the
+    # root-level opening prompt renders.
+    events = _opening_intent_events()
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    sp = compute_start_phase(path)
+    assert sp is None
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase=sp)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert any("build the parser" in ln for ln in _body(out))
+
+
+def test_anchored_resume_suppresses_old_opening_intent(tmp_path):
+    # Once the run has moved past the first phase, the opening prompt is old context
+    # at root (before the first phase header) and IS suppressed.
+    events = [*_opening_intent_events(), {
+        "type": "step_started", "agent_id": None,
+        "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+        "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00",
+    }]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    sp = compute_start_phase(path)
+    assert sp == "plan"
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80,
+                     status=LiveStatus(out), start_phase=sp)
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert not any("build the parser" in ln for ln in body)
+    assert body[0] == "── plan phase ───"
+
+
+def test_resume_anchor_reads_change_events_path(tmp_path):
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+    ]
+    change.events_path.parent.mkdir(parents=True, exist_ok=True)
+    change.events_path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # The resume path reads change.events_path and anchors at the current phase.
+    assert compute_start_phase(change.events_path) == "plan"

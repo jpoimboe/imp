@@ -27,7 +27,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, playbooks, resume_select
 from imp.cli import palette as pal
 from imp.cli.init import run_init
-from imp.cli.live_driver import LiveDriver
+from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
@@ -947,7 +947,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status)
+                            width=_term_width(), status=status,
+                            start_phase=compute_start_phase(change.events_path))
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -975,7 +976,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status)
+                        width=_term_width(), status=status,
+                        start_phase=compute_start_phase(change.events_path))
     coord = InterruptCoordinator()
     solicit = make_interactive_solicit(
         change, status=status, driver=driver, coord=coord)
