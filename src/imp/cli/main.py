@@ -1092,7 +1092,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             continue
         print(change_row.format_change_line(
             change_id=row[0], title=row[4], status=row[1], step=row[2],
-            last_iso=row[3], now=now, color=color,
+            step_label=row[6], last_iso=row[3], now=now, color=color,
             name_width=change_row.name_budget()), file=sys.stderr)
     raise SystemExit(2)
 
@@ -1213,7 +1213,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     row = _row_for_id(control, change_id)
     if row is None:
         return []
-    _id, status, step, last, title, created = row
+    _id, status, step, last, title, created, _step_label = row
     events = _load_events_for_id(control, change_id) or []
     lines = [
         f"id:            {_id}",
@@ -1605,10 +1605,11 @@ def _effective_status(status: str, change_dir: Path) -> str:
     return status if _pid_alive(pid) else "errored"
 
 
-# Row = (id, status, step, last_activity, title, created_at). created_at is the
-# trailing sort key only — the renderer never displays it (see _cmd_status, which
-# formats each row via change_row.format_change_line).
-_Row = tuple[str, str, str, str, str, str]
+# Row = (id, status, step, last_activity, title, created_at, step_label).
+# created_at is the trailing sort key only; step_label feeds the merged STATUS
+# cell's ` (label)` suffix (see change_row.format_change_line). The step slot
+# stays the RAW step name so imp show keeps printing it.
+_Row = tuple[str, str, str, str, str, str, str | None]
 
 
 def _status_row(change_id: str, state_json: bytes, change_json: bytes,
@@ -1623,7 +1624,7 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         st = json.loads(state_json)
         meta = json.loads(change_json)
         return (change_id, st["status"], st.get("step") or "-", last_activity,
-                meta["title"], meta["created_at"])
+                meta["title"], meta["created_at"], st.get("step_label"))
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
@@ -1733,7 +1734,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     name_w = change_row.name_budget()
     for r in rows:
         print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w), file=sys.stderr)
     return 2
 
@@ -1753,7 +1754,8 @@ async def _pick_change_target(
     if len(rows) == 1:
         return rows[0][0]
     candidates = [resume_select.Candidate(
-        change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3])
+        change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
+        step_label=r[6])
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -1974,7 +1976,7 @@ def _backlog_rows(control: Path) -> list[_Row]:
         step = "ready" if ready else f"blocked: {', '.join(unmerged)}"
         created = rec.get("created_at", "")
         rows.append((rec["id"], "backlog", step, created,
-                     rec.get("title") or "", created))
+                     rec.get("title") or "", created, None))
     return rows
 
 
@@ -1999,7 +2001,7 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     print(change_row.header_line(color=color))
     for r in inflight:
         print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w))
     for r in backlog_rows:
         print(change_row.format_change_line(
@@ -2010,7 +2012,7 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
             print()
         for r in past:
             print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
                 last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
     return 0
 

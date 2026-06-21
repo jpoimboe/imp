@@ -14,8 +14,10 @@ def anyio_backend() -> str:
 
 
 def _row(cid: str, status: str = "paused",
-         last: str = "2026-06-11T00:00:00+00:00") -> tuple[str, str, str, str, str, str]:
-    return (cid, status, "plan", last, "Title " + cid, "2026-06-01T00:00:00+00:00")
+         last: str = "2026-06-11T00:00:00+00:00",
+         ) -> tuple[str, str, str, str, str, str, str | None]:
+    return (cid, status, "plan", last, "Title " + cid,
+            "2026-06-01T00:00:00+00:00", "planning")
 
 
 @pytest.mark.anyio

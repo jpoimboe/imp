@@ -42,3 +42,11 @@ def test_create_seeds_step_label(tmp_path: Path) -> None:
     # step NAME — but it must be set (not None), proving the seed wrote it.
     assert flat0_name is not None
     assert st.step_label == flat0_name
+
+
+def test_status_row_carries_step_label_as_seventh_element(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    row = next(r for r in _status_rows(tmp_path) if r[0] == "alpha")
+    assert len(row) == 7
+    assert row[6] == row[2]    # stub step has no label → step_label == step name

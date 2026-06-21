@@ -229,6 +229,20 @@ def test_show_live_default_renders_card(
     assert "running" in out
 
 
+def test_show_step_line_prints_raw_step_name_not_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Feat", change_id="shwstp", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "write_spec"
+    st.step_label = "writing spec"     # label differs from the raw name
+    st.save(ch.state_dir)
+    out = _run(monkeypatch, tmp_path, "show", "shwstp")
+    assert "write_spec" in out         # imp show prints the RAW step name
+    assert "writing spec" not in out   # never the label
+
+
 def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

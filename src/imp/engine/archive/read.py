@@ -39,7 +39,7 @@ def is_archived(control_root: Path, change_id: str) -> bool:
 
 def completed_rows(
     control_root: Path,
-) -> list[tuple[str, str, str, str, str, str]]:
+) -> list[tuple[str, str, str, str, str, str, str | None]]:
     db = index_path(control_root)
     if not db.exists():
         return []

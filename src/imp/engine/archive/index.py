@@ -71,12 +71,12 @@ def has_change(conn: sqlite3.Connection, change_id: str) -> bool:
 
 def completed_rows(
     conn: sqlite3.Connection,
-) -> list[tuple[str, str, str, str, str, str]]:
+) -> list[tuple[str, str, str, str, str, str, str | None]]:
     rows = conn.execute(
         "SELECT id, status, step, title, created_at,"
         " (SELECT MAX(ts) FROM events WHERE events.change_id = changes.id)"
         " FROM changes").fetchall()
     return [
-        (cid, status or "", step or "-", last or "", title or "", created or "")
+        (cid, status or "", step or "-", last or "", title or "", created or "", None)
         for (cid, status, step, title, created, last) in rows
     ]
