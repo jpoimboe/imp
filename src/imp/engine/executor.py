@@ -239,6 +239,16 @@ async def run_change(
         index_of = {s.name: i for i, s in enumerate(flat)}
         pending_seed = seed_opening  # one-shot: consumed by the first fresh agent step
 
+        # A hold mark surviving to process entry means a prior run died while holding
+        # (a clean pause clears the mark). Don't evict when the merge already succeeded
+        # (merge_commit set) or the run is parked at completion — those finalize via
+        # the idempotent merge path / _complete.
+        if (state.held_lane is not None
+                and not state.completion_pending
+                and not state.merge_commit):
+            _evict_if_holding(change, state, log)
+            state.save(change.state_dir)
+
         while True:
             if state.completion_pending:
                 # §3: re-entry after an interrupt parked at the completion
@@ -292,7 +302,8 @@ async def run_change(
 
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
-                if step.kind == "agent":
+                evicted = _evict_if_holding(change, state, log)
+                if not evicted and step.kind == "agent":
                     # Any agent-step pause (quota, agent_incomplete, a fatal
                     # provider error, OR a user interrupt) keeps the current
                     # step's transcript so resume replays and continues it, not
@@ -326,6 +337,7 @@ async def run_change(
                     n = state.loop_counts.get(step.name, 0) + 1
                     state.loop_counts[step.name] = n
                     if n > step.max_loops and not coordinator.should_pause:
+                        _evict_if_holding(change, state, log)
                         state.status = "paused"
                         state.save(change.state_dir)
                         _emit_paused_event(log, "max_loops", step=step.name)
@@ -367,6 +379,7 @@ async def run_change(
             # Navigation already set resume_pending correctly (Goto(resume=True)
             # kept the target; Continue/forward-Goto cleared it) — do NOT override.
             if coordinator.should_pause:
+                _evict_if_holding(change, state, log)
                 state.status = "paused"
                 state.save(change.state_dir)
                 _emit_paused_event(
@@ -417,9 +430,13 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     _complete no longer does `git merge` — the authoritative merge moved into the
     routable merge-to-base step (B3/F1), and the H1 dirty net moved into
     merge_to_base under the lock (R5)."""
+    state.held_lane = None
+    state.held_acquire_step = None
     state.step = None
     state.step_label = None
     if not state.merge_commit:
+        from imp.engine import merge_queue
+        merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
         state.status = "completed"
         state.save(change.state_dir)
         shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
@@ -696,6 +713,22 @@ def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> No
     state.held_acquire_step = None
     state.save(change.state_dir)
     _emit(log, "lane_released", {"base": lane, "step": step.name})
+
+
+def _evict_if_holding(change: Change, state: State, log: EventLog) -> bool:
+    """Release a held lane on pause/crash and rewind the resume cursor to the acquiring step."""
+    if state.held_lane is None:
+        return False
+    from imp.engine import merge_queue
+    lane = state.held_lane
+    acquire_step = state.held_acquire_step
+    merge_queue.pop_and_wake(change.control_root, change.id, lane)
+    state.held_lane = None
+    state.held_acquire_step = None
+    state.step = acquire_step
+    state.resume_pending = None
+    _emit(log, "lane_evicted", {"base": lane, "rewind_to": acquire_step})
+    return True
 
 
 async def _route_merge(
