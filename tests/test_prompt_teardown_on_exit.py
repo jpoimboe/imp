@@ -61,19 +61,11 @@ def _fake_change(tmp_path: Path):
 class _FakeCoord:
     def __init__(self, exit_event) -> None:
         self._exit_event = exit_event
-        self._esc_reader = None
         self.exit_reason = None
         self.at_prompt_calls: list[bool] = []
 
     def set_at_prompt(self, value: bool) -> None:
         self.at_prompt_calls.append(value)
-
-    def tty_quiesced(self):
-        @contextlib.asynccontextmanager
-        async def _c():
-            yield
-
-        return _c()
 
     def rearm_signal_handlers(self) -> None: ...
 

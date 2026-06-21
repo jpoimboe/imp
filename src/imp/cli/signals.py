@@ -1,19 +1,10 @@
-"""Signal handling: pause-and-exit on Ctrl+C / Ctrl+D / ESC / SIGTERM.
+"""Signal handling: pause-and-exit on Ctrl+C / Ctrl+D / SIGTERM.
 
 `run_signal_receiver` uses `anyio.open_signal_receiver(SIGINT, SIGTERM)`, which
 INTERCEPTS SIGINT — Python does NOT raise KeyboardInterrupt on the main thread
 for it. A CPU-bound sync tool that never yields the event loop is torn down via
 the process group instead; in-process tools cooperate via
 `coordinator.should_pause`; HTTP providers cancel their in-flight request.
-
-ESC is read by `EscKeyReader` (this module) during agent-thinking phases of an
-interactive run: it opens /dev/tty in cbreak mode and funnels the ESC byte
-(0x1b) into `InterruptCoordinator.signal_pause(reason='esc')` — the same entry
-point SIGINT uses. ESC during a prompt_toolkit `Prompt.ask_async()` call is
-still owned by prompt_toolkit (emacs meta-prefix / vi insert exit): the CLI
-wraps that call in `coord.tty_quiesced()`, which restores the tty's original
-termios for the duration of the prompt and re-arms cbreak on exit, so the two
-never hold the tty in raw/cbreak mode at once.
 
 The CLI calls `prompt_async(handle_sigint=False)`, so prompt_toolkit does NOT
 own SIGINT during a prompt: an out-of-band SIGINT then lands in this
@@ -30,11 +21,8 @@ import contextlib
 import os
 import signal
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from typing import Any
-
-from anyio import TASK_STATUS_IGNORED
-from anyio.abc import TaskStatus
 
 from imp.engine.change import Change
 from imp.engine.state import State
@@ -98,24 +86,17 @@ class InterruptCoordinator:
     Lifecycle:
       - CLI spawns `await coord.run_signal_receiver()` as a sibling task that
         subscribes to SIGINT/SIGTERM and calls `signal_pause(reason=...)`.
-      - On interactive runs the CLI also spawns `EscKeyReader(coord).run()`,
-        which calls `signal_pause(reason="esc")` on a 0x1b keystroke from
-        /dev/tty.
       - The executor checks `coord.should_pause` between events; on True it
         returns RunResult.PAUSED. The CLI then reads `coord.pause_reason`
         (default "ctrl-c") to render `paused (<reason>)`.
       - Runners attach/detach an `interrupt()` callback per step; the signal
-        receiver and the ESC reader both invoke it via `signal_pause`.
-      - `coord.tty_quiesced()` hands /dev/tty to prompt_toolkit for the
-        duration of a prompt so the ESC reader's cbreak and the prompt's raw
-        mode never collide.
+        receiver invokes it via `signal_pause`.
     """
 
     def __init__(self) -> None:
         self._runner_interrupt: Any = None
         self._should_pause = False
         self.pause_reason: str | None = None
-        self._esc_reader: Any = None
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
         self._interjects: list[str] = []
@@ -193,10 +174,9 @@ class InterruptCoordinator:
         boolean, NOT depth-counted: prompts are serialized (single controlling
         tty; `router.begin_solicit`/`end_solicit`; the resume prompt runs only
         after the run loop returns), so `ask_line_with_slash` calls never nest.
-        If a nested prompt site is ever added, make this depth-counted (like the
-        reader's `tty_quiesced`) so the inner reset does not clear it early.
-        Routes an out-of-band SIGINT through the exit path while True
-        (see _dispatch_signal)."""
+        If a nested prompt site is ever added, make this depth-counted so the
+        inner reset does not clear it early. Routes an out-of-band SIGINT through
+        the exit path while True (see _dispatch_signal)."""
         self._at_prompt = value
 
     def set_ack_hook(self, fn: Any) -> None:
@@ -227,7 +207,7 @@ class InterruptCoordinator:
 
     def _register_gesture(self, *, kind: str) -> bool:
         """Record an interrupt gesture and decide whether it proceeds. SIGTERM is
-        exempt (a supervisor shutdown must never be suppressed). For ESC/Ctrl-C: a
+        exempt (a supervisor shutdown must never be suppressed). For Ctrl-C: a
         gesture within _SUPPRESS_WINDOW_S of the FIRST gesture is suppressed
         (returns False); the window is measured from the first gesture and is NOT
         restarted by suppressed presses. Returns True to proceed."""
@@ -244,14 +224,11 @@ class InterruptCoordinator:
     def reset(self) -> None:
         """Clear interrupt state between session-loop rounds (§1). Runs right
         after run_change returns, before the prompt. Does NOT clear queued
-        interjects. Un-parks the should_pause-parked ESC reader (Task B3)."""
+        interjects."""
         self._should_pause = False
         self.pause_reason = None
         self._first_gesture_at = None
         self.escalated = False
-        reader = self._esc_reader
-        if reader is not None and hasattr(reader, "unpark_on_reset"):
-            reader.unpark_on_reset()
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """interrupt_fn is an `async def () -> None` callable. All three V1
@@ -288,8 +265,8 @@ class InterruptCoordinator:
         """Attach `interrupt_fn` for the duration of a single drive, then
         RESTORE the previous attachment (not clear it). Nesting-safe: a nested
         subagent drive saves the parent's interrupt and reinstates it on exit,
-        so ESC stays clean for the parent after a subagent returns, and ESC
-        mid-subagent cancels the subagent runner."""
+        so a Ctrl-C stays clean for the parent after a subagent returns, and a
+        Ctrl-C mid-subagent cancels the subagent runner."""
         prev = self._runner_interrupt
         self._runner_interrupt = interrupt_fn
         try:
@@ -297,36 +274,15 @@ class InterruptCoordinator:
         finally:
             self._runner_interrupt = prev
 
-    def attach_esc_reader(self, reader: Any) -> None:
-        """Register the ESC keystroke reader so `tty_quiesced` can hand off
-        termios to prompt_toolkit during interactive prompts. Unattached =
-        no-op tty_quiesced (matches non-TTY / non-interactive)."""
-        self._esc_reader = reader
-
-    def detach_esc_reader(self) -> None:
-        self._esc_reader = None
-
-    @contextlib.asynccontextmanager
-    async def tty_quiesced(self) -> AsyncIterator[None]:
-        """Release the cbreak'd /dev/tty for the duration of a prompt_toolkit
-        prompt and re-arm on exit. No-op when no reader is attached. Nesting is
-        tracked on the reader, so nested prompt sites compose."""
-        reader = self._esc_reader
-        if reader is None:
-            yield
-            return
-        async with reader.tty_quiesced():
-            yield
-
     @property
     def should_pause(self) -> bool:
         return self._should_pause
 
     async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
-        """Fired by the signal receiver or the ESC keystroke reader. Records
-        the originating `reason` (first-wins; later calls do not overwrite),
-        calls the attached runner's interrupt (if any), then flips the pause
-        flag. Idempotent across repeated calls."""
+        """Fired by the signal receiver. Records the originating `reason`
+        (first-wins; later calls do not overwrite), calls the attached runner's
+        interrupt (if any), then flips the pause flag. Idempotent across
+        repeated calls."""
         fn = self._runner_interrupt
         if self.pause_reason is None:
             self.pause_reason = reason
@@ -434,367 +390,3 @@ class InterruptCoordinator:
             self._loop = None
             self._sig_send = None
             send.close()
-
-
-_READ_TIMEOUT_S = 0.05  # ESC-during-thinking latency + prompt-entry park-wait ceiling
-
-
-class EscKeyReader:
-    """POSIX `/dev/tty` keystroke reader. Opens the controlling terminal in
-    cbreak mode and funnels a single ESC byte (0x1b) into
-    `coord.signal_pause(reason='esc')` — the same entry point SIGINT uses.
-
-    `coord.tty_quiesced()` hands the terminal to prompt_toolkit for a prompt: it
-    parks the reader (waits for the reader to acknowledge, via `_parked_evt`,
-    that it has stopped reading /dev/tty) BEFORE restoring termios and yielding,
-    then re-arms cbreak on exit (depth-counted, nestable). Because the park is
-    synchronous, the reader and prompt_toolkit never both drive the controlling
-    terminal — no stolen first keystroke, no spurious paused(esc) during a
-    prompt (AC #3). Entering a prompt therefore waits up to one read timeout
-    (`_READ_TIMEOUT_S`) for the in-flight read to return; an ESC arriving in that
-    pre-park window is still "during thinking" (the prompt is not shown yet), so
-    pausing then is correct. The reader's `finally` also sets `_parked_evt`, so a
-    reader that exited (ESC already fired) releases a waiting quiescer instead of
-    deadlocking. On EBADF/OSError (no controlling tty — CI, piped stdin) `run()`
-    returns cleanly and stays unarmed: ESC becomes a no-op. Windows has no
-    `termios`/`tty`; `run()` exits cleanly there too.
-
-    Caveats: (1) in cbreak a bare ESC is also the prefix of arrow-key sequences
-    (up-arrow = ESC [ A). The reader fires on the first ESC byte and exits, so
-    an arrow press during agent-thinking pauses the run — there is no prompt
-    active then, so the spec accepts this. (2) Startup window: `tty_quiesced` is
-    a no-op until `run()` opens /dev/tty and attaches, so a prompt reached
-    before the reader arms gets no hand-off; in practice the first agent turn
-    thinks for seconds before any prompt, so the reader is armed long before
-    (accepted scope, not guarded). (3) An abandoned read thread (cancellation +
-    the `_READ_TIMEOUT_S` select) can wake and `os.read` a just-closed fd —
-    caught as OSError; only if that fd number were reused in-process within that
-    window could it consume one byte from the wrong fd (vanishingly unlikely).
-    (4) A SIGKILL/panic past the `finally` leaves the terminal in cbreak (echo
-    off) — inherent to any raw-mode TUI; this always-on reader widens that
-    window slightly."""
-
-    def __init__(
-        self, coord: InterruptCoordinator,
-        *, on_interject: Any = None,
-    ) -> None:
-        self._coord = coord
-        self._fd: int | None = None
-        self._orig_attrs: Any = None
-        self._armed = False
-        self._quiesce_depth = 0
-        self._unquiesce_evt: Any = None        # anyio.Event | None — wakes parked reader
-        self._parked_evt: Any = None           # anyio.Event — reader → quiescer ack
-        # Task 11: optional `(line: str) -> None` sink for interject lines typed
-        # during agent-thinking. None (default) = byte-identical legacy behavior:
-        # the reader fires ONLY on ESC and ignores every other keystroke. When a
-        # sink is set, printable bytes accumulate into a line that is delivered on
-        # Enter (routed to the interject queue by the CLI). ESC still pauses
-        # immediately and discards any partial line. This is the sole /dev/tty
-        # owner during thinking, so it cannot collide with the ESC watch (one
-        # reader, one terminal); during a solicit the reader is quiesced and
-        # prompt_toolkit owns input → the line is a reply, not an interject.
-        self._on_interject = on_interject
-        self._line_buf = bytearray()
-        # Spec §4: follow-up byte poll window for ESC disambiguation. Default
-        # mirrors the loop's existing select timeout (~50 ms). Injectable by tests.
-        self._seq_timeout_s: float = _READ_TIMEOUT_S
-        # Spec §4 unwind parking: set True when a stop is unwinding (should_pause
-        # already set before we process a newly-returned byte). The reader stops
-        # consuming /dev/tty so during-unwind typing surfaces as prompt type-ahead.
-        # Cleared by coordinator.reset() (Task C1).
-        self._parked_on_pause = False
-
-    def unpark_on_reset(self) -> None:
-        """Coordinator.reset() calls this to release a should_pause park (Task B3)."""
-        self._parked_on_pause = False
-
-    def set_interject_sink(self, sink: Any) -> None:
-        """Attach (or replace) the `(line: str) -> None` interject sink after
-        construction. None restores legacy ESC-only behavior."""
-        self._on_interject = sink
-
-    def _maybe_park_on_pause(self) -> bool:
-        """Between read-return and fire: if a stop is unwinding (should_pause
-        set), park — stop consuming /dev/tty so during-unwind typing stays in the
-        kernel buffer and surfaces as prompt type-ahead. Returns True if parked.
-        coordinator.reset() (Task C1) clears _parked_on_pause to un-park."""
-        if self._coord.should_pause:
-            self._parked_on_pause = True
-            return True
-        return False
-
-    async def run(self, *, task_status: TaskStatus[None] = TASK_STATUS_IGNORED) -> None:
-        # `task_status.started()` is signalled once the reader has either armed or
-        # conclusively given up, so `await tg.start(reader.run)` lets the caller
-        # block until then. This closes the startup race: a workflow whose first
-        # step is an interactive prompt would otherwise quiesce against an
-        # unattached reader (a no-op), let prompt_toolkit set up the terminal, and
-        # then arm mid-prompt — clobbering the prompt's input mode with cbreak.
-        try:
-            import termios
-            import tty
-        except ImportError:
-            task_status.started()
-            return                              # Windows / no termios
-        try:
-            self._fd = os.open(
-                "/dev/tty", os.O_RDONLY | getattr(os, "O_NOCTTY", 0))
-        except OSError:
-            task_status.started()
-            return                              # no controlling tty
-        try:
-            try:
-                self._orig_attrs = termios.tcgetattr(self._fd)
-                tty.setcbreak(self._fd)
-            except termios.error:
-                task_status.started()
-                return                          # not a tty after all
-            import anyio
-            self._parked_evt = anyio.Event()
-            self._armed = True
-            self._coord.attach_esc_reader(self)
-            task_status.started()               # armed: prompts may now start
-
-            while True:
-                if self._quiesce_depth > 0:
-                    # Park: stop reading /dev/tty, ACK the quiescer, wait to resume.
-                    if self._unquiesce_evt is None:
-                        self._unquiesce_evt = anyio.Event()
-                    self._parked_evt.set()
-                    await self._unquiesce_evt.wait()
-                    self._unquiesce_evt = None
-                    continue
-                if self._parked_on_pause:
-                    # Stop is unwinding: idle until coordinator.reset() (Task C1)
-                    # clears _parked_on_pause. Poll at the read-timeout interval so
-                    # we resume promptly once reset fires.
-                    await anyio.sleep(self._seq_timeout_s)
-                    continue
-                byte = await anyio.to_thread.run_sync(
-                    self._read_one_byte, abandon_on_cancel=True)
-                if self._maybe_park_on_pause():
-                    # Stop unwinding: drop this byte, wait for reset() to un-park
-                    # (the §C reset triggers the same unpark machinery).
-                    continue
-                if byte == b"\x1b":
-                    if not await self._disambiguate_esc():
-                        continue                 # consumed an escape sequence
-                    self._line_buf.clear()       # ESC discards any partial line
-                    await self._coord.signal_pause(reason="esc")
-                    return
-                # Empty bytes (select timeout / quiesce race) → loop.
-                if byte and self._on_interject is not None:
-                    self._feed_interject_byte(byte)
-        finally:
-            self._armed = False
-            self._coord.detach_esc_reader()
-            if self._parked_evt is not None:
-                self._parked_evt.set()      # release any quiescer awaiting a park ack
-            if self._fd is not None and self._orig_attrs is not None:
-                try:
-                    import termios
-                except ImportError:
-                    pass
-                else:
-                    with contextlib.suppress(OSError, termios.error):
-                        termios.tcsetattr(
-                            self._fd, termios.TCSADRAIN, self._orig_attrs)
-            if self._fd is not None:
-                with contextlib.suppress(OSError):
-                    os.close(self._fd)
-                self._fd = None
-
-    def _read_one_byte(self) -> bytes:
-        """Blocking read of one byte with a short select timeout so the loop can
-        periodically observe quiesce state. Returns b'' on timeout or any
-        non-fatal read error."""
-        import select
-        fd = self._fd
-        if fd is None:
-            return b""
-        try:
-            ready, _, _ = select.select([fd], [], [], _READ_TIMEOUT_S)
-        except (OSError, ValueError):
-            return b""
-        if not ready:
-            return b""
-        if self._quiesce_depth > 0:
-            # A prompt began quiescing while this read was in flight. The pending
-            # byte belongs to prompt_toolkit, not us — leave it in the tty buffer
-            # so the prompt reads it after termios is restored. Consuming it here
-            # is the `ESC_READER_ATE: b'1'` race: the prompt would then see only
-            # the trailing `\r`, read empty input, and re-prompt forever.
-            return b""
-        try:
-            return os.read(fd, 1)
-        except OSError:
-            return b""
-
-    def _poll_byte(self, timeout_s: float) -> bytes:
-        """Blocking read of one byte with `timeout_s`. b'' on timeout/error.
-        Mirrors _read_one_byte but with a caller-chosen window (the sequence
-        disambiguation timeout, not the loop's quiesce-poll timeout). Unlike
-        _read_one_byte, quiesce ownership is NOT checked here; Task B2 adds that
-        guard to the drain callers."""
-        import select
-        fd = self._fd
-        if fd is None:
-            return b""
-        try:
-            ready, _, _ = select.select([fd], [], [], timeout_s)
-        except (OSError, ValueError):
-            return b""
-        if not ready:
-            return b""
-        try:
-            return os.read(fd, 1)
-        except OSError:
-            return b""
-
-    async def _disambiguate_esc(self) -> bool:
-        """Called after reading a 0x1b. Returns True if this is a real ESC press
-        that should fire an interrupt, False if it was (part of) an escape
-        sequence that has now been consumed and discarded. See spec §4.
-
-        After consuming a complete sequence, the loop continues: a trailing ESC
-        immediately following the sequence is treated as a deliberate keypress
-        (restart table) and a drained buffer (empty window) means the sequence
-        was all there was → return False."""
-        import anyio
-        consumed_sequence = False
-        while True:
-            nxt = await anyio.to_thread.run_sync(
-                lambda: self._poll_byte(self._seq_timeout_s),
-                abandon_on_cancel=True)
-            if nxt == b"":
-                # Window empty: if we consumed a sequence and nothing follows,
-                # it was purely a terminal escape sequence (no real ESC). If we
-                # have not consumed a sequence yet, the window expired with no
-                # follow-up byte → human ESC.
-                return not consumed_sequence
-            if nxt == b"\x1b":
-                consumed_sequence = False        # fresh ESC: reset, restart the table
-                continue
-            if nxt == b"[":                      # CSI: bytes through final 0x40-0x7e
-                await self._drain_until(lambda b: 0x40 <= b[0] <= 0x7e)
-                consumed_sequence = True
-                continue                         # restart: check for trailing ESC
-            if nxt == b"O":                      # SS3: exactly one byte
-                await anyio.to_thread.run_sync(
-                    lambda: self._poll_byte(self._seq_timeout_s),
-                    abandon_on_cancel=True)
-                consumed_sequence = True
-                continue                         # restart: check for trailing ESC
-            if nxt in (b"]", b"P", b"_", b"^", b"X"):  # string seqs: to terminator
-                await self._drain_string_sequence()
-                consumed_sequence = True
-                continue                         # restart: check for trailing ESC
-            return True                          # any other byte → real ESC, byte lost
-
-    _DRAIN_CAP = 4096  # bytes; generous vs any real sequence (~20-200B typical),
-    # small enough that a runaway/malicious sequence cannot wedge the reader
-
-    async def _drain_until(self, is_final: Any) -> None:
-        """Drain CSI bytes through the final byte, bounded by _DRAIN_CAP,
-        yielding if a quiesce begins. On timeout or cap, abandon and return to
-        the table (a terminator that never arrives must not wedge the reader)."""
-        import anyio
-        for _ in range(self._DRAIN_CAP):
-            if self._quiesce_depth > 0:
-                return                            # yield pending bytes to the prompt
-            b = await anyio.to_thread.run_sync(
-                lambda: self._poll_byte(self._seq_timeout_s),
-                abandon_on_cancel=True)
-            if b == b"" or is_final(b):
-                return                            # timeout, or final byte reached
-
-    async def _drain_string_sequence(self) -> None:
-        """Drain string-sequence bytes to the terminator (BEL or ST), bounded
-        by _DRAIN_CAP, yielding if a quiesce begins. On timeout or cap, abandon
-        (a terminator that never arrives must not wedge the reader)."""
-        import anyio
-        prev = b""
-        for _ in range(self._DRAIN_CAP):
-            if self._quiesce_depth > 0:
-                return                            # yield pending bytes to the prompt
-            b = await anyio.to_thread.run_sync(
-                lambda: self._poll_byte(self._seq_timeout_s),
-                abandon_on_cancel=True)
-            if b == b"":                          # terminator never arrived → abandon
-                return
-            if b == b"\x07" or (prev == b"\x1b" and b == b"\\"):
-                return                            # BEL or ST (ESC \)
-            prev = b
-
-    def _feed_interject_byte(self, byte: bytes) -> None:
-        """Accumulate a typed byte into the in-progress interject line; on Enter
-        deliver the line to `_on_interject` and reset. Minimal raw line editing
-        (backspace handling + echo) — the heavy prompt_toolkit editing stays on
-        the solicit/reply path. Only reached when an interject sink is attached
-        and the reader is actively reading (not quiesced)."""
-        if byte in (b"\r", b"\n"):
-            line = self._line_buf.decode("utf-8", errors="replace")
-            self._line_buf.clear()
-            with _suppress(OSError):
-                os.write(1, b"\r\n")            # echo the newline
-            sink = self._on_interject
-            if sink is not None:
-                sink(line)
-            return
-        if byte in (b"\x7f", b"\x08"):          # DEL / BS
-            # Byte-level (not grapheme) edit: backspacing a multibyte UTF-8 char
-            # mid-line drops one continuation byte and under-erases the echo.
-            # Acceptable for this raw interject channel; clean type+Enter decodes
-            # correctly (errors="replace" only bites on mid-line multibyte edits).
-            if self._line_buf:
-                self._line_buf.pop()
-                with _suppress(OSError):
-                    os.write(1, b"\b \b")       # erase one echoed char
-            return
-        # Ignore other control bytes (e.g. a stray arrow-key tail); echo printable.
-        if byte < b"\x20":
-            return
-        self._line_buf.extend(byte)
-        with _suppress(OSError):
-            os.write(1, byte)                   # echo so the user sees their typing
-
-    @contextlib.asynccontextmanager
-    async def tty_quiesced(self) -> AsyncIterator[None]:
-        """Release termios for a prompt_toolkit prompt and re-arm cbreak on
-        exit. Idempotent under nesting (depth-counted)."""
-        if not self._armed or self._fd is None or self._orig_attrs is None:
-            yield
-            return
-        try:
-            import termios
-            import tty
-        except ImportError:
-            yield
-            return
-        self._quiesce_depth += 1
-        if self._quiesce_depth == 1:
-            # Wait until the reader has actually stopped reading /dev/tty BEFORE
-            # handing the terminal to prompt_toolkit — no shared-tty window, so no
-            # stolen keystroke and no spurious paused(esc) during a prompt (AC #3).
-            # The reader's finally also sets _parked_evt, so a reader that exited
-            # (ESC already fired) releases us instead of deadlocking.
-            if self._parked_evt is not None:
-                await self._parked_evt.wait()
-            if self._fd is not None:   # reader may have closed it (ESC fired / cancel)
-                with contextlib.suppress(OSError, termios.error):
-                    termios.tcsetattr(
-                        self._fd, termios.TCSADRAIN, self._orig_attrs)
-        try:
-            yield
-        finally:
-            self._quiesce_depth -= 1
-            if self._quiesce_depth == 0:
-                if self._fd is not None:   # guard setcbreak(None) → TypeError (not suppressed)
-                    with contextlib.suppress(OSError, termios.error):
-                        tty.setcbreak(self._fd)
-                import anyio
-                self._parked_evt = anyio.Event()   # fresh ack for the next cycle
-                evt = self._unquiesce_evt
-                if evt is not None:
-                    evt.set()

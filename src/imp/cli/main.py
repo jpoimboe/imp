@@ -75,10 +75,9 @@ class ReplyInterjectRouter:
     (tests/test_cli_interject_routing.py) — it touches no TTY.
 
     In the LIVE CLI the reply itself comes straight from the prompt_toolkit read
-    (so `reply_sink` is rarely exercised: while a solicit is active the ESC
-    reader is quiesced and never funnels a line in). The flag still guards the
-    race where a sink call lands during a prompt — that line is then a reply, not
-    a stray interject.
+    (so `reply_sink` is rarely exercised). The flag still guards the race where
+    a sink call lands during a prompt — that line is then a reply, not a stray
+    interject.
 
     Slash interception is scoped to the REPLY path only: when a solicit is
     active the line reader (`ask_line_with_slash`) consumes `/help`/`/skills`
@@ -365,15 +364,6 @@ def _last_script_blocked(
                 and (ev.get("payload") or {}).get("step") == step):
             matched = ev
     return matched
-
-
-def _should_respawn_reader(*, reader_exited: bool) -> bool:
-    """The ESC reader exits ONLY when ESC fired (run() returns); after a Ctrl-C
-    interrupt it is still alive (parked) and reset() un-parks it. So respawn iff
-    the previous round's reader exited. This reader-exit signal — NOT the
-    coordinator's is_running() — is the correct ESC-exit-vs-Ctrl-C-park
-    discriminator (review M1)."""
-    return reader_exited
 
 
 def _handle_terminal_outcome(

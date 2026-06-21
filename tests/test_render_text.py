@@ -1287,13 +1287,13 @@ def test_interrupt_renders_interrupted_not_complete_pause() -> None:
             message="runner cancelled by interrupt"),
         _ev("3", "step_completed", step="spec-writer", kind="agent",
             action={"verb": "pause"}, var_mutations={}),
-        _ev("4", "workflow_paused", reason="interrupt", interrupt_reason="esc"),
+        _ev("4", "workflow_paused", reason="interrupt", interrupt_reason="ctrl-c"),
     ]))
     assert "spec-writer interrupted" in out
     assert "complete · pause" not in out
     assert "error:" not in out
     assert "runner cancelled by interrupt" not in out
-    assert "paused (esc)" in out
+    assert "paused (ctrl-c)" in out
     assert "⏸" not in out
 
 
