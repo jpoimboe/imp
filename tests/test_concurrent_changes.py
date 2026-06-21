@@ -98,9 +98,8 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
         src_wf.read_text()
         + "  - name: merge\n    steps:\n"
         "      - name: merge-to-base\n"
-        "        kind: merge\n"
+        "        kind: merge_and_exit_worktree\n"
         "        rules:\n"
-        "          - {if: {merge: STALE}, pause: true}\n"
         "          - {if: {merge: MERGED}, continue: true}\n"
         "          - {else: true, pause: true}\n"
     )

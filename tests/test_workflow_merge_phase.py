@@ -20,15 +20,17 @@ def test_stamp_and_finalize_tail_the_implement_phase() -> None:
 
 def test_merge_phase_linear_queue_flow() -> None:
     wf = load_workflow(WF)
-    names = [s.name for s in _phase(wf, "merge").steps]
+    steps = _phase(wf, "merge").steps
+    names = [s.name for s in steps]
     assert names == [
         "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
-        "integration-verify", "bypass-dequeue", "integration-resolver", "merge-to-base",
+        "integration-verify", "integration-resolver", "merge-to-base",
     ]
-    kinds = {s.name: s.kind for s in _phase(wf, "merge").steps}
-    assert kinds["wait-for-head"] == "wait_for_head"
-    assert kinds["bypass-dequeue"] == "dequeue_wake"
-    assert kinds["merge-to-base"] == "merge"
+    by = {s.name: s for s in steps}
+    assert by["wait-for-head"].kind == "branch"
+    assert by["wait-for-head"].acquire == "base"
+    assert by["integration-resolver"].release == "base"
+    assert by["merge-to-base"].kind == "merge_and_exit_worktree"
 
 
 def test_optimistic_concurrency_vars_and_step_gone() -> None:
@@ -63,7 +65,7 @@ def test_integration_review_routing() -> None:
     _BASE = {}
     out = {"verdict": "breakage", "status": "Success", "summary": ""}
     m = evaluate_rules(rules, vars=_BASE, output=out)
-    assert isinstance(m.action, Goto) and m.action.target == "bypass-dequeue"
+    assert isinstance(m.action, Goto) and m.action.target == "integration-resolver"
     out = {"verdict": "ok", "status": "Success", "summary": ""}
     m = evaluate_rules(rules, vars=_BASE, output=out)
     assert isinstance(m.action, Continue)
@@ -78,7 +80,7 @@ def test_integration_verify_routing() -> None:
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 124})
     assert isinstance(m.action, Pause)
     m = evaluate_rules(rules, vars=_BASE, output={"exit": 1})
-    assert isinstance(m.action, Goto) and m.action.target == "bypass-dequeue"
+    assert isinstance(m.action, Goto) and m.action.target == "integration-resolver"
 
 
 def test_integration_resolve_routing() -> None:

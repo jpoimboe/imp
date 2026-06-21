@@ -280,7 +280,7 @@ phases:
   - name: merge
     steps:
       - name: wait-for-head
-        kind: wait_for_head
+        acquire: base
         label: waiting to merge
         rules:
           - {else: true, continue: true}
@@ -307,7 +307,7 @@ phases:
         tier: high
         label: reviewing merge
         rules:
-          - {if: {verdict: breakage}, goto: bypass-dequeue}
+          - {if: {verdict: breakage}, goto: integration-resolver}
           - {else: true, continue: true}
 
       - name: integration-verify
@@ -316,16 +316,11 @@ phases:
         rules:
           - {if: {exit: 0}, goto: merge-to-base}
           - {if: {exit: 124}, pause: true}
-          - {else: true, goto: bypass-dequeue}
-
-      - name: bypass-dequeue
-        kind: dequeue_wake
-        quiet: true
-        rules:
-          - {else: true, continue: true}
+          - {else: true, goto: integration-resolver}
 
       - name: integration-resolver
         file: agents/integration-resolve.md
+        release: base
         tier: high
         label: resolving merge
         max_loops: 20
@@ -335,9 +330,8 @@ phases:
           - {else: true, pause: true}
 
       - name: merge-to-base
-        kind: merge
+        kind: merge_and_exit_worktree
         label: merging
         rules:
           - {if: {merge: MERGED}, continue: true}
-          - {if: {merge: STALE}, pause: true}
           - {else: true, pause: true}

@@ -573,7 +573,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.BreadcrumbLine):
         name = node.step_label or node.step_name
         act = node.action if isinstance(node.action, dict) else None
-        blocked = (node.kind == "merge" and act is not None
+        blocked = (node.kind == "merge_and_exit_worktree" and act is not None
                    and act.get("verb") == "pause")
         if node.interrupted:
             parts = [f"{name} interrupted"]

@@ -11,7 +11,7 @@ _QUIET = {
     "autosquash", "review-base-init", "review-base-repin",
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "stamp-trailers",
-    "integrate-rebase", "bypass-dequeue",
+    "integrate-rebase",
 }
 
 

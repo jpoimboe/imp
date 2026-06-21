@@ -417,19 +417,19 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     """Terminal handler. Two paths:
     - No merge happened (merge-to-base was never reached, or the gate never set
       it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
-    - merge-to-base already merged under the lock (state.merge_commit set, base ref
-      durably advanced): finalize — mark completed, archive the final snapshot,
-      then remove the worktree (branch kept). Ordering is crash-safe: status is
-      written + saved BEFORE archive/remove, so a crash mid-finalize leaves the
-      merge durable and the worktree a harmless leftover. Recovery: a crash AFTER
-      status='completed' is already done; a crash in the window between _route_merge
-      recording merge_commit and this status write leaves status='running' — re-running
-      re-enters _route_merge, which short-circuits on state.merge_commit (idempotent,
-      no second merge) and completes cleanly.
+    - merge-to-base already merged and exited the worktree (state.merge_commit set,
+      base ref durably advanced): finalize — mark completed, archive the final
+      snapshot. Ordering is crash-safe: status is written + saved BEFORE archive,
+      so a crash mid-finalize leaves the merge durable. Recovery: a crash AFTER
+      status='completed' is already done; a crash in the window between
+      _route_merge_and_exit_worktree recording merge_commit and this status write
+      leaves status='running' — re-running re-enters the merge step, which
+      short-circuits on state.merge_commit (idempotent, no second merge) and
+      completes cleanly.
 
-    _complete no longer does `git merge` — the authoritative merge moved into the
-    routable merge-to-base step (B3/F1), and the H1 dirty net moved into
-    merge_to_base under the lock (R5)."""
+    _complete no longer does `git merge` or worktree teardown — the authoritative
+    merge and worktree exit moved into the routable merge-to-base step (B3/F1),
+    and the H1 dirty net moved into merge_to_base under the lock (R5)."""
     state.held_lane = None
     state.held_acquire_step = None
     state.step = None
@@ -442,7 +442,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 
-    from imp.engine import worktree
     state.status = "completed"
     state.save(change.state_dir)
     _emit(log, "change_merged",
@@ -456,7 +455,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         change_json_path=change.change_dir / "change.json",
         state_json_path=change.state_dir / "state.json",
     )
-    worktree.remove_worktree(change.control_root, change.id)
     shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
     return RunResult.COMPLETED
 
@@ -792,12 +790,11 @@ async def _route_merge(
 
 
 def _exit_worktree(change: Change) -> None:
-    """Idempotent: guarded on project_root != control_root so crash-resume re-entry is a no-op."""
-    if change.project_root == change.control_root:
-        return
+    """Idempotent: remove_worktree(force=True) tolerates an already-absent worktree."""
     from imp.engine import worktree
     worktree.remove_worktree(change.control_root, change.id, force=True)
-    change.set_project_root(change.control_root)
+    if change.project_root != change.control_root:
+        change.set_project_root(change.control_root)
 
 
 async def _route_merge_and_exit_worktree(
