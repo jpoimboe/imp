@@ -56,6 +56,6 @@ Self-check that you reproduced the oracle and left no rebase running:
       && echo OK
 
 End with `complete_step`: `status: Success` with a one-line `summary` of how many stops
-you resolved. Re-entry of `autosquash.sh` routes the next step purely from the git state,
+you resolved. Re-entry of `cleanup.sh` routes the next step purely from the git state,
 so if you cannot reproduce the tree, say so honestly in `summary` and report `status:
 Error` — never fabricate a clean result.
