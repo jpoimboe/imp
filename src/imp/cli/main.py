@@ -11,11 +11,12 @@ import contextlib
 import json
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -1352,6 +1353,80 @@ async def _pick_log_target(control: Path) -> str | int:
         on_empty=_log_picker_empty,
         selected_index=selected_index,
     )
+
+
+def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
+    # Pages lines through $PAGER on a tty; falls back to print() otherwise.
+    if no_pager or not sys.stdout.isatty():
+        for line in lines:
+            print(line)
+        return
+
+    pager_env = os.environ.get("PAGER")
+    if pager_env is not None:
+        stripped = pager_env.strip()
+        if not stripped:
+            # PAGER="" or whitespace: explicit disable, like git.
+            for line in lines:
+                print(line)
+            return
+        try:
+            cmd = shlex.split(stripped)
+        except ValueError:
+            # Malformed quoting in $PAGER (e.g. `less "unclosed`). Don't
+            # crash `imp log` — degrade to inline output, same as a
+            # missing pager binary.
+            for line in lines:
+                print(line)
+            return
+        if not cmd:
+            # Defensive: post-strip non-empty value can't normally split
+            # to empty, but if it does, fall through to inline output.
+            for line in lines:
+                print(line)
+            return
+    else:
+        cmd = ["less", "-F", "-R", "-X"]
+
+    # When the resolved pager is `less`, always pass an explicit `LESS`
+    # value to the child env: use the user's existing value if set,
+    # otherwise default to `FRX` so that `PAGER=less` behaves the same
+    # as the unset-PAGER default (`less -FRX`).
+    env: dict[str, str] | None = None
+    if os.path.basename(cmd[0]) == "less":
+        less_val = os.environ.get("LESS", "FRX")
+        env = {**os.environ, "LESS": less_val}
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+    except (FileNotFoundError, OSError):
+        # Pager binary missing or unexecutable → silent fallback.
+        for line in lines:
+            print(line)
+        return
+
+    assert proc.stdin is not None  # stdin=PIPE guarantees this for type-checkers
+    try:
+        with contextlib.suppress(BrokenPipeError):
+            for line in lines:
+                proc.stdin.write(line + "\n")
+    finally:
+        with contextlib.suppress(BrokenPipeError):
+            proc.stdin.close()
+        # Ctrl-C in the pager raises KeyboardInterrupt out of proc.wait().
+        # Re-wait until the child actually exits so the user sees the pager
+        # behave normally instead of a Python traceback.
+        while True:
+            try:
+                proc.wait()
+                break
+            except KeyboardInterrupt:
+                pass
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
