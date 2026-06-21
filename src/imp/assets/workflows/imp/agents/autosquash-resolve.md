@@ -21,7 +21,7 @@ pre-autosquash tree. That tree is recorded for you:
 
     cat {{ change.home }}/state/autosquash-before-tree
 
-A re-entry of `autosquash.sh` (triggered by the sentinel file) checks this byte-for-byte after you finish. You
+A re-entry of `cleanup.sh` (triggered by the sentinel file) checks this byte-for-byte after you finish. You
 cannot "win" by editing freely — only by reproducing that exact tree with a clean,
 one-commit-per-unit history. Resolve every conflict toward the content the pre-autosquash
 branch already had.
