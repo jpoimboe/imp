@@ -766,6 +766,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.command = p.get("command")
             existing.resumed = bool(p.get("resumed", False))
             existing.route_label = p.get("route_label")
+            if existing is self._first_step:
+                _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase)

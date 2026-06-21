@@ -2018,6 +2018,31 @@ def test_opening_intent_only_injected_under_first_step_not_later_ones() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in steps[1].children)
 
 
+def test_opening_intent_reinjected_once_on_resume_reentry_of_first_step() -> None:
+    seed = [
+        {"id": "e1", "agent_id": None, "type": "opening_intent",
+         "payload": {"text": "add a --json flag"}},
+        _ev("s1", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("wp", "workflow_paused", reason="ctrl-c"),
+        _ev("wr", "workflow_resumed"),
+    ]
+    live = [
+        # re-emitted on resume: same phase+step triggers the resume re-entry branch.
+        _ev("s1b", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+    ]
+    tree = nv.build_tree(seed + live)
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    intents = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    assert intents[0].text == "add a --json flag"
+    assert intents[0].interactive is True
+    # Not stranded at root.
+    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
+
+
 def test_lost_task_result_resume_closed_at_step_completed() -> None:
     # Backstop: a `task` fold opens, the parent streams a mid-turn chunk (no
     # terminal stop_reason) so Task 1's guard keeps the fold open, and NO task
