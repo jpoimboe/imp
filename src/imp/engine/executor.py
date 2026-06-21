@@ -316,6 +316,7 @@ async def run_change(
                 if nxt >= len(flat):
                     return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
+                state.step_label = flat[nxt].label or flat[nxt].name
                 state.resume_pending = None
             elif isinstance(action, Goto):
                 target_idx = workflow.resolve_goto(action.target)
@@ -332,6 +333,7 @@ async def run_change(
                 else:
                     state.loop_counts.pop(step.name, None)       # forward goto resets
                 state.step = flat[target_idx].name
+                state.step_label = flat[target_idx].label or flat[target_idx].name
                 if action.resume:
                     # Single-shot reset: a resumed step must not inherit a stale
                     # retry count. Done HERE (the navigation point that sets
@@ -416,6 +418,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     routable merge-to-base step (B3/F1), and the H1 dirty net moved into
     merge_to_base under the lock (R5)."""
     state.step = None
+    state.step_label = None
     if not state.merge_commit:
         state.status = "completed"
         state.save(change.state_dir)
