@@ -31,3 +31,14 @@ def test_status_rows_include_errored_and_carry_iso(tmp_path: Path) -> None:
     assert set(rows) == {"alpha", "beta"}          # errored beta is in-flight
     assert rows["beta"][1] == "errored"
     assert rows["alpha"][3] == "2026-06-05T12:00:00+00:00"   # r[3] is raw ISO, not local
+
+
+def test_create_seeds_step_label(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    st = State.load(ch.state_dir)
+    flat0_name = st.step                       # the seeded initial cursor
+    # The stub workflow's first step has no label:, so step_label falls back to the
+    # step NAME — but it must be set (not None), proving the seed wrote it.
+    assert flat0_name is not None
+    assert st.step_label == flat0_name

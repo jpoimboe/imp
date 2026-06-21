@@ -122,3 +122,37 @@ def test_plan_rewind_forward_no_gate_allowed() -> None:
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
     plan = plan_rewind(_wf(), _state("integrator"), "integration-reviewer")
     assert plan.to_step == "integration-reviewer"
+
+
+def test_apply_rewind_sets_step_label_from_target_step() -> None:
+    from imp.engine.recovery import apply_rewind, plan_rewind
+
+    wf = _wf()
+    st = _state("code-reviewer")
+    log = InMemoryEventLog()
+    plan = plan_rewind(wf, st, "code-reviewer")
+    apply_rewind(plan, wf, st, log)
+
+    # step_label is the target step's resolved label (label or name), NOT None
+    # and NOT a stale value from before the reroute.
+    assert st.step == "code-reviewer"
+    assert st.step_label == "reviewing code"
+
+
+def test_apply_rewind_clears_step_label_when_to_step_is_none() -> None:
+    """A terminal reroute (to_step=None, target_idx past the last flat index) takes
+    apply_rewind's `else None` branch. Seed a stale step_label first so clearing it
+    is falsifiable — the test fails if apply_rewind leaves the old label in place."""
+    from imp.engine.recovery import RewindPlan, apply_rewind
+
+    wf = _wf()
+    flat = wf.flat_steps()
+    st = _state("code-reviewer")
+    st.step_label = "reviewing the code"          # stale label to be cleared
+    log = InMemoryEventLog()
+    plan = RewindPlan(target="end", from_step="code-reviewer",
+                      to_step=None, target_idx=len(flat))
+    apply_rewind(plan, wf, st, log)
+
+    assert st.step is None
+    assert st.step_label is None
