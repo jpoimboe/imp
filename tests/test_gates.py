@@ -330,7 +330,7 @@ def test_route_script_renders_command_template(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={"review_base": "abc123"})
+        state = types.SimpleNamespace(vars={"review_base": "abc123"}, route_label=None)
         log = InMemoryEventLog()
         await _route_script(step, change, state, log)
 
