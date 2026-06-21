@@ -68,6 +68,7 @@ def test_header_line_leads_with_id_ends_with_name():
     assert h.rstrip().endswith("NAME")
     assert "TITLE" not in h
     assert "HANDLE" not in h
+    assert "STEP" not in h        # STEP column is merged into STATUS
 
 
 def test_format_does_not_truncate_name_within_budget():
@@ -124,13 +125,62 @@ def test_backlog_status_renders_dim():
     assert STATUS_COLORS["backlog"] == ("dim",)
 
 
-def test_long_step_truncates_to_column():
-    from datetime import UTC, datetime
+def test_status_cell_merges_step_label_as_dim_suffix():
+    line = format_change_line(**_row(status="running", step="write_spec"),
+                              step_label="writing spec", color=True)
+    # status word keeps its color; the label suffix is dim and parenthesized.
+    assert "\x1b[32mrunning\x1b[0m" in line
+    assert "\x1b[2m (writing spec)\x1b[0m" in line
 
-    from imp.cli import change_row
-    long_step = "blocked: 2026-06-16-aaaaaa, 2026-06-16-bbbbbb"
-    line = change_row.format_change_line(
-        change_id="2026-06-16-x", title="t", status="backlog", step=long_step,
-        last_iso=None, now=datetime(2026, 6, 20, tzinfo=UTC), color=False)
-    assert long_step not in line          # the full readiness was truncated
-    assert "blocked: 2026-06-16…" in line  # cut to text[:19] + "…" at STEP_W (20)
+
+def test_status_cell_falls_back_to_step_name_without_label():
+    line = format_change_line(**_row(status="running", step="write_spec"),
+                              step_label=None, color=False)
+    assert "running (write_spec)" in line
+
+
+def test_status_cell_bare_when_step_empty():
+    # The default _row title ("Add version flag") has no paren, so a clean line
+    # has none at all when the STATUS cell carries no ` (label)` suffix.
+    line = format_change_line(**_row(status="completed", step="-"),
+                              step_label=None, color=False)
+    assert "completed" in line
+    assert "(" not in line                     # no suffix in the STATUS cell
+
+
+def test_draft_status_suppresses_step_suffix():
+    # A parked draft carries a seeded step but must render the bare word.
+    line = format_change_line(**_row(status="draft", step="write_spec"),
+                              step_label="writing spec", color=False)
+    assert "draft" in line
+    assert "writing spec" not in line
+
+
+def test_status_word_never_truncated_only_label_is():
+    line = format_change_line(
+        **_row(status="merge_blocked", step="x"),
+        step_label="resolving deferred items", color=False)
+    assert "merge_blocked" in line               # status word intact
+    assert "…" in line                           # label was truncated
+    assert "resolving deferred items" not in line  # full label did not fit
+
+
+def test_intent_fallback_for_empty_title():
+    line = format_change_line(**_row(title="   ", status="running", step="s"),
+                              intent="add a dark mode toggle", color=False)
+    assert "add a dark mode toggle" in line
+    assert "(unnamed)" not in line
+
+
+def test_intent_fallback_for_empty_title_color():
+    line = format_change_line(**_row(title="   ", status="running", step="s"),
+                              intent="add a dark mode toggle", color=True)
+    # intent text rendered dim
+    assert "\x1b[2madd a dark mode toggle\x1b[0m" in line
+    assert "(unnamed)" not in line
+
+
+def test_unnamed_when_no_intent():
+    line = format_change_line(**_row(title="   ", status="running", step="s"),
+                              intent=None, color=False)
+    assert "(unnamed)" in line

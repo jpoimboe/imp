@@ -26,14 +26,13 @@ def relative_age(then_iso: str | None, *, now: datetime) -> str:
 
 
 ID_W = 6        # bare 6-char Change id
-STATUS_W = 13   # widest status: len("merge_blocked")
-STEP_W = 20     # widest default-workflow step name
+STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 4
 NAME_MIN = 10   # never shrink the trailing NAME column below this
 
-# Fixed columns plus their four 2-space gaps; the NAME column gets whatever
+# Fixed columns plus their three 2-space gaps; the NAME column gets whatever
 # terminal width remains after this.
-_PREFIX_W = ID_W + STATUS_W + STEP_W + AGE_W + 8
+_PREFIX_W = ID_W + STATUS_W + AGE_W + 6
 
 STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("green",),
@@ -66,28 +65,48 @@ def name_budget(*, indent: int = 0) -> int:
 
 def header_line(*, color: bool) -> str:
     text = (f"{'ID':<{ID_W}}  {'STATUS':<{STATUS_W}}  "
-            f"{'STEP':<{STEP_W}}  {'AGE':<{AGE_W}}  NAME")
+            f"{'AGE':<{AGE_W}}  NAME")
     return pal.ansi(text, "dim", enabled=color)
 
 
+def _status_segment(status: str, step: str, step_label: str | None) -> str:
+    """Status word plus dim ` (label)` suffix; bare word for stepless/draft rows."""
+    if not step or step == "-" or status == "draft":
+        return status
+    label = step_label or step
+    budget = STATUS_W - len(status) - 3   # one space + "(" + ")"
+    if budget >= 1 and len(label) > budget:
+        label = _truncate(label, budget)
+    return f"{status} ({label})"
+
+
 def format_change_line(*, change_id: str, title: str, status: str, step: str,
+                       step_label: str | None = None,
                        last_iso: str | None, now: datetime,
-                       color: bool, name_width: int = 80, dim: bool = False) -> str:
+                       color: bool, name_width: int = 80, dim: bool = False,
+                       intent: str | None = None) -> str:
     raw = title.strip()
     id_pad = f"{change_id:<{ID_W}}"
-    status_pad = f"{status:<{STATUS_W}}"
-    step_pad = f"{_truncate(step or '-', STEP_W):<{STEP_W}}"
+    visible = _status_segment(status, step, step_label)
+    status_pad = f"{visible:<{STATUS_W}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
     # NAME is the final column, so it needs no trailing pad — only a cap so a
     # very long name can't spill past the terminal's right edge.
-    name_text = "(unnamed)" if not raw else _truncate(raw, name_width)
+    if not raw and intent:
+        name_text = _truncate(intent, name_width)
+    else:
+        name_text = "(unnamed)" if not raw else _truncate(raw, name_width)
     if dim:
-        line = f"{id_pad}  {status_pad}  {step_pad}  {age_pad}  {name_text}"
+        line = f"{id_pad}  {status_pad}  {age_pad}  {name_text}"
         return pal.ansi(line, "dim", enabled=color)
     name_cell = pal.ansi(name_text, "dim", enabled=color) if not raw else name_text
     codes = STATUS_COLORS.get(status, ())
-    if color and codes:
-        status_cell = pal.ansi(status, *codes, enabled=True) + " " * (STATUS_W - len(status))
+    pad = " " * (STATUS_W - len(visible))
+    if color:
+        suffix = visible[len(status):]            # " (label)" or ""
+        status_word = pal.ansi(status, *codes, enabled=True) if codes else status
+        suffix_cell = pal.ansi(suffix, "dim", enabled=True) if suffix else ""
+        status_cell = status_word + suffix_cell + pad
     else:
         status_cell = status_pad
-    return f"{id_pad}  {status_cell}  {step_pad}  {age_pad}  {name_cell}"
+    return f"{id_pad}  {status_cell}  {age_pad}  {name_cell}"
