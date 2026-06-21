@@ -46,3 +46,19 @@ def test_parked_draft_is_inflight_and_resumable_with_draft_label(tmp_path: Path)
 
 def test_draft_status_has_a_color() -> None:
     assert "draft" in change_row.STATUS_COLORS
+
+
+def test_parked_draft_renders_bare_status_word(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+    _seed_control(tmp_path)
+    _park_draft(tmp_path, "drbare")
+    row = m._row_for_id(tmp_path, "drbare")
+    assert row is not None
+    line = change_row.format_change_line(
+        change_id=row[0], title=row[4], status=row[1], step=row[2],
+        step_label=row[6], last_iso=row[3], now=datetime.now(UTC), color=False)
+    # A parked draft has a seeded state.step, but STATUS is the bare word
+    # because _status_segment special-cases status == "draft".
+    # The draft's title is "X" (no parens), so a bare cell leaves no "(" anywhere.
+    assert "draft" in line
+    assert "(" not in line

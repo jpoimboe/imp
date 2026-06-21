@@ -31,7 +31,7 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
         row = _row_for_id(control_root, change_id)
         if row is None:
             continue
-        change_id_, status_, step_, _last, title_, _created = row
+        change_id_, status_, step_, _last, title_, _created, _step_label = row
         if status_ not in _INFLIGHT:
             continue
         out.append(ChangeInfo(id=change_id_, title=title_, status=status_, step=step_))
@@ -43,7 +43,7 @@ def snapshot(control_root: Path, change_id: str) -> tuple[str, str, str] | None:
     row = _row_for_id(control_root, change_id)
     if row is None:
         return None
-    _id, status, step, _last, title, _created = row
+    _id, status, step, _last, title, _created, _step_label = row
     return (status, step, title)
 
 

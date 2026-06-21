@@ -114,6 +114,9 @@ def apply_rewind(plan: RewindPlan, workflow: Workflow, state: State,
             state.loop_counts.pop(s.name, None)
 
     state.step = plan.to_step
+    state.step_label = (
+        (flat[plan.target_idx].label or flat[plan.target_idx].name)
+        if plan.to_step is not None else None)
     state.current_step = None
     state.resume_pending = None
     state.step_attempt = 0

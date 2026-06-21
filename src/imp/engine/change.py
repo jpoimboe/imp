@@ -225,6 +225,7 @@ class Change:
         flat = workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+            step_label=(flat[0].label or flat[0].name) if flat else None,
             status="running",
             vars=apply_var_overrides(workflow.vars, config.var_overrides),
             loop_counts={},
@@ -293,6 +294,7 @@ class Change:
         flat = workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+            step_label=(flat[0].label or flat[0].name) if flat else None,
             status="running",
             vars=apply_var_overrides(workflow.vars, config.var_overrides),
             loop_counts={},

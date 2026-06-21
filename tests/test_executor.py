@@ -2101,6 +2101,127 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
     assert sink[1] == str(wt)
 
 
+@pytest.mark.anyio
+async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
+    """A forward Continue persists the NEXT step's label-or-name into
+    state.step_label, derived from the labeled step the cursor lands on."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/writer.md\n"
+        "        label: writing the thing\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: check\n"
+        "        label: second gate\n"
+        "        command: 'exit 7'\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.step == "check"
+    assert state.step_label == "second gate"   # the navigated-to step's label
+
+
+@pytest.mark.anyio
+async def test_complete_clears_step_label(tmp_path: Path) -> None:
+    """Running off the last step clears step_label to None beside state.step.
+    Two steps so a non-None step_label (the second step's label, written by the
+    first step's Continue) exists before _complete — making the clear falsifiable."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/writer.md\n"
+        "        label: writing the thing\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: w2\n"
+        "        file: agents/writer.md\n"
+        "        label: second writer\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    state = State.load(change.state_dir)
+    assert state.step is None
+    assert state.step_label is None
+
+
+@pytest.mark.anyio
+async def test_goto_writes_target_step_label(tmp_path: Path) -> None:
+    """A Goto persists the TARGET step's label-or-name into state.step_label."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: src\n"
+        "        label: source step\n"
+        "        file: agents/writer.md\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {else: true, goto: dst}\n"
+        "      - name: dst\n"
+        "        label: destination step\n"
+        "        file: agents/writer.md\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.step == "dst"
+    assert state.step_label == "destination step"
+
+
 def test_step_started_payload_carries_command_only_for_script() -> None:
     from imp.engine.executor import _step_started_payload
     from imp.engine.types import Pause, SourceLoc, Step
