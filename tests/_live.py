@@ -104,3 +104,25 @@ def _await_worktree(control_root: Path, timeout: float) -> Path:
     raise TimeoutError(
         f"no Change worktree appeared under {root} within {timeout}s"
     )
+
+
+def _await_change_dir(control_root: Path, timeout: float) -> Path:
+    """Poll .imp/changes/ for the single Change's permanent home dir and return it;
+    its .name is the slug. Guards on change.json so a half-written dir is skipped.
+
+    Under the deferred-worktree model `imp new` creates an un-materialized draft
+    (no branch/worktree) with state+events under <control_root>/.imp/changes/<id>/.
+    A workflow that never calls create_and_enter_worktree runs to completion as a
+    draft, so tests that used to await a worktree must await the change home here.
+    Raises TimeoutError if no Change home appears within `timeout` seconds."""
+    root = control_root / ".imp" / "changes"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if root.is_dir():
+            for p in sorted(root.iterdir()):
+                if p.is_dir() and (p / "change.json").exists():
+                    return p
+        time.sleep(0.1)
+    raise TimeoutError(
+        f"no Change home appeared under {root} within {timeout}s"
+    )

@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._live import _await_worktree, opted_in
+from tests._live import _await_change_dir, opted_in
 from tests.conftest import _init_repo
 
 # Ensure subprocesses use this worktree's imp, not the editable install
@@ -161,11 +161,12 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         start_new_session=True,
     )
     try:
-        # Discover the worktree the engine created (its .name is the slug).
-        wt = _await_worktree(tmp_path, timeout=30.0)
-        slug = wt.name
-        events = wt / ".imp" / "change" / "events.jsonl"
-        state_path = wt / ".imp" / "change" / "state" / "state.json"
+        # imp new starts an un-materialized draft: no worktree, state+events live
+        # at the permanent control-root home .imp/changes/<id>/.
+        change_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = change_dir.name
+        events = change_dir / "events.jsonl"
+        state_path = change_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
@@ -185,8 +186,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
             proc.kill()
             proc.wait()
 
-    # Resume by slug; the minimal workflow has no merge gate, so the worktree
-    # persists and state.json reads "completed" from it (no journal needed).
+    # Resume by slug; the minimal workflow never goes live, so it completes as a
+    # draft and state.json reads "completed" from the change home (no journal needed).
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
@@ -254,10 +255,12 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         start_new_session=True,
     )
     try:
-        wt = _await_worktree(tmp_path, timeout=30.0)
-        slug = wt.name
-        events = wt / ".imp" / "change" / "events.jsonl"
-        state_path = wt / ".imp" / "change" / "state" / "state.json"
+        # imp new starts an un-materialized draft: no worktree, state+events live
+        # at the permanent control-root home .imp/changes/<id>/.
+        change_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = change_dir.name
+        events = change_dir / "events.jsonl"
+        state_path = change_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
@@ -325,10 +328,12 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         start_new_session=True,
     )
     try:
-        wt = _await_worktree(tmp_path, timeout=30.0)
-        slug = wt.name
-        events = wt / ".imp" / "change" / "events.jsonl"
-        state_path = wt / ".imp" / "change" / "state" / "state.json"
+        # imp new starts an un-materialized draft: no worktree, state+events live
+        # at the permanent control-root home .imp/changes/<id>/.
+        change_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = change_dir.name
+        events = change_dir / "events.jsonl"
+        state_path = change_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=120.0):
             stdout, stderr = proc.communicate(timeout=10)

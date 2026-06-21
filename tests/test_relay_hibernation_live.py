@@ -25,10 +25,9 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.state import LockHeld, ProjectLock
 from impty import TerminalSession
-from tests._live import _await_worktree, opted_in
+from tests._live import _await_change_dir, opted_in
 from tests.conftest import _init_repo
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
@@ -146,12 +145,14 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     )
     try:
-        wt = _await_worktree(tmp_path, timeout=30.0)
-        slug = wt.name
-        events = wt / ".imp" / "change" / "events.jsonl"
-        state_path = wt / ".imp" / "change" / "state" / "state.json"
-        change = Change.load(tmp_path, slug)
-        lock_path = change.change_dir / "lock"
+        # imp new starts an un-materialized draft: no worktree, state+events live
+        # at the permanent control-root home .imp/changes/<id>/. The minimal
+        # workflow never calls create_and_enter_worktree, so it runs as a draft.
+        change_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = change_dir.name
+        events = change_dir / "events.jsonl"
+        state_path = change_dir / "state" / "state.json"
+        lock_path = change_dir / "lock"
 
         assert _wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
         time.sleep(_CC_STARTUP_GRACE)
