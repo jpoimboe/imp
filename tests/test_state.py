@@ -325,6 +325,30 @@ def test_state_load_forward_compatible_without_step_label(tmp_path: Path) -> Non
     assert State.load(tmp_path).step_label is None
 
 
+def test_state_round_trips_hold_mark(tmp_path) -> None:
+    from imp.engine.state import State
+    sd = tmp_path / "state"
+    s = State(id="feat", step="touch-base", step_attempt=0, status="running")
+    s.held_lane = "main"
+    s.held_acquire_step = "wait-for-head"
+    s.save(sd)
+    loaded = State.load(sd)
+    assert loaded.held_lane == "main"
+    assert loaded.held_acquire_step == "wait-for-head"
+
+
+def test_state_hold_mark_defaults_none(tmp_path: Path) -> None:
+    from imp.engine.state import State
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "feat", "step": "s", "step_attempt": 0, "status": "running",
+        "vars": {}, "loop_counts": {}, "current_step": None,
+        "retry_feedback": None,
+    }))
+    loaded = State.load(tmp_path)
+    assert loaded.held_lane is None
+    assert loaded.held_acquire_step is None
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json

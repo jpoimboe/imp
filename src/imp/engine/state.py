@@ -61,6 +61,8 @@ class State:
     guidance: str | None = None
     merge_commit: str | None = None
     step_label: str | None = None
+    held_lane: str | None = None          # lane key (base branch) this change holds
+    held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
 
@@ -131,6 +133,8 @@ class State:
             "project_facts": self.project_facts,
             "guidance": self.guidance,
             "merge_commit": self.merge_commit,
+            "held_lane": self.held_lane,
+            "held_acquire_step": self.held_acquire_step,
             "completion_pending": self.completion_pending,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)

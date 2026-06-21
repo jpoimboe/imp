@@ -1316,7 +1316,7 @@ def test_intentional_pause_still_renders_complete_pause() -> None:
 
 def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
     bc = nv.BreadcrumbLine(step_name="merge-to-base", elapsed_s=None,
-                           action={"verb": "pause"}, extras=[], kind="merge")
+                           action={"verb": "pause"}, extras=[], kind="merge_and_exit_worktree")
     line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
     assert line == "  merge-to-base blocked"
     assert "complete" not in line
@@ -1329,8 +1329,9 @@ def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
 
 def test_merge_step_pause_breadcrumb_pipeline() -> None:
     tree = nv.build_tree([
-        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
-        _ev("2", "step_completed", step="merge-to-base", kind="merge",
+        _ev("1", "step_started", step="merge-to-base",
+            kind="merge_and_exit_worktree", phase="review"),
+        _ev("2", "step_completed", step="merge-to-base", kind="merge_and_exit_worktree",
             action={"verb": "pause"}, var_mutations={}),
     ])
     # The BreadcrumbLine produced through the pipeline must also read "blocked",
@@ -1589,9 +1590,9 @@ def test_happy_path_merge_stream_renders_labeled_finalize_breadcrumb() -> None:
             action={"verb": "goto", "target": "wait-for-head",
                     "resume": False, "rework": False},
             var_mutations={}, label="entering the merge queue"),
-        _ev("4", "step_started", step="wait-for-head", kind="wait_for_head",
+        _ev("4", "step_started", step="wait-for-head", kind="branch",
             phase="merge", model="m", provider="anthropic"),
-        _ev("5", "step_completed", step="wait-for-head", kind="wait_for_head",
+        _ev("5", "step_completed", step="wait-for-head", kind="branch",
             action={"verb": "continue"}, var_mutations={}, label=None),
     ]
     rendered = _lines(events)

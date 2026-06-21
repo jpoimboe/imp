@@ -1,15 +1,16 @@
 # tests/test_executor_merge.py — import _git/_seed_control from tests.conftest
 #
 # B3 cutover: the authoritative merge moved out of _complete into the routable
-# `merge-to-base` step (_route_merge). These tests drive _route_merge to perform
-# the merge (stashing State.merge_commit) and then _complete to finalize
-# (journal + remove worktree + mark completed), mirroring the run_change flow.
+# `merge-to-base` step (_route_merge_and_exit_worktree). These tests drive
+# _route_merge_and_exit_worktree to perform the merge (stashing State.merge_commit)
+# and then _complete to finalize (journal + remove worktree + mark completed),
+# mirroring the run_change flow.
 from pathlib import Path
 
 import anyio
 
 from imp.engine.change import Change
-from imp.engine.executor import _complete, _route_merge
+from imp.engine.executor import _complete, _route_merge_and_exit_worktree
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import Pause
@@ -17,13 +18,12 @@ from tests.conftest import _git, _seed_control
 
 
 def _run_merge(step, ch, state, log):
-    """_route_merge is a coroutine (it offloads the blocking git merge off the
-    event loop); drive it to completion from these sync tests."""
-    return anyio.run(_route_merge, step, ch, state, log)
+    """Drive _route_merge_and_exit_worktree to completion from these sync tests."""
+    return anyio.run(_route_merge_and_exit_worktree, step, ch, state, log)
 
 
 def _merge_step():
-    """The shipped `merge-to-base` step (kind: merge) with its real rules."""
+    """The shipped `merge-to-base` step (kind: merge_and_exit_worktree) with its real rules."""
     wf = load_workflow(
         Path(__file__).resolve().parents[1]
         / "src" / "imp" / "assets" / "workflows" / "imp")
@@ -50,13 +50,14 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     assert not isinstance(action, Pause)
     assert state.merge_commit is not None
     assert (tmp_path / "feature.txt").read_text() == "hi"          # merged into base
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists() # worktree removed by route
+    assert ch.project_root == ch.control_root                       # project_root reset
 
     (ch.change_dir / "steps").mkdir(parents=True, exist_ok=True)
     (ch.change_dir / "steps" / "001.json").write_text("{}")
 
     result = _complete(ch, state, log)
     assert result.value == "completed"
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists() # worktree removed
     assert not (ch.change_dir / "steps").exists()                  # transcript dir dropped
     assert "imp/feat" in _git(tmp_path, "branch", "--list", "imp/feat").stdout  # branch kept
 
@@ -202,7 +203,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
             tg.start_soon(ticker)
             await anyio.sleep(0.06)          # let the ticker spin up
             before = ticks
-            res = _route_merge(step, change, state, log)
+            res = _route_merge_and_exit_worktree(step, change, state, log)
             if inspect.isawaitable(res):
                 res = await res
             during = ticks - before

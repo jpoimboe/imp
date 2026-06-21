@@ -239,6 +239,16 @@ async def run_change(
         index_of = {s.name: i for i, s in enumerate(flat)}
         pending_seed = seed_opening  # one-shot: consumed by the first fresh agent step
 
+        # A hold mark surviving to process entry means a prior run died while holding
+        # (a clean pause clears the mark). Don't evict when the merge already succeeded
+        # (merge_commit set) or the run is parked at completion — those finalize via
+        # the idempotent merge path / _complete.
+        if (state.held_lane is not None
+                and not state.completion_pending
+                and not state.merge_commit):
+            _evict_if_holding(change, state, log)
+            state.save(change.state_dir)
+
         while True:
             if state.completion_pending:
                 # §3: re-entry after an interrupt parked at the completion
@@ -292,7 +302,8 @@ async def run_change(
 
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
-                if step.kind == "agent":
+                evicted = _evict_if_holding(change, state, log)
+                if not evicted and step.kind == "agent":
                     # Any agent-step pause (quota, agent_incomplete, a fatal
                     # provider error, OR a user interrupt) keeps the current
                     # step's transcript so resume replays and continues it, not
@@ -326,6 +337,7 @@ async def run_change(
                     n = state.loop_counts.get(step.name, 0) + 1
                     state.loop_counts[step.name] = n
                     if n > step.max_loops and not coordinator.should_pause:
+                        _evict_if_holding(change, state, log)
                         state.status = "paused"
                         state.save(change.state_dir)
                         _emit_paused_event(log, "max_loops", step=step.name)
@@ -367,6 +379,7 @@ async def run_change(
             # Navigation already set resume_pending correctly (Goto(resume=True)
             # kept the target; Continue/forward-Goto cleared it) — do NOT override.
             if coordinator.should_pause:
+                _evict_if_holding(change, state, log)
                 state.status = "paused"
                 state.save(change.state_dir)
                 _emit_paused_event(
@@ -404,33 +417,35 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     """Terminal handler. Two paths:
     - No merge happened (merge-to-base was never reached, or the gate never set
       it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
-    - merge-to-base already merged under the lock (state.merge_commit set, base ref
-      durably advanced): finalize — mark completed, archive the final snapshot,
-      then remove the worktree (branch kept). Ordering is crash-safe: status is
-      written + saved BEFORE archive/remove, so a crash mid-finalize leaves the
-      merge durable and the worktree a harmless leftover. Recovery: a crash AFTER
-      status='completed' is already done; a crash in the window between _route_merge
-      recording merge_commit and this status write leaves status='running' — re-running
-      re-enters _route_merge, which short-circuits on state.merge_commit (idempotent,
-      no second merge) and completes cleanly.
+    - merge-to-base already merged and exited the worktree (state.merge_commit set,
+      base ref durably advanced): finalize — mark completed, archive the final
+      snapshot. Ordering is crash-safe: status is written + saved BEFORE archive,
+      so a crash mid-finalize leaves the merge durable. Recovery: a crash AFTER
+      status='completed' is already done; a crash in the window between
+      _route_merge_and_exit_worktree recording merge_commit and this status write
+      leaves status='running' — re-running re-enters the merge step, which
+      short-circuits on state.merge_commit (idempotent, no second merge) and
+      completes cleanly.
 
-    _complete no longer does `git merge` — the authoritative merge moved into the
-    routable merge-to-base step (B3/F1), and the H1 dirty net moved into
-    merge_to_base under the lock (R5)."""
+    _complete no longer does `git merge` or worktree teardown — the authoritative
+    merge and worktree exit moved into the routable merge-to-base step (B3/F1),
+    and the H1 dirty net moved into merge_to_base under the lock (R5)."""
+    state.held_lane = None
+    state.held_acquire_step = None
     state.step = None
     state.step_label = None
+    from imp.engine import merge_queue
     if not state.merge_commit:
+        merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
         state.status = "completed"
         state.save(change.state_dir)
         shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 
-    from imp.engine import worktree
     state.status = "completed"
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": state.merge_commit})
-    from imp.engine import merge_queue
     merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
     from imp.engine import archive
     archive.archive_change(
@@ -439,7 +454,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         change_json_path=change.change_dir / "change.json",
         state_json_path=change.state_dir / "state.json",
     )
-    worktree.remove_worktree(change.control_root, change.id)
     shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
     return RunResult.COMPLETED
 
@@ -465,16 +479,15 @@ async def _dispatch_step(
         state.retry_feedback = None
         state.save(change.state_dir)
 
-    if step.kind == "wait_for_head":
-        if wait_for_turn_fn is None:
-            raise RuntimeError("wait_for_turn_fn is required for wait_for_head steps")
-        return await _route_wait_for_head(step, change, state, log, wait_for_turn_fn)
-    if step.kind == "dequeue_wake":
-        return _route_dequeue_wake(step, change, state, log)
+    if step.release is not None:
+        _release_lane(step, change, state, log)
+    if step.acquire is not None:
+        return await _route_acquire(step, change, state, log, wait_for_turn_fn)
+
     if step.kind == "branch":
         return _route_branch(step, state, log)
-    if step.kind == "merge":
-        return await _route_merge(step, change, state, log)
+    if step.kind == "merge_and_exit_worktree":
+        return await _route_merge_and_exit_worktree(step, change, state, log)
     if step.kind == "script":
         return await _route_script(step, change, state, log,
                                    verify_command=verify_command,
@@ -595,25 +608,32 @@ async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
     raise AwaitingUserInput()
 
 
-async def _route_wait_for_head(
+def _resolve_lane(value: str, change: Change) -> str:
+    if value == "base":
+        return change.base_branch
+    raise RuntimeError(f"unknown lane keyword {value!r}")
+
+
+async def _route_acquire(
     step: Step, change: Change, state: State, log: EventLog,
-    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]],
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
 ) -> tuple[Action, str | None, dict[str, object]]:
-    """Enqueue-if-absent, then proceed when head; otherwise wait. A non-head
-    change with a client attached stays resident (wait_for_turn_fn polls the
-    queue and watches detach); with no client it hibernates (AwaitingUserInput ->
-    a clean paused exit, rehydrated later by the popping head's `imp resume`)."""
+    """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
     from imp.agents.tools.wait_for_user import AwaitingUserInput
     from imp.engine import merge_queue
+    if wait_for_turn_fn is None:
+        raise RuntimeError("wait_for_turn_fn is required for acquire steps")
+    assert step.acquire is not None
+    lane = _resolve_lane(step.acquire, change)
     _emit_started(log, step)
-    merge_queue.enqueue_if_absent(change.control_root, change.id, change.base_branch)
+    merge_queue.enqueue_if_absent(change.control_root, change.id, lane)
 
     def _is_head() -> bool:
-        return merge_queue.is_head(change.control_root, change.id, change.base_branch)
+        return merge_queue.is_head(change.control_root, change.id, lane)
 
     if not _is_head():
-        ahead = merge_queue.position(change.control_root, change.id, change.base_branch)
-        _emit(log, "waiting_for_head", {"base": change.base_branch, "ahead": ahead})
+        ahead = merge_queue.position(change.control_root, change.id, lane)
+        _emit(log, "lane_waiting", {"base": lane, "ahead": ahead})
         try:
             await wait_for_turn_fn(_is_head)
         except AwaitingUserInput:
@@ -623,45 +643,63 @@ async def _route_wait_for_head(
                 "action": _action_payload(pause), "var_mutations": {}})
             return pause, None, {}
 
+    state.held_lane = lane
+    state.held_acquire_step = step.name
+    state.save(change.state_dir)
+    _emit(log, "lane_acquired", {"base": lane, "step": step.name})
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)
 
 
-def _route_dequeue_wake(
-    step: Step, change: Change, state: State, log: EventLog,
-) -> tuple[Action, str | None, dict[str, object]]:
+def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
+    """Pop the lane before the step body, clearing the hold mark."""
     from imp.engine import merge_queue
-    _emit_started(log, step)
-    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
-    match = evaluate_rules(step.rules, vars=state.vars, output=None)
-    state.vars.update(match.var_mutations)
-    return _finish(log, step, match)
+    assert step.release is not None
+    lane = _resolve_lane(step.release, change)
+    merge_queue.pop_and_wake(change.control_root, change.id, lane)
+    state.held_lane = None
+    state.held_acquire_step = None
+    state.save(change.state_dir)
+    _emit(log, "lane_released", {"base": lane, "step": step.name})
 
 
-async def _route_merge(
+def _evict_if_holding(change: Change, state: State, log: EventLog) -> bool:
+    """Release a held lane on pause/crash and rewind the resume cursor to the acquiring step."""
+    if state.held_lane is None:
+        return False
+    from imp.engine import merge_queue
+    lane = state.held_lane
+    acquire_step = state.held_acquire_step
+    merge_queue.pop_and_wake(change.control_root, change.id, lane)
+    state.held_lane = None
+    state.held_acquire_step = None
+    state.step = acquire_step
+    state.resume_pending = None
+    _emit(log, "lane_evicted", {"base": lane, "rewind_to": acquire_step})
+    return True
+
+
+def _exit_worktree(change: Change) -> None:
+    """Idempotent: remove_worktree(force=True) tolerates an already-absent worktree."""
+    from imp.engine import worktree
+    worktree.remove_worktree(change.control_root, change.id, force=True)
+    if change.project_root != change.control_root:
+        change.set_project_root(change.control_root)
+
+
+async def _route_merge_and_exit_worktree(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
-    """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
-    merge_to_base), re-asserts a clean worktree (DIRTY) under the lock, performs
-    the merge, and routes on the result via the step's rules. On MERGED it stashes
-    the commit in State.merge_commit; the actual finalize (archive + worktree
-    removal + mark completed) happens when the run falls through to _complete."""
     from imp.engine import worktree
     _emit_started(log, step)
 
-    # Idempotent resume (crash-safety): if a prior run already merged (the commit
-    # is durable on base) but crashed before _complete finalized, do NOT re-merge.
     if state.merge_commit:
+        _exit_worktree(change)
         match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
         state.vars.update(match.var_mutations)
         return _finish(log, step, match)
 
-    # merge_to_base holds RepoGitLock and shells out to git (merge/commit); a
-    # large or conflict-heavy merge can take seconds-to-minutes. Offload it to a
-    # worker thread so the event loop keeps turning — same rationale as the
-    # script gate (see _route_script). The surrounding emits and state.save stay
-    # on the loop thread (single terminal writer / no cross-thread state race).
     spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
     body = _decisions_body(spec_path)
     result = await anyio.to_thread.run_sync(
@@ -672,26 +710,18 @@ async def _route_merge(
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
         state.save(change.state_dir)
+        _exit_worktree(change)
 
-    # Preserve the pre-B3 merge_blocked surfacing (review finding #2). Before the
-    # cutover, _complete emitted a `merge_blocked` event and set
-    # status="merge_blocked"; the CLI keys remediation, resumability, and status
-    # color on BOTH. The declared `{else: pause: true}` rule would produce a
-    # reason-less pause -> status="paused" -> all of that goes dead. So for
-    # blocking outcomes, emit the event ourselves and return a *reasoned* Pause;
-    # run_change's pause handler maps reason=="merge_blocked" to the merge_blocked
-    # status (Step 4b). DIRTY reuses the worktree_dirty reason the old H1 net emitted.
     if result.status in ("CONFLICT", "REFUSED", "DIRTY"):
         reason = "worktree_dirty" if result.status == "DIRTY" else result.status.lower()
         _emit(log, "merge_blocked",
               {"reason": reason, "base": change.base_branch, "detail": result.detail})
         pause = Pause(reason="merge_blocked", kind=reason)
         _emit(log, "step_completed",
-              {"step": step.name, "kind": "merge",
+              {"step": step.name, "kind": "merge_and_exit_worktree",
                "action": _action_payload(pause), "var_mutations": {}})
         return pause, None, {}
 
-    # MERGED -> continue (falls through to finalize).
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)

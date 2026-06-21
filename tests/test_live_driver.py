@@ -1083,8 +1083,9 @@ def test_change_merged_suppressed_in_live_path() -> None:
     for e in [
         ev("0", "change_created", id="run-x",
            title="Run X"),
-        ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
-        ev("2", "step_completed", step="merge-to-base", kind="merge",
+        ev("1", "step_started", step="merge-to-base",
+           kind="merge_and_exit_worktree", phase="review"),
+        ev("2", "step_completed", step="merge-to-base", kind="merge_and_exit_worktree",
            action={"verb": "continue"}, var_mutations={}),
         ev("3", "change_merged", base="master", commit="37dde900abc"),
     ]:

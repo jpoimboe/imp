@@ -1192,7 +1192,7 @@ def test_visible_calls_omits_load_skill_tool_and_wait_for_user() -> None:
     ])
     assert [c.name for c in nv.visible_calls(burst)] == ["bash", "read_file"]
     assert frozenset({"load_skill", "tool", "wait_for_user"}) == nv._OMIT
-    assert frozenset({"script", "branch", "merge"}) == nv.CHROME_KINDS
+    assert frozenset({"script", "branch", "merge_and_exit_worktree"}) == nv.CHROME_KINDS
 
 
 def test_tool_result_citations_go_to_footer_not_result() -> None:
@@ -1242,7 +1242,7 @@ def test_current_activity_agent_step_no_burst_is_thinking() -> None:
 
 def test_current_activity_chrome_step_is_running() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "step_started", step="g", kind="merge", phase="p"))
+    b.add(ev("1", "step_started", step="g", kind="merge_and_exit_worktree", phase="p"))
     assert b.current_activity() == nv.Activity()
 
 
@@ -1702,8 +1702,9 @@ def test_non_interrupt_config_error_still_renders() -> None:
 def test_change_merged_becomes_merged_node_not_fallback() -> None:
     tree = nv.build_tree([
         _ev("0", "change_created", id="runx01", title="Run X"),
-        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
-        _ev("2", "step_completed", step="merge-to-base", kind="merge",
+        _ev("1", "step_started", step="merge-to-base",
+            kind="merge_and_exit_worktree", phase="review"),
+        _ev("2", "step_completed", step="merge-to-base", kind="merge_and_exit_worktree",
             action={"verb": "continue"}, var_mutations={}),
         _ev("3", "change_merged", base="master", commit="37dde900abc"),
     ])
@@ -1725,7 +1726,8 @@ def test_change_merged_becomes_merged_node_not_fallback() -> None:
 
 def test_merge_blocked_event_is_suppressed() -> None:
     tree = nv.build_tree([
-        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        _ev("1", "step_started", step="merge-to-base",
+            kind="merge_and_exit_worktree", phase="review"),
         _ev("2", "merge_blocked", reason="refused", base="master",
             detail="error: Your local changes ... Aborting"),
     ])
@@ -1843,7 +1845,7 @@ def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="merge-it", kind="merge", phase="integrate"),
+        ev("2", "step_started", step="merge-it", kind="merge_and_exit_worktree", phase="integrate"),
     ]:
         b.add(e)
     assert b.current_activity() == nv.Activity()
@@ -2132,3 +2134,15 @@ def test_burst_span_restarts_on_user_message() -> None:
     # The reply restarts the span: the burst measures from 00:08, not the
     # step_started boundary at 00:00.
     assert burst.span_start_ts == "2026-06-03T00:00:08+00:00"
+
+
+def test_lane_events_render_no_fallback_breadcrumb() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="wait-for-head", kind="branch", phase="merge"),
+        _ev("2", "lane_acquired", base="main", step="wait-for-head"),
+        _ev("3", "lane_released", base="main", step="integration-resolver"),
+        _ev("4", "lane_evicted", base="main", rewind_to="wait-for-head"),
+    ])
+    step = tree.root.children[0].children[0]
+    fbs = [c for c in step.children if isinstance(c, nv.FallbackLine)]
+    assert fbs == []

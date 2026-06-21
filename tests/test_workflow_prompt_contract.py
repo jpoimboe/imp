@@ -442,11 +442,11 @@ def test_integration_resolve_discriminates_bypass_via_query_events() -> None:
     text = INTEGRATION_RESOLVE.read_text()
     low = text.lower()
     # Discriminate the two bypass reasons from the journal, keyed on the routing
-    # action.target == "bypass-dequeue" (the events carry no verdict/exit field).
+    # action.target == "integration-resolver" (the events carry no verdict/exit field).
     assert "query_events" in text
     assert "step_completed" in text
     assert "action.target" in text
-    assert "bypass-dequeue" in text
+    assert "integration-resolver" in text
     assert "most recent" in low
     assert "integration-reviewer" in text         # breakage gate
     assert "integration-verify" in text          # verify-fail gate

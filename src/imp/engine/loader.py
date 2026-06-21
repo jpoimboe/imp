@@ -244,8 +244,8 @@ def _output_types_for_step(
         return out
     if step_kind == "script":
         return dict(_SCRIPT_OUTPUT_TYPES)
-    if step_kind == "merge":
-        return {"merge": "string"}   # engine produces merge: MERGED|STALE|CONFLICT|REFUSED|DIRTY
+    if step_kind == "merge_and_exit_worktree":
+        return {"merge": "string"}   # engine produces merge: MERGED|CONFLICT|REFUSED|DIRTY
     return None  # branch / engine-native (no typed output env)
 
 
@@ -255,7 +255,7 @@ _KIND_SIGNALS = {
     "agent": ("file", "prompt"),
     "script": ("command",),
 }
-_ENGINE_NATIVE = ("merge", "wait_for_head", "dequeue_wake")
+_ENGINE_NATIVE = ("merge_and_exit_worktree",)
 
 
 def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
@@ -579,6 +579,17 @@ def _parse_fs_rule(
 # ── Step parsing ──────────────────────────────────────────────────────────────
 
 
+def _parse_lane_attr(raw: dict[str, Any], key: str, source: SourceLoc) -> str | None:
+    val = raw.get(key)
+    if val is None:
+        return None
+    if val != "base":
+        raise LoadError(
+            f"{key}: only the lane keyword 'base' is supported, got {val!r}",
+            source)
+    return "base"
+
+
 def _parse_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool:
     val = raw.get(key, False)
     if not isinstance(val, bool):
@@ -613,6 +624,16 @@ def _parse_step(
         if agent_def is not None:
             label = agent_def.label
 
+    acquire = _parse_lane_attr(raw, "acquire", source)
+    release = _parse_lane_attr(raw, "release", source)
+    if acquire is not None and kind != "branch":
+        raise LoadError(
+            f"acquire: only valid on a rules-only branch step, not a {kind} step",
+            source)
+    if release is not None and kind != "agent":
+        raise LoadError(
+            f"release: only valid on an agent step, not a {kind} step", source)
+
     max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
     max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops
     on_max = defaults.on_max_retries  # on_max_retries is not a per-step YAML knob
@@ -621,7 +642,7 @@ def _parse_step(
 
     if "rules" in raw:
         rules = _parse_rules(raw["rules"], source, yaml_path)
-    elif kind in ("script", "branch", "merge", "wait_for_head", "dequeue_wake"):
+    elif kind in ("script", "branch", "merge_and_exit_worktree"):
         raise LoadError(f"{kind} step {name!r} requires a rules: block", source)
     # agent with no rules means continue-on-success (rules stays ())
 
@@ -642,6 +663,8 @@ def _parse_step(
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
             quiet=quiet,
             label=label,
+            acquire=acquire,
+            release=release,
         )
     elif kind == "script":
         step = Step(
@@ -653,7 +676,7 @@ def _parse_step(
             quiet=quiet,
             label=label,
         )
-    elif kind in ("merge", "wait_for_head", "dequeue_wake"):
+    elif kind in ("merge_and_exit_worktree",):
         step = Step(
             name=name, phase=phase_name, kind=cast(Kind, kind), rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
@@ -666,6 +689,8 @@ def _parse_step(
             on_max_retries=on_max, max_loops=max_loops, source=source,
             quiet=quiet,
             label=label,
+            acquire=acquire,
+            release=release,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).

@@ -16,14 +16,14 @@ this change at the BACK of its lane with a fresh timestamp.
 
 ## First: discriminate WHY you were invoked
 
-Two distinct gates converge on you through `bypass-dequeue`, and the convergent routing
+Two distinct gates converge on you through `integration-resolver`, and the convergent routing
 carries **no in-context signal** for which one fired. Determine it from the event journal
 before anything else, with `query_events(type="step_completed")`. Each `step_completed`
 event carries `{step, kind, action, var_mutations}`, where a routing `Goto` serializes as
 `action == {verb: goto, target, resume, rework}`. The discriminator is the **routing
 `action.target`**, never a verdict or exit field (those are not on these events):
 
-- Find the **most recent** `step_completed` whose `action.target == "bypass-dequeue"`.
+- Find the **most recent** `step_completed` whose `action.target == "integration-resolver"`.
 - If that event's `step == "integration-reviewer"` (and no later `integration-verify`
   `step_completed` exists), this is a **breakage bypass** — the at-head semantic review
   flagged breakage.

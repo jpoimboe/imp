@@ -194,7 +194,7 @@ class RepoGitLock:
 
 @dataclass(frozen=True)
 class MergeResult:
-    status: Literal["MERGED", "CONFLICT", "REFUSED", "STALE", "DIRTY"]
+    status: Literal["MERGED", "CONFLICT", "REFUSED", "DIRTY"]
     merge_commit: str | None = None
     detail: str | None = None   # git's stderr on a blocking outcome (surfaced to the human)
 
