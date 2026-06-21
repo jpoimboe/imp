@@ -179,10 +179,9 @@ you never re-run a single test:
 - **A failure attributable to the diff** → fix it via the implementer and return
   `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the implementer to make
   a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
-  `git commit --fixup=HEAD`. `task-lead` uses `--fixup=HEAD` only because `autosquash` runs
-  after the per-task `verify` gate; **no `autosquash` runs after `deferred-sweep`/
-  `sweep-verify`**, so a fixup commit would leak unsquashed to merge. This matches the
-  "Commit granularity" discipline above.
+  `git commit --fixup=HEAD`: a sweep fix resolves its own deferred item and lands as its
+  own commit in the batch (which `cleanup-sweep` then stamps), not an amendment to the
+  last task's commit. This matches the "Commit granularity" discipline above.
 
 Emit `sweep_tolerated: true` ONLY on the all-tolerated case above. On EVERY
 other return — a fresh list-drain entry, a real-regression fix — emit `sweep_tolerated:
@@ -190,8 +189,7 @@ false`.
 
 A **`max_loops` pause at `sweep-verify`** (the gate is capped at 5 fix laps) means the
 triage is **non-converging** — an unrecognized flake or a hard regression you could not fix
-in the budget. It escalates to a human; it is not a transient to retry. The
-`sweep_tolerated` forward advance is not a fix lap and does not consume the budget.
+in the budget. It escalates to a human; it is not a transient to retry.
 
 ## Finish
 
