@@ -238,6 +238,13 @@ def test_per_batch_reviews_review_base_range(tmp_path) -> None:
     assert "task(subagent_name=" not in out
 
 
+def test_per_batch_empty_review_base_falls_back_to_fork(tmp_path) -> None:
+    # review-base-init is gone: the first per-batch review runs with review_base == "",
+    # which must resolve to the recorded fork point, not a broken empty-LHS range.
+    out = _render_reviewer(tmp_path, review_scope="plan", review_base="",
+                           cur_base_head="forkSHA")
+    assert "forkSHA..imp/chg" in out
+
 
 def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
     rules = _steps(_wf())["review-base-repin"].rules

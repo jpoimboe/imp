@@ -33,7 +33,7 @@ reconstructed from `progress.md`:
 `git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the change's recorded fork point. This is
 the one full review of the run.
 {% else %}
-**Per-batch pass.** Review this batch's work: `git diff {{ vars.review_base }}..imp/{{ change.id }}`
+**Per-batch pass.** Review this batch's work: `git diff {{ vars.review_base or change.cur_base_head }}..imp/{{ change.id }}`
 — do not widen it to the whole change.
 {% endif %}
 
