@@ -45,7 +45,7 @@ def evaluate_rules(
 
 def run_script(
     step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
-    policy: SandboxPolicy | None = None,
+    policy: SandboxPolicy | None = None, command: str | None = None,
 ) -> dict[str, Any]:
     """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
@@ -65,15 +65,16 @@ def run_script(
     are visible while a stale inherited engine var cannot leak (engine_env's
     "absent => no gate" contract).
     """
-    assert step.command is not None, "script step must have a command"
+    cmd = command if command is not None else step.command
+    assert cmd is not None, "script step must have a command"
     env = overlay_engine_env(os.environ, env_extra or {})
     run_cwd = step.cwd or str(cwd)
     # The policy's setenv was frozen at run start (possibly with an empty
     # name-on-intent slug), so the live engine_env (env_extra) is the authoritative
     # source that refreshes IMP_* inside the bwrap --clearenv jail.
-    argv = (build_sandbox_argv(step.command, cwd=run_cwd, policy=policy,
+    argv = (build_sandbox_argv(cmd, cwd=run_cwd, policy=policy,
                                engine_env=env_extra or {})
-            if policy is not None else ["sh", "-c", step.command])
+            if policy is not None else ["sh", "-c", cmd])
     proc = subprocess.Popen(
         argv, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, env=env, start_new_session=True,
