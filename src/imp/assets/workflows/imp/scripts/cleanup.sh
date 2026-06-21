@@ -50,6 +50,60 @@ _all_stamped() {
   return 0
 }
 
+# ── VERIFY MODE ──────────────────────────────────────────────────────────────
+# A before-tree sentinel means a fold conflict was handed to autosquash-resolve,
+# which has now run; this re-entry VERIFIES its resolution rather than re-folding.
+# A fixup! fold is tree-preserving, so a correct resolution reproduces the
+# pre-fold tree exactly: HEAD^{tree} == BEFORE_TREE, no leftover directive, no
+# rebase in progress. This block owns its own 3-attempt bound and the terminal
+# pristine restore (the engine's max_loops cannot restore the branch itself). On
+# success it falls through to the stamp below over the same range.
+if [ -f "$STATE/autosquash-before-tree" ]; then
+  BEFORE_TREE=$(cat "$STATE/autosquash-before-tree" 2>/dev/null || true)
+  BEFORE_HEAD=$(cat "$STATE/autosquash-before-head" 2>/dev/null || true)
+  ATTEMPTS_FILE="$STATE/autosquash-resolve-attempts"
+  MAX_ATTEMPTS=3
+
+  _clear_sentinels() {
+    rm -f "$STATE/autosquash-before-tree" "$STATE/autosquash-before-head" "$ATTEMPTS_FILE"
+  }
+
+  # First objective failure (empty REASON => verified). An in-progress rebase makes
+  # the tree check meaningless, so report it first.
+  REASON=""
+  if [ -d "$(git rev-parse --git-path rebase-merge)" ] \
+     || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+    REASON="a rebase is still in progress (the fold was not driven to completion)"
+  elif _has_directives; then
+    REASON="a fixup!/squash!/amend! subject still remains in $LOWER..HEAD"
+  elif [ "$(git rev-parse 'HEAD^{tree}')" != "$BEFORE_TREE" ]; then
+    REASON="HEAD tree does not match the pre-fold tree (the fold changed content)"
+  fi
+
+  if [ -n "$REASON" ]; then
+    PREV=$(cat "$ATTEMPTS_FILE" 2>/dev/null || echo 0)
+    COUNT=$((PREV + 1))
+    echo "$COUNT" > "$ATTEMPTS_FILE"
+    if [ "$COUNT" -ge "$MAX_ATTEMPTS" ]; then
+      # Bound exhausted: restore the branch to its exact pre-fold commit ourselves,
+      # then pause. Abort any in-progress rebase first.
+      git rebase --abort 2>/dev/null || true
+      if [ -n "$BEFORE_HEAD" ]; then git reset -q --hard "$BEFORE_HEAD" 2>/dev/null || true; fi
+      _clear_sentinels
+      echo "autosquash-resolve exhausted $MAX_ATTEMPTS attempts: $REASON" >&2
+      echo "Restored the branch to its pre-fold state. Squash by hand, then resume:" >&2
+      echo "  git rebase -i --autosquash $LOWER" >&2
+      echo "resolve each conflict so the fold preserves the tree, then \`imp resume\`." >&2
+      exit 1
+    fi
+    echo "cleanup: $REASON (attempt $COUNT/$MAX_ATTEMPTS); re-resolving" >&2
+    exit 2
+  fi
+
+  # Verified: clear the sentinels and fall through to the clean-tree check + stamp.
+  _clear_sentinels
+fi
+
 # ── CLEAN-TREE CHECK ─────────────────────────────────────────────────────────
 # The agent must have committed everything; a dirty tree means work was left behind.
 if [ -n "$(git status --porcelain)" ]; then

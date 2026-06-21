@@ -248,3 +248,97 @@ def test_empty_change_id_fails(tmp_path: Path) -> None:
 
     res = _run(pr, change_id="")
     assert res.returncode != 0                               # ${IMP_CHANGE_ID:?}
+
+
+def _build_and_handoff(pr: Path) -> tuple[str, str]:
+    """Build a plain-path fold conflict, run cleanup.sh to its exit-2 hand-off, and
+    return (before_head, before_tree) captured before the rebase started."""
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "a.txt").write_text("orig\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", "-m", "target")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "a.txt").write_text("intervened\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", "-m", "intervening")
+    (pr / "a.txt").write_text("fixed\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    before_head = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    before_tree = _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
+    handoff = _run(pr)
+    assert handoff.returncode == 2, handoff.stderr      # precondition: mid-flight
+    return before_head, before_tree
+
+
+def _resolve(pr: Path, content: str) -> None:
+    """Drive the mid-flight rebase to completion, resolving each stop by writing
+    `content` to a.txt (the only conflicted path in this fixture)."""
+    while True:
+        rebase_dir = _git(pr, "rev-parse", "--git-path", "rebase-merge").stdout.strip()
+        if not (pr / rebase_dir).is_dir():
+            break
+        (pr / "a.txt").write_text(content)
+        _git(pr, "add", "a.txt")
+        _git(pr, "rebase", "--continue")
+
+
+def _state(pr: Path) -> Path:
+    return _home(pr) / "state"
+
+
+def test_verify_passes_and_stamps(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _, before_tree = _build_and_handoff(pr)
+    _resolve(pr, "fixed\n")                              # reproduces the pre-fold tree
+
+    res = _run(pr)
+    assert res.returncode == 0, res.stderr
+    assert _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip() == before_tree
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
+    assert not any(s.startswith(("fixup!", "squash!", "amend!"))
+                   for s in _subjects(pr, fork))
+    assert _trailer(pr, "HEAD") == ID                   # fell through to stamp
+    assert not (_state(pr) / "autosquash-before-tree").exists()   # sentinels cleaned
+    assert not (_state(pr) / "autosquash-before-head").exists()
+    assert not (_state(pr) / "autosquash-resolve-attempts").exists()
+
+
+def test_verify_rejects_rebase_in_progress(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _build_and_handoff(pr)
+    # rebase still mid-flight; do NOT resolve
+    res = _run(pr)
+    assert res.returncode == 2, res.stderr
+    assert "in progress" in res.stderr.lower()
+    assert (_state(pr) / "autosquash-resolve-attempts").read_text().strip() == "1"
+    assert (_state(pr) / "autosquash-before-tree").exists()
+    _git(pr, "rebase", "--abort")                       # tidy for teardown
+
+
+def test_verify_rejects_tree_drift(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _build_and_handoff(pr)
+    _resolve(pr, "WRONG\n")                              # drops the fix: tree diverges
+    res = _run(pr)
+    assert res.returncode == 2, res.stderr
+    assert "tree" in res.stderr.lower()
+    assert (_state(pr) / "autosquash-resolve-attempts").read_text().strip() == "1"
+    assert (_state(pr) / "autosquash-before-tree").exists()
+
+
+def test_verify_exhaustion_restores_pristine(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    before_head, before_tree = _build_and_handoff(pr)
+    _resolve(pr, "WRONG\n")
+    (_state(pr) / "autosquash-resolve-attempts").write_text("2")  # this run is #3 of 3
+    res = _run(pr)
+    assert res.returncode == 1, res.stderr
+    assert _git(pr, "rev-parse", "HEAD").stdout.strip() == before_head
+    assert _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip() == before_tree
+    assert not (_state(pr) / "autosquash-before-tree").exists()
+    assert not (_state(pr) / "autosquash-before-head").exists()
+    assert not (_state(pr) / "autosquash-resolve-attempts").exists()
+    assert "rebase -i --autosquash" in res.stderr        # manual-recovery hint
