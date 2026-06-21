@@ -1454,8 +1454,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if events is None:
         rec = backlog.read_record(control, change_id)
         if rec is not None:
-            for line in _backlog_card(rec, control, now=datetime.now(UTC)):
-                print(line)
+            lines: Iterable[str] = _backlog_card(rec, control, now=datetime.now(UTC))
+            _page_or_print(lines, no_pager=args.no_pager)
             return 0
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
@@ -1475,16 +1475,14 @@ def _cmd_log(args: argparse.Namespace) -> int:
         workflow = parse_default_workflow(control / "imp" / "project.yaml")
         header = SummaryHeader(workflow=workflow, change_id=change_id,
                                status=status, total_seconds=summary_total(events))
-        for line in render_summary(build_summary(events), header=header,
-                                   color=color, width=width):
-            print(line)
+        lines = render_summary(build_summary(events), header=header,
+                               color=color, width=width)
+        _page_or_print(lines, no_pager=args.no_pager)
         return 0
 
     tree = narrative.build_tree(events)
     lines = render_tree(tree, full=args.full, color=color, width=width)
-    # Lines carry no trailing newline; print() adds one. No pager — straight to stdout.
-    for line in lines:
-        print(line)
+    _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
 
@@ -2262,6 +2260,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "-s", "--summary", action="store_true",
         help="Compact run-overview timeline: one line per step occurrence, "
              "grouped by phase, with wall-clock durations.",
+    )
+    p_log.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.",
     )
     p_log.set_defaults(func=_cmd_log)
 

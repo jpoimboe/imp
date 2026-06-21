@@ -9,10 +9,15 @@ iteration, appending "\n" itself — both in the pager-spawn path (via
 
 from __future__ import annotations
 
+import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from imp.engine import backlog
+from imp.engine.change import LAYOUT_VERSION
 
 
 def _fake_tty_stdout(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
@@ -353,3 +358,183 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
         _page_or_print(iter(["alpha"]), no_pager=False)
 
     assert proc.wait.call_count == 2
+
+
+def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
+    """Create a minimal on-disk Change home under control/.imp/changes/<slug>
+    with one rendered step (phase "spec") so the narrative reaches output."""
+    change_dir = control / ".imp" / "changes" / slug
+    change_dir.mkdir(parents=True)
+    (change_dir / "change.json").write_text(
+        json.dumps({"id": slug, "title": title, "base_branch": "main",
+                    "layout_version": LAYOUT_VERSION,
+                    "created_at": "2026-05-27T10:00:00+00:00"}),
+    )
+    state_dir = change_dir / "state"
+    state_dir.mkdir()
+    (state_dir / "state.json").write_text(
+        json.dumps({"step": "-", "status": "paused"}),
+    )
+    (change_dir / "events.jsonl").write_text(
+        json.dumps({
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "type": "change_created",
+            "payload": {"title": title},
+        }) + "\n"
+        + json.dumps({
+            "id": "e2", "agent_id": None,
+            "timestamp": "2026-05-27T10:00:01+00:00",
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": "spec",
+                        "model": "m", "provider": "anthropic"},
+        }) + "\n",
+    )
+    return change_dir
+
+
+def test_main_log_invokes_pager_on_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`main(["log", "<slug>"])` on a TTY routes the narrative through
+    _page_or_print: Popen called once, nothing leaked to capsys, rendered
+    phase reached the pager's stdin, cleanup ran."""
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=True)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        rc = m.main(["log", slug])
+
+    assert rc == 0
+    assert popen.call_count == 1, "_cmd_log must route TTY output through _page_or_print"
+    assert capsys.readouterr().out == ""
+    writes = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
+    assert "spec" in writes
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
+
+
+def test_main_log_no_pager_flag_skips_pager_on_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`main(["log", "--no-pager", "<slug>"])` on a TTY → no Popen, inline
+    print. Catches a refactor that drops `args.no_pager` from the helper call."""
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=True)
+
+    with patch("imp.cli.main.subprocess.Popen") as popen:
+        rc = m.main(["log", "--no-pager", slug])
+
+    assert rc == 0
+    assert popen.call_count == 0
+    assert "spec" in capsys.readouterr().out
+
+
+def test_main_log_non_tty_prints_inline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Not a TTY (pipe/redirect) → no Popen, inline print, as today."""
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=False)
+
+    with patch("imp.cli.main.subprocess.Popen") as popen:
+        rc = m.main(["log", slug])
+
+    assert rc == 0
+    assert popen.call_count == 0
+    assert "spec" in capsys.readouterr().out
+
+
+def test_main_log_summary_routes_through_pager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`main(["log", "-s", "<slug>"])` on a TTY routes the summary view
+    through _page_or_print (Popen once, cleanup ran)."""
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=True)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        rc = m.main(["log", "-s", slug])
+
+    assert rc == 0
+    assert popen.call_count == 1, "--summary must route through _page_or_print"
+    assert capsys.readouterr().out == ""
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
+
+
+def test_main_log_backlog_routes_through_pager(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A backlog-only Change (no events) renders its card through
+    _page_or_print on a TTY (Popen once, cleanup ran)."""
+    import imp.cli.main as m
+
+    slug = "backlog-only"
+    backlog.write_record(
+        tmp_path, change_id=slug, title="queued work",
+        description="", depends_on=[], created_by="user",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=True)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        rc = m.main(["log", slug])
+
+    assert rc == 0
+    assert popen.call_count == 1, "backlog card must route through _page_or_print"
+    assert capsys.readouterr().out == ""
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
