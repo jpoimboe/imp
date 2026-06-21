@@ -586,7 +586,7 @@ async def _route_script(
                 command, out["exit"], out["stdout"], out["stderr"])
     elif isinstance(action, Pause):
         # Script pauses (e.g. integrate-rebase exit 3/4/5,
-        # autosquash/stamp-trailers) otherwise lose their stderr — the pause verb
+        # cleanup-implement/assert-stamped) otherwise lose their stderr — the pause verb
         # carries no reason and the CLI keys remediation only on merge_blocked.
         # Journal it so `imp log` shows it and the CLI can surface it (findings #5/#6).
         _emit(log, "script_blocked", {
