@@ -434,8 +434,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.held_acquire_step = None
     state.step = None
     state.step_label = None
+    from imp.engine import merge_queue
     if not state.merge_commit:
-        from imp.engine import merge_queue
         merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
         state.status = "completed"
         state.save(change.state_dir)
@@ -446,7 +446,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": state.merge_commit})
-    from imp.engine import merge_queue
     merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
     from imp.engine import archive
     archive.archive_change(
