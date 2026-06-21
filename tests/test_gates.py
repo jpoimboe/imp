@@ -189,7 +189,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={})
+        state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
         step = _script_step("sleep 0.5")
 
@@ -243,7 +243,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={})
+        state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, change, state, log)
         assert isinstance(action, Goto)
@@ -274,7 +274,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     )
 
     async def main() -> None:
-        state = types.SimpleNamespace(vars={})
+        state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
         action, feedback, _ = await _route_script(step, change, state, log)
         assert isinstance(action, Goto)
