@@ -497,6 +497,8 @@ async def _dispatch_step(
         return _route_branch(step, state, log)
     if step.kind == "merge":
         return await _route_merge(step, change, state, log)
+    if step.kind == "merge_and_exit_worktree":
+        return await _route_merge_and_exit_worktree(step, change, state, log)
     if step.kind == "script":
         return await _route_script(step, change, state, log,
                                    verify_command=verify_command,
@@ -784,6 +786,54 @@ async def _route_merge(
         return pause, None, {}
 
     # MERGED -> continue (falls through to finalize).
+    match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
+
+
+def _exit_worktree(change: Change) -> None:
+    """Idempotent: guarded on project_root != control_root so crash-resume re-entry is a no-op."""
+    if change.project_root == change.control_root:
+        return
+    from imp.engine import worktree
+    worktree.remove_worktree(change.control_root, change.id, force=True)
+    change.set_project_root(change.control_root)
+
+
+async def _route_merge_and_exit_worktree(
+    step: Step, change: Change, state: State, log: EventLog,
+) -> tuple[Action, str | None, dict[str, object]]:
+    from imp.engine import worktree
+    _emit_started(log, step)
+
+    if state.merge_commit:
+        _exit_worktree(change)
+        match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
+        state.vars.update(match.var_mutations)
+        return _finish(log, step, match)
+
+    spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
+    body = _decisions_body(spec_path)
+    result = await anyio.to_thread.run_sync(
+        functools.partial(
+            worktree.merge_to_base,
+            change.control_root, change.id, change.base_branch, title=change.title,
+            body=body, project_root=change.project_root))
+    if result.status == "MERGED":
+        state.merge_commit = result.merge_commit
+        state.save(change.state_dir)
+        _exit_worktree(change)
+
+    if result.status in ("CONFLICT", "REFUSED", "DIRTY"):
+        reason = "worktree_dirty" if result.status == "DIRTY" else result.status.lower()
+        _emit(log, "merge_blocked",
+              {"reason": reason, "base": change.base_branch, "detail": result.detail})
+        pause = Pause(reason="merge_blocked", kind=reason)
+        _emit(log, "step_completed",
+              {"step": step.name, "kind": "merge_and_exit_worktree",
+               "action": _action_payload(pause), "var_mutations": {}})
+        return pause, None, {}
+
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)

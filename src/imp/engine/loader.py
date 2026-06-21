@@ -244,8 +244,8 @@ def _output_types_for_step(
         return out
     if step_kind == "script":
         return dict(_SCRIPT_OUTPUT_TYPES)
-    if step_kind == "merge":
-        return {"merge": "string"}   # engine produces merge: MERGED|STALE|CONFLICT|REFUSED|DIRTY
+    if step_kind in ("merge", "merge_and_exit_worktree"):
+        return {"merge": "string"}   # engine produces merge: MERGED|CONFLICT|REFUSED|DIRTY
     return None  # branch / engine-native (no typed output env)
 
 
@@ -255,7 +255,7 @@ _KIND_SIGNALS = {
     "agent": ("file", "prompt"),
     "script": ("command",),
 }
-_ENGINE_NATIVE = ("merge", "wait_for_head", "dequeue_wake")
+_ENGINE_NATIVE = ("merge", "wait_for_head", "dequeue_wake", "merge_and_exit_worktree")
 
 
 def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
@@ -642,7 +642,7 @@ def _parse_step(
 
     if "rules" in raw:
         rules = _parse_rules(raw["rules"], source, yaml_path)
-    elif kind in ("script", "branch", "merge", "wait_for_head", "dequeue_wake"):
+    elif kind in ("script", "branch", "merge", "wait_for_head", "dequeue_wake", "merge_and_exit_worktree"):
         raise LoadError(f"{kind} step {name!r} requires a rules: block", source)
     # agent with no rules means continue-on-success (rules stays ())
 
@@ -676,7 +676,7 @@ def _parse_step(
             quiet=quiet,
             label=label,
         )
-    elif kind in ("merge", "wait_for_head", "dequeue_wake"):
+    elif kind in ("merge", "wait_for_head", "dequeue_wake", "merge_and_exit_worktree"):
         step = Step(
             name=name, phase=phase_name, kind=cast(Kind, kind), rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
