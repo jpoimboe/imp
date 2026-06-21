@@ -641,3 +641,49 @@ def test_grep_binary_skip_on_escape_hatch_path(tmp_path: Path) -> None:
     out = _grep(_ctx(tmp_path), pattern="NEEDLE", path="build")
     assert "build/text.txt" in out
     assert "bin.dat" not in out
+
+
+def test_glob_surfaces_sanctioned_change_home_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "wt"
+    root.mkdir()
+    _init_git_repo(root, ".imp/\n")
+    # Out-of-worktree permanent home, reached via the sanctioned symlink.
+    plans = tmp_path / "home" / "artifacts" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "c1-plan-1.md").write_text("# plan 1\n")
+    changes = root / ".imp" / "changes"
+    changes.mkdir(parents=True)
+    (changes / "c1").symlink_to(tmp_path / "home")
+
+    out = _glob(_ctx(root),
+                pattern=".imp/changes/c1/artifacts/plans/*.md")
+    assert ".imp/changes/c1/artifacts/plans/c1-plan-1.md" in out
+
+
+def test_glob_drops_nonsanctioned_escape_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "wt"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("")
+    (root / "keep.txt").write_text("")
+    (root / "link").symlink_to(outside)        # escapes root, NOT under artifacts/
+
+    out = _glob(_ctx(root), pattern="*")
+    assert "keep.txt" in out
+    assert "link" not in out                    # escape guard still drops it
+
+
+def test_grep_surfaces_sanctioned_change_home_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "wt"
+    root.mkdir()
+    _init_git_repo(root, ".imp/\n")
+    spec = tmp_path / "home" / "artifacts" / "spec"
+    spec.mkdir(parents=True)
+    (spec / "feat.md").write_text("the DECISION is X\n")
+    changes = root / ".imp" / "changes"
+    changes.mkdir(parents=True)
+    (changes / "c1").symlink_to(tmp_path / "home")
+
+    out = _grep(_ctx(root), pattern="DECISION", path=".")
+    assert ".imp/changes/c1/artifacts/spec/feat.md" in out

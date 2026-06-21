@@ -180,15 +180,18 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
     for p in sorted(base.glob(pattern)):
         await tool_checkpoint(coordinator, deadline)
         resolved = p.resolve()
+        # p.resolve() escapes root via the change-home symlink; use the logical path instead.
+        rel = p.relative_to(root) if p.is_relative_to(root) else None
+        sanctioned = rel is not None and within_artifacts(rel)
         if inside:
-            if not resolved.is_relative_to(root):
+            if not resolved.is_relative_to(root) and not sanctioned:
                 continue                        # belt-and-suspenders vs symlinks
             if masking and not policy.allows_read(resolved):
                 continue
         elif masking and not policy.allows_read(resolved):
             continue                            # masked secret behind a symlink/in-tree
         if (any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
-                and not (inside and within_artifacts(resolved.relative_to(root)))):
+                and not (inside and sanctioned)):
             continue
         matched.append(p)
 
@@ -197,7 +200,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
         repo = await repo_root(gbase if gbase.is_dir() else gbase.parent)
         if repo is not None and not await is_ignored(repo, gbase):
             to_check = {p.resolve() for p in matched
-                        if not within_artifacts(p.resolve().relative_to(root))}
+                        if not within_artifacts(p.relative_to(root))}
             ignored = await partition_ignored(repo, to_check)
             if ignored:
                 matched = [p for p in matched if p.resolve() not in ignored]
