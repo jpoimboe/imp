@@ -19,7 +19,6 @@ _BASE_VARS = {
     "plan_minors_integrated": False,
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
-    "sweep_tolerated_carry": False,
     "change_panel_done": False,
 }
 
@@ -533,7 +532,6 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
     assert isinstance(m.action, Continue)
 
 
-
 def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
     asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
@@ -701,32 +699,25 @@ def test_plan_writer_can_write_progress(tmp_path: Path) -> None:
     assert "**" not in write_paths
 
 
-def test_sweep_tolerated_carry_var_declared_default_false() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.vars.defaults()["sweep_tolerated_carry"] is False
-
-
 def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert "sweep_tolerated" in wf.agents["deferred-sweep"].output_schema.field_names()
 
 
-def test_deferred_sweep_tolerated_routes_through_sweep_verify() -> None:
+def test_deferred_sweep_tolerated_routes_to_cleanup() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["deferred-sweep"].rules
-    # All sweep-verify failures tolerated (or a new flaky declared): deferred-sweep made
-    # NO regression fix and hands the carry signal to sweep-verify so that step performs
-    # the budget-resetting forward advance on its next pass.
+    # All sweep failures tolerated: deferred-sweep made NO fix and routes straight to
+    # cleanup-sweep, skipping the sweep-verify gate; it carries no var.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
         output={"status": "Success", "sweep_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "sweep-verify" and m.action.resume is False
-    assert m.var_mutations["sweep_tolerated_carry"] is True
+    assert m.action.target == "cleanup-sweep" and m.action.resume is False
+    assert m.var_mutations == {}
 
 
 def test_deferred_sweep_normal_return_continues_without_carry() -> None:
@@ -748,41 +739,14 @@ def test_sweep_verify_has_max_loops_5() -> None:
     assert _steps(wf)["sweep-verify"].max_loops == 5
 
 
-def test_sweep_verify_carry_continues_forward_and_clears_carry() -> None:
+def test_sweep_verify_red_resumes_deferred_sweep() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["sweep-verify"].rules
-    # A red suite (exit 1) whose failures deferred-sweep already tolerated (carry set):
-    # forward-continue past sweep-verify -- the advance that resets sweep-verify's OWN
-    # loop counter -- and clear the carry so a later batch starts fresh.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
-                       output={"exit": 1, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["sweep_tolerated_carry"] is False
-
-
-def test_sweep_verify_red_without_carry_resumes_deferred_sweep() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["sweep-verify"].rules
-    # A red suite with no tolerated-carry resumes deferred-sweep for triage -- the
-    # backward edge that increments sweep-verify's loop counter.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": False},
+    m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"exit": 1, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
     assert m.action.target == "deferred-sweep" and m.action.resume is True
-
-
-def test_sweep_verify_green_clears_stale_carry() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["sweep-verify"].rules
-    # A green suite (exit 0) clears a stale carry too, so a carry set in a prior batch
-    # can never leak forward and mask a real regression.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
-                       output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["sweep_tolerated_carry"] is False
 
 
 def test_spec_writer_prompt_has_build_or_save_section() -> None:
@@ -817,12 +781,11 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
         assert a.label, f"agent {name!r} has no label"
 
 
-def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
+def test_sweep_verify_timeout_pauses() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["sweep-verify"].rules
-    # exit:124 precedes the carry rule; timeout pauses even when carry is True.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
+    m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"exit": 124, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Pause)
 
@@ -882,4 +845,13 @@ def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
     # Trivial path: a plain-language heads-up, never naming the internal label.
     assert "brief plain-language heads-up" in lowered
     assert "never name the internal" in lowered
+
+
+def test_review_base_repin_command_cds_into_project_root() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    cmd = _steps(wf)["review-base-repin"].command
+    # Script gates run with cwd = the control-root workflow dir, so the command MUST
+    # cd into the worktree before reading HEAD, else it resolves the base-branch tip.
+    assert cmd == 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
 

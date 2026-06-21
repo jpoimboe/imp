@@ -44,7 +44,8 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
     assert [s.name for s in impl.steps] == [
         "task-lead", "verify",
         "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
-        "code-reviewer", "deferred-sweep", "sweep-verify", "review-base-repin",
+        "code-reviewer", "deferred-sweep", "sweep-verify",
+        "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
         "stamp-trailers", "finalize",
     ]
 
@@ -318,3 +319,26 @@ def test_code_reviewer_is_not_a_pure_advisor() -> None:
     assert "pure advisor" not in low          # it routes now, not merely advises
     assert "verdict" in low                    # owns the keep/dismiss/defer call
     assert "approve" in text and "task_gap" in text
+
+
+def test_cleanup_sweep_routes_by_exit_code() -> None:
+    from imp.engine.gates import evaluate_rules
+    from imp.engine.types import Continue, Goto, Pause
+    step = _steps(_wf())["cleanup-sweep"]
+    assert step.kind == "script"
+    assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
+    r = step.rules
+    m0 = evaluate_rules(r, vars={}, output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(m0.action, Goto) and m0.action.target == "review-base-repin"
+    m2 = evaluate_rules(r, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
+    assert isinstance(m2.action, Continue)
+    m3 = evaluate_rules(r, vars={}, output={"exit": 3, "stdout": "", "stderr": ""})
+    assert isinstance(m3.action, Goto) and m3.action.target == "deferred-sweep"
+    assert m3.action.resume is True
+    m1 = evaluate_rules(r, vars={}, output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(m1.action, Pause)
+    resolver = _steps(_wf())["autosquash-resolve-sweep"]
+    assert resolver.kind == "agent" and resolver.tier == "high"
+    assert resolver.file.name == "autosquash-resolve.md"
+    assert resolver.rules[-1].action.target == "cleanup-sweep"
+    assert resolver.max_loops == 6

@@ -19,7 +19,6 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
-  sweep_tolerated_carry:  {type: bool, default: false}   # deferred-sweep -> sweep-verify hand-off: all failures tolerated, so sweep-verify forward-advances (resetting its own max_loops budget)
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-batch, not re-paneled
 
 defaults:
@@ -204,8 +203,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          # Mirrors task-lead -> verify: carry the tolerated signal so sweep-verify forward-advances.
-          - {if: {sweep_tolerated: true}, set: {sweep_tolerated_carry: true}, goto: sweep-verify}
+          - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
           - {else: true, continue: true}
 
       - name: sweep-verify
@@ -213,10 +211,31 @@ phases:
         label: testing
         max_loops: 5
         rules:
-          - {if: {exit: 0}, set: {sweep_tolerated_carry: false}, continue: true}
+          - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {if: {sweep_tolerated_carry: true}, set: {sweep_tolerated_carry: false}, continue: true}
           - {else: true, resume: deferred-sweep}
+
+      # Fold + stamp this batch's sweep commits over the same (review_base or fork)..HEAD
+      # range before the diff base advances. Mirrors cleanup-implement.
+      - name: cleanup-sweep
+        quiet: true
+        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        rules:
+          - {if: {exit: 0}, goto: review-base-repin}
+          - {if: {exit: 2}, continue: true}
+          - {if: {exit: 3}, resume: deferred-sweep}
+          - {else: true, pause: true}
+
+      - name: autosquash-resolve-sweep
+        file: agents/autosquash-resolve.md
+        tier: high
+        label: resolving fixups
+        max_loops: 6
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+        rules:
+          - {else: true, goto: cleanup-sweep}
 
       # After a batch's review + sweep settle, advance the diff base to HEAD and reset
       # the counter. The end-of-change pass (review_scope==change) is the last review,
@@ -224,7 +243,7 @@ phases:
       # pass returns to plan-writer for the next plan.
       - name: review-base-repin
         quiet: true
-        command: ./scripts/pin-review-base.sh head
+        command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
         rules:
           - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
           # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
