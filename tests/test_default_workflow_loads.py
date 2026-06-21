@@ -178,17 +178,17 @@ def test_route_labels_assigned() -> None:
     by = {s.name: s for s in wf.flat_steps()}
 
     # spec-reviewer: blocking -> feedback rework; minors -> integrate
-    assert by["spec-reviewer"].rules[0].label == "addressing review feedback"
-    assert by["spec-reviewer"].rules[1].label == "integrating minor improvements"
+    assert by["spec-reviewer"].rules[0].label == "addressing spec review feedback"
+    assert by["spec-reviewer"].rules[1].label == "addressing spec review feedback"
     # plan-reviewer: blocking; minors (has_minor_findings rule)
-    assert by["plan-reviewer"].rules[0].label == "addressing review feedback"
-    assert by["plan-reviewer"].rules[2].label == "integrating minor improvements"
+    assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
+    assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # task-lead deviation
-    assert by["task-lead"].rules[0].label == "plan didn't match the code"
+    assert by["task-lead"].rules[0].label == "plan/code mismatch, going back to planning"
     # plan-cycle-check supercycle (the more_plans:true -> plan-writer rule)
-    assert by["plan-cycle-check"].rules[1].label == "more plans for this spec"
+    assert by["plan-cycle-check"].rules[1].label == "write next plan"
     # code-reviewer task_gap -> task-lead
-    assert by["code-reviewer"].rules[0].label == "addressing review feedback"
+    assert by["code-reviewer"].rules[0].label == "addressing code review feedback"
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"

@@ -60,10 +60,10 @@ phases:
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
           - {if: {blocking: true}, set: {spec_minors_integrated: false},
-             resume: spec-writer, label: "addressing review feedback", feedback: "Here's review feedback to address:"}
+             resume: spec-writer, label: "addressing spec review feedback", feedback: "Here's review feedback to address:"}
           # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
           - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
-             resume: spec-writer, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+             resume: spec-writer, label: "addressing spec review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
           - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 
@@ -98,11 +98,11 @@ phases:
         # every rework/terminal branch. Mirrors the spec minors loop.
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
-          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing review feedback", feedback: "Here's review feedback to address:"}
+          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing plan review feedback", feedback: "Here's review feedback to address:"}
           # Clean, and the writer already did its minors-integration pass -> stop.
           - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: task-lead}
           # Clean with actionable minors -> integrate them, then owe one more (verification) review.
-          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, label: "addressing plan review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean, nothing to integrate -> stop.
           - {else: true, goto: task-lead}
 
@@ -116,7 +116,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {if: {deviation: true}, resume: plan-writer, label: "plan didn't match the code", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
           - {if: {verify_tolerated: true}, set: {verify_tolerated_carry: true}, goto: verify}
           - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
@@ -186,7 +186,7 @@ phases:
              set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"}, goto: code-reviewer}
           # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
           - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
-             goto: plan-writer, label: "more plans for this spec", feedback: "More plans are needed for this spec. Coverage assessment:"}
+             goto: plan-writer, label: "write next plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
           # coverage complete, trivial change -> no panel, straight to integration via stamp-trailers
           - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: stamp-trailers}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
@@ -210,7 +210,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: [".imp/changes/*/**"], mode: allow}   # append deferred observations
         rules:
-          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
+          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
           - {else: true, continue: true}
 
