@@ -665,13 +665,13 @@ def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["merge_blocked"] = _h_merge_blocked
 
 
-def _h_waiting_for_head(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(LiteralTextNode(text=f"waiting to merge — {p.get('ahead', 0)} ahead",
                                  color_role="lifecycle"))
 
 
-NarrativeBuilder._HANDLERS["waiting_for_head"] = _h_waiting_for_head
+NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
 
 
 def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

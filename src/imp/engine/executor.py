@@ -633,7 +633,7 @@ async def _route_acquire(
 
     if not _is_head():
         ahead = merge_queue.position(change.control_root, change.id, lane)
-        _emit(log, "waiting_for_head", {"base": lane, "ahead": ahead})
+        _emit(log, "lane_waiting", {"base": lane, "ahead": ahead})
         try:
             await wait_for_turn_fn(_is_head)
         except AwaitingUserInput:
