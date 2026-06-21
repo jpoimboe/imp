@@ -526,7 +526,7 @@ def _run_header_line(change_id: str, title: str, marker: str,
     stripped = title.strip()
     name = stripped if stripped else "(unnamed)"
     tail = f" · {name} · {marker}"
-    return (ansi(change_id, *pal.NODE_COLORS["workflow"], enabled=color)
+    return (ansi(change_id, *pal.NODE_COLORS["change_id"], enabled=color)
             + ansi(tail, "dim", enabled=color))
 
 

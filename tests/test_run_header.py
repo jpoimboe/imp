@@ -18,15 +18,15 @@ def test_whitespace_only_title_shows_unnamed_label() -> None:
     assert line == "yaitd7 · (unnamed) · new"
 
 
-def test_color_wraps_head_bold_magenta_and_tail_dim() -> None:
+def test_color_wraps_head_bold_yellow_and_tail_dim() -> None:
     line = _run_header_line("yaitd7", "Add version flag", "new", color=True)
     assert line == (
-        "\x1b[1m\x1b[35myaitd7\x1b[0m"
+        "\x1b[1m\x1b[33myaitd7\x1b[0m"
         "\x1b[2m · Add version flag · new\x1b[0m")
 
 
-def test_color_unnamed_shows_id_bold_magenta_and_dim_unnamed_tail() -> None:
+def test_color_unnamed_shows_id_bold_yellow_and_dim_unnamed_tail() -> None:
     line = _run_header_line("yaitd7", "", "resuming", color=True)
     assert line == (
-        "\x1b[1m\x1b[35myaitd7\x1b[0m"
+        "\x1b[1m\x1b[33myaitd7\x1b[0m"
         "\x1b[2m · (unnamed) · resuming\x1b[0m")

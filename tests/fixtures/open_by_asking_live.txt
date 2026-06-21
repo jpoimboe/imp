@@ -58,7 +58,7 @@ spec-writer · opus
 
   4 calls · rename_change · write_file · bash · complete_step · 25s
 
-→ named add-version-flag
+• (set name to "add-version-flag")
 
 • Spec written and committed as imp/specs/2026-06-06-add-version-flag.md. It
   captures the top-level --version/-V flag, version resolution via

@@ -215,7 +215,7 @@ def test_empty_thinking_dropped_in_live_path() -> None:
 def test_no_slug_title_header_emitted() -> None:
     # The slug/title banner is gone: change_created (and a later change_renamed)
     # emit no `#slug  title` line — the transcript opens on the first turn.
-    # A rename DOES emit a `→ named …` breadcrumb (tested in test_rename_line.py).
+    # A rename DOES emit a `• (set name to …)` aside (tested in test_rename_line.py).
     drv, out = _driver()
     drv.on_event(ev("1", "change_created", title="add auth"))
     drv.on_event(ev("2", "change_renamed", id="ch1", old_title="add auth",

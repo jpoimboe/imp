@@ -69,7 +69,7 @@ def fmt_seconds_done(seconds: float | int | None) -> str:
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80, live_viewer: bool = False) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
-    # change id/title belong to `imp` chrome (the run header, `imp list`), not the
+    # change id/title belong to `imp` chrome (the run header, `imp status`), not the
     # narrative body — so live and log both start with content, not a banner.
     root = tree.root
     yield from _render_children(root.children, depth=0, full=full, color=color, width=width,
@@ -611,11 +611,14 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.RenameNode):
+        # A naming reads as a quiet agent-style aside, inline where it happened:
+        # the bold "• " turn bullet, then a parenthetical with the new title in
+        # non-bold yellow (the change's identity hue — see NODE_COLORS["change_id"],
+        # minus the bold that anchors it in the run-header chrome).
         indent = _gutter_indent(depth, gutters, color)
-        marker = pal.ansi("→ named ", "dim", enabled=color)
-        name = pal.ansi(_caret_escape(node.name), *pal.NODE_COLORS["workflow"],
-                        enabled=color)
-        yield indent + marker + name
+        bullet = pal.ansi("• ", "bold", enabled=color)
+        name = pal.ansi(_caret_escape(node.name), "yellow", enabled=color)
+        yield indent + bullet + '(set name to "' + name + '")'
         return
 
     if isinstance(node, nv.ErrorNode):

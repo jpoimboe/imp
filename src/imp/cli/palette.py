@@ -250,6 +250,7 @@ def action_text(action: Any) -> str:
 # calmest; weight + color are reserved for speaker identity and structure.
 NODE_COLORS: dict[str, tuple[str, ...]] = {
     "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
+    "change_id": ("bold", "yellow"),   # the change's own identity handle (new/resume chrome)
     "phase": ("bold", "blue"),         # structure stands out: bold blue
     "step": ("bold", "step"),          # a bold darker-blue "mini-phase" label
     "breadcrumb": ("gray",),           # per-step completion line — recede entirely
