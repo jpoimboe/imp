@@ -145,8 +145,6 @@ def test_relative_home_location_is_worktree_symlink_to_home(tmp_path: Path) -> N
     ch = Change.create_draft(tmp_path, title="X", change_id="rel1", base_branch="main")
     ch.materialize()
     rel = f".imp/changes/{ch.id}"
-    assert not rel.startswith("/")
-    assert ".." not in rel
     link = ch.project_root / rel
     assert link.is_symlink()
     assert link.resolve() == ch.change_dir.resolve()
