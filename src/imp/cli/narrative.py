@@ -235,6 +235,11 @@ class SubagentFold:
                                         # for a missing/lost task tool_result).
     event_count: int = 0
     running: bool = True
+    awaits_result: bool = False        # dispatch is block-tracked: an authoritative
+                                       # id_ns="block" tool_result WILL close it, so
+                                       # the opener's next event must NOT resume-close
+                                       # it early (which would freeze a near-instant
+                                       # end_ts and drop the run duration live).
     outcome: str | None = None         # result summary when task tool_result lands
     is_error: bool = False
     terminal_state: str | None = None  # 'stalled' or 'interrupted' (both providers
@@ -469,11 +474,18 @@ class NarrativeBuilder:
         Outcome-free close — there is no task tool_result to read — so the fold
         renders as `running=False` with no glyph. Matches opener_agent_id EXACTLY;
         skips folds opened by a different parent (single-level routing means there
-        is at most one today, but the loop is robust to future nesting)."""
+        is at most one today, but the loop is robust to future nesting).
+
+        SKIPS block-tracked folds (awaits_result): their authoritative id_ns="block"
+        tool_result WILL close them, so a non-blocking dispatch's opener can keep
+        emitting its own events while the subagent runs without freezing the fold's
+        row at a near-instant end_ts. A genuine resume still finalizes them as
+        interrupted via _h_workflow_resumed's own loop, not this fallback."""
         ts = event.get("timestamp") if isinstance(event, dict) else None
         to_close = [
             fold for fold in self._open_sub_by_event.values()
             if fold.running and fold.opener_agent_id == agent_id
+            and not fold.awaits_result
         ]
         for fold in to_close:
             self._open_sub_by_block.pop(fold.block_id, None)
@@ -1424,6 +1436,7 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"),
+        awaits_result=p.get("id_ns") == "block",
         label=p.get("label"))
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold

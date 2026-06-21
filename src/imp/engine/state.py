@@ -189,7 +189,8 @@ class EventLog(Protocol):
                             stop_reason: Any,
                             auth_mode: str | None = None) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
-                         block: Any, label: str | None = None) -> dict[str, Any]: ...
+                         block: Any, label: str | None = None,
+                         id_ns: str | None = None) -> dict[str, Any]: ...
     def append_tool_result(self, *, agent_id: str | None,
                            block: Any,
                            citations: list[dict[str, Any]] | None = None,
@@ -312,11 +313,20 @@ class _BaseEventLog:
             agent_id=agent_id, type="llm_response", payload=payload)
 
     def append_tool_call(self, *, agent_id: str | None,
-                         block: Any, label: str | None = None) -> dict[str, Any]:
+                         block: Any, label: str | None = None,
+                         id_ns: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "id": block.id, "name": block.name, "input": block.input}
         if label is not None:
             payload["label"] = label
+        # §3 marker for a `task` dispatch that will be closed by an authoritative
+        # `id_ns`-stamped tool_result (the block-close protocol). Mirrors the same
+        # field on append_tool_result so a dispatch/result pair is symmetrically
+        # tagged. The renderer reads it to keep the subagent fold OPEN until that
+        # result lands (instead of the opener's next event resume-closing it with a
+        # near-instant end_ts). Absent on legacy dispatches with no such result.
+        if id_ns is not None:
+            payload["id_ns"] = id_ns
         return self._emit(agent_id=agent_id, type="tool_call", payload=payload)
 
     def append_tool_result(self, *, agent_id: str | None,

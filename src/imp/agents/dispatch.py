@@ -194,7 +194,10 @@ async def dispatch_task_batch(
             state.tool_calls_used += 1
             sub_def = ctx.subagent_defs.get(tu.input["subagent_name"])
             label = sub_def.label if sub_def is not None else None
-            tc_ev = elog.append_tool_call(agent_id=aid, block=tu, label=label)
+            # Tag the dispatch block-tracked: its result below carries id_ns="block",
+            # so the fold stays open until then rather than being resume-closed.
+            tc_ev = elog.append_tool_call(agent_id=aid, block=tu, label=label,
+                                          id_ns="block")
             dispatched.append((tu, tc_ev["id"]))
 
     async def _run_child(tu: ToolUseBlock, tcid: str) -> None:
@@ -285,7 +288,10 @@ async def _dispatch_one_task_inline(
     state.tool_calls_used += 1
     sub_def = ctx.subagent_defs.get(tu.input["subagent_name"])
     label = sub_def.label if sub_def is not None else None
-    tc_ev = elog.append_tool_call(agent_id=aid, block=tu, label=label)
+    # Tag the dispatch block-tracked: its result below carries id_ns="block", so the
+    # fold stays open until then rather than being resume-closed.
+    tc_ev = elog.append_tool_call(agent_id=aid, block=tu, label=label,
+                                  id_ns="block")
     try:
         result_str = await dispatch_task(
             ctx, tu.input["subagent_name"], tu.input["task_description"],

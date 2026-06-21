@@ -336,6 +336,50 @@ def test_subagent_body_parity_with_render_tree() -> None:
     assert _body(out) == _render_body(events)
 
 
+def test_background_subagent_row_keeps_duration_in_live() -> None:
+    # Regression: a NON-BLOCKING subagent dispatch. The parent (opener "a") keeps
+    # working — a concurrent read_file tool_call/result — WHILE the subagent runs,
+    # and the subagent's authoritative `task` tool_result lands much later (10s).
+    # The opener's concurrent activity must NOT resume-close the still-running fold
+    # with a near-instant end_ts: doing so makes the live driver commit the row at
+    # sub-1s elapsed (no duration), frozen, while `imp log` (which reads the final
+    # end_ts) shows `· 10s`. Both views must stay byte-identical AND show the
+    # duration.
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        # Block-tracked dispatch (id_ns="block"): an authoritative result WILL close
+        # it, so the opener's concurrent activity must not resume-close it early.
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}, id_ns="block",
+           timestamp="2026-01-01T00:00:00+00:00"),
+        # Opener does concurrent work while the background subagent runs — this is
+        # the event that used to premature-close the fold (not matched / not task /
+        # not mid-turn → resume-close fired).
+        ev("5", "tool_call", agent_id="a", id="r1", name="read_file",
+           input={"p": "x"}, timestamp="2026-01-01T00:00:00.4+00:00"),
+        ev("6", "tool_result", agent_id="a", id="r1", content="ok",
+           timestamp="2026-01-01T00:00:00.5+00:00"),
+        ev("7", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
+        # Authoritative close, 10s after dispatch.
+        ev("8", "tool_result", agent_id="a", id="t1", id_ns="block",
+           content='{"status":"Success"}',
+           timestamp="2026-01-01T00:00:10+00:00"),
+        ev("9", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert body == _render_body(events)            # live == imp log, byte-for-byte
+    reviewer_row = next(ln for ln in body if ln.strip().startswith("reviewer"))
+    assert "10s" in reviewer_row, f"duration dropped from live row: {reviewer_row!r}"
+
+
 # NOTE: there is intentionally NO doubly-nested (sub-subagent) live test. Routing
 # is single-level (narrative.py:763-770) and spawned subagents get
 # `subagent_defs={}`, so a sub-subagent's events misroute and the inner fold stays
