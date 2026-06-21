@@ -1234,30 +1234,32 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     assert "review · reviewing plan" not in line   # the phase is NOT shown in the status line
 
 
-def test_labeled_forward_goto_label_in_both_paths() -> None:
+def test_labeled_route_reason_rides_target_header_in_both_paths() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="finalize", kind="agent", phase="implement",
+        ev("2", "step_started", step="code-reviewer", kind="agent", phase="review",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:implement/finalize",
-           raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
-        ev("4", "step_completed", step="finalize", kind="agent",
-           action={"verb": "goto", "target": "wait-for-head",
-                   "resume": False, "rework": False},
-           var_mutations={}, label="entering the merge queue"),
+        ev("3", "llm_response", agent_id="step:review/code-reviewer",
+           raw={"content": [{"type": "text", "text": "rework"}]}, usage={}),
+        ev("4", "step_completed", step="code-reviewer", kind="agent",
+           action={"verb": "goto", "target": "task-lead",
+                   "resume": False, "rework": True},
+           var_mutations={}, label="addressing review feedback"),
+        ev("5", "step_started", step="task-lead", kind="agent", phase="implement",
+           model="opus", provider="anthropic",
+           route_label="addressing review feedback"),
     ]
     for e in events:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    # the completion line prints first, then a blank, then the route label two lines below it.
-    bc_i = next(i for i, ln in enumerate(body) if "finalize · complete" in ln)
-    lbl_i = next(i for i, ln in enumerate(body)
-                 if ln.strip() == "→ entering the merge queue")
-    assert lbl_i == bc_i + 2
-    assert body[bc_i + 1].strip() == ""
-    assert "→ entering the merge queue" not in body[bc_i]
+    # No "→ <label>" route line beneath the completion any more.
+    assert not any(ln.strip().startswith("→ addressing review feedback") for ln in body)
+    # The reason rides the task-lead header as the last suffix segment.
+    hdr = next(ln for ln in body if "task-lead" in ln and "complete" not in ln)
+    assert hdr.strip().endswith("· addressing review feedback")
+    # Live path and the lean render_text path stay byte-identical.
     assert body == _render_body(events)
 
 

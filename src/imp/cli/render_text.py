@@ -593,18 +593,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         done = fmt_seconds_done(node.elapsed_s)
         if done:
             parts.append(done)
-        # A completed step prints its gray completion line first, then — for a
-        # labeled non-interrupted/non-blocked completion — a (gutter-bearing) blank
-        # and the non-bold yellow "→ <label>" route line beneath it, so the route
-        # announcing where the run goes next prints after the line saying the step
-        # is done. Without a label (or when blocked/interrupted) the completion
-        # line stands alone, as before.
+        # Route reason rides the next step's header, not a line beneath the completion.
         yield _line(" · ".join(parts), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
-        if node.label and not (node.interrupted or blocked):
-            yield _gutter_indent(depth, gutters, color)
-            yield _line(f"→ {node.label}", depth, color,
-                        *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.PauseNode):
