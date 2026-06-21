@@ -672,3 +672,18 @@ def test_glob_drops_nonsanctioned_escape_symlink(tmp_path: Path) -> None:
     out = _glob(_ctx(root), pattern="*")
     assert "keep.txt" in out
     assert "link" not in out                    # escape guard still drops it
+
+
+def test_grep_surfaces_sanctioned_change_home_symlink(tmp_path: Path) -> None:
+    root = tmp_path / "wt"
+    root.mkdir()
+    _init_git_repo(root, ".imp/\n")
+    spec = tmp_path / "home" / "artifacts" / "spec"
+    spec.mkdir(parents=True)
+    (spec / "feat.md").write_text("the DECISION is X\n")
+    changes = root / ".imp" / "changes"
+    changes.mkdir(parents=True)
+    (changes / "c1").symlink_to(tmp_path / "home")
+
+    out = _grep(_ctx(root), pattern="DECISION", path=".")
+    assert ".imp/changes/c1/artifacts/spec/feat.md" in out
