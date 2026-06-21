@@ -12,14 +12,14 @@ from imp.engine.state import State
 
 def test_pause_lines_include_from_when_recover_phase_set() -> None:
     lines = _pause_lines("title", "spec", "k3f9qa",
-                         reason="esc", color=False, recover_phase="spec")
+                         reason="ctrl-c", color=False, recover_phase="spec")
     joined = "\n".join(lines)
     assert "imp resume k3f9qa --from spec" in joined
 
 
 def test_pause_lines_omit_from_without_recover_phase() -> None:
     lines = _pause_lines("title", "spec", "k3f9qa",
-                         reason="esc", color=False)
+                         reason="ctrl-c", color=False)
     assert all("--from" not in ln for ln in lines)
 
 

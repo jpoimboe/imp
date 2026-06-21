@@ -89,10 +89,10 @@ async def test_mid_turn_interrupt_sets_resume_pending(tmp_path: Path) -> None:
 
     class _InterruptingRunner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
-            # Simulate ESC mid-turn: flip should_pause, then yield ONE event so
-            # drive_invocation's per-event should_pause check observes it and
+            # Simulate a mid-turn Ctrl-C: flip should_pause, then yield ONE event
+            # so drive_invocation's per-event should_pause check observes it and
             # returns paused (the clean cooperative interrupt).
-            await coord.signal_pause(reason="esc")
+            await coord.signal_pause(reason="ctrl-c")
             yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
