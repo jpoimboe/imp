@@ -27,3 +27,10 @@ def test_autosquash_resolve_prompt_contract(needle: str, case_fold: bool) -> Non
     text = PROMPT.read_text()
     haystack = text.lower() if case_fold else text
     assert needle in haystack
+
+
+def test_prompt_names_no_deleted_script() -> None:
+    """cleanup.sh present, deleted autosquash.sh absent."""
+    text = PROMPT.read_text()
+    assert "autosquash.sh" not in text
+    assert "cleanup.sh" in text

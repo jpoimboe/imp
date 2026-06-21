@@ -6,11 +6,11 @@ from imp.engine.loader import load_workflow
 
 _QUIET = {
     # spec/plan/implement plumbing
-    "spec-verify-commit", "plan-verify-commit", "commit-check",
-    # per-batch diff-base pinning (mechanical git commands, no narrative)
-    "autosquash", "review-base-init", "review-base-repin",
+    "spec-verify-commit", "plan-verify-commit",
+    # per-batch fold+stamp + diff-base pinning (mechanical git, no narrative)
+    "cleanup-implement", "cleanup-sweep", "cleanup-merge", "review-base-repin",
     # review/merge plumbing: mechanical git scripts + pure routing gates
-    "stamp-trailers",
+    "assert-stamped",
     "integrate-rebase",
 }
 
@@ -28,7 +28,9 @@ def test_substantive_steps_stay_loud() -> None:
     # agents and the consequential merge step carry real narrative — never quiet.
     for name in ("spec-writer", "plan-writer", "task-lead", "spec-reviewer",
                  "verify", "code-reviewer", "deferred-sweep",
-                 "autosquash-resolve", "integrator", "integration-reviewer",
+                 "autosquash-resolve-implement", "autosquash-resolve-sweep",
+                 "autosquash-resolve-merge",
+                 "integrator", "integration-reviewer",
                  "integration-resolver", "finalize", "merge-to-base",
                  "wait-for-head"):
         assert by_name[name].quiet is False, name

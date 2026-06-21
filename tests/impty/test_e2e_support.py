@@ -76,6 +76,6 @@ def test_seed_default_repo_installs_the_real_default_workflow(tmp_path: Path) ->
     # The shipped default workflow (with its gate scripts) was copied in.
     wf = tmp_path / "imp" / "workflows" / "imp"
     assert (wf / "workflow.yaml").is_file()
-    assert (wf / "scripts" / "autosquash.sh").is_file()
-    assert (wf / "scripts" / "stamp-trailers.sh").is_file()
+    assert (wf / "scripts" / "cleanup.sh").is_file()
+    assert (wf / "scripts" / "run-verify.sh").is_file()
     assert (wf / "agents" / "spec-writer.md").is_file()

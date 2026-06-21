@@ -146,7 +146,7 @@ def test_task_lead_nit_fix_dispatch_has_overreach_guardrail_and_batches() -> Non
     # Over-reach guardrail on the nit-fix dispatch (AC 3).
     assert "apply only these named nits" in low
     assert "do not refactor beyond the named change" in low
-    # Qualifying nits ride the same fixup round, folded by autosquash (AC 4).
+    # Qualifying nits ride the same fixup round, folded by cleanup (AC 4).
     assert "same fixup round" in low
 
 
@@ -313,6 +313,8 @@ def test_task_lead_documents_verify_triage() -> None:
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
+    assert "commit-check" not in text               # the commit-check step is deleted
+    assert "consume the budget" not in low          # the carry-era budget wording is gone
 
 
 def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
@@ -420,13 +422,16 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     # does triage only and does NOT re-drain.
     assert "injected feedback" in low
     assert "triage only" in low
-    # A real regression is fixed with a PLAIN commit, never a --fixup (no autosquash
-    # runs after the sweep), so a fixup would leak unsquashed to merge.
+    # A real regression is fixed with a PLAIN commit, never a --fixup: a sweep fix is its
+    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped by
+    # cleanup-sweep.
     assert 'git commit -m' in text
     assert "--fixup=HEAD" in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
+    assert "cleanup-sweep" in text                  # the sweep's cleanup gate
+    assert "consume the budget" not in low          # the carry-era budget wording is gone
 
 
 def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:

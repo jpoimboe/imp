@@ -19,8 +19,6 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
-  verify_tolerated_carry: {type: bool, default: false}   # task-lead -> verify hand-off: all failures tolerated, so verify forward-advances (resetting its own max_loops budget)
-  sweep_tolerated_carry:  {type: bool, default: false}   # deferred-sweep -> sweep-verify hand-off: all failures tolerated, so sweep-verify forward-advances (resetting its own max_loops budget)
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-batch, not re-paneled
 
 defaults:
@@ -117,38 +115,32 @@ phases:
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
-          - {if: {verify_tolerated: true}, set: {verify_tolerated_carry: true}, goto: verify}
+          - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
-
-      - name: commit-check
-        quiet: true
-        command: ./scripts/implement-commit-verify.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, resume: task-lead}
 
       - name: verify
         command: ./scripts/run-verify.sh
         label: testing
         max_loops: 5
         rules:
-          - {if: {exit: 0}, set: {verify_tolerated_carry: false}, continue: true}
+          - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {if: {verify_tolerated_carry: true}, set: {verify_tolerated_carry: false}, continue: true}
           - {else: true, resume: task-lead}
 
-      # autosquash folds this plan's fixup chain into one-commit-per-task BEFORE any
-      # review reads the diff. Clean fold -> pin the per-batch diff base.
-      - name: autosquash
+      # cleanup folds this batch's fixup chain into one commit per task AND stamps the
+      # Change: trailer over (review_base or fork)..HEAD, BEFORE any review reads the
+      # diff. exit 0 skips the resolver; exit 2 falls through into it.
+      - name: cleanup-implement
         quiet: true
-        command: ./scripts/autosquash.sh
+        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
         rules:
-          - {if: {exit: 0}, goto: review-base-init}                    # clean fold / verified resolution -> pin diff base
-          - {if: {exit: 2}, continue: true}                            # resolvable fold conflict -> autosquash-resolve
-          - {else: true, pause: true}                                  # hard failure / verify bound exhausted
+          - {if: {exit: 0}, goto: plan-cycle-check}     # clean fold+stamp -> coverage check
+          - {if: {exit: 2}, continue: true}             # resolvable fold conflict -> resolver
+          - {if: {exit: 3}, resume: task-lead}          # dirty tree: the agent left work
+          - {else: true, pause: true}                   # hard failure / out-of-range fixup
 
-      - name: autosquash-resolve
+      - name: autosquash-resolve-implement
         file: agents/autosquash-resolve.md
         tier: high
         label: resolving fixups
@@ -157,18 +149,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {else: true, goto: autosquash}
-
-      # Capture the per-batch diff base ONCE, at the first implement entry (review_base
-      # still empty): the fork point. Idempotent — later laps see a non-empty review_base
-      # (re-pinned to HEAD after each batch) and leave it untouched.
-      - name: review-base-init
-        quiet: true
-        command: ./scripts/pin-review-base.sh fork
-        rules:
-          - {if: {exit: 0, review_base: ''}, set: {review_base: output.stdout}, continue: true}
-          - {if: {exit: 0}, continue: true}
-          - {else: true, pause: true}
+          - {else: true, goto: cleanup-implement}
 
       # SOLE arbiter of coverage AND review cadence. Increments tasks_since_review by the
       # just-completed plan's task count (read from the plan file) and emits the running
@@ -187,8 +168,9 @@ phases:
           # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
           - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
              goto: plan-writer, label: "write next plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
-          # coverage complete, trivial change -> no panel, straight to integration via stamp-trailers
-          - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: stamp-trailers}
+          # coverage complete, trivial change -> no panel, straight to finalize
+          # (the per-batch cleanup already folded+stamped this batch)
+          - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: finalize}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
           # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD diff
           # (review_scope='plan'), not a fresh whole-change panel each round.
@@ -222,8 +204,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          # Mirrors task-lead -> verify: carry the tolerated signal so sweep-verify forward-advances.
-          - {if: {sweep_tolerated: true}, set: {sweep_tolerated_carry: true}, goto: sweep-verify}
+          - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
           - {else: true, continue: true}
 
       - name: sweep-verify
@@ -231,39 +212,49 @@ phases:
         label: testing
         max_loops: 5
         rules:
-          - {if: {exit: 0}, set: {sweep_tolerated_carry: false}, continue: true}
+          - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {if: {sweep_tolerated_carry: true}, set: {sweep_tolerated_carry: false}, continue: true}
           - {else: true, resume: deferred-sweep}
+
+      # Fold + stamp this batch's sweep commits over the same (review_base or fork)..HEAD
+      # range before the diff base advances. Mirrors cleanup-implement.
+      - name: cleanup-sweep
+        quiet: true
+        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        rules:
+          - {if: {exit: 0}, goto: review-base-repin}
+          - {if: {exit: 2}, continue: true}
+          - {if: {exit: 3}, resume: deferred-sweep}
+          - {else: true, pause: true}
+
+      - name: autosquash-resolve-sweep
+        file: agents/autosquash-resolve.md
+        tier: high
+        label: resolving fixups
+        max_loops: 6
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+        rules:
+          - {else: true, goto: cleanup-sweep}
 
       # After a batch's review + sweep settle, advance the diff base to HEAD and reset
       # the counter. The end-of-change pass (review_scope==change) is the last review,
-      # so route it to integration (via stamp-trailers); a per-batch
+      # so route it to finalize (the per-batch cleanup already stamped); a per-batch
       # pass returns to plan-writer for the next plan.
       - name: review-base-repin
         quiet: true
-        command: ./scripts/pin-review-base.sh head
+        command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
         rules:
-          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
+          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: finalize}
           # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
           # never re-enters with more_plans:true; every post-panel per-batch settle is therefore
           # terminal -> route a corrective/gap-fix batch to finalize, not the next plan. (This keys
           # solely on change_panel_done; it is correct only while more_plans means uncovered SPEC
           # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
           # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
-          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: stamp-trailers}
+          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: finalize}
           - {if: {exit: 0}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: plan-writer}
-          - {else: true, pause: true}
-
-      # Stamp the Change: trailer on every run commit ONCE, before integration. Content-
-      # idempotent; a plain rebase preserves the trailer, so re-integration rounds need
-      # no re-stamp. Reached from plan-cycle-check (fast-path) and review-base-repin
-      # (end-of-change), so it runs on every path into integration.
-      - name: stamp-trailers
-        quiet: true
-        command: ./scripts/stamp-trailers.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
       - name: finalize
@@ -289,9 +280,9 @@ phases:
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
-          - {if: {exit: 2}, goto: merge-to-base}
-          - {if: {exit: 0}, goto: integration-reviewer}
-          - {if: {exit: 6}, continue: true}
+          - {if: {exit: 2}, goto: assert-stamped}                                  # base unmoved, merge directly: implement-phase cleanup already stamped
+          - {if: {exit: 0}, set: {review_base: "''"}, goto: integration-reviewer}  # clean replant onto a moved base -> clear the pin so cleanup-merge folds/stamps the whole change
+          - {if: {exit: 6}, set: {review_base: "''"}, continue: true}              # rebase stopped on a conflict -> integrator; the replant rewrote history, clear the pin
           - {else: true, pause: true}
 
       - name: integrator
@@ -314,9 +305,33 @@ phases:
         command: ./scripts/run-verify.sh
         label: testing
         rules:
-          - {if: {exit: 0}, goto: merge-to-base}
+          - {if: {exit: 0}, continue: true}        # green -> cleanup-merge folds+stamps, then assert-stamped, then merge
           - {if: {exit: 124}, pause: true}
           - {else: true, goto: integration-resolver}
+
+      # Fold + stamp the change over (review_base or fork)..HEAD before it merges. By
+      # now integrate-rebase has cleared review_base on a replant, so this folds/stamps
+      # the whole change from the fork; the re-stamp is content-idempotent. Mirrors
+      # cleanup-implement/cleanup-sweep. exit 0 skips the resolver to assert-stamped.
+      - name: cleanup-merge
+        quiet: true
+        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        rules:
+          - {if: {exit: 0}, goto: assert-stamped}   # clean fold+stamp -> pre-merge backstop
+          - {if: {exit: 2}, continue: true}         # resolvable fold conflict -> resolver
+          - {if: {exit: 3}, resume: integrator}     # dirty tree: the integrator left work
+          - {else: true, pause: true}               # hard failure / out-of-range fixup
+
+      - name: autosquash-resolve-merge
+        file: agents/autosquash-resolve.md
+        tier: high
+        label: resolving fixups
+        max_loops: 6
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+        rules:
+          - {else: true, goto: cleanup-merge}
 
       - name: integration-resolver
         file: agents/integration-resolve.md
@@ -327,6 +342,17 @@ phases:
         rules:
           - {if: {decision: merge},  goto: wait-for-head}
           - {if: {decision: rework}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {else: true, pause: true}
+
+      # Read-only PRE-MERGE backstop: no rebase, no mutation. Asserts every non-merge
+      # commit in fork..HEAD carries Change: <id> and no fixup!/squash!/amend! subject
+      # remains. cleanup guarantees this on every normal path; this catches a future
+      # path that reaches merge-to-base without passing through cleanup. exit 0 -> merge.
+      - name: assert-stamped
+        quiet: true
+        command: ./scripts/assert-stamped.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
       - name: merge-to-base

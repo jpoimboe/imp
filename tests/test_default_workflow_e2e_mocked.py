@@ -427,8 +427,9 @@ async def test_fast_path_skips_reviewers_and_review(
     # complexity:trivial -> spec-writer sets fast_path=true. The fast path skips
     # spec-reviewer (A.1: spec-verify-commit routes straight to plan-writer with no
     # unseen change), plan-review (plan-verify-commit fast-path rule), and the whole
-    # review -> deferred-sweep -> sweep-verify block (A.2: autosquash routes to
-    # stamp-trailers). The run still reaches planning, implementation, and merge.
+    # review -> deferred-sweep -> sweep-verify block (A.2: plan-cycle-check fast-path
+    # routes straight to finalize).
+    # The run still reaches planning, implementation, and merge.
     def _default_trivial(**kwargs):
         system = kwargs.get("system", "")
         if _IR_SIG in system:

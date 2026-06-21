@@ -1,9 +1,9 @@
-"""Per-batch review cadence: autosquash + review-base-init runs INSIDE the
-per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
+"""Per-batch review cadence: cleanup-implement / autosquash-resolve-implement run
+INSIDE the per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
 single `code-reviewer` runs as the `code-reviewer` step directly, over review_base..HEAD
 per batch and over merge-base..HEAD once at change end (review_scope=change).
 deferred-sweep + sweep-verify + review-base-repin trail each review batch.
-stamp-trailers and finalize tail the implement phase (no separate review phase)."""
+review-base-repin and finalize tail the implement phase (no separate review phase)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,11 +42,11 @@ def _steps(wf):
 def test_implement_phase_is_the_per_batch_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
-        "task-lead", "commit-check", "verify",
-        "autosquash", "autosquash-resolve",
-        "review-base-init", "plan-cycle-check",
-        "code-reviewer", "deferred-sweep", "sweep-verify", "review-base-repin",
-        "stamp-trailers", "finalize",
+        "task-lead", "verify",
+        "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
+        "code-reviewer", "deferred-sweep", "sweep-verify",
+        "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
+        "finalize",
     ]
 
 
@@ -54,7 +54,7 @@ def test_no_separate_review_phase_stamp_and_finalize_tail_implement() -> None:
     wf = _wf()
     assert not any(p.name == "review" for p in wf.phases)
     impl = next(p for p in wf.phases if p.name == "implement")
-    assert [s.name for s in impl.steps][-2:] == ["stamp-trailers", "finalize"]
+    assert [s.name for s in impl.steps][-2:] == ["review-base-repin", "finalize"]
     names = {s.name for s in wf.flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers",
@@ -181,7 +181,7 @@ def test_plan_cycle_check_routes_cadence_and_coverage() -> None:
     m_fast = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                             output={"status": "Success", "more_plans": False,
                                     "running_tasks": 1, "rationale": "x"})
-    assert isinstance(m_fast.action, Goto) and m_fast.action.target == "stamp-trailers"
+    assert isinstance(m_fast.action, Goto) and m_fast.action.target == "finalize"
     m_cov = evaluate_rules(rules, vars=_BASE_VARS,
                            output={"status": "Success", "more_plans": False,
                                    "running_tasks": 3, "rationale": "x"})
@@ -239,16 +239,12 @@ def test_per_batch_reviews_review_base_range(tmp_path) -> None:
     assert "task(subagent_name=" not in out
 
 
-def test_review_base_init_pins_once_then_idempotent() -> None:
-    rules = _steps(_wf())["review-base-init"].rules
-    m_first = evaluate_rules(rules, vars={**_BASE_VARS, "review_base": ""},
-                             output={"exit": 0, "stdout": "fork123", "stderr": ""})
-    assert isinstance(m_first.action, Continue)
-    assert m_first.var_mutations["review_base"] == "fork123"
-    m_later = evaluate_rules(rules, vars={**_BASE_VARS, "review_base": "head999"},
-                             output={"exit": 0, "stdout": "fork123", "stderr": ""})
-    assert isinstance(m_later.action, Continue)
-    assert "review_base" not in m_later.var_mutations
+def test_per_batch_empty_review_base_falls_back_to_fork(tmp_path) -> None:
+    # review-base-init is gone: the first per-batch review runs with review_base == "",
+    # which must resolve to the recorded fork point, not a broken empty-LHS range.
+    out = _render_reviewer(tmp_path, review_scope="plan", review_base="",
+                           cur_base_head="forkSHA")
+    assert "forkSHA..imp/chg" in out
 
 
 def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
@@ -256,7 +252,7 @@ def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:
     m_change = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "change",
                                            "tasks_since_review": 9},
                               output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
-    assert isinstance(m_change.action, Goto) and m_change.action.target == "stamp-trailers"
+    assert isinstance(m_change.action, Goto) and m_change.action.target == "finalize"
     assert m_change.var_mutations["tasks_since_review"] == 0
     assert m_change.var_mutations["review_base"] == "deadbeef"
     m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan",
@@ -301,7 +297,7 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
     # preamble workflow.yaml emits for verdict: task_gap (kept verbatim — task-lead.md
     # is out of scope for this change).
     assert "The code-reviewer found an implemented task needs rework." in text
-    assert 'gate failure (the `commit-check`' in text
+    assert 'gate failure (the `verify`' in text
     assert "human finalize decision" not in text
 
 
@@ -323,3 +319,26 @@ def test_code_reviewer_is_not_a_pure_advisor() -> None:
     assert "pure advisor" not in low          # it routes now, not merely advises
     assert "verdict" in low                    # owns the keep/dismiss/defer call
     assert "approve" in text and "task_gap" in text
+
+
+def test_cleanup_sweep_routes_by_exit_code() -> None:
+    from imp.engine.gates import evaluate_rules
+    from imp.engine.types import Continue, Goto, Pause
+    step = _steps(_wf())["cleanup-sweep"]
+    assert step.kind == "script"
+    assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
+    r = step.rules
+    m0 = evaluate_rules(r, vars={}, output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(m0.action, Goto) and m0.action.target == "review-base-repin"
+    m2 = evaluate_rules(r, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
+    assert isinstance(m2.action, Continue)
+    m3 = evaluate_rules(r, vars={}, output={"exit": 3, "stdout": "", "stderr": ""})
+    assert isinstance(m3.action, Goto) and m3.action.target == "deferred-sweep"
+    assert m3.action.resume is True
+    m1 = evaluate_rules(r, vars={}, output={"exit": 1, "stdout": "", "stderr": ""})
+    assert isinstance(m1.action, Pause)
+    resolver = _steps(_wf())["autosquash-resolve-sweep"]
+    assert resolver.kind == "agent" and resolver.tier == "high"
+    assert resolver.file.name == "autosquash-resolve.md"
+    assert resolver.rules[-1].action.target == "cleanup-sweep"
+    assert resolver.max_loops == 6

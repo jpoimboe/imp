@@ -283,3 +283,56 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
         assert "not accepted" in feedback
 
     anyio.run(main)
+
+
+def test_run_script_rstrips_stdout(tmp_path) -> None:
+    """Gate stdout exposed to rules/feedback has trailing whitespace trimmed."""
+    step = _script_step("printf 'abc123\\n\\n'")
+    out = run_script(step, cwd=tmp_path)
+    assert out["stdout"] == "abc123"
+
+
+def test_run_script_does_not_rstrip_stderr(tmp_path) -> None:
+    """stderr is returned verbatim; only stdout is rstripped."""
+    step = _script_step("echo err >&2; printf 'out'")
+    out = run_script(step, cwd=tmp_path)
+    assert out["stderr"] == "err\n"
+    assert out["stdout"] == "out"
+
+
+def test_run_script_uses_command_override(tmp_path) -> None:
+    """When a rendered command is supplied, run_script executes it, not step.command."""
+    step = _script_step("echo step-command")
+    out = run_script(step, cwd=tmp_path, command="echo override")
+    assert out["stdout"] == "override"
+
+
+def test_route_script_renders_command_template(tmp_path) -> None:
+    """Gate command {{ vars.X }} templates are rendered against state.vars before execution."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        cur_base_head="basesha",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="g", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo {{ vars.review_base }} > rendered.txt",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={"review_base": "abc123"}, route_label=None)
+        log = InMemoryEventLog()
+        await _route_script(step, change, state, log)
+
+    anyio.run(main)
+    assert (tmp_path / "rendered.txt").read_text().strip() == "abc123"

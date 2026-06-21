@@ -21,7 +21,7 @@ pre-autosquash tree. That tree is recorded for you:
 
     cat {{ change.home }}/state/autosquash-before-tree
 
-A re-entry of `autosquash.sh` (triggered by the sentinel file) checks this byte-for-byte after you finish. You
+A re-entry of `cleanup.sh` (triggered by the sentinel file) checks this byte-for-byte after you finish. You
 cannot "win" by editing freely — only by reproducing that exact tree with a clean,
 one-commit-per-unit history. Resolve every conflict toward the content the pre-autosquash
 branch already had.
@@ -56,6 +56,6 @@ Self-check that you reproduced the oracle and left no rebase running:
       && echo OK
 
 End with `complete_step`: `status: Success` with a one-line `summary` of how many stops
-you resolved. Re-entry of `autosquash.sh` routes the next step purely from the git state,
+you resolved. Re-entry of `cleanup.sh` routes the next step purely from the git state,
 so if you cannot reproduce the tree, say so honestly in `summary` and report `status:
 Error` — never fabricate a clean result.

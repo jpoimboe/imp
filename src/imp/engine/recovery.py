@@ -34,7 +34,7 @@ def _is_gate(workflow: Workflow, step: Step, idx: int) -> bool:
 
     Scope is deliberately rules only — NOT on_max_retries. The spec
     defines a gate by its authored rules; the default workflow's pause-only
-    steps (autosquash/stamp-trailers) use explicit `else: pause` rules. Do not
+    steps (cleanup-implement/assert-stamped) use explicit `else: pause` rules. Do not
     fold on_max_retries in here without revisiting the spec definition."""
 
     def blocks(action: object) -> bool:

@@ -550,6 +550,14 @@ async def _route_script(
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step, state)
+    command = step.command
+    assert command is not None, "script step must have a command"
+    if "{{" in command:
+        command = render_prompt(command, build_context(
+            change_title=change.title, event_log=log,
+            change_id=change.id, change_home=f".imp/changes/{change.id}",
+            cur_base_head=change.cur_base_head, vars=state.vars,
+        ))
     # The script gate's subprocess runs to completion under a blocking
     # proc.communicate() (gates.run_script). Offload it to a worker thread so the
     # event loop keeps turning — otherwise a multi-minute verify gate starves
@@ -566,20 +574,19 @@ async def _route_script(
                                  change_dir=change.change_dir,
                                  verify_command=verify_command,
                                  verify_timeout=verify_timeout),
-            policy=sandbox_policy))
+            policy=sandbox_policy, command=command))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match, state)
     feedback = None
     if isinstance(action, Goto):
-        assert step.command is not None, "script step must have a command"
         # exit-0 Goto is a success forward-route; only non-zero exit is a failure-retry.
         if out["exit"] != 0:
             feedback = format_script_feedback(
-                step.command, out["exit"], out["stdout"], out["stderr"])
+                command, out["exit"], out["stdout"], out["stderr"])
     elif isinstance(action, Pause):
         # Script pauses (e.g. integrate-rebase exit 3/4/5,
-        # autosquash/stamp-trailers) otherwise lose their stderr — the pause verb
+        # cleanup-implement/assert-stamped) otherwise lose their stderr — the pause verb
         # carries no reason and the CLI keys remediation only on merge_blocked.
         # Journal it so `imp log` shows it and the CLI can surface it (findings #5/#6).
         _emit(log, "script_blocked", {

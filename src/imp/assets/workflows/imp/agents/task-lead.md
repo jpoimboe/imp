@@ -31,7 +31,7 @@ Read first, every entry:
 message containing feedback, treat it as **authoritative over progress.md**:
 re-open and fix the named task even if progress.md marks it done, then reconcile
 progress.md. Two feedback sources resume you here:
-- a gate failure (the `commit-check`/`verify` scripts `resume` you with their
+- a gate failure (the `verify` and `cleanup` gates `resume` you with their
   stderr — e.g. failing tests or an uncommitted file);
 - the code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
   preamble "The code-reviewer found an implemented task needs rework. Findings:"
@@ -59,9 +59,9 @@ progress.md. Two feedback sources resume you here:
      original task commit is the one whose subject equals the recorded subject with
      no `fixup! ` prefix) — then tell the implementer: "fixup the buried task
      commit `<SHA>`" → it runs `git commit --fixup=<SHA>`. Resolve the SHA **now**,
-     against current history (no autosquash has run since the last commit-check, so
-     SHAs are stable within the loop). The `autosquash` step at review entry folds
-     the fixup into its target, so the final branch stays one clean commit per task.
+     against current history (no fold has run since your last commit, so SHAs are
+     stable within the loop). The `cleanup` gate folds the fixup into its target at
+     review entry, so the final branch stays one clean commit per task.
      Do **not** make a second new commit for a re-opened task.
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
@@ -121,7 +121,7 @@ progress.md. Two feedback sources resume you here:
    **re-dispatch the implementer telling it to fix the tree to its final state and
    `git commit --fixup=HEAD`** (the task commit, or its pending fixups, sits at the
    loop tip). Batch qualifying nits into the **same fixup round** as any blocking
-   fixes; the fixup is transient, and `autosquash` folds the whole chain back into
+   fixes; the fixup is transient, and `cleanup` folds the whole chain back into
    the task commit at review entry, so the final branch is **one clean commit per
    task**. When nothing clears the bar and there are no blocking findings, there is
    **no extra work** — do not invent a fixup.
@@ -160,7 +160,7 @@ progress.md. Two feedback sources resume you here:
 
    **Record an `open_items` note
    whenever a round was NOT clean on first pass** — any of: a reviewer raised a
-   blocking (Critical/Major) finding; a gate (`commit-check` / `verify`) failed
+   blocking (Critical/Major) finding; a gate (`verify` / `cleanup`) failed
    and resumed you; or a fixup had to be made for **correctness** (not polish). A
    degraded run must be self-reporting. The line between polish and correctness:
    renaming a variable for clarity, or a nit that cleared the fixability bar, =
@@ -210,8 +210,7 @@ return — a normal task entry, a real-regression fix, a deviation — emit
 
 A **`max_loops` pause at `verify`** (the gate is capped at 5 fix laps) means the
 triage is **non-converging** — an unrecognized flake or a hard regression you could
-not fix in the budget. It escalates to a human; it is not a transient to retry. The
-`verify_tolerated` forward advance is not a fix lap and does not consume the budget.
+not fix in the budget. It escalates to a human; it is not a transient to retry.
 
 Discipline: never dispatch two implementers in parallel; never skip the
 `quality-reviewer`; never move on with blocking findings open. When a subagent returns

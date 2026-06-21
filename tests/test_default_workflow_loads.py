@@ -151,11 +151,13 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "plan-reviewer": "reviewing plan",
         "task-lead": "implementing",
         "verify": "testing",
-        "autosquash-resolve": "resolving fixups",
+        "autosquash-resolve-implement": "resolving fixups",
+        "autosquash-resolve-merge": "resolving fixups",
         "plan-cycle-check": "checking plan coverage",
         "code-reviewer": "reviewing code",
         "deferred-sweep": "resolving deferred items",
         "sweep-verify": "testing",
+        "autosquash-resolve-sweep": "resolving fixups",
         "finalize": "finalizing",
         "wait-for-head": "waiting to merge",
         "integrator": "integrating",
@@ -167,9 +169,9 @@ def test_every_nonquiet_step_has_its_label() -> None:
     for name, label in expected.items():
         assert by[name].label == label, name
     # Quiet plumbing steps stay label-free.
-    for name in ("spec-verify-commit", "plan-verify-commit", "commit-check",
-                 "autosquash", "review-base-init", "review-base-repin",
-                 "stamp-trailers", "integrate-rebase"):
+    for name in ("spec-verify-commit", "plan-verify-commit",
+                 "cleanup-implement", "cleanup-sweep", "cleanup-merge", "review-base-repin",
+                 "assert-stamped", "integrate-rebase"):
         assert by[name].label is None, name
 
 

@@ -19,8 +19,6 @@ _BASE_VARS = {
     "plan_minors_integrated": False,
     "review_scope": "plan",
     "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
-    "verify_tolerated_carry": False,
-    "sweep_tolerated_carry": False,
     "change_panel_done": False,
 }
 
@@ -101,7 +99,8 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert wf.phases[-1].name == "merge"
     assert [s.name for s in wf.phases[-1].steps] == [
         "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
-        "integration-verify", "integration-resolver", "merge-to-base"]
+        "integration-verify", "cleanup-merge", "autosquash-resolve-merge",
+        "integration-resolver", "assert-stamped", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
 
 
@@ -243,13 +242,14 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_stamp_trailers_tails_the_implement_phase() -> None:
+def test_finalize_tails_the_implement_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
-    assert "stamp-trailers" in names and "finalize" in names
-    assert names.index("stamp-trailers") == names.index("finalize") - 1
+    assert "stamp-trailers" not in names
+    assert names[-1] == "finalize"
+    assert names[-2] == "review-base-repin"
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -296,13 +296,6 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         assert not isinstance(failed.action, Pause), (
             f"{name} must NOT pause on an ordinary failure"
         )
-
-    # Timeout pauses regardless of carry state (rule ordering: exit:124 precedes
-    # the carry rule, so a timeout with carry=True still pauses).
-    with_carry = evaluate_rules(steps["verify"].rules,
-                                vars={**_BASE_VARS, "verify_tolerated_carry": True},
-                                output={"exit": 124, "stdout": "", "stderr": ""})
-    assert isinstance(with_carry.action, Pause)
 
 
 def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
@@ -541,26 +534,6 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
     assert isinstance(m.action, Continue)
 
 
-def test_autosquash_non_fast_path_goes_to_review_base_init() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["autosquash"].rules
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
-                       output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "review-base-init" and m.action.resume is False
-
-
-def test_autosquash_fast_path_goes_to_review_base_init() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["autosquash"].rules
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
-                       output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "review-base-init" and m.action.resume is False
-
-
 def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
     asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
@@ -604,28 +577,20 @@ def test_task_lead_declares_verify_tolerated_output() -> None:
     assert "verify_tolerated" in wf.agents["task-lead"].output_schema.field_names()
 
 
-def test_verify_tolerated_carry_var_declared_default_false() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.vars.defaults()["verify_tolerated_carry"] is False
-
-
-def test_task_lead_tolerated_routes_back_through_verify() -> None:
+def test_task_lead_tolerated_routes_to_cleanup() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["task-lead"].rules
-    # All current failures tolerated: task-lead made NO change and routes BACK to
-    # verify carrying the signal (NOT forward to autosquash). The engine resets a
-    # step's loop counter only when THAT step forward-advances, so routing back lets
-    # the *verify* step perform the budget-resetting forward advance on its next pass.
+    # All current failures tolerated: task-lead made NO change and routes straight to
+    # cleanup-implement, skipping the verify gate; it carries no var.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
         output={"status": "Success", "done": True, "deviation": False,
                 "verify_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "verify" and m.action.resume is False
-    assert m.var_mutations["verify_tolerated_carry"] is True
+    assert m.action.target == "cleanup-implement" and m.action.resume is False
+    assert m.var_mutations == {}
 
 
 def test_task_lead_normal_return_does_not_route_to_verify() -> None:
@@ -633,51 +598,24 @@ def test_task_lead_normal_return_does_not_route_to_verify() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["task-lead"].rules
     # A normal "more tasks remain" return loops back to task-lead, untouched by the
-    # verify_tolerated rule, and sets no carry.
+    # verify_tolerated rule.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
         output={"status": "Success", "done": False, "deviation": False,
                 "verify_tolerated": False, "summary": "next"},
     )
     assert isinstance(m.action, Goto) and m.action.target == "task-lead"
-    assert "verify_tolerated_carry" not in m.var_mutations
 
 
-def test_verify_carry_continues_forward_and_clears_carry() -> None:
+def test_verify_red_resumes_task_lead() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["verify"].rules
-    # A red suite (exit 1) whose failures task-lead already tolerated (carry set):
-    # forward-continue past verify -- the advance that resets verify's OWN loop
-    # counter -- and clear the carry so the next batch's first verify starts fresh.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "verify_tolerated_carry": True},
-                       output={"exit": 1, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["verify_tolerated_carry"] is False
-
-
-def test_verify_red_without_carry_resumes_task_lead() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["verify"].rules
-    # A red suite with no tolerated-carry resumes task-lead for triage -- the
-    # backward edge that increments verify's loop counter.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "verify_tolerated_carry": False},
+    # A red suite resumes task-lead for triage (the three-rule no-carry form).
+    m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"exit": 1, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
     assert m.action.target == "task-lead" and m.action.resume is True
-
-
-def test_verify_green_clears_stale_carry() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["verify"].rules
-    # A green suite (exit 0) clears a stale carry too, so a carry set in a prior
-    # batch can never leak forward and mask a real regression.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "verify_tolerated_carry": True},
-                       output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["verify_tolerated_carry"] is False
 
 
 def test_change_panel_done_var_declared_default_false() -> None:
@@ -719,11 +657,11 @@ def test_review_base_repin_corrective_batch_routes_to_finalize() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["review-base-repin"].rules
     # A per-batch review settling AFTER the full panel (guard latched) means coverage
-    # is complete: route to stamp-trailers -> finalize, NOT back to plan-writer.
+    # is complete: route to finalize, NOT back to plan-writer.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": True},
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "stamp-trailers"
+    assert isinstance(m.action, Goto) and m.action.target == "finalize"
 
 
 def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
@@ -763,32 +701,25 @@ def test_plan_writer_can_write_progress(tmp_path: Path) -> None:
     assert "**" not in write_paths
 
 
-def test_sweep_tolerated_carry_var_declared_default_false() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.vars.defaults()["sweep_tolerated_carry"] is False
-
-
 def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert "sweep_tolerated" in wf.agents["deferred-sweep"].output_schema.field_names()
 
 
-def test_deferred_sweep_tolerated_routes_through_sweep_verify() -> None:
+def test_deferred_sweep_tolerated_routes_to_cleanup() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["deferred-sweep"].rules
-    # All sweep-verify failures tolerated (or a new flaky declared): deferred-sweep made
-    # NO regression fix and hands the carry signal to sweep-verify so that step performs
-    # the budget-resetting forward advance on its next pass.
+    # All sweep failures tolerated: deferred-sweep made NO fix and routes straight to
+    # cleanup-sweep, skipping the sweep-verify gate; it carries no var.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
         output={"status": "Success", "sweep_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "sweep-verify" and m.action.resume is False
-    assert m.var_mutations["sweep_tolerated_carry"] is True
+    assert m.action.target == "cleanup-sweep" and m.action.resume is False
+    assert m.var_mutations == {}
 
 
 def test_deferred_sweep_normal_return_continues_without_carry() -> None:
@@ -810,41 +741,14 @@ def test_sweep_verify_has_max_loops_5() -> None:
     assert _steps(wf)["sweep-verify"].max_loops == 5
 
 
-def test_sweep_verify_carry_continues_forward_and_clears_carry() -> None:
+def test_sweep_verify_red_resumes_deferred_sweep() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["sweep-verify"].rules
-    # A red suite (exit 1) whose failures deferred-sweep already tolerated (carry set):
-    # forward-continue past sweep-verify -- the advance that resets sweep-verify's OWN
-    # loop counter -- and clear the carry so a later batch starts fresh.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
-                       output={"exit": 1, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["sweep_tolerated_carry"] is False
-
-
-def test_sweep_verify_red_without_carry_resumes_deferred_sweep() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["sweep-verify"].rules
-    # A red suite with no tolerated-carry resumes deferred-sweep for triage -- the
-    # backward edge that increments sweep-verify's loop counter.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": False},
+    m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"exit": 1, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
     assert m.action.target == "deferred-sweep" and m.action.resume is True
-
-
-def test_sweep_verify_green_clears_stale_carry() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["sweep-verify"].rules
-    # A green suite (exit 0) clears a stale carry too, so a carry set in a prior batch
-    # can never leak forward and mask a real regression.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
-                       output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Continue)
-    assert m.var_mutations["sweep_tolerated_carry"] is False
 
 
 def test_spec_writer_prompt_has_build_or_save_section() -> None:
@@ -879,12 +783,11 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
         assert a.label, f"agent {name!r} has no label"
 
 
-def test_sweep_verify_timeout_pauses_regardless_of_carry() -> None:
+def test_sweep_verify_timeout_pauses() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["sweep-verify"].rules
-    # exit:124 precedes the carry rule; timeout pauses even when carry is True.
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "sweep_tolerated_carry": True},
+    m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"exit": 124, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Pause)
 
@@ -944,4 +847,13 @@ def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
     # Trivial path: a plain-language heads-up, never naming the internal label.
     assert "brief plain-language heads-up" in lowered
     assert "never name the internal" in lowered
+
+
+def test_review_base_repin_command_cds_into_project_root() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    cmd = _steps(wf)["review-base-repin"].command
+    # Script gates run with cwd = the control-root workflow dir, so the command MUST
+    # cd into the worktree before reading HEAD, else it resolves the base-branch tip.
+    assert cmd == 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
 

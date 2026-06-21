@@ -11,24 +11,34 @@ def _wf():
     return load_workflow(bundled_workflow_dir("imp"), configured_tiers=_TIERS)
 
 
+def _idx(wf, name: str) -> int:
+    return next(i for i, s in enumerate(wf.flat_steps()) if s.name == name)
+
+
 def test_gate_steps_in_span_merge_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Merge phase = flat [20..27]. Gates (pause or backward/self goto):
-    # integrate-rebase (else pause), integration-verify (exit-124 pause),
-    # integration-resolve (backward goto + pause), merge-to-base (pause).
-    assert gate_steps_in_span(wf, 20, 27) == (
-        "integrate-rebase", "integration-verify", "integration-resolver", "merge-to-base",
+    # Merge phase gates (pause or backward/self goto), resolved by name so the
+    # assertion is stable across the implement-phase step shuffle.
+    lo, hi = _idx(wf, "integrate-rebase"), _idx(wf, "merge-to-base")
+    assert gate_steps_in_span(wf, lo, hi) == (
+        "integrate-rebase", "integration-verify", "cleanup-merge",
+        "autosquash-resolve-merge", "integration-resolver", "assert-stamped",
+        "merge-to-base",
     )
 
 
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
-    # autosquash(9) and stamp-trailers(17) gate via `pause: true` (no goto).
-    assert gate_steps_in_span(_wf(), 9, 9) == ("autosquash",)
-    assert gate_steps_in_span(_wf(), 17, 17) == ("stamp-trailers",)
+    wf = _wf()
+    # cleanup-implement gates via its `else: pause` rule; assert-stamped via its
+    # `else: pause`. Each is the sole gate at its own flat index.
+    i = _idx(wf, "cleanup-implement")
+    assert gate_steps_in_span(wf, i, i) == ("cleanup-implement",)
+    j = _idx(wf, "assert-stamped")
+    assert gate_steps_in_span(wf, j, j) == ("assert-stamped",)
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
@@ -60,9 +70,10 @@ def test_plan_rewind_unknown_target_lists_names() -> None:
 def test_plan_rewind_backward_to_step() -> None:
     from imp.engine.recovery import plan_rewind
 
-    plan = plan_rewind(_wf(), _state("code-reviewer"), "code-reviewer")
+    wf = _wf()
+    plan = plan_rewind(wf, _state("code-reviewer"), "code-reviewer")
     assert plan.to_step == "code-reviewer"
-    assert plan.target_idx == 13
+    assert plan.target_idx == _idx(wf, "code-reviewer")   # name-resolved, shift-stable
     assert plan.from_step == "code-reviewer"
 
 
@@ -72,7 +83,8 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("wait-for-head"), "merge-to-base")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integration-verify", "integration-resolver",
+        "integrate-rebase", "integration-verify", "cleanup-merge",
+        "autosquash-resolve-merge", "integration-resolver", "assert-stamped",
     )
     msg = str(exc.value)
     assert "integrate-rebase" in msg
@@ -94,7 +106,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # review (13) maxed; task-lead (6) upstream; finalize (18) downstream.
+    # code-reviewer maxed; task-lead upstream; finalize downstream.
     st = _state("code-reviewer",
                 loop_counts={"task-lead": 2, "code-reviewer": 6, "finalize": 1})
     log = InMemoryEventLog()
@@ -118,7 +130,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator (22) -> integration-reviewer (23): span [22,22] = integrator,
+    # integrator -> integration-reviewer: span [integrator,integrator] = integrator,
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
     plan = plan_rewind(_wf(), _state("integrator"), "integration-reviewer")
     assert plan.to_step == "integration-reviewer"
