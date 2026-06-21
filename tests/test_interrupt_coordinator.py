@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import contextlib
-from collections.abc import AsyncIterator
-
 import pytest
 
 from imp.cli import signals as _signals
@@ -65,11 +62,11 @@ def test_reason_for_signal_maps_sigint_and_sigterm() -> None:
 async def test_signal_pause_records_reason_first_wins() -> None:
     assert InterruptCoordinator().pause_reason is None   # initial state, fresh instance
     coord = InterruptCoordinator()
-    await coord.signal_pause(reason="esc")
+    await coord.signal_pause(reason="ctrl-c")
     assert coord.should_pause is True
-    assert coord.pause_reason == "esc"
-    await coord.signal_pause(reason="ctrl-c")     # later call must NOT overwrite
-    assert coord.pause_reason == "esc"
+    assert coord.pause_reason == "ctrl-c"
+    await coord.signal_pause(reason="sigterm")    # later call must NOT overwrite
+    assert coord.pause_reason == "ctrl-c"
 
 
 @pytest.mark.anyio
@@ -80,70 +77,17 @@ async def test_signal_pause_default_reason_is_ctrl_c() -> None:
 
 
 @pytest.mark.anyio
-async def test_tty_quiesced_noop_when_no_reader_attached() -> None:
-    coord = InterruptCoordinator()
-    entered = False
-    async with coord.tty_quiesced():
-        entered = True
-    assert entered
-
-
-@pytest.mark.anyio
-async def test_tty_quiesced_nestable_when_no_reader_attached() -> None:
-    coord = InterruptCoordinator()
-    async with coord.tty_quiesced(), coord.tty_quiesced():
-        pass
-
-
-@pytest.mark.anyio
-async def test_tty_quiesced_delegates_to_attached_reader() -> None:
-    coord = InterruptCoordinator()
-    enter_calls: list[int] = []
-    exit_calls: list[int] = []
-
-    class _FakeReader:
-        @contextlib.asynccontextmanager
-        async def tty_quiesced(self) -> AsyncIterator[None]:
-            enter_calls.append(1)
-            try:
-                yield
-            finally:
-                exit_calls.append(1)
-
-    coord.attach_esc_reader(_FakeReader())
-    async with coord.tty_quiesced():
-        pass
-    assert enter_calls == [1] and exit_calls == [1]
-
-    coord.detach_esc_reader()
-    async with coord.tty_quiesced():
-        pass
-    assert enter_calls == [1]                     # back to no-op
-
-
-@pytest.mark.anyio
-async def test_reset_clears_pause_keeps_interjects_and_unparks() -> None:
+async def test_reset_clears_pause_keeps_interjects() -> None:
     coord = InterruptCoordinator()
     coord.enqueue_interject("keep me")
-    await coord.signal_pause(reason="esc")
+    await coord.signal_pause(reason="ctrl-c")
     assert coord.should_pause is True
 
-    unparked: list[int] = []
-
-    class _FakeReader:
-        def __init__(self) -> None:
-            self._parked_on_pause = True
-        def unpark_on_reset(self) -> None:
-            self._parked_on_pause = False
-            unparked.append(1)
-
-    coord.attach_esc_reader(_FakeReader())
     coord.reset()
 
     assert coord.should_pause is False
     assert coord.pause_reason is None
     assert coord.drain_interject() == "keep me"  # interjects preserved
-    assert unparked == [1]
 
 
 def test_reset_clears_suppression_window() -> None:
@@ -165,7 +109,7 @@ def test_suppression_window_from_first_gesture() -> None:
 
     assert coord._register_gesture(kind="ctrl-c") is True   # first → allowed
     t["now"] = 100.5
-    assert coord._register_gesture(kind="esc") is False     # within 1 s → suppressed
+    assert coord._register_gesture(kind="ctrl-c") is False     # within 1 s → suppressed
     t["now"] = 100.9
     assert coord._register_gesture(kind="ctrl-c") is False  # window not restarted
     t["now"] = 101.2
