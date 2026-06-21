@@ -1165,6 +1165,15 @@ def _first_user_message(events: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
+    for ev in events:
+        if ev.get("type") == "opening_intent":
+            text = ((ev.get("payload") or {}).get("text") or "").strip()
+            if text:
+                return text
+    return _first_user_message(events)
+
+
 def _latest_phase(events: list[dict[str, Any]]) -> str | None:
     phase = None
     for ev in events:
@@ -1972,10 +1981,8 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
 def _backlog_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
     for rec in backlog.list_records(control):
-        ready, unmerged = backlog.readiness(control, rec["depends_on"])
-        step = "ready" if ready else f"blocked: {', '.join(unmerged)}"
         created = rec.get("created_at", "")
-        rows.append((rec["id"], "backlog", step, created,
+        rows.append((rec["id"], "backlog", "", created,
                      rec.get("title") or "", created, None))
     return rows
 
@@ -2000,12 +2007,15 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     name_w = change_row.name_budget()
     print(change_row.header_line(color=color))
     for r in inflight:
+        intent = None
+        if not r[4].strip():
+            intent = _resolve_intent(_load_events_for_id(control, r[0]) or [])
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w))
+            last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
     for r in backlog_rows:
         print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w))
     if past:
         if inflight or backlog_rows:
