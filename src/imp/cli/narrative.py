@@ -110,6 +110,7 @@ class StepNode:
     label: str | None = None           # step display label (step_started.payload.label)
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
+    route_label: str | None = None     # route reason (rule label) of the entering rule
     closed: bool = False
     interrupted: bool = False
     collapsible = False
@@ -762,6 +763,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.label = p.get("label")
             existing.command = p.get("command")
             existing.resumed = bool(p.get("resumed", False))
+            existing.route_label = p.get("route_label")
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase)
@@ -774,7 +776,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     quiet=bool(p.get("quiet", False)),
                     label=p.get("label"),
                     command=p.get("command"),
-                    resumed=bool(p.get("resumed", False)))
+                    resumed=bool(p.get("resumed", False)),
+                    route_label=p.get("route_label"))
     self._append(node)
     self._step_stack.append(node)
 
