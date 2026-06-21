@@ -1,5 +1,5 @@
-"""Per-batch review cadence: autosquash + review-base-init runs INSIDE the
-per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
+"""Per-batch review cadence: cleanup-implement / autosquash-resolve-implement run
+INSIDE the per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
 single `code-reviewer` runs as the `code-reviewer` step directly, over review_base..HEAD
 per batch and over merge-base..HEAD once at change end (review_scope=change).
 deferred-sweep + sweep-verify + review-base-repin trail each review batch.
@@ -42,9 +42,8 @@ def _steps(wf):
 def test_implement_phase_is_the_per_batch_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
-        "task-lead", "commit-check", "verify",
-        "autosquash", "autosquash-resolve",
-        "review-base-init", "plan-cycle-check",
+        "task-lead", "verify",
+        "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
         "code-reviewer", "deferred-sweep", "sweep-verify", "review-base-repin",
         "stamp-trailers", "finalize",
     ]
@@ -238,17 +237,6 @@ def test_per_batch_reviews_review_base_range(tmp_path) -> None:
     assert "spec-compliance-slice" not in out       # single reviewer, no panel
     assert "task(subagent_name=" not in out
 
-
-def test_review_base_init_pins_once_then_idempotent() -> None:
-    rules = _steps(_wf())["review-base-init"].rules
-    m_first = evaluate_rules(rules, vars={**_BASE_VARS, "review_base": ""},
-                             output={"exit": 0, "stdout": "fork123", "stderr": ""})
-    assert isinstance(m_first.action, Continue)
-    assert m_first.var_mutations["review_base"] == "fork123"
-    m_later = evaluate_rules(rules, vars={**_BASE_VARS, "review_base": "head999"},
-                             output={"exit": 0, "stdout": "fork123", "stderr": ""})
-    assert isinstance(m_later.action, Continue)
-    assert "review_base" not in m_later.var_mutations
 
 
 def test_review_base_repin_resets_counter_and_routes_by_scope() -> None:

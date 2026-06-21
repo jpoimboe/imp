@@ -19,7 +19,6 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
-  verify_tolerated_carry: {type: bool, default: false}   # task-lead -> verify hand-off: all failures tolerated, so verify forward-advances (resetting its own max_loops budget)
   sweep_tolerated_carry:  {type: bool, default: false}   # deferred-sweep -> sweep-verify hand-off: all failures tolerated, so sweep-verify forward-advances (resetting its own max_loops budget)
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-batch, not re-paneled
 
@@ -117,38 +116,32 @@ phases:
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
-          - {if: {verify_tolerated: true}, set: {verify_tolerated_carry: true}, goto: verify}
+          - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
-
-      - name: commit-check
-        quiet: true
-        command: ./scripts/implement-commit-verify.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, resume: task-lead}
 
       - name: verify
         command: ./scripts/run-verify.sh
         label: testing
         max_loops: 5
         rules:
-          - {if: {exit: 0}, set: {verify_tolerated_carry: false}, continue: true}
+          - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {if: {verify_tolerated_carry: true}, set: {verify_tolerated_carry: false}, continue: true}
           - {else: true, resume: task-lead}
 
-      # autosquash folds this plan's fixup chain into one-commit-per-task BEFORE any
-      # review reads the diff. Clean fold -> pin the per-batch diff base.
-      - name: autosquash
+      # cleanup folds this batch's fixup chain into one commit per task AND stamps the
+      # Change: trailer over (review_base or fork)..HEAD, BEFORE any review reads the
+      # diff. exit 0 skips the resolver; exit 2 falls through into it.
+      - name: cleanup-implement
         quiet: true
-        command: ./scripts/autosquash.sh
+        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
         rules:
-          - {if: {exit: 0}, goto: review-base-init}                    # clean fold / verified resolution -> pin diff base
-          - {if: {exit: 2}, continue: true}                            # resolvable fold conflict -> autosquash-resolve
-          - {else: true, pause: true}                                  # hard failure / verify bound exhausted
+          - {if: {exit: 0}, goto: plan-cycle-check}     # clean fold+stamp -> coverage check
+          - {if: {exit: 2}, continue: true}             # resolvable fold conflict -> resolver
+          - {if: {exit: 3}, resume: task-lead}          # dirty tree: the agent left work
+          - {else: true, pause: true}                   # hard failure / out-of-range fixup
 
-      - name: autosquash-resolve
+      - name: autosquash-resolve-implement
         file: agents/autosquash-resolve.md
         tier: high
         label: resolving fixups
@@ -157,18 +150,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {else: true, goto: autosquash}
-
-      # Capture the per-batch diff base ONCE, at the first implement entry (review_base
-      # still empty): the fork point. Idempotent — later laps see a non-empty review_base
-      # (re-pinned to HEAD after each batch) and leave it untouched.
-      - name: review-base-init
-        quiet: true
-        command: ./scripts/pin-review-base.sh fork
-        rules:
-          - {if: {exit: 0, review_base: ''}, set: {review_base: output.stdout}, continue: true}
-          - {if: {exit: 0}, continue: true}
-          - {else: true, pause: true}
+          - {else: true, goto: cleanup-implement}
 
       # SOLE arbiter of coverage AND review cadence. Increments tasks_since_review by the
       # just-completed plan's task count (read from the plan file) and emits the running
