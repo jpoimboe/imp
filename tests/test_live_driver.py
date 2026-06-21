@@ -1529,6 +1529,26 @@ def test_compute_start_phase_missing_file_is_none(tmp_path):
     assert compute_start_phase(tmp_path / "nope.jsonl") is None
 
 
+def test_compute_start_phase_ignores_malformed_phase_field(tmp_path):
+    events = [
+        {"type": "step_started", "agent_id": None, "id": "e0",
+         "payload": {"step": "a", "phase": "spec"}},
+        {"type": "step_started", "agent_id": None, "id": "e1", "payload": None},
+        {"type": "step_started", "agent_id": None, "id": "e2",
+         "payload": {"step": "b"}},
+        {"type": "step_started", "agent_id": None, "id": "e3",
+         "payload": {"step": "c", "phase": None}},
+        {"type": "step_started", "agent_id": None, "id": "e4",
+         "payload": {"step": "d", "phase": 42}},
+        {"type": "step_started", "agent_id": None, "id": "e5",
+         "payload": {"step": "e", "phase": "plan"}},
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    # Malformed entries are skipped; first valid = "spec", last valid = "plan".
+    assert compute_start_phase(path) == "plan"
+
+
 def _two_phase_events():
     return [
         {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
