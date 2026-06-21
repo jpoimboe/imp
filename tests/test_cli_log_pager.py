@@ -502,6 +502,8 @@ def test_main_log_summary_routes_through_pager(
     assert rc == 0
     assert popen.call_count == 1, "--summary must route through _page_or_print"
     assert capsys.readouterr().out == ""
+    writes = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
+    assert writes  # summary content reached the pager
     proc.stdin.close.assert_called_once()
     proc.wait.assert_called_once()
 
@@ -536,5 +538,7 @@ def test_main_log_backlog_routes_through_pager(
     assert rc == 0
     assert popen.call_count == 1, "backlog card must route through _page_or_print"
     assert capsys.readouterr().out == ""
+    writes = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
+    assert "queued work" in writes  # title from the backlog card reached the pager
     proc.stdin.close.assert_called_once()
     proc.wait.assert_called_once()
