@@ -75,10 +75,9 @@ class ReplyInterjectRouter:
     (tests/test_cli_interject_routing.py) — it touches no TTY.
 
     In the LIVE CLI the reply itself comes straight from the prompt_toolkit read
-    (so `reply_sink` is rarely exercised: while a solicit is active the ESC
-    reader is quiesced and never funnels a line in). The flag still guards the
-    race where a sink call lands during a prompt — that line is then a reply, not
-    a stray interject.
+    (so `reply_sink` is rarely exercised). The flag still guards the race where
+    a sink call lands during a prompt — that line is then a reply, not a stray
+    interject.
 
     Slash interception is scoped to the REPLY path only: when a solicit is
     active the line reader (`ask_line_with_slash`) consumes `/help`/`/skills`
