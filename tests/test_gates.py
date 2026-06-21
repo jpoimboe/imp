@@ -283,3 +283,18 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
         assert "not accepted" in feedback
 
     anyio.run(main)
+
+
+def test_run_script_rstrips_stdout(tmp_path) -> None:
+    """Gate stdout exposed to rules/feedback has trailing whitespace trimmed."""
+    step = _script_step("printf 'abc123\\n\\n'")
+    out = run_script(step, cwd=tmp_path)
+    assert out["stdout"] == "abc123"
+
+
+def test_run_script_does_not_rstrip_stderr(tmp_path) -> None:
+    """stderr is returned verbatim; only stdout is rstripped."""
+    step = _script_step("echo err >&2; printf 'out'")
+    out = run_script(step, cwd=tmp_path)
+    assert out["stderr"] == "err\n"
+    assert out["stdout"] == "out"

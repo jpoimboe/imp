@@ -91,4 +91,4 @@ def run_script(
             if stream is not None:
                 stream.close()
         raise
-    return {"exit": proc.returncode, "stdout": stdout, "stderr": stderr}
+    return {"exit": proc.returncode, "stdout": stdout.rstrip(), "stderr": stderr}
