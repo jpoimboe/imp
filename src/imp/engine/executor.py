@@ -465,6 +465,11 @@ async def _dispatch_step(
         state.retry_feedback = None
         state.save(change.state_dir)
 
+    if step.release is not None:
+        _release_lane(step, change, state, log)
+    if step.acquire is not None:
+        return await _route_acquire(step, change, state, log, wait_for_turn_fn)
+
     if step.kind == "wait_for_head":
         if wait_for_turn_fn is None:
             raise RuntimeError("wait_for_turn_fn is required for wait_for_head steps")
@@ -637,6 +642,60 @@ def _route_dequeue_wake(
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)
+
+
+def _resolve_lane(value: str, change: Change) -> str:
+    if value == "base":
+        return change.base_branch
+    raise RuntimeError(f"unknown lane keyword {value!r}")
+
+
+async def _route_acquire(
+    step: Step, change: Change, state: State, log: EventLog,
+    wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
+) -> tuple[Action, str | None, dict[str, object]]:
+    """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine import merge_queue
+    if wait_for_turn_fn is None:
+        raise RuntimeError("wait_for_turn_fn is required for acquire steps")
+    lane = _resolve_lane(step.acquire, change)
+    _emit_started(log, step)
+    merge_queue.enqueue_if_absent(change.control_root, change.id, lane)
+
+    def _is_head() -> bool:
+        return merge_queue.is_head(change.control_root, change.id, lane)
+
+    if not _is_head():
+        ahead = merge_queue.position(change.control_root, change.id, lane)
+        _emit(log, "waiting_for_head", {"base": lane, "ahead": ahead})
+        try:
+            await wait_for_turn_fn(_is_head)
+        except AwaitingUserInput:
+            pause = Pause(reason="awaiting_turn")
+            _emit(log, "step_completed", {
+                "step": step.name, "kind": step.kind,
+                "action": _action_payload(pause), "var_mutations": {}})
+            return pause, None, {}
+
+    state.held_lane = lane
+    state.held_acquire_step = step.name
+    state.save(change.state_dir)
+    _emit(log, "lane_acquired", {"base": lane, "step": step.name})
+    match = evaluate_rules(step.rules, vars=state.vars, output=None)
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
+
+
+def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
+    """Pop the lane before the step body, clearing the hold mark."""
+    from imp.engine import merge_queue
+    lane = _resolve_lane(step.release, change)
+    merge_queue.pop_and_wake(change.control_root, change.id, lane)
+    state.held_lane = None
+    state.held_acquire_step = None
+    state.save(change.state_dir)
+    _emit(log, "lane_released", {"base": lane, "step": step.name})
 
 
 async def _route_merge(
