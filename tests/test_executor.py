@@ -155,6 +155,40 @@ def _register_prompt_capturing(output: dict, sink: list[str]) -> None:
     )
 
 
+class _InvocationCapturingRunner:
+    def __init__(self, output: dict, sink: list) -> None:
+        self._output = output
+        self._sink = sink
+
+    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        self._sink.append(invocation)
+        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _InvocationCapturingProvider:
+    name = "fake"
+
+    def __init__(self, output: dict, sink: list, model: str = "m") -> None:
+        self._output = output
+        self._sink = sink
+        self.model = model
+
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+        return _InvocationCapturingRunner(self._output, self._sink)
+
+
+def _register_invocation_capturing(output: dict, sink: list) -> None:
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _InvocationCapturingProvider(output, sink, model=model),
+    )
+
+
 _FAKE_CONFIG = (
     "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
 )
@@ -2105,3 +2139,36 @@ async def test_executor_passes_run_mode_to_prompt(tmp_path: Path) -> None:
     )
     assert result is RunResult.COMPLETED
     assert any("headless=True" in p for p in sink)
+
+
+@pytest.mark.anyio
+async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "home={{ change.home }}\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    inv = sink[0]
+    assert inv.change_context.change_home == ".imp/changes/test-change"
+    assert "home=.imp/changes/test-change" in inv.system_prompt
+    # worktree-anchored: relative, never absolute, never a parent escape.
+    assert not inv.change_context.change_home.startswith("/")
+    assert ".." not in inv.change_context.change_home

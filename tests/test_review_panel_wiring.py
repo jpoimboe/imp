@@ -218,6 +218,7 @@ def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123"
     body = wf.agents["code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
+                        change_id="chg",
                         vars={"review_scope": review_scope, "review_base": review_base,
                               "fast_path": False})
     return render_prompt(body, ctx)
@@ -225,7 +226,7 @@ def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123"
 
 def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
     out = _render_reviewer(tmp_path, review_scope="change")
-    assert "forkSHA..HEAD" in out                   # whole-change diff from recorded fork
+    assert "forkSHA..imp/chg" in out                 # whole-change diff from recorded fork
     assert "git merge-base" not in out
     assert "vars.review_base" not in out and "abc123" not in out
     assert "task(subagent_name=" not in out         # reviews directly, dispatches nothing
@@ -233,7 +234,7 @@ def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
 
 def test_per_batch_reviews_review_base_range(tmp_path) -> None:
     out = _render_reviewer(tmp_path, review_scope="plan")
-    assert "abc123..HEAD" in out                    # diff range pins review_base
+    assert "abc123..imp/chg" in out                 # diff range pins review_base
     assert "spec-compliance-slice" not in out       # single reviewer, no panel
     assert "task(subagent_name=" not in out
 

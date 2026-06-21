@@ -30,10 +30,10 @@ reconstructed from `progress.md`:
 
 {% if vars.review_scope == 'change' %}
 **End-of-change pass (whole-change, cross-plan).** Review the whole change:
-`git diff {{ change.cur_base_head }}..HEAD` — the change's recorded fork point. This is
+`git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the change's recorded fork point. This is
 the one full review of the run.
 {% else %}
-**Per-batch pass.** Review this batch's work: `git diff {{ vars.review_base }}..HEAD`
+**Per-batch pass.** Review this batch's work: `git diff {{ vars.review_base }}..imp/{{ change.id }}`
 — do not widen it to the whole change.
 {% endif %}
 
