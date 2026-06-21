@@ -138,3 +138,20 @@ def test_relink_home_noop_when_project_root_is_control_root(tmp_path: Path) -> N
     )
     ch.relink_home()
     assert not (tmp_path / ".imp" / "changes" / "guard1").is_symlink()
+
+
+def test_relative_home_location_is_worktree_symlink_to_home(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="rel1", base_branch="main")
+    ch.materialize()
+    rel = f".imp/changes/{ch.id}"
+    assert not rel.startswith("/")
+    assert ".." not in rel
+    link = ch.project_root / rel
+    assert link.is_symlink()
+    assert link.resolve() == ch.change_dir.resolve()
+    # A write through the relative location lands in the permanent home.
+    p = link / "artifacts" / "note.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("via-rel\n")
+    assert (ch.change_dir / "artifacts" / "note.txt").read_text() == "via-rel\n"
