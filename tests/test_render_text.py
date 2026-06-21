@@ -2035,3 +2035,22 @@ def test_phase_end_rule_collapses_when_subsecond() -> None:
     out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
     line = next(ln for ln in out if "spec phase complete" in ln)
     assert line == "spec phase complete"
+
+
+def test_opening_intent_renders_under_first_step_header_before_narration() -> None:
+    out = _lines([
+        _ev("e1", "change_created", title="add auth"),
+        {"id": "e2", "agent_id": None, "type": "opening_intent",
+         "payload": {"text": "add a --json flag"}},
+        _ev("s1", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("ll", "llm_response", agent_id="step:design/spec", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "starting the work"}]}),
+    ])
+    joined = "\n".join(out)
+    assert "> add a --json flag" in joined
+    step_idx = next(i for i, ln in enumerate(out) if "spec" in ln)
+    intent_idx = next(i for i, ln in enumerate(out) if "add a --json flag" in ln)
+    narr_idx = next(i for i, ln in enumerate(out) if "starting the work" in ln)
+    assert step_idx < intent_idx < narr_idx
