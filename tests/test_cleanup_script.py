@@ -318,6 +318,18 @@ def test_verify_rejects_rebase_in_progress(tmp_path: Path) -> None:
     _git(pr, "rebase", "--abort")                       # tidy for teardown
 
 
+def test_verify_rejects_remaining_directives(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _build_and_handoff(pr)
+    _git(pr, "rebase", "--abort")   # no rebase in progress; fixup! commit still on branch
+
+    res = _run(pr)
+    assert res.returncode == 2, res.stderr
+    assert "fixup" in res.stderr.lower()
+    assert (_state(pr) / "autosquash-resolve-attempts").read_text().strip() == "1"
+    assert (_state(pr) / "autosquash-before-tree").exists()
+
+
 def test_verify_rejects_tree_drift(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _build_and_handoff(pr)
