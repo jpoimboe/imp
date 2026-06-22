@@ -774,7 +774,7 @@ def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     # Standard path: say nothing about the classification.
-    assert "say nothing to the user about the classification" in lowered
+    assert "say nothing to them about the classification" in lowered
     # Trivial path: a plain-language heads-up, never naming the internal label.
     assert "brief plain-language heads-up" in lowered
     assert "never name the internal" in lowered
