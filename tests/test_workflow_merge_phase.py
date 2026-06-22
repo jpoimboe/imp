@@ -33,30 +33,41 @@ def test_merge_phase_layers_integrator_loop_on_cleanup_gate() -> None:
 def test_integrate_rebase_routing_into_cleanup_gate() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integrate-rebase")
-    m = evaluate_rules(rules, vars={}, output={"exit": 2})
+    m = evaluate_rules(rules, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "assert-stamped"
-    m = evaluate_rules(rules, vars={}, output={"exit": 0})
+    assert "integration_fork" not in m.var_mutations            # exit 2 emits no fork SHA
+    m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
     assert m.var_mutations.get("review_base") == ""
-    m = evaluate_rules(rules, vars={}, output={"exit": 6})
+    assert m.var_mutations.get("integration_fork") == "forkSHA"
+    m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA", "stderr": ""})
     assert isinstance(m.action, Continue)
     assert m.var_mutations.get("review_base") == ""
-    m = evaluate_rules(rules, vars={}, output={"exit": 5})
+    assert m.var_mutations.get("integration_fork") == "forkSHA"
+    m = evaluate_rules(rules, vars={}, output={"exit": 5, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Pause)
 
 
-def test_integrator_deviation_releases_head_to_plan_writer() -> None:
+def test_integrator_stuck_pauses_and_else_continues() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integrator")
     m = evaluate_rules(rules, vars={},
-                       output={"status": "Success", "deviation": True, "summary": ""})
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer"
-    assert m.action.release == "base"
-    assert m.action.feedback is not None
+                       output={"status": "Success", "stuck": True, "summary": ""})
+    assert isinstance(m.action, Pause)
     m = evaluate_rules(rules, vars={},
-                       output={"status": "Success", "deviation": False, "summary": ""})
+                       output={"status": "Success", "stuck": False, "summary": ""})
     assert isinstance(m.action, Continue)
+
+
+def test_merge_phase_never_routes_to_planning_or_releases_the_lane() -> None:
+    wf = load_workflow(WF)
+    planning = {s.name for p in wf.phases if p.name in ("spec", "plan", "implement")
+                for s in p.steps}
+    for step in _phase(wf, "merge").steps:
+        for rule in step.rules:
+            a = rule.action
+            assert getattr(a, "target", None) not in planning, (step.name, a)
+            assert getattr(a, "release", None) is None, (step.name, a)
 
 
 def test_integration_verify_routes_failure_to_integrator() -> None:

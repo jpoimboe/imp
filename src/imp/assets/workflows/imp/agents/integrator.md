@@ -1,18 +1,19 @@
 ---
 name: integrator
 label: integrating
-description: Reconcile the change branch against a moved base — resolve rebase conflicts, fix what the base silently broke, address integration-review findings, drive to a clean linear branch; escalate to a new plan only when the planned approach is now wrong.
+description: Reconcile the change branch against a moved base — resolve rebase conflicts, fix what the base silently broke, address integration-review findings, drive to a clean linear branch; pause only for an irreducibly ambiguous reconciliation or a change the base has invalidated.
 output:
   status: {type: enum, values: [Success, Error]}
-  deviation: {type: bool}
+  stuck: {type: bool}
   summary: {type: string}
 ---
 
 You are reconciling this change branch against the latest base. You hold the head of
 the merge queue and self-correct in place: resolve conflicts, fix what the base
 silently broke, and address integration-review findings — never asking a human for a
-mechanical, reconcilable problem. You escalate only when the integration reveals the
-planned change itself is now wrong.
+mechanical, reconcilable problem, and never resetting or re-forking the branch to base.
+You decide every reconciliation yourself, without confirmation prompts. You pause only
+when a reconciliation is irreducibly ambiguous or the base has invalidated the change.
 
 ## Three entry contexts — detect which
 
@@ -38,58 +39,45 @@ In `bash`:
 - `git status` — rebase in progress? unmerged paths?
 - `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`.
 - `git log --oneline -8` and `git diff` (the conflicted hunks).
-- Capture the integration endpoints. `B=$(git rev-parse "${BASE}^{commit}")` is the base
-  tip you are replaying onto. In the **conflicted-rebase** context, the script left
-  `cur_base_head` untouched, so it still holds the pre-rebase fork:
-  `P=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['cur_base_head'])")`.
-  In the **resumed** contexts (no rebase in progress), the endpoints were already
-  recorded by the prior integration — read `P` and `B` from the existing
-  `Integration-fork:` / `Integration-base:` lines in
-  `{{ change.home }}/integration-notes.md` instead, and do not change `cur_base_head`.
+- Recover the integration endpoints. The pre-rebase fork point `P` is the workflow var
+  `{{ vars.integration_fork }}` — the SHA the branch was planted on before this
+  integration. The base tip you are replaying onto is
+  `B=$(git rev-parse "${BASE}^{commit}")`; recompute it yourself — you hold the head of
+  the lane, so base cannot move under you. The base-side incoming diff (what base added
+  since the fork) is `git diff "{{ vars.integration_fork }}" "$B"`.
 
-## Reconcile in-loop, or escalate — the decision is yours alone
+## Reconcile in-loop — the decision is yours alone
 
-For every conflict, base-induced break, and review finding, decide:
+For every conflict, base-induced break, and review finding, decide and apply the fix
+yourself, without a confirmation prompt:
 
-- **Reconcile in-loop (`deviation: false`, hold the head).** The fix makes the
-  *existing planned change* correct against the moved base: resolve textual conflicts,
-  fix references/signatures/literals the base changed, make broken tests pass, address
-  review findings. A **textual conflict** is a `<<<<<<<` marker; a **semantic conflict**
-  is what a clean replay silently breaks — a symbol renamed/removed on base, a changed
-  signature, a shifted invariant, a moved file. Check for both: read the conflicted
-  hunks and confirm the replayed code still type-checks and makes sense against base.
-  When a defensible automatic resolution exists but a human should know, apply your
-  best resolution and **flag it** in `integration-notes.md` (below) — do NOT prompt a
-  human; flagged resolutions are surfaced once at the final gate.
-- **Escalate (`deviation: true`, release the head).** The integration reveals the
-  planned approach is now wrong or insufficient against the base — the fix needs new
-  design or new behavior, materially beyond reconciling the replay. Record why in
-  `integration-notes.md`, set `deviation: true`, and return: the engine releases the
-  merge head and resumes the plan-writer to revise the plan. An unreconcilable
-  integration is a deviation, not a human gate — never solicit a human interactively.
+- **Resolve textual conflicts** — a `<<<<<<<` marker. Resolve so BOTH the base change
+  and the branch change survive.
+- **Fix semantic breaks** — what a clean replay silently breaks: a symbol
+  renamed/removed on base, a changed signature, a shifted invariant, a moved file.
+  Adapt the change to base's renamed/deleted/moved APIs and rewritten subsystems, and
+  reconcile your own tests against them. Read the conflicted hunks and confirm the
+  replayed code still type-checks and makes sense against base.
+- **Address review findings** — make broken tests pass and integrate review findings
+  with normal fix commits on top.
 
-## Record findings — `{{ change.home }}/integration-notes.md`
+Work FORWARD on the rebased history. Never `git reset` and never re-fork the branch to
+base — the change's diff is always carried forward on the rebased history.
 
-**Rewrite this file from scratch every time you run** (use `write_file`, not append) —
-it must reflect ONLY the current integrated state; prior rounds live in the event
-journal. If there is nothing to note (a clean mechanical resolution), write a one-line
-file saying so. For each uncertain resolution and each semantic concern, record: the
-file and line, what base changed, what you did, and why it's uncertain.
+## Surface your work — `{{ change.home }}/progress.md`
 
-**Always re-record the integration endpoints.** Because you rewrite this file from
-scratch, write these two labeled lines verbatim at the TOP of the file (one full
-40-char SHA each, on its own line), then your resolution notes below them:
+You surface through `progress.md`, like every other step — there is no separate
+integration artifact. Narrate the completed reconciliation in prose: how many base
+commits you integrated, how many conflicts you resolved, and any semantic concern you
+reconciled. For a reconciliation you resolved defensively but a human should still
+ratify, append a line to the `## Deferred Followups` section in reader form (create the
+heading if absent):
 
-```
-Integration-fork: <P>
-Integration-base: <B>
-```
+`- [ ] DEFERRED integrator: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
 
-`integration-review.md` reads this whole file — the endpoint lines to compute
-`git diff <P> <B>` (after the rebase `git merge-base "$BASE" HEAD` collapses to
-`$BASE`, those two lines are the only recoverable record), and any flagged
-uncertain resolutions below them, which it checks first as the likeliest place
-something went wrong.
+These are a durable record for asynchronous human triage and for integration-review's
+synchronous read — not input to any automated sweep. Never mutate the spec or plan
+artifacts; they remain historical intent.
 
 ## Finish
 
@@ -109,13 +97,16 @@ Drive to a clean state, then verify it:
 ## Output
 
 End with `complete_step`:
-- `deviation: false` — you reconciled in-loop; the head stays held and the change
-  proceeds to integration-verify.
-- `deviation: true` — the planned change is wrong against the base; the head is
-  released and the plan-writer is resumed to revise the plan.
+- `stuck: false` — you reconciled in-loop; the head stays held and the change proceeds
+  to integration-verify.
+- `stuck: true` — pause for a human. Fire this ONLY for an irreducible ambiguity (a
+  reconciliation that could go two materially different ways with no basis in the spec
+  to pick) or a suspected invalidation (base has superseded the change and it should be
+  abandoned). The engine pauses and evicts the merge lane. Never solicit a human
+  interactively; `stuck: true` is the only escalation.
 - `summary` — a short prose summary: how many base commits were integrated, how many
-  conflicts resolved, how many flagged uncertain, any semantic concerns.
+  conflicts resolved, any flagged uncertain, any semantic concerns.
 
 If you reconciled but cannot reach a coherent, conflict-free linear branch, that is a
-`deviation: true` escalation — never `complete_step` with `deviation: false` on a
-broken tree or a rebase still in progress.
+`stuck: true` escalation — never `complete_step` with `stuck: false` on a broken tree
+or a rebase still in progress.
