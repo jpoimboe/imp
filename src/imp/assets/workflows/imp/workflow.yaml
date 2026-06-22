@@ -60,6 +60,7 @@ phases:
         file: agents/spec-reviewer.md
         tier: high
         label: reviewing spec
+        read_only: ["."]
         # The reviewer gets the last word: the loop ends only on a clean review with
         # nothing left to integrate. spec_minors_integrated tracks whether the writer
         # has already spent its one minors-integration pass for the current settled
@@ -94,6 +95,7 @@ phases:
         file: agents/plan-reviewer.md
         tier: high
         label: reviewing plan
+        read_only: ["."]
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
         # engine routes its {status, findings, blocking, has_minor_findings} output

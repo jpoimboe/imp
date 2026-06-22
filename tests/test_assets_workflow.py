@@ -799,6 +799,18 @@ def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
         assert term in out
 
 
+def test_review_steps_read_only_tightening():
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    steps = {s.name: s for s in wf.flat_steps()}
+    # Write-free, test-free reviewers are locked to a read-only worktree.
+    assert steps["spec-reviewer"].read_only == (".",)
+    assert steps["plan-reviewer"].read_only == (".",)
+    # Reviewers that run tests in-tree stay loose (cannot be confined).
+    assert steps["code-reviewer"].read_only == ()
+    assert steps["integration-reviewer"].read_only == ()
+
+
 def test_quality_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.assets import bundled_workflow_dir
