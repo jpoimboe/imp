@@ -35,8 +35,10 @@ async def run_session_client(
     resume: bool = False,
     from_target: str | None = None,
     opening_intent: str | None = None,
+    leave_mode: str | None = None,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
+    leave_state: dict[str, str] = {}
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume, from_target=from_target,
         opening_intent=opening_intent)
@@ -48,7 +50,7 @@ async def run_session_client(
         try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
-                change_id=change.id)
+                change_id=change.id, leave_state=leave_state)
         except TimeoutError:
             startup_failed = True
         tg.cancel_scope.cancel()
@@ -58,7 +60,13 @@ async def run_session_client(
             f"it may have crashed (see {change.control_root}/.imp/remote-control.log)",
             file=sys.stderr)
         return 3
-    from imp.cli.main import _session_exit_code  # lazy: main imports this module
+    from imp.cli.main import (
+        _maybe_apply_leave_disposition,
+        _session_exit_code,
+    )
+    disposition_rc = await _maybe_apply_leave_disposition(change, leave_mode, leave_state)
+    if disposition_rc is not None:
+        return disposition_rc
     return _session_exit_code(change, coord)
 
 
