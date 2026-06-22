@@ -120,6 +120,7 @@ def _register_builtins() -> None:
         create_change,
         fs,
         nav,
+        notice,
         query_events,
         rename_change,
         step_label,
