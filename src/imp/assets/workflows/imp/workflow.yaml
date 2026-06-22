@@ -20,6 +20,7 @@ vars:
   tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
   review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-batch, not re-paneled
+  integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
 
 defaults:
   max_retries: 3
@@ -281,8 +282,8 @@ phases:
         command: ./scripts/integrate-rebase.sh
         rules:
           - {if: {exit: 2}, goto: assert-stamped}                                  # base unmoved: implement-phase cleanup already stamped
-          - {if: {exit: 0}, set: {review_base: "''"}, goto: integration-verify}    # clean replant: clear pin, skip integrator, do->verify->review
-          - {if: {exit: 6}, set: {review_base: "''"}, continue: true}              # conflicts: clear pin, run integrator (next)
+          - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip integrator
+          - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run integrator (next)
           - {else: true, pause: true}
 
       - name: integrator

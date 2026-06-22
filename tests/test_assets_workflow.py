@@ -491,6 +491,12 @@ def test_review_cadence_vars_declared() -> None:
     assert "multi_plan" not in d        # removed: plan-cycle-check owns coverage
 
 
+def test_integration_fork_var_declared_default_empty() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert wf.vars.defaults()["integration_fork"] == ""
+
+
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     # Acceptance #1/#2/#6: in this repo, imp/workflows/imp must be a
     # symlink whose resolved target equals src/imp/assets/workflows/imp.

@@ -33,15 +33,18 @@ def test_merge_phase_layers_integrator_loop_on_cleanup_gate() -> None:
 def test_integrate_rebase_routing_into_cleanup_gate() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integrate-rebase")
-    m = evaluate_rules(rules, vars={}, output={"exit": 2})
+    m = evaluate_rules(rules, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "assert-stamped"
-    m = evaluate_rules(rules, vars={}, output={"exit": 0})
+    assert "integration_fork" not in m.var_mutations            # exit 2 emits no fork SHA
+    m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
     assert m.var_mutations.get("review_base") == ""
-    m = evaluate_rules(rules, vars={}, output={"exit": 6})
+    assert m.var_mutations.get("integration_fork") == "forkSHA"
+    m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA", "stderr": ""})
     assert isinstance(m.action, Continue)
     assert m.var_mutations.get("review_base") == ""
-    m = evaluate_rules(rules, vars={}, output={"exit": 5})
+    assert m.var_mutations.get("integration_fork") == "forkSHA"
+    m = evaluate_rules(rules, vars={}, output={"exit": 5, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Pause)
 
 
