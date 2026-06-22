@@ -14,6 +14,7 @@ from imp.remote.daemon.commands import (
     Notice,
     Reply,
     Resume,
+    Save,
     Search,
     parse,
 )
@@ -108,3 +109,15 @@ def test_slash_resume_with_token_is_a_resume() -> None:
 
 def test_slash_resume_empty_is_a_usage_notice() -> None:
     assert parse("/resume   ", None, fake_resolve) == Notice(RESUME_USAGE)
+
+
+def test_slash_save_reply_to_resolves_the_target() -> None:
+    assert parse("/save", 42, fake_resolve) == Save(A)
+
+
+def test_slash_save_at_handle_resolves_the_target() -> None:
+    assert parse("/save @good", None, fake_resolve) == Save(B)
+
+
+def test_slash_save_untargeted_carries_no_change_id() -> None:
+    assert parse("/save", None, fake_resolve) == Save(None)

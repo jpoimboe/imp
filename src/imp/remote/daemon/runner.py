@@ -15,13 +15,14 @@ from typing import Any
 
 import anyio
 
+from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
-from imp.engine.archive import read as archive_read
 from imp.remote.daemon.commands import (
     HELP_TEXT,
     ROUTE_HINT,
+    SAVE_USAGE,
     Abandon,
     Command,
     Create,
@@ -33,6 +34,7 @@ from imp.remote.daemon.commands import (
     Reply,
     Response,
     Resume,
+    Save,
     Search,
     Subscribe,
     Unsubscribe,
@@ -44,6 +46,7 @@ from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
 from imp.remote.session.reply import deliver_session_reply
+from imp.remote.session.save import save_change as _save_change
 
 _log = logging.getLogger("imp.daemon")
 
@@ -307,6 +310,20 @@ async def _handle_command(
     elif isinstance(command, Resume):
         message = await anyio.to_thread.run_sync(control.resume, command.token)
         responses.put(Notice(message))
+    elif isinstance(command, Save):
+        change_id = command.change_id or control.focus.current()
+        if change_id is None:
+            responses.put(Notice(SAVE_USAGE))
+        else:
+            try:
+                await anyio.to_thread.run_sync(control.save, change_id)
+            except (OSError, TimeoutError):
+                responses.put(Notice(
+                    f"Couldn't reach the session for @{handle_for(change_id)} "
+                    "to save it — it may still be running."))
+            else:
+                responses.put(Notice(
+                    f"Saved @{handle_for(change_id)} to your Backlog."))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
     elif isinstance(command, Notice):
@@ -366,6 +383,7 @@ async def run_daemon(
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
     search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
     resume: Callable[[str], str] | None = None,
+    save: Callable[[str], None] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
 ) -> None:
@@ -378,6 +396,7 @@ async def run_daemon(
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
     search = search or (lambda q: archive_read.search_archive(control_root, q))
     resume = resume or (lambda token: spawn.resume_change(control_root, token))
+    save = save or (lambda cid: _save_change(control_root, cid))
 
     spath = socket_path(control_root)
     outbound: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -400,7 +419,7 @@ async def run_daemon(
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n),
-        search=search, resume=resume)
+        search=search, resume=resume, save=save)
     adapter = make_adapter(env, inbound.put, focus)
 
     log_handlers = _install_file_logging(control_root, env)

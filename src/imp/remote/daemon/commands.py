@@ -69,18 +69,26 @@ class Resume:
 
 
 @dataclass(frozen=True)
+class Save:
+    change_id: str | None
+
+
+@dataclass(frozen=True)
 class ListResult:
     changes: list[ChangeInfo]
 
 
 Command = (
     Reply | Create | Abandon | ListChanges | Help | Notice |
-    Subscribe | Unsubscribe | Replay | Search | Resume)
+    Subscribe | Unsubscribe | Replay | Search | Resume | Save)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
 SEARCH_USAGE = "Usage: /search <query>"
 RESUME_USAGE = "Usage: /resume <id or search text>"
+SAVE_USAGE = (
+    "To save a conversation, reply to one of its messages or use @handle "
+    "(e.g. /save @ab12cd).")
 ABANDON_USAGE = (
     "To abandon a Change, reply to one of its messages or use @handle "
     "(e.g. /abandon @ab12cd).")
@@ -98,6 +106,7 @@ HELP_TEXT = (
     "/abandon (reply or @handle) — stop a Change\n"
     "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
+    "/save (reply or @handle) — save a conversation to your Backlog\n"
     "/help — this message\n"
     "Reply to a Change's message (or @handle) to answer it.")
 
@@ -149,6 +158,8 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
             return Search(rest) if rest else Notice(SEARCH_USAGE)
         if verb == "resume":
             return Resume(rest) if rest else Notice(RESUME_USAGE)
+        if verb == "save":
+            return Save(_resolve_target(rest, reply_to, resolve_lookup, "save"))
         return Notice(UNKNOWN_COMMAND)
     change_id, body = resolve_lookup(text, reply_to)
     return Reply(change_id, body) if change_id is not None else Notice(ROUTE_HINT)

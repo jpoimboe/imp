@@ -5,9 +5,9 @@ import json
 import pytest
 
 from imp.remote.session.protocol import (
+    CONTROL_SAVE,
     Attach,
     Control,
-    CONTROL_SAVE,
     Input,
     encode_attach,
     encode_control,

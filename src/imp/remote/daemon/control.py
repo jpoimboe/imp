@@ -20,6 +20,7 @@ class ControlPlane:
         recent_narrative: Callable[[str, int], list[str]],
         search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
         resume: Callable[[str], str] | None = None,
+        save: Callable[[str], None] | None = None,
     ) -> None:
         self._deliver = deliver
         self._create = create
@@ -30,6 +31,7 @@ class ControlPlane:
         self._recent_narrative = recent_narrative
         self._search = search
         self._resume = resume
+        self._save = save
 
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshot(change_id)
@@ -44,6 +46,10 @@ class ControlPlane:
     def resume(self, token: str) -> str:
         assert self._resume is not None  # run_daemon always wires it
         return self._resume(token)
+
+    def save(self, change_id: str) -> None:
+        assert self._save is not None  # run_daemon always wires it
+        self._save(change_id)
 
     async def reply(self, change_id: str, text: str) -> None:
         """Deliver a reply into the change's session daemon, rehydrating if hibernated."""
