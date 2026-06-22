@@ -54,6 +54,13 @@ def handle_slash_line(
         # to resume), it is a no-op that re-prompts rather than a skill lookup.
         output_fn("/continue resumes a paused run; there is nothing to resume here.")
         return REPROMPT
+    if cmd == "ls":
+        import argparse
+
+        from imp.cli.main import _cmd_status
+        show_all = args in ("-a", "--all", "all")
+        _cmd_status(argparse.Namespace(all=show_all), change.control_root)
+        return REPROMPT
 
     try:
         body = load_skill_body(change.workflow_dir / "skills", cmd)
@@ -84,6 +91,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
     out("  /continue          Resume a paused run (at the post-interrupt prompt)")
+    out("  /ls [-a]           List your changes (-a adds completed/abandoned)")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
