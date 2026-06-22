@@ -27,7 +27,7 @@ from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, playbooks, resume_select, splash
 from imp.cli import palette as pal
-from imp.cli.init import run_init
+from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
@@ -503,6 +503,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
     try:
         run_init(project, input_fn=input, output_fn=print)
+    except GitSetupDeclined as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     except FileExistsError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2

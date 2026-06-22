@@ -15,6 +15,7 @@ model question — it just records the enabled providers + detected theme.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,35 @@ from imp.cli.verify_detect import (
 )
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
+
+
+class GitSetupDeclined(Exception):
+    """The user declined `imp init`'s offer to set up a git repository."""
+
+
+def _in_git_repo(project_root: Path) -> bool:
+    return subprocess.run(
+        ["git", "rev-parse", "--git-dir"],
+        cwd=project_root, capture_output=True, text=True,
+    ).returncode == 0
+
+
+def _ensure_git_repo(
+    project_root: Path, *,
+    input_fn: Callable[[str], str],
+    output_fn: Callable[[str], None],
+) -> None:
+    if _in_git_repo(project_root):
+        return
+    answer = input_fn("Initialize a git repository here? [Y/n] ").strip().lower()
+    if answer in ("n", "no"):
+        raise GitSetupDeclined(
+            "imp needs a git repository — re-run `imp init` and allow git setup."
+        )
+    subprocess.run(["git", "init"], cwd=project_root, check=True,
+                   capture_output=True, text=True)
+    output_fn("Initialized a git repository.")
+
 
 # The order providers are presented in the picker. Bindings (tier→model) are
 # owned by the provider-code floor now, so init no longer carries a model table.
@@ -217,6 +247,8 @@ def run_init(
     imp_dir = project_root / "imp"
     project_file = imp_dir / "project.yaml"
     already_initialized = project_file.is_file()
+
+    _ensure_git_repo(project_root, input_fn=input_fn, output_fn=output_fn)
 
     output_fn(f"Setting up imp in {project_root}")
 

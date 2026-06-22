@@ -35,6 +35,16 @@ def _stub_theme_detection(monkeypatch):
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
 
 
+@pytest.fixture(autouse=True)
+def _git_repo(tmp_path, monkeypatch):
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+
+
 def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
