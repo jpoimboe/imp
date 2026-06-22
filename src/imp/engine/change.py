@@ -216,6 +216,7 @@ class Change:
                 project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
+            # State is not yet written; tear down the worktree so no orphan is left.
             worktree.destroy_worktree(control_root, change_id)
             shutil.rmtree(change_dir, ignore_errors=True)
             raise
