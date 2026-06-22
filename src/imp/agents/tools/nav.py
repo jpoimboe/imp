@@ -2,8 +2,8 @@
 
 Read-only navigation. Both glob and grep route their search root through
 ToolContext.authorize_fs(("read",), path) — the same gate the fs ops use —
-so they reach exactly the paths read_file/write_file/edit_file can: in-worktree
-paths via fs_permissions, out-of-worktree paths bounded by the sandbox mirror.
+so they reach exactly the paths read_file/write_file/edit_file can: bounded by
+the sandbox mirror like `bash` (allow-all when unsandboxed).
 In-worktree matches are reported relative to the worktree root; out-of-worktree
 matches as absolute paths.
 """

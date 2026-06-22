@@ -1,9 +1,7 @@
 """read_file, write_file, edit_file (spec §6.6).
 
-Every call funnels through ToolContext.authorize_fs: in-worktree paths pass
-through fs_permissions (default-allow read, default-deny write); absolute and
-out-of-worktree paths are bounded by the sandbox mirror like `bash` (allowed when
-unsandboxed, confined to the policy's read/write set when active).
+Every call funnels through ToolContext.authorize_fs, which bounds the path by the
+sandbox mirror like `bash` (allow-all when unsandboxed).
 """
 
 from __future__ import annotations
@@ -182,8 +180,8 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
         fd, tmp_name = tempfile.mkstemp(dir=resolved.parent)
     except PermissionError:
         raise PermissionError(
-            f"directory of {display_path} is not writable; edit_file's atomic "
-            f"write-back creates a temp file beside the target — use bash instead"
+            f"directory of {display_path} is read-only for this step; edit_file's "
+            f"atomic write-back creates a temp file beside the target"
         ) from None
     tmp = Path(tmp_name)
     try:

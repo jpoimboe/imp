@@ -17,13 +17,10 @@ from collections.abc import Sequence
 from functools import lru_cache
 from typing import Literal
 
+from imp.agents.tools.errors import PermissionDenied  # re-export
 from imp.engine.types import FsRule
 
 Op = Literal["read", "write"]
-
-
-class PermissionDenied(Exception):
-    pass
 
 
 @lru_cache(maxsize=512)

@@ -212,7 +212,7 @@ def test_readonly_directory_refused_with_curated_error(tmp_path: Path) -> None:
     p.write_text("a = 1\n")
     d.chmod(0o555)
     try:
-        with pytest.raises(PermissionError, match=r"directory of ro/x\.py is not writable"):
+        with pytest.raises(PermissionError, match=r"directory of ro/x\.py is read-only for this step"):
             _edit(_ctx(tmp_path), path="ro/x.py", old="a = 1", new="a = 2")
         assert p.read_text() == "a = 1\n"
     finally:

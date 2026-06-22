@@ -2,8 +2,8 @@
 
 Path model: in-worktree files are addressed by paths RELATIVE to the worktree
 root. `resolve_path` resolves both relative-under-root and absolute paths with NO
-containment raise; `authorize_fs` then bounds the result (fs_permissions
-in-worktree, the sandbox mirror outside) so the fs tools reach the same paths as
+containment raise; `authorize_fs` then bounds the result (bounded by the sandbox
+mirror (allow-all when unsandboxed)) so the fs tools reach the same paths as
 `bash`. There is
 no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system
 paths are `bash`'s job, backstopped by the OS sandbox.
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from imp.agents.permissions import PermissionDenied, check_permission
+from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
 from imp.engine.types import AgentDef, FsRule
 
@@ -143,7 +143,7 @@ class ToolContext:
         project_root; a `~`-home path expands to an absolute host path, and any
         absolute path replaces the root (pathlib join semantics) and resolves to
         its literal host location. Out-of-worktree access is then bounded by
-        authorize_fs (fs_permissions in-worktree, the sandbox mirror outside),
+        authorize_fs (bounded by the sandbox mirror (allow-all when unsandboxed)),
         matching `bash`.
         """
         return (self.project_root / Path(path).expanduser()).resolve()
@@ -152,30 +152,11 @@ class ToolContext:
         self, ops: tuple[Literal["read", "write"], ...], path: str,
     ) -> Path:
         """The single guard every fs tool funnels through. Resolve (loose), then
-        authorize each op: in-worktree paths pass through fs_permissions keyed by
-        the worktree-relative POSIX path (default-allow read, default-deny write);
-        out-of-worktree paths are NOT fs_permission-governed (bash isn't either) —
-        they go through the sandbox mirror: allowed when unsandboxed, else bounded
-        by SandboxPolicy.allows_read/allows_write. Raises PermissionDenied on any
-        denied op; returns the resolved Path.
-        """
+        authorize each op against the sandbox policy — the same boundary bash
+        obeys. An unsandboxed run is fully trusted (allow-all, bash parity); under
+        an active policy each op is bounded by allows_read/allows_write. Raises
+        PermissionDenied on a denied op; returns the resolved Path."""
         resolved = self.resolve_path(path)
-        home = self.change_home
-        if home is not None:
-            home = home.resolve()
-            if resolved == home or resolved.is_relative_to(home):
-                virtual = f".imp/changes/{home.name}"
-                if resolved != home:
-                    virtual = f"{virtual}/{resolved.relative_to(home).as_posix()}"
-                for op in ops:
-                    self.check_fs_permission(op, virtual)
-                return resolved
-        root = self.project_root.resolve()
-        if resolved == root or resolved.is_relative_to(root):
-            virtual = "." if resolved == root else resolved.relative_to(root).as_posix()
-            for op in ops:
-                self.check_fs_permission(op, virtual)
-            return resolved
         policy = self.sandbox_policy
         if policy is None or not policy.active:
             return resolved
@@ -189,9 +170,6 @@ class ToolContext:
                     f"{op} on {resolved} denied by the sandbox policy"
                 )
         return resolved
-
-    def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:
-        check_permission(self.fs_permissions, op, virtual)
 
 
 def change_home_path(change_home: str | None) -> Path | None:

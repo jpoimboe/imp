@@ -7,9 +7,9 @@ import anyio
 import pytest
 
 import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
-from imp.agents.permissions import PermissionDenied
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import ToolAborted
 from imp.engine.sandbox import SandboxPolicy
 from imp.engine.types import FsRule, SourceLoc
@@ -83,8 +83,20 @@ def test_write_file_creates_file_and_dirs(tmp_path: Path) -> None:
     assert (tmp_path / "deep" / "x.txt").read_text() == "ok"
 
 
-def test_write_file_default_denied(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)  # no rules; default-deny on write
+def test_write_file_allowed_by_loose_default(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)  # no policy → bash parity, write allowed
+    get_registry()["write_file"].invoke(ctx, {"path": "x.txt", "content": "x"})
+    assert (tmp_path / "x.txt").read_text() == "x"
+
+
+def test_write_file_denied_under_readonly_worktree(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.sandbox_policy = SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        readonly_overlays=(str(tmp_path),),
+    )
     with pytest.raises(PermissionDenied):
         get_registry()["write_file"].invoke(ctx, {"path": "x.txt", "content": "x"})
 

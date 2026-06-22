@@ -22,3 +22,8 @@ class FatalToolError(Exception):
     JSON parse error). Those are recoverable — surface them to the agent as
     ``tool_result`` so it can decide what to do.
     """
+
+
+class PermissionDenied(Exception):
+    """A tool reached a path the sandbox policy forbids for this step. Recoverable:
+    surfaced to the agent as a tool_result so it can adjust."""
