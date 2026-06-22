@@ -69,6 +69,14 @@ def resolve_workflow_dir(project_root: Path, name: str) -> Path:
     """Resolve a workflow name to a real dir: a committed imp/workflows/<name>
     (a fork, or the imp-repo dogfood symlink) wins; else the bundled workflow;
     else LoadError naming the valid set."""
+    from imp.providers.config import validate_workflow_name
+    if not validate_workflow_name(name):
+        from imp.engine.errors import LoadError
+        from imp.engine.types import SourceLoc
+        raise LoadError(
+            f"invalid workflow name {name!r}",
+            SourceLoc(file=project_root / "imp" / "project.yaml", line=1),
+        )
     committed = project_root / "imp" / "workflows" / name
     if committed.is_dir():
         return committed

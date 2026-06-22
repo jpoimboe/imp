@@ -109,6 +109,14 @@ def test_resolve_workflow_dir_unknown_names_valid_set(tmp_path: Path) -> None:
     assert "imp" in msg and "patent" in msg  # bundled set is named in the error
 
 
+def test_resolve_workflow_dir_rejects_invalid_name(tmp_path: Path) -> None:
+    from imp.assets import resolve_workflow_dir
+    with pytest.raises(LoadError):
+        resolve_workflow_dir(tmp_path, "../evil")
+    with pytest.raises(LoadError):
+        resolve_workflow_dir(tmp_path, "bad/name")
+
+
 def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -> None:
     from imp.assets import available_workflow_names
     (tmp_path / "imp" / "workflows" / "mine").mkdir(parents=True)
