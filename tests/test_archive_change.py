@@ -110,3 +110,27 @@ def test_archive_change_missing_events_file(tmp_path: Path) -> None:
         ).fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_archive_change_records_resumable_and_full_meta(tmp_path: Path) -> None:
+    events, change_json, state_json = _setup_change(tmp_path)
+
+    archive.archive_change(
+        tmp_path, "alpha", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        resumable=True)
+
+    rec = record.read_record(archive.records_root(tmp_path), "alpha")
+    assert rec is not None
+    assert rec["resumable"] is True
+    assert rec["change_meta"]["id"] == "alpha"
+    assert rec["change_meta"]["base_branch"] == "main"
+
+
+def test_archive_change_defaults_not_resumable(tmp_path: Path) -> None:
+    events, change_json, state_json = _setup_change(tmp_path)
+    archive.archive_change(
+        tmp_path, "alpha", events_path=events,
+        change_json_path=change_json, state_json_path=state_json)
+    rec = record.read_record(archive.records_root(tmp_path), "alpha")
+    assert rec is not None and rec["resumable"] is False
