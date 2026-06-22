@@ -50,6 +50,19 @@ def completed_rows(
         conn.close()
 
 
+def search_archive(
+    control_root: Path, query: str,
+) -> list[tuple[str, str, str, str]]:
+    db = index_path(control_root)
+    if not db.exists():
+        return []
+    conn = index.connect(db)
+    try:
+        return index.search(conn, query)
+    finally:
+        conn.close()
+
+
 def read_events(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
     if rec is None:
