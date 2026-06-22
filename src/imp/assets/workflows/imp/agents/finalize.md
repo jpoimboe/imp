@@ -37,40 +37,31 @@ end-of-run human asks are born. Populate:
   `{{ change.home }}/progress.md` (the sweep records each fix there and prunes it from the
   transient list), e.g. "plus N opportunistic improvements (see commits)".
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
-- `open_items`: the items you surface at the gate are a **closed set** — exactly
-  (a) the recorded `— needs-decision: <why>` lines in
-  `{{ change.home }}/progress.md` and (b) the entries in
-  `{{ change.home }}/tolerated-failures.md` (handled in the next section), and
+- `open_items`: the items you surface at the gate are a **closed set** — exactly the
+  recorded `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`, and
   nothing else. Read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `{{ change.home }}/progress.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-writer`/`plan-writer` appended directly in reader form (they reach you even on
-  a `fast_path` change where `deferred-sweep` never ran); present them identically. Do **not** list
-  `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in `built`)
-  and do **not** list `— dismissed: <why>` items (considered and judged not worth
-  doing; never surfaced). **Never originate a decision item from your own reading of
-  the diff or the code** — if something is not a recorded `— needs-decision:` line or
-  a `tolerated-failures.md` entry, it is not surfaced here.
+  a `fast_path` change where `deferred-sweep` never ran) **and tolerations** the
+  `verify` / `sweep-verify` gates recorded as `- [ ] DEFERRED verify: …` /
+  `- [ ] DEFERRED sweep-verify: … — needs-decision: …` lines; present them all
+  identically. A toleration is an admission of non-attribution: do **not**
+  re-run the failure and do **not** editorialize about its current status
+  (no "already fixed", no "now green") — present its recorded justification
+  and let the human adjudicate. Do
+  **not** list `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in
+  `built`) and do **not** list `— dismissed: <why>` items (considered and judged not
+  worth doing; never surfaced). **Never originate a decision item from your own reading
+  of the diff or the code** — if something is not a recorded `— needs-decision:` line,
+  it is not surfaced here.
 - `next_steps`: suggested follow-on work.
 
 These four fields (`built` / `verify_status` / `open_items` / `next_steps`) are
 the **audit record** — emitted on `complete_step` and queryable via `imp log` —
 not the script you read at the gate. Present them as prose in §2.
 
-## Surface tolerated verification failures
-
-Besides the `— needs-decision:` lines the `deferred-sweep` left in
-`{{ change.home }}/progress.md`, read the change-local tolerated-failures record
-`{{ change.home }}/tolerated-failures.md` if it exists. Each entry reads as
-`<signature>: <justification>` — a failure the responsible agent judged not
-attributable to this change's diff (pre-existing on the base, or
-non-deterministic/environmental). Surface **every** such entry
-as its own **needs-decision** item in the per-item walk (§2): present the entry and
-its justification, give your recommendation, and take one of the three dispositions
-exactly as for a `progress.md` needs-decision item. A toleration changed
-nothing about the merge — visibility, not reproduction, is the guard — so a human
-adjudicates each one before merge. If the record is absent or empty, there is
-nothing extra to surface.
+## Non-converging verify triage
 
 A **`max_loops` pause at the `verify` step** (capped at 5 fix laps) means the verify
 triage did **not converge** — an unrecognized flake or a hard regression that was
@@ -120,11 +111,10 @@ were any** — do not manufacture controversy. The structured fields are the aud
 record (§1); your prose is what the human reads.
 
 Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed set**
-of inputs: the `— needs-decision: <why>` lines the `deferred-sweep` left in
-`{{ change.home }}/progress.md` and the `{{ change.home }}/tolerated-failures.md`
-entries surfaced above — and nothing else. Do not add an item here from something you
-noticed while reading the diff. For EACH item, in its own `wait_for_user` turn (one
-item per turn):
+of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`
+(including tolerations the `verify` / `sweep-verify` gates recorded there) — and
+nothing else. Do not add an item here from something you noticed while reading the
+diff. For EACH item, in its own `wait_for_user` turn (one item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.

@@ -337,14 +337,23 @@ def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
 def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     text = (AGENTS_DIR / "finalize.md").read_text()
     low = text.lower()
-    assert "tolerated-failures.md" in text
-    assert "<signature>: <justification>" in text    # the untagged entry shape
-    assert "as its own" in text  # each entry surfaced individually
-    assert "[baseline]" not in text
-    assert "[flaky]" not in text
-    # The max_loops pause meaning is documented (non-converging triage).
+    # No separate tolerated-failures record or section — tolerations are ordinary
+    # needs-decision items now, surfaced through the existing walk.
+    assert "tolerated-failures.md" not in text
+    assert "Surface tolerated verification failures" not in text
+    assert "<signature>: <justification>" not in text
+    # They reach finalize as DEFERRED verify:/sweep-verify needs-decision lines.
+    assert "DEFERRED verify:" in text
+    assert "sweep-verify" in text
+    assert "needs-decision" in low
+    # finalize must not re-run the failure or editorialize its current status.
+    assert "already fixed" in low
+    assert "re-run the failure" in low
+    # The max_loops pause meaning is still documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
 
 
 PLAN_WRITER = AGENTS_DIR / "plan-writer.md"
