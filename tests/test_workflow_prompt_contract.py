@@ -254,14 +254,12 @@ def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
 PLAN_CYCLE_CHECK = AGENTS_DIR / "plan-cycle-check.md"
 
 
-def test_plan_cycle_check_counts_tasks_from_plan_file() -> None:
+def test_plan_cycle_check_emits_no_task_counter() -> None:
     low = PLAN_CYCLE_CHECK.read_text().lower()
-    # Counts the just-implemented plan's tasks from the PLAN FILE, not progress.md.
-    assert "running_tasks" in low
-    assert "{{ vars.tasks_since_review }}".lower() in low
-    assert "plan file" in low
-    assert "## task" in low
-    # Emits the running total so the workflow counter advances.
+    # The accumulated-task review counter is gone: per-plan review needs no count.
+    assert "running_tasks" not in low
+    assert "tasks_since_review" not in low
+    assert "review_batch_size" not in low
 
 
 

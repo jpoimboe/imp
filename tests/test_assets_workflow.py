@@ -18,7 +18,7 @@ _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False,
     "review_scope": "plan",
-    "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
+    "review_base": "",
     "change_panel_done": False,
 }
 
@@ -480,10 +480,10 @@ def test_review_cadence_vars_declared() -> None:
     d = wf.vars.defaults()
     assert d["review_scope"] == "plan"
     assert d["review_base"] == ""
-    assert d["tasks_since_review"] == 0
-    assert d["review_batch_size"] == 7
+    assert "tasks_since_review" not in d   # removed: review is per-plan, no counter
+    assert "review_batch_size" not in d
     assert "panel_done" not in d            # removed: review-panel keys on review_scope only
-    assert "multi_plan" not in d        # removed: plan-cycle-check owns coverage
+    assert "multi_plan" not in d            # removed: plan-cycle-check owns coverage
 
 
 def test_integration_fork_var_declared_default_empty() -> None:
@@ -621,7 +621,7 @@ def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> Non
     # panel fires (review_scope=change) and the once-only guard is latched true.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": False},
-        output={"more_plans": False, "running_tasks": 3, "rationale": "done"})
+        output={"more_plans": False, "rationale": "done"})
     assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
     assert m.var_mutations["review_scope"] == "change"
     assert m.var_mutations["change_panel_done"] is True
@@ -635,7 +635,7 @@ def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
     # rework is reviewed as a per-batch diff (review_scope=plan), NOT a fresh full panel.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": True},
-        output={"more_plans": False, "running_tasks": 1, "rationale": "corrective"})
+        output={"more_plans": False, "rationale": "corrective"})
     assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
     assert m.var_mutations["review_scope"] == "plan"
     assert "change_panel_done" not in m.var_mutations
