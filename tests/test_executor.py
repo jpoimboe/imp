@@ -353,6 +353,61 @@ async def test_branch_routes_on_var(tmp_path: Path) -> None:
     assert branch_started[0]["payload"]["kind"] == "branch"
 
 
+def _seed_lane_release_workflow(root: Path) -> Change:
+    wf = root / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True, exist_ok=True)
+    (wf / "agents" / "worker.md").write_text(
+        "---\nname: worker\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  deviation: {type: bool}\n---\ndo work\n"
+    )
+    (wf / "agents" / "done.md").write_text(
+        "---\nname: done\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nfinish\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: wait-for-head\n"
+        "        acquire: base\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: worker\n"
+        "        file: agents/worker.md\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {if: {deviation: true}, release: base, goto: done}\n"
+        "          - {else: true, continue: true}\n"
+        "  - name: finish\n"
+        "    steps:\n"
+        "      - name: done\n"
+        "        file: agents/done.md\n"
+        "        tier: medium\n"
+    )
+    _write_fake_config(root)
+    return _make_change(root)
+
+
+@pytest.mark.anyio
+async def test_goto_with_release_releases_held_lane(tmp_path: Path) -> None:
+    """Goto(release="base") in a rule releases the held lane via the executor routing branch."""
+    change = _seed_lane_release_workflow(tmp_path)
+    events: list = []
+    _register_fake({"status": "Success", "deviation": True})
+
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    state = State.load(change.state_dir)
+    assert state.held_lane is None
+    released = [e for e in events if e.get("type") == "lane_released"]
+    assert len(released) == 1
+    assert released[0]["payload"]["step"] == "worker"
+
+
 # ── backward goto loop counting + max_loops trip ────────────────────────────
 
 

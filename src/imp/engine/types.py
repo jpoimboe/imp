@@ -52,6 +52,7 @@ class Goto(Action):
                                  # appends the prior step's structured output. None
                                  # => forwards nothing on this edge (§6).
     resume: bool = False         # set by the `resume:` verb; continues the transcript
+    release: str | None = None   # lane keyword "base" => pop the held lane on this route
 
 
 # ── Mutations & rules ─────────────────────────────────────────────────────────

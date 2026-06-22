@@ -7,7 +7,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine import merge_queue as mq
 from imp.engine.change import Change
 from imp.engine.executor import _release_lane, _route_acquire
-from imp.engine.state import JsonlEventLog, State
+from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 from imp.engine.types import Continue, Pause, Rule, SourceLoc, Step
 from tests.conftest import _seed_control
 
@@ -99,3 +99,23 @@ def test_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     assert state.held_lane is None
     assert state.held_acquire_step is None
     assert State.load(a.state_dir).held_lane is None
+    assert State.load(a.state_dir).held_acquire_step is None
+
+
+def test_rule_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Change.create(tmp_path, title="a", change_id="aaa", base_branch="main")
+    Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")   # head
+    mq.enqueue_if_absent(tmp_path, "bbb", "main")   # next
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    from imp.engine.executor import _release_held_lane
+    state, log = State.load(a.state_dir), InMemoryEventLog()
+    state.held_lane = "main"
+    state.held_acquire_step = "wait-for-head"
+    _release_held_lane("base", a, state, log, step_name="integrator")
+    assert all(e["change_id"] != "aaa" for e in mq.read(tmp_path))   # self popped
+    assert state.held_lane is None
+    assert State.load(a.state_dir).held_lane is None
+    released = [e for e in log.read() if e["type"] == "lane_released"]
+    assert released and released[-1]["payload"]["step"] == "integrator"

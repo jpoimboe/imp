@@ -440,64 +440,43 @@ def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
     assert marker in SWEEP.read_text()
 
 
-INTEGRATION_RESOLVE = AGENTS_DIR / "integration-resolve.md"
-
-
-def test_integration_resolve_discriminates_bypass_via_query_events() -> None:
-    text = INTEGRATION_RESOLVE.read_text()
-    low = text.lower()
-    # Discriminate the two bypass reasons from the journal, keyed on the routing
-    # action.target == "integration-resolver" (the events carry no verdict/exit field).
-    assert "query_events" in text
-    assert "step_completed" in text
-    assert "action.target" in text
-    assert "integration-resolver" in text
-    assert "most recent" in low
-    assert "integration-reviewer" in text         # breakage gate
-    assert "integration-verify" in text          # verify-fail gate
-    # Ambiguous/indeterminate journal -> solicit, never auto-merge.
-    assert "ambiguous" in low or "indeterminate" in low
-
-
-def test_integration_resolve_breakage_always_solicits() -> None:
-    low = INTEGRATION_RESOLVE.read_text().lower()
-    # A breakage bypass ALWAYS solicits and is never auto-merged, regardless of verify state.
-    assert "breakage" in low
-    assert "always" in low
-    assert "never auto-merge" in low or "never auto-merged" in low
-
-
-def test_integration_resolve_verify_fail_honor_existing_auto_merge() -> None:
-    text = INTEGRATION_RESOLVE.read_text()
-    low = text.lower()
-    # On a verify-fail bypass, reproduce the failure set by running the injected
-    # $IMP_VERIFY_COMMAND (the gate output does not survive; its relative
-    # ./scripts/run-verify.sh path does not resolve from the agent's project-root cwd).
-    assert "IMP_VERIFY_COMMAND" in text
-    assert "tolerated-failures.md" in text
-    # All current failures within baseline+flaky -> decide merge WITHOUT wait_for_user.
-    assert "WITHOUT" in text and "wait_for_user" in text
-    # It honors only the EXISTING set; it never writes a new tolerated entry.
-    assert "never write" in low or "never writes" in low
-    assert "new tolerated" in low
-    # Else branch: any failure outside the tolerated set -> solicit the human.
-    assert "solicit" in low
-    # It now refers to "the recorded tolerated set", not the old two-category union notation.
-    assert "recorded tolerated set" in low
-    assert "[baseline]" not in text
-    assert "[flaky]" not in text
-
-
 def test_integration_prompts_use_recorded_endpoints() -> None:
     review = (AGENTS_DIR / "integration-review.md").read_text()
-    resolve = (AGENTS_DIR / "integration-resolve.md").read_text()
     integ = (AGENTS_DIR / "integrator.md").read_text()
     # Consumers parse the labeled endpoint lines, not a post-rebase merge-base diff.
-    for text in (review, resolve):
-        assert "Integration-fork:" in text
-        assert "Integration-base:" in text
-        assert 'git diff "$(git merge-base "$BASE" HEAD)" "$BASE"' not in text
+    assert "Integration-fork:" in review
+    assert "Integration-base:" in review
+    assert 'git diff "$(git merge-base "$BASE" HEAD)" "$BASE"' not in review
     # The integrator re-records the endpoints and replants cur_base_head.
     assert "Integration-fork:" in integ
     assert "Integration-base:" in integ
     assert "cur_base_head" in integ
+
+
+RUBRIC_PARTIAL = Path("src/imp/assets/workflows/imp/partials/severity.md")
+RUBRIC_REVIEWERS = [
+    "spec-reviewer.md", "plan-reviewer.md", "code-reviewer.md",
+    "quality-reviewer.md", "integration-review.md",
+]
+
+
+@pytest.mark.parametrize("name", RUBRIC_REVIEWERS)
+def test_reviewer_includes_canonical_severity_partial(name: str) -> None:
+    assert '{% include "partials/severity.md" %}' in (AGENTS_DIR / name).read_text(), (
+        f"{name}: must reference the single-source severity partial, not a "
+        f"hand-written severity-definition block")
+
+
+def test_severity_partial_holds_canonical_definitions() -> None:
+    text = RUBRIC_PARTIAL.read_text()
+    for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
+        assert term in text, term
+    assert "behavioral impact, not file type" in text
+    assert "non-trivial risk" in text
+
+
+def test_no_agent_prompt_mentions_breakage_or_bypass_gate() -> None:
+    for md in AGENTS_DIR.glob("*.md"):
+        text = md.read_text().lower()
+        assert "breakage" not in text, md.name
+        assert "bypass gate" not in text, md.name

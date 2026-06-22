@@ -1268,3 +1268,41 @@ def test_release_rejects_non_agent_kind(tmp_path) -> None:
         """)
     with pytest.raises((LoadError, LoadErrors), match="release: only valid"):
         load_workflow(wf)
+
+
+def test_rule_release_parsed_and_non_goto_rejected(tmp_path: Path) -> None:
+    """A rule-level `release: base` attaches to its Goto; `release` on a
+    non-routing verb (continue) raises."""
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, release: base, goto: w, feedback: "Findings:"}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    act = {s.name: s for s in load_workflow(wf).flat_steps()}["gate"].rules[0].action
+    assert isinstance(act, Goto) and act.release == "base"
+
+    bad = _write(tmp_path / "bad", """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, release: base, continue: true}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(bad)
