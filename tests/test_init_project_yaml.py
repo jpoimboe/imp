@@ -9,6 +9,14 @@ from imp.cli.init import run_init
 from imp.providers.config import parse_project_facts
 
 
+@pytest.fixture(autouse=True)
+def _git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+
+
 def _run(root: Path, xdg: Path, providers: list[str]) -> None:
     run_init(
         root,

@@ -11,6 +11,10 @@ def _run(project: Path, monkeypatch, lines: list[str]) -> None:
     user_cfg = project / "userhome" / "config.yaml"
     monkeypatch.setattr("imp.providers.effective.user_config_path",
                         lambda: user_cfg)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
     run_init(
         project,
         input_fn=lambda _p: "",

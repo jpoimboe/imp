@@ -263,9 +263,7 @@ def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
     assert "IMP_TELEGRAM_TOKEN" in text and "IMP_TELEGRAM_CHAT_ID" in text
 
 
-def test_post_init_manifest_does_not_claim_project_yaml_committed(
-    tmp_path: Path,
-) -> None:
+def test_post_init_manifest_notes_the_commit(tmp_path: Path) -> None:
     lines: list[str] = []
     run_init(
         project_root=tmp_path,
@@ -274,9 +272,8 @@ def test_post_init_manifest_does_not_claim_project_yaml_committed(
         output_fn=lines.append,
     )
     manifest = "\n".join(lines)
-    assert "imp/project.yaml" in manifest
-    assert "committed" not in manifest          # no false "already committed" claim
-    assert "track in git" in manifest           # correct intent: user tracks it
+    assert "Committed imp/project.yaml." in manifest
+    assert "track in git" not in manifest
 
 
 def test_already_initialized_with_existing_user_config_claims_no_write(

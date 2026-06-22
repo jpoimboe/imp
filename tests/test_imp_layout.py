@@ -15,6 +15,10 @@ def _isolate_user_config(monkeypatch, tmp_path):
     # init bootstraps the user config — pin XDG into the tmp tree.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
 
 
 def _init(tmp_path: Path) -> None:

@@ -31,6 +31,9 @@ from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
 
+_INIT_COMMIT_PATHS: tuple[str, ...] = ("imp/project.yaml", ".gitignore")
+
+
 class GitSetupDeclined(Exception):
     """The user declined `imp init`'s offer to set up a git repository."""
 
@@ -57,6 +60,22 @@ def _ensure_git_repo(
     subprocess.run(["git", "init"], cwd=project_root, check=True,
                    capture_output=True, text=True)
     output_fn("Initialized a git repository.")
+
+
+def _commit_init_files(project_root: Path) -> bool:
+    """Stage and commit imp init files by explicit pathspec; return True iff a commit was created."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--", *_INIT_COMMIT_PATHS],
+        cwd=project_root, capture_output=True, text=True, check=True)
+    if not status.stdout.strip():
+        return False
+    subprocess.run(["git", "add", "--", *_INIT_COMMIT_PATHS],
+                   cwd=project_root, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "commit", "-m", "imp: initialize project",
+         "--", *_INIT_COMMIT_PATHS],
+        cwd=project_root, check=True, capture_output=True, text=True)
+    return True
 
 
 # The order providers are presented in the picker. Bindings (tier→model) are
@@ -324,6 +343,8 @@ def run_init(
         sep = "" if existing.endswith("\n") or not existing else "\n"
         project_gi.write_text(existing + sep + "\n# imp\n.imp/\n")
 
+    committed = _commit_init_files(project_root)
+
     output_fn("")
     if already_initialized:
         output_fn("Project already initialized (imp/project.yaml is committed).")
@@ -333,7 +354,9 @@ def run_init(
             output_fn("Your machine config is already set up — nothing to do.")
     else:
         output_fn("Created:")
-        output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
+        output_fn("  imp/project.yaml")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
+    if committed:
+        output_fn("Committed imp/project.yaml.")
     output_fn("")
     output_fn("Try: imp new \"Add a dark-mode toggle\"")
