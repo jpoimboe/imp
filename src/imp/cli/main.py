@@ -2044,6 +2044,17 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
+def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
+    control = _control if _control is not None else _control_root()
+    hits = archive_read.search_archive(control, args.query)
+    if not hits:
+        print(f"No archived changes match {args.query!r}.")
+        return 0
+    for change_id, title, status, _created in hits:
+        print(f"{change_id}  {title or '(untitled)'}  [{status or '-'}]")
+    return 0
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
@@ -2281,6 +2292,18 @@ def _build_parser() -> argparse.ArgumentParser:
              "(default: in-progress + Backlog).",
     )
     p_ls.set_defaults(func=_cmd_status)
+
+    p_search = sub.add_parser(
+        "search",
+        help="Search archived changes by title or id.",
+        description=(
+            "Search the archive (completed, abandoned, and left conversations) "
+            "for changes whose title or id contains the query substring."),
+    )
+    p_search.add_argument(
+        "query", metavar="QUERY",
+        help="Substring matched case-insensitively against a change's title or id.")
+    p_search.set_defaults(func=_cmd_search)
 
     p_config = sub.add_parser(
         "config",
