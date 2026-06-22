@@ -751,3 +751,48 @@ def test_jinja_syntax_error_is_loaderror(tmp_path: Path) -> None:
 def test_no_facts_block_and_no_project_refs_loads_ok(tmp_path: Path) -> None:
     wf = _wf(tmp_path, _PROJECT_WF, agents={"stub": _OK_AGENT})
     load_workflow(wf)  # no facts block, no project.* refs -> must not raise
+
+
+# ── _v_read_only_paths ────────────────────────────────────────────────────────
+
+def _read_only_wf(tmp_path: Path, path_literal: str):
+    return _wf(tmp_path, f"""\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/stub.md
+                read_only: ['{path_literal}']
+        """, agents={"stub": _OK_AGENT})
+
+
+def test_read_only_parses_into_step(tmp_path: Path) -> None:
+    wf = load_workflow(_read_only_wf(tmp_path, "src/vendor"))
+    step = next(s for s in wf.flat_steps() if s.name == "s")
+    assert step.read_only == ("src/vendor",)
+
+
+def test_read_only_rejects_glob_metachar(tmp_path: Path) -> None:
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(_read_only_wf(tmp_path, "src/**"))
+    assert any("glob" in str(e) for e in ei.value.errors)
+
+
+def test_read_only_rejects_parent_segment(tmp_path: Path) -> None:
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(_read_only_wf(tmp_path, "../escape"))
+    assert any("'..'" in str(e) for e in ei.value.errors)
+
+
+def test_read_only_rejects_absolute_path(tmp_path: Path) -> None:
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(_read_only_wf(tmp_path, "/etc"))
+    assert any("leading '/'" in str(e) for e in ei.value.errors)
+
+
+def test_read_only_rejects_home_path(tmp_path: Path) -> None:
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(_read_only_wf(tmp_path, "~/secrets"))
+    assert any("'~'" in str(e) for e in ei.value.errors)

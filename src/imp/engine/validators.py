@@ -38,6 +38,7 @@ def validate(
     _v_empty_phase_is_last(workflow, errors)
     _v_agent_has_file(workflow, errors)
     _v_fs_permissions_paths(workflow, errors)
+    _v_read_only_paths(workflow, errors)
     if configured_tiers is not None:
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
@@ -231,6 +232,27 @@ def _v_check_paths(rule: FsRule, errors: list[LoadError]) -> None:
                     rule.source,
                 )
             )
+
+
+def _v_read_only_paths(workflow: Workflow, errors: list[LoadError]) -> None:
+    for step in workflow.flat_steps():
+        if step.kind != "agent":
+            continue
+        for p in step.read_only:
+            if p.startswith("/"):
+                errors.append(LoadError(
+                    f"read_only path must be worktree-relative (no leading '/'): {p!r}",
+                    step.source))
+            if any(part == ".." for part in PurePosixPath(p).parts):
+                errors.append(LoadError(
+                    f"read_only path may not contain '..' segment: {p!r}", step.source))
+            if p.startswith("~"):
+                errors.append(LoadError(
+                    f"read_only path may not start with '~': {p!r}", step.source))
+            if any(ch in p for ch in "*?[]"):
+                errors.append(LoadError(
+                    f"read_only path may not contain glob metacharacters "
+                    f"(binds are path-based): {p!r}", step.source))
 
 
 def _v_step_tier_configured(
