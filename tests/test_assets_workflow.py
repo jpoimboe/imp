@@ -20,6 +20,7 @@ _BASE_VARS = {
     "review_scope": "plan",
     "review_base": "",
     "change_panel_done": False,
+    "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
 
@@ -599,7 +600,7 @@ def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> Non
     # panel fires (review_scope=change) and the once-only guard is latched true.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": False},
-        output={"more_plans": False, "rationale": "done"})
+        output={"more_plans": False, "rationale": "done", "plan_total": 1})
     assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
     assert m.var_mutations["review_scope"] == "change"
     assert m.var_mutations["change_panel_done"] is True
@@ -613,7 +614,7 @@ def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
     # rework is reviewed as a per-batch diff (review_scope=plan), NOT a fresh full panel.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": True},
-        output={"more_plans": False, "rationale": "corrective"})
+        output={"more_plans": False, "rationale": "corrective", "plan_total": 1})
     assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
     assert m.var_mutations["review_scope"] == "plan"
     assert "change_panel_done" not in m.var_mutations
