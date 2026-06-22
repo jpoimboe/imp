@@ -108,7 +108,9 @@ plan/task), the verification state in plain terms, the one-line rollup of
 opportunistic improvements carried in `built`, and any **before/after** captures
 from the section above. Name genuinely controversial decisions **only when there
 were any** — do not manufacture controversy. The structured fields are the audit
-record (§1); your prose is what the human reads.
+record (§1); your prose is what the human reads. When you recap the reader's own
+choice at the gate, address them directly — "you chose to ignore it," not "the
+human chose ignore."
 
 Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed set**
 of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`
@@ -118,7 +120,7 @@ diff. For EACH item, in its own `wait_for_user` turn (one item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.
-- Ask the human to pick one of three dispositions:
+- Ask them to pick one of three dispositions:
   - **fix** — fix before merge. Collect the item into the rework brief and
     leave its `progress.md` line `needs-decision` (it rides the rework and is
     re-evaluated next pass).
@@ -126,7 +128,7 @@ diff. For EACH item, in its own `wait_for_user` turn (one item per turn):
     `create_change(title="<short title>", description="<self-contained brief that needs
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
-    and tell the human it is startable via `imp resume <new-change-id>` once this
+    and tell them it is startable via `imp resume <new-change-id>` once this
     change merges.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
