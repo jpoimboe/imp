@@ -9,6 +9,7 @@ import imp.cli.main as m
 from imp.engine.abandon import discard_conversation, save_to_backlog
 from imp.engine.archive import record, records_root
 from imp.engine.change import Change
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.state import LockHeld, ProjectLock, State
 from tests.conftest import _seed_control
 
@@ -272,12 +273,26 @@ async def test_disposition_lock_held_after_retries_prints_busy_and_returns_none(
 async def test_disposition_returns_none_when_reload_raises_load_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.engine.errors import LoadError
     _seed_control(tmp_path)
     ch = _draft_with_exchange(tmp_path, "le1")
 
     def _raise(*args, **kwargs):
         raise LoadError("home gone")
+
+    monkeypatch.setattr(m.Change, "load", _raise)
+    rc = await m._maybe_apply_leave_disposition(ch, "chat", {})
+    assert rc is None
+
+
+@pytest.mark.anyio
+async def test_disposition_returns_none_when_reload_raises_load_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _draft_with_exchange(tmp_path, "le2")
+
+    def _raise(*args, **kwargs):
+        raise LoadErrors(errors=[LoadError("missing field")], warnings=[])
 
     monkeypatch.setattr(m.Change, "load", _raise)
     rc = await m._maybe_apply_leave_disposition(ch, "chat", {})
