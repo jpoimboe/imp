@@ -7,6 +7,7 @@ import pytest
 from imp.remote.session.protocol import (
     Attach,
     Control,
+    CONTROL_SAVE,
     Input,
     encode_attach,
     encode_control,
@@ -62,7 +63,7 @@ def test_parse_client_message_recovers_input() -> None:
 
 
 def test_parse_client_message_recovers_control_for_each_action() -> None:
-    for action in ("interrupt", "detach", "abandon"):
+    for action in ("interrupt", "detach", "abandon", "save"):
         assert parse_client_message(encode_control(action)) == Control(action)
 
 
@@ -101,3 +102,9 @@ def test_parse_event_rejects_non_object_json() -> None:
 def test_parse_event_rejects_non_object_event_field() -> None:
     with pytest.raises(ValueError, match="expected 'event' to be a JSON object"):
         parse_event('{"kind": "event", "event": 42}')
+
+
+def test_encode_control_accepts_save_and_round_trips() -> None:
+    line = encode_control(CONTROL_SAVE)
+    assert json.loads(line) == {"kind": "control", "action": CONTROL_SAVE}
+    assert parse_client_message(line) == Control(CONTROL_SAVE)
