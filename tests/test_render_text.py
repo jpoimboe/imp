@@ -1724,7 +1724,7 @@ def test_rename_title_control_bytes_escaped() -> None:
     assert "\x07" not in out
     assert "\x00" not in out
     assert "^G" in out and "^@" in out
-    assert "set name to" in out             # imp's framing stays intact, unescaped
+    assert "Set name to" in out             # imp's framing stays intact, unescaped
 
 
 def test_breadcrumb_extras_control_bytes_escaped() -> None:
