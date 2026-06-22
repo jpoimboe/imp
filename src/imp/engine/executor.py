@@ -11,6 +11,7 @@ complete_step. The whole steps/ tree is removed at change completion.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import os
 import shutil
@@ -462,6 +463,14 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     return RunResult.COMPLETED
 
 
+def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
+    """Compose step.read_only into a dispatch-time policy copy; no-op if empty or None."""
+    if not step.read_only or policy is None:
+        return policy
+    overlays = tuple(str((project_root / p).resolve()) for p in step.read_only)
+    return dataclasses.replace(policy, readonly_overlays=overlays)
+
+
 async def _dispatch_step(
     step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *, is_resume: bool,
@@ -487,6 +496,8 @@ async def _dispatch_step(
         _release_lane(step, change, state, log)
     if step.acquire is not None:
         return await _route_acquire(step, change, state, log, wait_for_turn_fn)
+
+    sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, change.project_root)
 
     if step.kind == "branch":
         return _route_branch(step, state, log)

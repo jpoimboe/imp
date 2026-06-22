@@ -837,6 +837,36 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
+    """A subagent inherits the parent step's read_only overlay automatically:
+    the overlay is folded into sandbox_policy, which dispatch threads verbatim."""
+    from imp.engine.sandbox import SandboxPolicy
+
+    capture: dict = {}
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"helper": _agent("helper")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
+    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+    ctx.sandbox_policy = SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+        readonly_overlays=(str(tmp_path),),
+    )
+
+    await dispatch_task(ctx, "helper", "do it")
+    assert capture["inv"].sandbox_policy.readonly_overlays == (str(tmp_path),)
+
+
+@pytest.mark.anyio
 async def test_dispatch_task_holds_limiter_during_drive(tmp_path: Path) -> None:
     """The per-invocation CapacityLimiter is acquired AROUND the drive loop:
     exactly one token is borrowed while the subagent runs, and it is released
