@@ -1030,6 +1030,50 @@ def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
+async def test_resident_abandon_of_unmaterialized_draft_archives_not_tears_down(
+    tmp_path: Path,
+) -> None:
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create_draft(
+        tmp_path, title="x", change_id="draft1", base_branch="main")
+    assert change.materialized is False
+    sock = str(session_socket_path(change.control_root, change.id))
+    torn: list[Change] = []
+    archived: list[Change] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> str:
+        await anyio.sleep_forever()   # only an abandon-cancel ends this run
+        return "x"
+
+    async with anyio.create_task_group() as tg:
+        async def _serve() -> None:
+            await serve_change_session(
+                change, run_fn=fake_run, hibernate=False,
+                tear_down=lambda ch: torn.append(ch),
+                archive_left=lambda ch: archived.append(ch))
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        await client.send_control(CONTROL_ABANDON)
+        with anyio.fail_after(5):
+            while not archived:
+                await anyio.sleep(0.02)
+        assert archived == [change]
+        assert torn == []
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
 async def test_awaiting_turn_hibernation_exit_drives_now_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

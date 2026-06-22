@@ -10,7 +10,7 @@ from typing import Any
 
 import anyio
 
-from imp.engine.abandon import tear_down_change
+from imp.engine.abandon import archive_conversation, tear_down_change
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -57,6 +57,7 @@ async def serve_change_session(
     run_fn: RunFn = run_change,
     hibernate: bool = True,
     tear_down: Callable[[Change], None] = tear_down_change,
+    archive_left: Callable[[Change], None] = archive_conversation,
     seed_opening: str | None = None,
     resume: bool = False,
     from_target: str | None = None,
@@ -163,8 +164,10 @@ async def serve_change_session(
         # A wake-spawn raced a resident change: exit harmlessly without binding socket.
         return None
     if server.abandoned:
-        # cwd is control_root, not the worktree, so worktree removal is safe
-        await anyio.to_thread.run_sync(tear_down, change)
+        if change.materialized:
+            await anyio.to_thread.run_sync(tear_down, change)
+        else:
+            await anyio.to_thread.run_sync(archive_left, change)
     elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(change.event_log()):
         await anyio.to_thread.run_sync(
             ensure_head_driven, change.control_root, change.base_branch)
