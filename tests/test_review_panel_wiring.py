@@ -28,6 +28,7 @@ _BASE_VARS = {
     "change_panel_done": False,
     "review_scope": "plan",
     "review_base": "",
+    "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
 
@@ -158,25 +159,33 @@ def test_plan_cycle_check_routes_coverage_per_plan() -> None:
     rules = _steps(_wf())["plan-cycle-check"].rules
     # More scope remains -> review THIS plan first; review_scope forced to 'plan'.
     m_more = evaluate_rules(rules, vars=_BASE_VARS,
-                            output={"status": "Success", "more_plans": True, "rationale": "x"})
+                            output={"status": "Success", "more_plans": True,
+                                    "rationale": "x", "plan_total": 9})
     assert isinstance(m_more.action, Goto) and m_more.action.target == "code-reviewer"
     assert m_more.var_mutations["review_scope"] == "plan"
+    assert m_more.var_mutations["plan_total"] == 9
     assert "tasks_since_review" not in m_more.var_mutations
     # Coverage complete + trivial change -> straight to finalize.
     m_fast = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
-                            output={"status": "Success", "more_plans": False, "rationale": "x"})
+                            output={"status": "Success", "more_plans": False,
+                                    "rationale": "x", "plan_total": 1})
     assert isinstance(m_fast.action, Goto) and m_fast.action.target == "finalize"
+    assert m_fast.var_mutations["plan_total"] == 1
     # First coverage-complete -> end-of-change full panel, latched.
     m_cov = evaluate_rules(rules, vars=_BASE_VARS,
-                           output={"status": "Success", "more_plans": False, "rationale": "x"})
+                           output={"status": "Success", "more_plans": False,
+                                   "rationale": "x", "plan_total": 1})
     assert isinstance(m_cov.action, Goto) and m_cov.action.target == "code-reviewer"
     assert m_cov.var_mutations["review_scope"] == "change"
     assert m_cov.var_mutations["change_panel_done"] is True
+    assert m_cov.var_mutations["plan_total"] == 1
     # Coverage complete after the panel already ran -> per-plan corrective review.
     m_corr = evaluate_rules(rules, vars={**_BASE_VARS, "change_panel_done": True},
-                            output={"status": "Success", "more_plans": False, "rationale": "x"})
+                            output={"status": "Success", "more_plans": False,
+                                    "rationale": "x", "plan_total": 1})
     assert isinstance(m_corr.action, Goto) and m_corr.action.target == "code-reviewer"
     assert m_corr.var_mutations["review_scope"] == "plan"
+    assert m_corr.var_mutations["plan_total"] == 1
 
 
 def test_code_reviewer_reads_review_scope_not_integration_pass() -> None:

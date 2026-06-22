@@ -511,6 +511,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.LiteralTextNode):
+        if node.verbatim:
+            codes = pal.NODE_COLORS[node.color_role] if node.color_role else ()
+            for line in _caret_escape(node.text).split("\n"):
+                yield _line(line, depth, color, *codes, gutters=gutters)
+            return
         if node.color_role:
             yield from _wrap(_caret_escape(node.text), width, depth, color,
                              *pal.NODE_COLORS[node.color_role], gutters=gutters)

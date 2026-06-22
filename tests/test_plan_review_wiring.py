@@ -45,10 +45,10 @@ def test_plan_review_rules_thread_minors_without_panel_var() -> None:
     assert m.action.resume is True
     assert m.var_mutations == {"plan_minors_integrated": False}
 
-    # verification pass (minors already integrated) -> task-lead; clears flag.
+    # verification pass (minors already integrated) -> plan-finalized; clears flag.
     m2 = evaluate_rules(rules, vars={**_BASE_VARS, "plan_minors_integrated": True},
                         output={"blocking": False, "has_minor_findings": True})
-    assert isinstance(m2.action, Goto) and m2.action.target == "task-lead"
+    assert isinstance(m2.action, Goto) and m2.action.target == "plan-finalized"
     assert m2.action.resume is False
     assert m2.var_mutations == {"plan_minors_integrated": False}
 
@@ -59,9 +59,9 @@ def test_plan_review_rules_thread_minors_without_panel_var() -> None:
     assert m3.action.resume is True
     assert m3.var_mutations == {"plan_minors_integrated": True}
 
-    # clean, nothing actionable -> task-lead; no mutations.
+    # clean, nothing actionable -> plan-finalized; no mutations.
     m4 = evaluate_rules(rules, vars=_BASE_VARS,
                         output={"blocking": False, "has_minor_findings": False})
-    assert isinstance(m4.action, Goto) and m4.action.target == "task-lead"
+    assert isinstance(m4.action, Goto) and m4.action.target == "plan-finalized"
     assert m4.action.resume is False
     assert m4.var_mutations == {}

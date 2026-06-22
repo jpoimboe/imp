@@ -44,7 +44,12 @@ progress.md. Two feedback sources resume you here:
 **For each task in the plan, in order** (steps 1–6; on entry begin at the first
 unimplemented task, or the re-opened task from injected feedback):
 1. Pick the next unimplemented task from the plan (or the re-opened task from
-   injected feedback).
+   injected feedback). As soon as you know which task it is, push the live status
+   position — call
+   `update_step_label(label="implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · task <N>/{{ vars.task_total }}")`,
+   replacing `<N>` with this task's own number from its `## Task <N>` heading. This
+   updates only the live status bar; it introduces no task counter and changes
+   nothing about how you pick work.
 2. Dispatch the implementer with the **full task text + scene-setting context**
    (it does not read the plan), at the **`medium` tier**
    (`task(subagent_name="implementer", tier="medium", task_description=…)`):

@@ -18,6 +18,9 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-plan review diff range
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-plan, not re-paneled
   integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
+  plan_index:             {type: int, default: 1}         # current plan number, rendered in plan/task step labels
+  plan_total:             {type: int, default: 0}         # anticipated total plans (0 = unknown → drops the denominator); sole emitter plan-cycle-check
+  task_total:             {type: int, default: 0}         # tasks in the current plan, set by plan-finalized
 
 defaults:
   max_retries: 3
@@ -81,13 +84,13 @@ phases:
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
-        label: writing plan
+        label: "writing plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
 
       - name: plan-verify-commit
         quiet: true
         command: ./scripts/plan-commit-verify.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: task-lead}   # trivial change: skip plan review entirely
+          - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial change: skip plan review entirely
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
@@ -106,18 +109,26 @@ phases:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
           - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing plan review feedback", feedback: "Here's review feedback to address:"}
           # Clean, and the writer already did its minors-integration pass -> stop.
-          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: task-lead}
+          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: plan-finalized}
           # Clean with actionable minors -> integrate them, then owe one more (verification) review.
           - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, label: "addressing plan review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean, nothing to integrate -> stop.
-          - {else: true, goto: task-lead}
+          - {else: true, goto: plan-finalized}
+
+      - name: plan-finalized
+        file: agents/plan-finalized.md
+        tier: medium
+        label: finalizing plan
+        read_only: ["."]
+        rules:
+          - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
   - name: implement
     steps:
       - name: task-lead
         file: agents/task-lead.md
         tier: high
-        label: implementing
+        label: "implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         rules:
           - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
@@ -165,17 +176,17 @@ phases:
           # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
           # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
           # per-plan review as the full panel.
-          - {if: {more_plans: true}, set: {review_scope: "'plan'"}, goto: code-reviewer}
+          - {if: {more_plans: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: code-reviewer}
           # coverage complete, trivial change -> no panel, straight to finalize
           # (the per-plan cleanup already folded+stamped this plan)
-          - {if: {fast_path: true}, goto: finalize}
+          - {if: {fast_path: true}, set: {plan_total: "output.plan_total"}, goto: finalize}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix plan
           # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD
           # diff (review_scope='plan'), not a fresh whole-change panel each round.
-          - {if: {change_panel_done: true}, set: {review_scope: "'plan'"}, goto: code-reviewer}
+          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: code-reviewer}
           # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
           # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
-          - {else: true, set: {review_scope: "'change'", change_panel_done: true}, goto: code-reviewer}
+          - {else: true, set: {review_scope: "'change'", change_panel_done: true, plan_total: "output.plan_total"}, goto: code-reviewer}
 
       # The review step IS the code-reviewer (no coordinator/panel): per-plan it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
@@ -243,7 +254,7 @@ phases:
           # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
           # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
           - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout}, goto: finalize}
-          - {if: {exit: 0}, set: {review_base: output.stdout}, goto: plan-writer}
+          - {if: {exit: 0}, set: {review_base: output.stdout, plan_index: "var.plan_index + 1"}, goto: plan-writer}
           - {else: true, pause: true}
 
       - name: finalize
@@ -253,7 +264,7 @@ phases:
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}
-          - {if: {decision: rework}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── merge: the FIFO merge queue. Only the head touches the base. ───────

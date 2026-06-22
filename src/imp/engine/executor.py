@@ -500,7 +500,7 @@ async def _dispatch_step(
     sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, change.project_root)
 
     if step.kind == "branch":
-        return _route_branch(step, state, log)
+        return _route_branch(step, change, state, log)
     if step.kind == "merge_and_exit_worktree":
         return await _route_merge_and_exit_worktree(step, change, state, log)
     if step.kind == "script":
@@ -517,9 +517,26 @@ async def _dispatch_step(
         project_facts=project_facts, guidance=guidance)
 
 
-def _step_started_payload(step: Step, state: State) -> dict[str, Any]:
+def _render_label(
+    label: str | None, change: Change | None, log: EventLog | None, state: State,
+) -> str | None:
+    if label is None or "{{" not in label or change is None or log is None:
+        return label
+    return render_prompt(label, build_context(
+        change_title=change.title, event_log=log,
+        change_id=change.id, change_home=f".imp/changes/{change.id}",
+        cur_base_head=change.cur_base_head,
+        orig_base_head=change.orig_base_head, vars=state.vars,
+    ))
+
+
+def _step_started_payload(
+    step: Step, state: State,
+    change: Change | None = None, log: EventLog | None = None,
+) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
-               "quiet": step.quiet, "label": step.label}
+               "quiet": step.quiet,
+               "label": _render_label(step.label, change, log, state)}
     if step.kind == "script":
         payload["command"] = step.command
     if step.chrome is not None:
@@ -531,9 +548,11 @@ def _step_started_payload(step: Step, state: State) -> dict[str, Any]:
     return payload
 
 
-def _emit_started(log: EventLog, step: Step, state: State, **extra: Any) -> dict[str, Any]:
+def _emit_started(
+    log: EventLog, step: Step, state: State, change: Change, **extra: Any,
+) -> dict[str, Any]:
     return _emit(log, "step_started",
-                 {**_step_started_payload(step, state), **extra},
+                 {**_step_started_payload(step, state, change, log), **extra},
                  agent_id=None)
 
 
@@ -552,9 +571,9 @@ def _finish(
 
 
 def _route_branch(
-    step: Step, state: State, log: EventLog
+    step: Step, change: Change, state: State, log: EventLog
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step, state)
+    _emit_started(log, step, state, change)
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, match, state)            # branch goto carries NO feedback
@@ -565,7 +584,7 @@ async def _route_script(
     *, verify_command: str | None = None, verify_timeout: int | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step, state)
+    _emit_started(log, step, state, change)
     command = step.command
     assert command is not None, "script step must have a command"
     if "{{" in command:
@@ -656,7 +675,7 @@ async def _route_acquire(
         raise RuntimeError("wait_for_turn_fn is required for acquire steps")
     assert step.acquire is not None
     lane = _resolve_lane(step.acquire, change)
-    _emit_started(log, step, state)
+    _emit_started(log, step, state, change)
     merge_queue.enqueue_if_absent(change.control_root, change.id, lane)
 
     def _is_head() -> bool:
@@ -730,7 +749,7 @@ async def _route_merge_and_exit_worktree(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     from imp.engine import worktree
-    _emit_started(log, step, state)
+    _emit_started(log, step, state, change)
 
     if state.merge_commit:
         _exit_worktree(change)
@@ -816,7 +835,7 @@ async def _route_agent(
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={
-                **_step_started_payload(step, state), "resumed": is_resume},
+                **_step_started_payload(step, state, change, log), "resumed": is_resume},
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,

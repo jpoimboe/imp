@@ -45,7 +45,7 @@ def _canned_anthropic(**overrides):
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "deviation": False, "verify_tolerated": False,
         "stuck": False, "sweep_tolerated": False, "summary": "ok",
-        "more_plans": False, "rationale": "ok",
+        "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
         "built": "stub", "verify_status": "ok",
         "open_items": "", "next_steps": "",
@@ -87,7 +87,7 @@ def _openai_step_aware(**kwargs):
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "deviation": False, "verify_tolerated": False,
         "stuck": False, "sweep_tolerated": False, "summary": "ok",
-        "more_plans": False, "rationale": "ok",
+        "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
         "built": "stub", "verify_status": "ok",
         "open_items": "", "next_steps": "",
@@ -327,7 +327,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "plan_path": "stub-plan.md", "plan_number": 1,
                     "done": True, "deviation": False, "verify_tolerated": False,
                     "stuck": False, "sweep_tolerated": False, "summary": "ok",
-                    "more_plans": False, "rationale": "ok",
+                    "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
                     "blocking": False, "has_minor_findings": False,
                     "built": "stub", "verify_status": "ok",
                     "open_items": "", "next_steps": "",
@@ -409,7 +409,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
     # Termination is the REVIEWER's goto on the verification pass (minors-integrated
     # already set), not a separate gate: the second spec-reviewer jumps to
-    # plan-writer, the second plan-review jumps to task-lead.
+    # plan-writer, the second plan-review jumps to plan-finalized.
     assert any(
         s == "spec-reviewer"
         and a.get("verb") == "goto" and a.get("target") == "plan-writer"
@@ -417,7 +417,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     ), completed
     assert any(
         s == "plan-reviewer"
-        and a.get("verb") == "goto" and a.get("target") == "task-lead"
+        and a.get("verb") == "goto" and a.get("target") == "plan-finalized"
         for s, a in completed
     ), completed
 
@@ -463,6 +463,7 @@ async def test_fast_path_skips_reviewers_and_review(
     assert "deferred-sweep" not in started, started
     assert "sweep-verify" not in started, started
     assert "plan-writer" in started, started           # planning still runs
+    assert "plan-finalized" in started, started        # task list announced on the fast path
     assert "task-lead" in started, started             # implementation still runs
 
 

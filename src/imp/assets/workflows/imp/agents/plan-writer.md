@@ -1,6 +1,5 @@
 ---
 name: plan-writer
-label: writing plan
 description: Write the next bite-sized plan ({{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md) from the spec and progress, then commit it.
 subagents: [explorer, researcher]
 output:

@@ -22,7 +22,12 @@ from typing import Any, ClassVar
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
 # (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
-_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
+# emit_notice renders as a verbatim block elsewhere; showing it here too would
+# double-print as a clipped `text=…` in the recap.
+# update_step_label would register as activity in the very status line it exists to
+# keep clean.
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user",
+                                   "emit_notice", "update_step_label"})
 
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge_and_exit_worktree"})
@@ -109,6 +114,7 @@ class StepNode:
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
     label: str | None = None           # step display label (step_started.payload.label)
+    live_label: str | None = None      # agent-pushed live status label; None when unset
     chrome: str | None = None          # "none" → suppress this step's header
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
@@ -311,6 +317,7 @@ class LiteralTextNode:
     path instead of the markdown/prose path; None keeps the prose rendering."""
     text: str
     color_role: str | None = None
+    verbatim: bool = False             # render line-by-line, preserving indentation
     collapsible = False
 
 
@@ -442,7 +449,8 @@ class NarrativeBuilder:
 
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
-        step_label = self._step_stack[-1].label if self._step_stack else None
+        top = self._step_stack[-1] if self._step_stack else None
+        step_label = (top.live_label or top.label) if top is not None else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -745,6 +753,10 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             and self._current_phase.name == phase):
         top = self._step_stack[-1]
         if not top.closed and top.name == name:
+            if p.get("resumed"):
+                top.live_label = None
+                top.label = p.get("label")
+                top.resumed = True
             return
     # Resume re-entry: the first step_started after a resume re-enters the
     # interrupted step in the still-open phase. The executor re-runs it from
@@ -774,6 +786,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.start_ts = event.get("timestamp")
             existing.agent_output = None
             existing.label = p.get("label")
+            existing.live_label = None
             existing.command = p.get("command")
             existing.chrome = p.get("chrome")
             existing.resumed = bool(p.get("resumed", False))
@@ -1390,6 +1403,30 @@ def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, An
 
 
 NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
+
+
+def _h_step_label_updated(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Live status-bar label for the current step. Do NOT flush the open burst:
+    # this fires between the update_step_label tool_call and its tool_result.
+    if self._step_stack:
+        self._step_stack[-1].live_label = p.get("label")
+
+
+NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
+
+
+def _h_notice(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Do NOT flush the open burst: this fires between the emit_notice tool_call
+    # and its tool_result.
+    self._append(LiteralTextNode(text=str(p.get("text", "")),
+                                 color_role="lifecycle", verbatim=True))
+
+
+NarrativeBuilder._HANDLERS["notice"] = _h_notice
 
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
