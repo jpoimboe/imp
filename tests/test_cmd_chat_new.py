@@ -21,7 +21,7 @@ def test_cmd_chat_uses_chat_leave_mode(monkeypatch) -> None:
 def test_cmd_new_uses_new_leave_mode(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def _fake(args: Namespace, *, leave_mode: str = "new") -> int:
+    async def _fake(args: Namespace, *, leave_mode: str = "UNSET") -> int:
         captured["leave_mode"] = leave_mode
         return 0
 

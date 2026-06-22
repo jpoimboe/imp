@@ -884,7 +884,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    return anyio.run(_async_cmd_new, args)
+    return anyio.run(functools.partial(_async_cmd_new, leave_mode="new"), args)
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
