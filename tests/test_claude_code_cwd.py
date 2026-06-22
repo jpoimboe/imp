@@ -102,3 +102,23 @@ def test_build_options_blanks_external_anthropic_keys(tmp_path: Path) -> None:
         f"expected options.env['ANTHROPIC_AUTH_TOKEN']=='' to override any inherited "
         f"external token, got {opts.env.get('ANTHROPIC_AUTH_TOKEN')!r}"
     )
+
+
+def test_build_options_skips_cc_prompt_history(tmp_path: Path) -> None:
+    """imp persists its own transcripts; the nested `claude` must write NOTHING
+    to ~/.claude/projects/. --no-session-persistence suppresses the conversation
+    body but NOT the ai-title stub (CC 2.x writes a single-record
+    {"type":"ai-title",...} session file even under that flag, polluting
+    `claude --resume`). CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 suppresses ALL CC-side
+    history writes, killing the stub at source. The SDK merges options.env OVER
+    the inherited env, so _build_options must set it.
+    """
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    opts = runner._build_options(
+        _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
+    )
+    assert opts.env.get("CLAUDE_CODE_SKIP_PROMPT_HISTORY") == "1", (
+        f"expected options.env['CLAUDE_CODE_SKIP_PROMPT_HISTORY']=='1' so the "
+        f"nested claude writes no session/ai-title files to ~/.claude/projects/, "
+        f"got {opts.env.get('CLAUDE_CODE_SKIP_PROMPT_HISTORY')!r}"
+    )

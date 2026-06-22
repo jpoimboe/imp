@@ -18,7 +18,10 @@ runners:
 
 `extra_args={"no-session-persistence": None}` is the documented forwarding
 path for `--no-session-persistence` (spec §6.11; verified in Spike 7 and
-SDK `_internal/transport/subprocess_cli.py`).
+SDK `_internal/transport/subprocess_cli.py`). That flag alone is insufficient:
+CC 2.x still writes an `ai-title` session stub to ~/.claude/projects/, so the
+subprocess env also sets `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` to suppress all
+CC-side history writes (imp persists its own transcripts).
 """
 
 from __future__ import annotations
@@ -978,7 +981,18 @@ class ClaudeCodeAgentRunner:
             # empty string makes claude fall back to its backend auth (verified
             # live), so blank both here to make the nested claude immune to
             # whatever ANTHROPIC_* the parent process happens to export.
-            env={"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": ""},
+            env={
+                "ANTHROPIC_API_KEY": "",
+                "ANTHROPIC_AUTH_TOKEN": "",
+                # imp persists its own transcripts; the nested claude must write
+                # NOTHING to ~/.claude/projects/. --no-session-persistence (below)
+                # suppresses the conversation body but NOT the ai-title stub: CC
+                # 2.x writes a single-record {"type":"ai-title",...} session file
+                # even under that flag, polluting `claude --resume`. There is no
+                # title-only knob; this var suppresses ALL CC-side history writes,
+                # killing the stub at source.
+                "CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1",
+            },
             # Pin the `claude` subprocess to the change's project_root. Without
             # this the SDK launches claude with cwd=None and leaves $PWD as
             # inherited, so claude keys off a stale $PWD and edits/commits the
@@ -1206,7 +1220,8 @@ class ClaudeCodeAgentRunner:
                 # Name-only schemas: the in-process MCP server owns the full
                 # input schemas; unlike anthropic/openai we don't pass them here.
                 tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
-                params={"no-session-persistence": None},
+                params={"no-session-persistence": None,
+                        "env.CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1"},
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
