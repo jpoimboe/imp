@@ -129,10 +129,10 @@ item per turn):
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.
 - Ask the human to pick one of three dispositions:
-  - **fix now** — fix before merge. Collect the item into the rework brief and
+  - **fix** — fix before merge. Collect the item into the rework brief and
     leave its `progress.md` line `needs-decision` (it rides the rework and is
     re-evaluated next pass).
-  - **hand to a follow-up** — defer it to a new backlog Change. Call
+  - **defer** — hand it to a new backlog Change. Call
     `create_change(title="<short title>", description="<self-contained brief that needs
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
