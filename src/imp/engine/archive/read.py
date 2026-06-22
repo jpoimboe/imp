@@ -114,6 +114,23 @@ def newest_plan_name(control_root: Path, change_id: str) -> str | None:
     return None
 
 
+def rehydrate_change(control_root: Path, change_id: str) -> Path:
+    """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
+    change_dir = control_root / ".imp" / "changes" / change_id
+    if change_dir.exists():
+        raise FileExistsError(f"live home for {change_id!r} already exists")
+    change_json = read_change_json(control_root, change_id)
+    if change_json is None:
+        raise FileNotFoundError(f"no archived record for {change_id!r}")
+    state_json = read_state_json(control_root, change_id)
+    events = read_events(control_root, change_id)
+    (change_dir / "state").mkdir(parents=True)
+    (change_dir / "change.json").write_bytes(change_json)
+    (change_dir / "state" / "state.json").write_bytes(state_json or b"{}")
+    (change_dir / "events.jsonl").write_bytes(events or b"")
+    return change_dir
+
+
 def last_event_iso(control_root: Path, change_id: str) -> str | None:
     raw = read_events(control_root, change_id)
     if raw is None:
