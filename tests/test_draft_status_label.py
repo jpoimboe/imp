@@ -36,11 +36,11 @@ def test_materialized_paused_change_is_not_labeled_draft(tmp_path: Path) -> None
     assert row[1] == "paused"   # materialized ⇒ real status, never relabeled
 
 
-def test_parked_draft_is_inflight_and_resumable_with_draft_label(tmp_path: Path) -> None:
+def test_parked_draft_is_inflight_and_resumable_at_raw_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _park_draft(tmp_path, "drfres")
     inflight = {r[0]: r[1] for r in m._status_rows(tmp_path)}
-    assert inflight.get("drfres") == "draft"                 # listed + relabeled
+    assert inflight.get("drfres") == "paused"  # raw status, no draft re-label
     assert "drfres" in {r[0] for r in m._resumable_rows(tmp_path)}   # resumable
 
 

@@ -1681,9 +1681,26 @@ def _status_rows(control: Path) -> list[_Row]:
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
             continue
-        status = _draft_label(_effective_status(row[1], cdir), change_json)
+        status = _effective_status(row[1], cdir)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _saved_rows(control: Path) -> list[_Row]:
+    rows: list[_Row] = []
+    for change_id in _list_change_homes(control):
+        cdir = _change_home(control, change_id)
+        try:
+            state_json = (cdir / "state" / "state.json").read_bytes()
+            change_json = (cdir / "change.json").read_bytes()
+        except FileNotFoundError:
+            continue
+        last = _last_event_iso(cdir / "events.jsonl") or ""
+        row = _status_row(change_id, state_json, change_json, last)
+        if row is None or row[1] != "saved":
             continue
         rows.append(row)
     return rows
@@ -1991,7 +2008,8 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         return 0
     now = datetime.now(UTC)
     inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
+    backlog_rows = _sort_rows_newest_first(
+        _backlog_rows(control) + _saved_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not backlog_rows and not past:
         print(_NO_CHANGES_MESSAGE)
@@ -2006,10 +2024,13 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
-    for r in backlog_rows:
-        print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w))
+    if backlog_rows:
+        print()
+        print(pal.ansi("Backlog", "dim", enabled=color))
+        for r in backlog_rows:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+                last_iso=r[3], now=now, color=color, name_width=name_w))
     if past:
         if inflight or backlog_rows:
             print()

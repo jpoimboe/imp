@@ -349,6 +349,13 @@ def test_state_hold_mark_defaults_none(tmp_path: Path) -> None:
     assert loaded.held_acquire_step is None
 
 
+def test_saved_is_a_status_value() -> None:
+    from typing import get_args
+
+    from imp.engine.state import Status
+    assert "saved" in get_args(Status)
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json

@@ -21,7 +21,7 @@ def test_cmd_status_shows_backlog_row_by_default(
     assert "2026-06-16-rdy111" in out
     assert "backlog" in out
     assert "Ready one" in out
-    assert "Backlog" not in out  # no separate heading
+    assert "Backlog" in out  # headed Backlog section
 
 
 def test_cmd_status_backlog_rows_appear_after_inflight(
