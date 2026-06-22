@@ -34,3 +34,30 @@ def tear_down_change(change: Change) -> None:
     worktree.remove_worktree(control, change_id, force=True)
     worktree.delete_branch(control, change_id)
     shutil.rmtree(change.change_dir, ignore_errors=True)
+
+
+def archive_conversation(change: Change) -> None:
+    """Archive a left conversation as resumable (paused, not abandoned); drop the live home."""
+    control = change.control_root
+    change_id = change.id
+    base_branch = change.base_branch
+    materialized = change.materialized
+    with ProjectLock(change.change_dir / "lock").acquire():  # raises LockHeld if runner is live
+        state = State.load(change.state_dir)
+        state.status = "paused"
+        state.save(change.state_dir)
+        change.event_log().append(
+            agent_id=None, type="conversation_archived", payload={})
+        from imp.engine import archive
+        archive.archive_change(
+            control, change_id,
+            events_path=change.events_path,
+            change_json_path=change.change_dir / "change.json",
+            state_json_path=change.state_dir / "state.json",
+            resumable=True,
+        )
+    if materialized:
+        merge_queue.pop_and_wake(control, change_id, base_branch)
+        worktree.remove_worktree(control, change_id, force=True)
+        worktree.delete_branch(control, change_id)
+    shutil.rmtree(change.change_dir, ignore_errors=True)
