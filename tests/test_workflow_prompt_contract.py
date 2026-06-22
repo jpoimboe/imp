@@ -304,8 +304,11 @@ def test_plan_writer_states_soft_task_size_target() -> None:
 def test_task_lead_documents_verify_triage() -> None:
     text = (AGENTS_DIR / "task-lead.md").read_text()
     low = text.lower()
-    assert "tolerated-failures.md" in text          # the change-local record path
-    assert "verify_tolerated" in text               # the signal it emits
+    assert "tolerated-failures.md" not in text       # the separate record is retired
+    assert "DEFERRED verify:" in text                # the gate-sourced toleration line
+    assert "## Deferred Followups" in text           # recorded in the followups list
+    assert "— needs-decision:" in text          # born in needs-decision state (em dash)
+    assert "verify_tolerated" in text                # the signal it emits
     assert "attributable" in low                     # the single attributability judgment
     assert "review_base..HEAD" in text               # judged against the diff
     # The two-category taxonomy is gone — no tags, no "green at baseline", no union set.

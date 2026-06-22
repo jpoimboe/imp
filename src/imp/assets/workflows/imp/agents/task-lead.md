@@ -189,24 +189,27 @@ uniform; only the fix path differs (you fix in task context with a fixup; deferr
 fixes in sweep context with a plain commit). -->
 
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
-failure output AND the change-local tolerated-failures record
-`{{ change.home }}/tolerated-failures.md` (passed even when it is absent/empty — the
-common case). The record is one untagged list; each entry is a failure signature
-plus a one-line justification of why this change is not responsible for it
-(pre-existing on the base, or non-deterministic/environmental):
+failure output. Reason over the OPAQUE failure text against the diff
+(`review_base..HEAD`) — you never re-run a single test; this is pure judgment.
 
-`- <test id / failure signature>: <why this change is not responsible>`
+Record a toleration as a normal `## Deferred Followups` entry in
+`{{ change.home }}/progress.md`, born directly in `— needs-decision:` state with the
+originating gate as its `<source>` — here `verify`, never an agent. The EXACT shape:
 
-Reason over the OPAQUE failure text against the diff (`review_base..HEAD`) — you
-never re-run a single test; this is pure judgment:
+`- [ ] DEFERRED verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
 
-- **Every current failure is already recorded in `tolerated-failures.md`, or is
-  plainly not attributable to the diff** → append any not-yet-listed such failure
-  (create the file with a `# Tolerated failures` heading if absent) in the shape
-  above, make NO fix commit, and return `verify_tolerated: true`. The workflow
-  advances past `verify` instead of re-looping. A toleration is **visibility, not
-  reproduction**: it changes nothing about the merge — `finalize` surfaces it to a
-  human before merge.
+The `verify` source is the discriminator the convergence check greps for.
+
+- **Every current failure is already recorded as a `DEFERRED verify:` line in
+  `## Deferred Followups`, or is plainly not attributable to the diff** → append any
+  not-yet-recorded such failure as a line in the shape above (create the
+  `## Deferred Followups` heading if absent), make NO fix commit, and return
+  `verify_tolerated: true`. Run the convergence check by grepping `## Deferred
+  Followups` for `DEFERRED verify:` lines and matching each line's embedded failure
+  signature against the current failure output. The workflow advances past `verify`
+  instead of re-looping. A toleration is **visibility, not reproduction**: it changes
+  nothing about the merge — `finalize` surfaces it to a human through the existing
+  needs-decision walk before merge.
 - **A failure attributable to the diff** → fix it as usual (dispatch the
   implementer, `git commit --fixup=HEAD`) and return `verify_tolerated: false`. The
   engine re-runs `verify`.
