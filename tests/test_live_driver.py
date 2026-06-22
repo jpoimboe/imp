@@ -773,6 +773,34 @@ def test_status_span_restarts_on_prose_turns_steps_and_user_replies() -> None:
     assert calls == ["restart", "restart", "restart", "restart"]
 
 
+def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
+    """A parent prose llm_response restarts the span normally — but NOT while a
+    dispatched subagent is still running, else the visible `(+N subagents) · Ns`
+    elapsed zeroes for work that never stopped."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),                              # restart
+        ev("3", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),                         # fold runs
+        ev("4", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "still working"}]},
+           usage={}),                                                    # NO restart
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart"]                                          # only step_started
+
+
 def test_compose_status_colors_count_detail_label() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))

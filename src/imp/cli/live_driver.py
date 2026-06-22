@@ -142,8 +142,13 @@ class LiveDriver:
                 # reset behavior is preserved as a side effect.
                 self._status.restart_span()
             elif etype == "llm_response":
+                # A genuine prose turn restarts the span (w7f56t) — but NOT while
+                # a dispatched subagent is still running: the parent narrating in
+                # the background must not zero the visible `(+N subagents) · Ns`
+                # elapsed of work that never stopped.
                 payload = event.get("payload")
-                if isinstance(payload, dict) and nv.llm_response_has_prose(payload):
+                if (isinstance(payload, dict) and nv.llm_response_has_prose(payload)
+                        and not self._builder.has_running_subagent):
                     self._status.restart_span()
         self._walk()
         self._refresh_status()

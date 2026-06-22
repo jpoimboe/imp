@@ -1633,8 +1633,8 @@ def test_resume_drops_interrupted_fold_membership_so_late_events_dont_reattach()
 
 
 def test_current_activity_suffix_counts_extra_running_subagents() -> None:
-    # AC40: one running fold → no suffix; two → "(+1 more subagent)"; three →
-    # "(+2 more subagents)" (singular/plural). The named detail is the FIRST
+    # AC40: one running fold → no suffix; two → "(+1 subagent)"; three →
+    # "(+2 subagents)" (singular/plural). The named detail is the FIRST
     # running fold's; the suffix counts the rest.
     def _task(eid: str, bid: str, name: str) -> dict:
         return _ev(eid, "tool_call", agent_id="step:p/s", id=bid, name="task",
@@ -1646,17 +1646,17 @@ def test_current_activity_suffix_counts_extra_running_subagents() -> None:
     b.add(_task("tk1", "b1", "reviewer"))
     one = nv.activity_to_text(b.current_activity())
     assert "subagent(reviewer)" in one
-    assert "more subagent" not in one                    # single fold: no suffix
+    assert "(+" not in one                                # single fold: no suffix
 
     b.add(_task("tk2", "b2", "tester"))
     two = nv.activity_to_text(b.current_activity())
     assert "subagent(reviewer)" in two                   # first running fold's detail
-    assert "(+1 more subagent)" in two                   # singular
-    assert "(+1 more subagents)" not in two
+    assert "(+1 subagent)" in two                         # singular
+    assert "(+1 subagents)" not in two
 
     b.add(_task("tk3", "b3", "researcher"))
     three = nv.activity_to_text(b.current_activity())
-    assert "(+2 more subagents)" in three                # plural
+    assert "(+2 subagents)" in three                      # plural
 
 
 def test_interrupt_config_event_suppresses_error_and_marks_step() -> None:

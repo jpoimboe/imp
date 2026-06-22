@@ -429,6 +429,15 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
+    @property
+    def has_running_subagent(self) -> bool:
+        """True while at least one dispatched subagent fold is still running.
+        The live driver checks this to suppress the prose-turn timer reset while
+        background subagents are in flight — an interleaved prose llm_response
+        from the PARENT would otherwise zero the visible `(+N subagents) · Ns`
+        elapsed even though the subagents never stopped (w7f56t over-reset)."""
+        return any(f.running for f in self._open_sub_by_event.values())
+
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
         step_label = self._step_stack[-1].label if self._step_stack else None
@@ -438,7 +447,7 @@ class NarrativeBuilder:
             extra = len(running) - 1
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
-                label = f"{label} (+{extra} more {noun})"
+                label = f"{label} (+{extra} {noun})"
             return Activity(step_label=step_label, label=label)
         burst = self._current_burst
         if burst is not None:
