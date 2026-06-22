@@ -4,8 +4,10 @@ import re
 from pathlib import Path
 
 from imp.agents.runner import ChangeContext
-from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
+from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+_PERSONA = Path("src/imp/assets/workflows/imp/persona.md")
 
 
 def _agent(name: str = "rev", tools=frozenset({"complete_step"})) -> AgentDef:
@@ -24,7 +26,7 @@ def _build(tmp_path: Path, *, name: str, body: str):
         agent_def=_agent(name=name), provider_name="anthropic", model_name="m",
         rendered_system_prompt=body, initial_messages=(),
         change_context=ChangeContext(title="t", project_root=tmp_path,
-                                      workflow_dir=tmp_path / "wf"),
+                                     workflow_dir=tmp_path / "wf"),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl", subagent_defs={},
         tiers=(), max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -33,64 +35,75 @@ def _build(tmp_path: Path, *, name: str, body: str):
 
 
 def test_base_prefix_byte_identical_across_agents(tmp_path: Path) -> None:
-    # Acceptance #4: two different agent defs assembled in the same run share a
-    # byte-identical base prefix. Fails if the base ever interpolates the agent
-    # name/body (an accidental f-string), because the prefixes would diverge.
+    # With no workflow persona, the engine base is core_head + core_tail; it is
+    # byte-identical across agent defs (fails if the base interpolates name/body).
     a = _build(tmp_path, name="alpha", body="BODY ALPHA")
     b = _build(tmp_path, name="omega", body="BODY OMEGA")
-    n = len(_AGENT_BASE_PROMPT)
-    assert a.system_prompt[:n] == _AGENT_BASE_PROMPT
-    assert b.system_prompt[:n] == _AGENT_BASE_PROMPT
-    assert a.system_prompt[:n] == b.system_prompt[:n]
+    engine_base = f"{_CORE_HEAD}\n\n{_CORE_TAIL}"
+    assert a.system_prompt.startswith(engine_base)
+    assert b.system_prompt.startswith(engine_base)
+
+
+def test_engine_base_has_no_domain_language() -> None:
+    # Acceptance #2: no software-engineering / coding-hygiene language remains in
+    # the engine base after the split.
+    base = (_CORE_HEAD + _CORE_TAIL).lower()
+    for banned in (
+        "software engineering",
+        "owasp",
+        "snake case",
+        "premature abstraction",
+        "backwards-compatibility",
+        "# doing tasks",
+    ):
+        assert banned not in base, banned
+
+
+def test_persona_carries_the_domain_language() -> None:
+    # Acceptance #2: the moved text now lives only in the imp persona.
+    persona = _PERSONA.read_text().lower()
+    assert "# doing tasks" in persona
+    assert "software engineering" in persona
+    assert "owasp" in persona
 
 
 def test_base_asserts_no_mechanism_imp_lacks() -> None:
-    # Acceptance #6: the base claims no capability imp lacks.
-    low = _AGENT_BASE_PROMPT.lower()
+    low = (_CORE_HEAD + _CORE_TAIL).lower()
     for banned in (
-        "system-reminder",
-        "permission mode",
-        "permission-mode",
-        "auto-compact",
-        "compacted",
-        "tool results may be cleared",
-        "automatically compressed",
-        "subagent_type",
-        "you are claude code",
+        "system-reminder", "permission mode", "permission-mode",
+        "auto-compact", "compacted", "tool results may be cleared",
+        "automatically compressed", "subagent_type", "you are claude code",
     ):
         assert banned not in low, banned
-    # No unfilled template placeholders (Jinja or `<placeholder>`).
-    assert "{{" not in _AGENT_BASE_PROMPT
-    assert re.search(r"<[A-Za-z][A-Za-z0-9_]*>", _AGENT_BASE_PROMPT) is None
+    assert "{{" not in (_CORE_HEAD + _CORE_TAIL)
+    assert re.search(r"<[A-Za-z][A-Za-z0-9_]*>", _CORE_HEAD + _CORE_TAIL) is None
 
 
 def test_base_uses_imp_identity_and_tool_names() -> None:
-    # Acceptance #6: imp's own identity line and imp's tool names.
-    assert _AGENT_BASE_PROMPT.startswith("You are imp")
+    assert _CORE_HEAD.startswith("You are imp")
+    base = _CORE_HEAD + _CORE_TAIL
     for tool in ("read_file", "edit_file", "write_file", "grep", "glob",
                  "load_skill"):
-        assert tool in _AGENT_BASE_PROMPT, tool
+        assert tool in base, tool
 
 
 def test_base_reaches_verbatim_provider_field(tmp_path: Path) -> None:
-    # claude_code/openai/anthropic forward invocation.system_prompt unchanged,
-    # so the base reaching that field is the base reaching all three.
     inv = _build(tmp_path, name="rev", body="BODY")
-    assert _AGENT_BASE_PROMPT in inv.system_prompt
+    assert _CORE_HEAD in inv.system_prompt
+    assert _CORE_TAIL in inv.system_prompt
 
 
 def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
-    # codex builds its final prompt from invocation.system_prompt via _build_prompt
-    # (self is unused — it only transforms the string). The base must survive intact.
     from imp.providers.codex_runner import CodexAgentRunner
     inv = _build(tmp_path, name="rev", body="BODY")
     built = CodexAgentRunner._build_prompt(None, inv.system_prompt)
     assert built.startswith(inv.system_prompt)
-    assert _AGENT_BASE_PROMPT in built
+    assert _CORE_HEAD in built
+    assert _CORE_TAIL in built
 
 
 def test_base_has_numbered_options_convention() -> None:
-    low = _AGENT_BASE_PROMPT.lower()
+    low = _CORE_TAIL.lower()
     assert "numbered list" in low
     assert "single digit" in low
     for banned in ("go live", "go-live", "build/park", "build now or save"):
@@ -98,19 +111,15 @@ def test_base_has_numbered_options_convention() -> None:
 
 
 def test_base_has_recommendation_anchored_and_no_jargon_conventions() -> None:
-    low = _AGENT_BASE_PROMPT.lower()
-    # Recommendation-anchored yes/no convention (after the numbered-list rule).
+    low = _CORE_TAIL.lower()
     assert "plain affirmative" in low
     assert "declining is always implicitly available" in low
-    # The non-obvious-decline carve-out is stated as a follow-on, not a sibling option.
     assert "follow-on to the question" in low
-    # No-internal-jargon convention, pairing with the narrate rule.
     assert "complexity classes" in low
     assert "phase or step ids" in low
     assert "workflow variable names" in low
     assert "internal tool names" in low
     assert "describe the effect in plain language" in low
-    # Ordering: yes/no convention appears after the numbered-list rule.
     assert low.index("numbered list") < low.index("plain affirmative")
-    # Ordering: no-jargon convention appears after the narrate rule.
-    assert low.index("narrate your internal deliberation") < low.index("complexity classes")
+    assert low.index("narrate your internal deliberation") < low.index(
+        "complexity classes")

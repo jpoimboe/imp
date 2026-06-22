@@ -951,21 +951,26 @@ async def _run_agent_invocation(
     provider = provider_from_model(provider_model)
 
     stored = _resume_system_prompt(log, agent_id, transcript_dir) if is_resume else None
+    rendered_persona = ""
     if stored is not None:
         rendered = stored
         system_prompt_override: str | None = stored
     else:
+        ctx = build_context(
+            change_id=change.id, change_title=change.title,
+            change_home=f".imp/changes/{change.id}",
+            cur_base_head=change.cur_base_head,
+            event_log=log, vars=state.vars,
+            project_facts=project_facts, guidance=guidance,
+            non_interactive=non_interactive,
+        )
         rendered = render_prompt(
-            agent_def.prompt_template_source, build_context(
-                change_id=change.id, change_title=change.title,
-                change_home=f".imp/changes/{change.id}",
-                cur_base_head=change.cur_base_head,
-                event_log=log, vars=state.vars,
-                project_facts=project_facts, guidance=guidance,
-                non_interactive=non_interactive,
-            ),
+            agent_def.prompt_template_source, ctx,
             workflow_dir=change.workflow_dir,
         )
+        rendered_persona = render_prompt(
+            workflow.persona_source, ctx, workflow_dir=change.workflow_dir,
+        ) if workflow.persona_source else ""
         system_prompt_override = None
 
     subagent_defs = {
@@ -996,6 +1001,7 @@ async def _run_agent_invocation(
         provider_name=provider.name,
         model_name=provider.model,
         rendered_system_prompt=rendered,
+        rendered_persona=rendered_persona,
         system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         change_context=ChangeContext(
@@ -1003,6 +1009,7 @@ async def _run_agent_invocation(
             change_home=f".imp/changes/{change.id}",
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
+            persona_source=workflow.persona_source,
         ),
         user_chat_input_fn=user_chat_input_fn,
         transcript_dir=transcript_dir,

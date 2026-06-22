@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.agents.tools.wait_for_user import make_wait_for_user_tool
-from imp.engine.agent_run import _AGENT_BASE_PROMPT
+from imp.engine.agent_run import _CORE_HEAD
 from imp.engine.completion import completion_instruction
 from imp.engine.types import OutputField, OutputSchema, SourceLoc
 
@@ -29,4 +29,4 @@ def test_wait_for_user_description_takes_no_arguments() -> None:
 
 
 def test_base_prompt_carries_state_once_rule() -> None:
-    assert "not shown to the user" in _AGENT_BASE_PROMPT
+    assert "not shown to the user" in _CORE_HEAD

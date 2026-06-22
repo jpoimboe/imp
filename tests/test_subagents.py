@@ -17,7 +17,7 @@ from imp.agents.subagents import (
 )
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
-from imp.engine.agent_run import _AGENT_BASE_PROMPT
+from imp.engine.agent_run import _CORE_HEAD
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 
@@ -228,7 +228,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
     result = anyio.run(dispatch_task, ctx, "sub", "do the thing")
     # build_agent_invocation appends the completion instruction after the rendered
     # prompt — check the rendered portion is correct.
-    assert capture["inv"].system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert capture["inv"].system_prompt.startswith(_CORE_HEAD)
     assert "hello change-7" in capture["inv"].system_prompt
     # Sanity: dispatch_task still returns JSON-stringified agent_output.
     assert "Success" in result
