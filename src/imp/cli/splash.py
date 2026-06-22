@@ -12,7 +12,9 @@ verbatim from the reference THEMES table.
 from __future__ import annotations
 
 import math
+import random
 from collections.abc import Callable
+from typing import Protocol
 
 from imp.cli import palette as pal
 
@@ -843,3 +845,72 @@ SCENES: list[tuple[int, str, SceneBuilder]] = [
     (19, "welcome back.", _scene19),
     (20, "your imp is listening.", _scene20),
 ]
+
+
+def _cell(top: Color | None, bot: Color | None, *, color: bool) -> str:
+    if top is None and bot is None:
+        return " "
+    if not color:
+        return "▀" if top is not None else "▄"
+    if top is not None and bot is None:
+        return _fg_open(top) + "▀" + _RESET
+    if top is None and bot is not None:
+        return _fg_open(bot) + "▄" + _RESET
+    return _fg_open(top) + _bg_open(bot) + "▀" + _RESET
+
+
+def _encode_row(g: Grid, top_idx: int, bot_idx: int, *, color: bool) -> str:
+    w = len(g[0])
+    top_row = g[top_idx] if top_idx < len(g) else [None] * w
+    bot_row = g[bot_idx] if bot_idx < len(g) else [None] * w
+    return "".join(
+        _cell(top_row[x], bot_row[x], color=color) for x in range(w)
+    ).rstrip()
+
+
+def _encode_grid(g: Grid, rows: int, *, color: bool) -> list[str]:
+    return [_encode_row(g, 2 * k, 2 * k + 1, color=color) for k in range(rows)]
+
+
+def _wordmark_grid() -> Grid:
+    wm = _P["wm"]
+    return [[wm if ch == "X" else None for ch in row] for row in WM]
+
+
+def render_scene(index: int, *, theme: str, width: int,
+                 color: bool) -> tuple[list[str], str]:
+    """Build scene `index` at `width` in `theme`; return (lines, phrase)."""
+    _use_theme(theme)
+    g = _make_grid(width)
+    _num, phrase, builder = SCENES[index]
+    builder(g, width)
+    lines = _encode_grid(g, 14, color=color)
+    lines += _encode_grid(_wordmark_grid(), 3, color=color)
+    return lines, phrase
+
+
+class _Rng(Protocol):
+    def randrange(self, n: int, /) -> int: ...
+
+
+def choose_index(rng: "_Rng | None" = None) -> int:
+    r: _Rng = rng if rng is not None else random
+    return r.randrange(len(SCENES))
+
+
+def styled_phrase(phrase: str, *, theme: str, color: bool) -> str:
+    if not color:
+        return phrase
+    return _fg_open(_build_palette(theme)["text"]) + phrase + _RESET
+
+
+def render_splash(*, theme: str, width: int, color: bool,
+                  rng: "_Rng | None" = None) -> tuple[list[str], str]:
+    return render_scene(choose_index(rng), theme=theme, width=width, color=color)
+
+
+def splash_block(*, theme: str, width: int, color: bool,
+                 rng: "_Rng | None" = None) -> str:
+    """The full printable splash: art + wordmark + styled phrase, newline-joined."""
+    lines, phrase = render_splash(theme=theme, width=width, color=color, rng=rng)
+    return "\n".join([*lines, styled_phrase(phrase, theme=theme, color=color)])

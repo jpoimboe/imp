@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from imp.cli import palette as pal
@@ -196,3 +198,69 @@ def test_star_lattice_is_stable_in_overlap_across_widths() -> None:
     splash._stars(g_b, splash.H, 0.30)
     assert [row[:100] for row in g_b] == g_a
     assert any(cell is not None for row in g_a for cell in row)
+
+
+def test_cell_encoding_rules_truecolor() -> None:
+    assert splash._cell(None, None, color=True) == " "
+    assert splash._cell((1, 2, 3), None, color=True) == "\x1b[38;2;1;2;3m▀\x1b[0m"
+    assert splash._cell(None, (1, 2, 3), color=True) == "\x1b[38;2;1;2;3m▄\x1b[0m"
+    assert splash._cell((1, 2, 3), (4, 5, 6), color=True) == \
+        "\x1b[38;2;1;2;3m\x1b[48;2;4;5;6m▀\x1b[0m"
+
+
+def test_cell_encoding_named_and_plain() -> None:
+    assert splash._cell("red", None, color=True) == "\x1b[31m▀\x1b[0m"
+    assert splash._cell("red", "blue", color=True) == "\x1b[31m\x1b[44m▀\x1b[0m"
+    assert splash._cell((1, 2, 3), None, color=False) == "▀"
+    assert splash._cell(None, (1, 2, 3), color=False) == "▄"
+    assert splash._cell((1, 2, 3), (4, 5, 6), color=False) == "▀"
+    assert splash._cell(None, None, color=False) == " "
+
+
+def test_render_scene_shape_and_phrase() -> None:
+    lines, phrase = splash.render_scene(0, theme="dark", width=100, color=False)
+    assert len(lines) == 17                  # 14 art rows + 3 wordmark rows
+    assert phrase == splash.SCENES[0][1]
+
+
+def test_render_scene_is_deterministic() -> None:
+    a = splash.render_scene(4, theme="dark", width=100, color=False)
+    b = splash.render_scene(4, theme="dark", width=100, color=False)
+    assert a == b
+
+
+def test_choose_index_is_uniform_over_all_scenes() -> None:
+    class _FakeRng:
+        def __init__(self) -> None:
+            self.n = -1
+
+        def randrange(self, n: int) -> int:
+            self.n = n
+            return 7
+
+    fr = _FakeRng()
+    assert splash.choose_index(fr) == 7
+    assert fr.n == len(splash.SCENES)        # selection spans all 20
+
+
+def test_styled_phrase_colors_with_text_token() -> None:
+    out = splash.styled_phrase("hi", theme="dark", color=True)
+    assert out == "\x1b[38;2;143;160;200mhi\x1b[0m"   # dark text #8fa0c8
+    assert splash.styled_phrase("hi", theme="dark", color=False) == "hi"
+
+
+def test_splash_block_is_newline_joined_with_phrase() -> None:
+    rng = random.Random(42)
+    block = splash.splash_block(theme="dark", width=80, color=False, rng=rng)
+    lines = block.split("\n")
+    assert len(lines) >= 18            # 17 grid lines + 1 phrase line
+    idx = random.Random(42).randrange(len(splash.SCENES))
+    assert lines[-1] == splash.SCENES[idx][1]
+
+
+def test_encode_row_strips_trailing_transparent_columns() -> None:
+    g = splash._make_grid(10)
+    g[0][0] = (1, 2, 3)               # only first column in top row has color
+    row = splash._encode_row(g, 0, 1, color=False)
+    assert row == "▀"                  # trailing 9 transparent columns stripped
+    assert not row.endswith(" ")
