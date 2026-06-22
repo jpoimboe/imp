@@ -312,6 +312,7 @@ class LiteralTextNode:
     path instead of the markdown/prose path; None keeps the prose rendering."""
     text: str
     color_role: str | None = None
+    verbatim: bool = False             # render line-by-line, preserving indentation
     collapsible = False
 
 
@@ -1409,6 +1410,18 @@ def _h_step_label_updated(
 
 
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
+
+
+def _h_notice(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Do NOT flush the open burst: this fires between the emit_notice tool_call
+    # and its tool_result.
+    self._append(LiteralTextNode(text=str(p.get("text", "")),
+                                 color_role="lifecycle", verbatim=True))
+
+
+NarrativeBuilder._HANDLERS["notice"] = _h_notice
 
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
