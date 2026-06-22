@@ -73,6 +73,8 @@ def handle_slash_line(
             for change_id, title, status, _created in hits:
                 output_fn(f"  {change_id}  {title or '(untitled)'}  [{status or '-'}]")
         return REPROMPT
+    if cmd == "abandon":
+        return "/abandon"
 
     try:
         body = load_skill_body(change.workflow_dir / "skills", cmd)
@@ -105,6 +107,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /continue          Resume a paused run (at the post-interrupt prompt)")
     out("  /ls [-a]           List your changes (-a adds completed/abandoned)")
     out("  /search <query>    Search archived changes by title or id")
+    out("  /abandon           Abandon the current change")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
@@ -240,7 +243,7 @@ async def ask_line_with_slash(
                     if result is REPROMPT:
                         print("")  # one blank between slash output and the reprompt
                         continue
-                    assert isinstance(result, str)  # handle_slash_line returns str (skill body)
+                    assert isinstance(result, str)  # skill body or a literal command like /abandon
                     return result
             finally:
                 # Flush deferred live-driver blocks exactly once on solicit exit

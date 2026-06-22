@@ -75,3 +75,20 @@ def test_search_builtin_requires_a_query(tmp_path: Path) -> None:
     result = handle_slash_line("/search", change=change, output_fn=out.append)
     assert result is REPROMPT
     assert any("Usage: /search" in line for line in out)
+
+
+def test_abandon_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /abandon is a built-in (NOT a skill): it returns the literal so the session
+    # gate loop (cli/session_terminal) confirms and sends CONTROL_ABANDON.
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/abandon", change=change, output_fn=out.append)
+    assert result == "/abandon"
+    assert not any("no such skill" in line for line in out)
+
+
+def test_abandon_is_in_the_help_text() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append)
+    assert any("/abandon" in line for line in lines)
