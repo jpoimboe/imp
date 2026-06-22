@@ -123,6 +123,9 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 done(plan_path=".imp/change/artifacts/plans/SCRIPTED-STUB-plan-1.md",
                      plan_number=1),
             ]}],
+            "plan-finalized": [{"text": "finalize plan", "tools": [
+                done(task_total=1),
+            ]}],
             "task-lead": [{"text": "implement", "tools": [
                 bash(lead_cmd),
                 done(done=True, deviation=False, verify_tolerated=False, summary="done"),

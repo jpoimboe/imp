@@ -90,7 +90,7 @@ phases:
         quiet: true
         command: ./scripts/plan-commit-verify.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: task-lead}   # trivial change: skip plan review entirely
+          - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial change: skip plan review entirely
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
@@ -109,11 +109,19 @@ phases:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
           - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, label: "addressing plan review feedback", feedback: "Here's review feedback to address:"}
           # Clean, and the writer already did its minors-integration pass -> stop.
-          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: task-lead}
+          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: plan-finalized}
           # Clean with actionable minors -> integrate them, then owe one more (verification) review.
           - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, label: "addressing plan review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean, nothing to integrate -> stop.
-          - {else: true, goto: task-lead}
+          - {else: true, goto: plan-finalized}
+
+      - name: plan-finalized
+        file: agents/plan-finalized.md
+        tier: medium
+        label: finalizing plan
+        read_only: ["."]
+        rules:
+          - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
   - name: implement
     steps:

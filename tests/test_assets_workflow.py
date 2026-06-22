@@ -271,7 +271,7 @@ def test_plan_verify_commit_fast_path_skips_plan_review() -> None:
     rules = _steps(wf)["plan-verify-commit"].rules
     m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                        output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "task-lead"
+    assert isinstance(m.action, Goto) and m.action.target == "plan-finalized"
 
 
 def test_verify_gate_timeout_pauses_not_loops() -> None:
@@ -335,7 +335,7 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
     )
     assert m.var_mutations["plan_minors_integrated"] is False
     assert isinstance(m.action, Goto)
-    assert m.action.target == "task-lead" and m.action.resume is False
+    assert m.action.target == "plan-finalized" and m.action.resume is False
 
 
 def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
@@ -348,7 +348,7 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
         output={"blocking": False, "has_minor_findings": False},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "task-lead" and m.action.resume is False
+    assert m.action.target == "plan-finalized" and m.action.resume is False
     assert m.var_mutations == {}
 
 
