@@ -1686,6 +1686,37 @@ def test_anchored_resume_suppresses_old_opening_intent(tmp_path):
     assert body[0] == "── plan phase ───"
 
 
+def test_opening_intent_does_not_drop_following_step_output() -> None:
+    # Regression (change fbb6r4): the opening_intent UserMessageNode is appended at
+    # the workflow root; the live cursor emits it and advances PAST its slot. The
+    # next step_started then re-homes that node under the step (_inject_opening_intent)
+    # and inserts the PhaseNode at the index the cursor has ALREADY passed, so the
+    # whole step subtree — phase header, step header, and every llm_response — slips
+    # behind the monotonic cursor and is never emitted. The live view sat blank while
+    # imp log (full re-walk) showed all the activity. BOTH the opening prompt AND the
+    # agent's output must render live.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("e1", "opening_intent", text="build the parser"),
+        ev("3", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("8", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "drafting the spec now"}]},
+           usage={}),
+        ev("9", "step_completed", step="spec-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("build the parser" in ln for ln in body)      # opening prompt
+    assert any("drafting the spec now" in ln for ln in body)  # step output (was dropped)
+    # The live body must match imp log's full re-walk exactly (shared render path).
+    assert body == _render_body(events)
+
+
 def test_resume_anchor_reads_change_events_path(tmp_path):
     from imp.engine.change import Change
     from tests.conftest import _seed_control

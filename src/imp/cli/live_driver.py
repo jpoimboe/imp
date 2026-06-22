@@ -216,6 +216,19 @@ class LiveDriver:
                 self._emit_leaf(child, cur.depth, gutters=self._gutters())
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
+        if (node is self._builder._opening_intent_node
+                and self._builder._first_step is None):
+            # The opening-intent turn is appended at root BEFORE its step exists,
+            # then re-homed under the first step by _h_step_started (which removes
+            # it from root and inserts the PhaseNode at the slot it vacated). The
+            # cursor advances monotonically and would skip that PhaseNode — dropping
+            # the whole step subtree from the live view (the fbb6r4 blank-live-view
+            # regression) — if it emitted this node at root first. Block the cursor
+            # here until the re-home happens (first_step set), so it lands on the
+            # PhaseNode and the turn renders under the step instead. If the run ends
+            # with no step ever started, finish()'s force-walk bypasses _is_final
+            # and emits it at root, preserving the no-step rendering.
+            return False
         if isinstance(node, nv.StepNode) and node.quiet:
             return node.closed
         if isinstance(node, nv.SubagentFold):
