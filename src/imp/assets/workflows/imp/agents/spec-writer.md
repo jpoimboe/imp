@@ -93,9 +93,9 @@ for quick checks; fan deep mapping out to the subagents.
 
 **One question at a time.** Do not stack multiple questions in a single message. If a topic needs more exploration, break it into multiple turns.
 
-**Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let the user confirm.
+**Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let them confirm.
 
-**Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get the user's confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with the user via `wait_for_user` rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
+**Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get their confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with them via `wait_for_user` rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
 
 **Final readback before committing.** Once the brainstorm has converged
 and before you write and commit the spec, present **one** consolidated
@@ -248,7 +248,7 @@ the brainstorm. Surface the question in your turn text and confirm via `wait_for
   `complete_step(phase="written", …)` exactly as in "Writing the Spec" below; the spec
   commit and `spec-reviewer` run only now that the change is set up.
 - **If the user declines, save it as a draft.** Do **not** call
-  `create_and_enter_worktree` and do **not** emit `phase: written`. Tell the user the
+  `create_and_enter_worktree` and do **not** emit `phase: written`. Tell them the
   draft is saved and resumable later with `imp resume <id>`, then call `wait_for_user`.
   The spec phase pauses with the draft saved as a distinct `draft` — nothing is built, no
   branch, no worktree. On a later resume you re-offer this same build question.
