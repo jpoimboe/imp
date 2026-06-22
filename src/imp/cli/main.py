@@ -1675,8 +1675,11 @@ def _status_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
     for change_id in _list_change_homes(control):
         cdir = _change_home(control, change_id)
-        state_json = (cdir / "state" / "state.json").read_bytes()
-        change_json = (cdir / "change.json").read_bytes()
+        try:
+            state_json = (cdir / "state" / "state.json").read_bytes()
+            change_json = (cdir / "change.json").read_bytes()
+        except FileNotFoundError:
+            continue
         last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
