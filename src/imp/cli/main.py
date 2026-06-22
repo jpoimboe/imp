@@ -2072,13 +2072,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser(
         "init",
-        help="Scaffold imp in this git repository.",
+        help="Set up imp here (initializes git if needed).",
         description=(
-            "Set up imp in the current git repository: create imp/ with the\n"
-            "default workflow, write imp/project.yaml (the version-controlled\n"
-            "workflow + project settings), detect your terminal theme, and\n"
-            "bootstrap your machine-local config (providers and theme).\n"
-            "Only touches the filesystem — never makes a git commit."
+            "Set up imp in this directory: optionally initialize a git\n"
+            "repository, write imp/project.yaml (the version-controlled\n"
+            "workflow + project settings) with the default workflow, detect\n"
+            "your terminal theme, and bootstrap your machine-local config\n"
+            "(providers and theme). Makes an initial commit of\n"
+            "imp/project.yaml and .gitignore."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

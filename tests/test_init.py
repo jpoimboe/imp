@@ -248,7 +248,8 @@ def test_init_help_describes_what_it_does(capsys: pytest.CaptureFixture[str]) ->
         parser.parse_args(["init", "-h"])
     help_text = capsys.readouterr().out
     assert "default workflow" in help_text
-    assert "never makes a git commit" in help_text
+    assert "never makes a git commit" not in help_text
+    assert "initial commit" in help_text.lower()
 
 
 def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:

@@ -30,7 +30,6 @@ from imp.cli.verify_detect import (
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
-
 _INIT_COMMIT_PATHS: tuple[str, ...] = ("imp/project.yaml", ".gitignore")
 
 
@@ -63,7 +62,7 @@ def _ensure_git_repo(
 
 
 def _commit_init_files(project_root: Path) -> bool:
-    """Stage and commit imp init files by explicit pathspec; return True iff a commit was created."""
+    """Stage and commit init files by explicit pathspec; return True iff a commit was created."""
     status = subprocess.run(
         ["git", "status", "--porcelain", "--", *_INIT_COMMIT_PATHS],
         cwd=project_root, capture_output=True, text=True, check=True)
