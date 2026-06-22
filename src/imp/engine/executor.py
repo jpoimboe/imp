@@ -511,6 +511,8 @@ def _step_started_payload(step: Step, state: State) -> dict[str, Any]:
                "quiet": step.quiet, "label": step.label}
     if step.kind == "script":
         payload["command"] = step.command
+    if step.chrome is not None:
+        payload["chrome"] = step.chrome
     # Consume-on-read: transfer route_label from the prior step's _finish, then clear it.
     if state.route_label is not None:
         payload["route_label"] = state.route_label
