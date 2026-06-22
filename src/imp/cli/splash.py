@@ -12,11 +12,13 @@ verbatim from the reference THEMES table.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 from imp.cli import palette as pal
 
 Color = tuple[int, int, int] | str
 Grid = list[list["Color | None"]]
+SceneBuilder = Callable[[Grid, int], None]
 
 _RESET = "\x1b[0m"
 
@@ -601,3 +603,243 @@ def _lantern2(g: Grid, x: int, topY: int, length: int) -> None:
     _px(g, x, by + 7, _P["lanMetal"])
     _px(g, x - 3, by + 4, _P["lanHalo"])
     _px(g, x + 3, by + 4, _P["lanHalo"])
+
+
+def _scene1(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    _stars(g, 9, 0.34)
+    rx = int(min(22, max(13, W * 0.13)))
+    _ringE(g, cx, 22, rx, 3, _P["portal"], 0.6, 1.18)
+    _ringE(g, cx, 22, rx - 3, 2.4, _P["portalG"], 0.5, 1.3)
+    _glowFill(g, cx, 22, rx, 3, _P["portalG"])
+    a = 0.0
+    while a < 360:
+        t = a * math.pi / 180
+        _sparkle(g, cx + math.cos(t) * (rx + 1), 22 + math.sin(t) * 4, _P["rune"])
+        a += 137.5
+    _moonG(g, mb, 6, 3, True)
+    _impAt(g, cx, 6)
+
+
+def _scene2(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    _stars(g, H, 0.32)
+    _moonG(g, mb, int(H * 0.24), 4, True)
+    _sparkle(g, cx - int(W * 0.12), 5, _P["bright"])
+    _sparkle(g, cx + int(W * 0.16), 3, _P["star"])
+    _impAt(g, cx, 9)
+
+
+def _scene3(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, H, 0.30)
+    _glowRing(g, cx + 5, 13, 8, _P["moonGlow"])
+    _discE(g, cx + 5, 13, 8, 8, _P["moon"])
+    if _P["moonRing"]:
+        _ringE(g, cx + 5, 13, 8.6, 8.6, _P["moonRing"], 0.72, 1.2)
+    _carve(g, cx + 11, 10, 8, 8)
+    _sparkle(g, cx + 13, 5, _P["bright"])
+    _impAt(g, cx - 3, 9)
+
+
+def _scene4(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.32)
+    _impAt(g, cx, 6)
+    _candle2(g, cx - 12, 24, 7)
+    _candle2(g, cx + 12, 24, 7)
+
+
+def _scene5(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    _stars(g, 9, 0.30)
+    _moonG(g, mb, 5, 3, True)
+    _impAt(g, cx, 3)
+    _cauldron2(g, cx, 18, 18)
+
+
+def _scene6(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 8, 0.30)
+    _portal2(g, cx, 14)
+    _impAt(g, cx + 11, 7)
+
+
+def _scene7(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.32)
+    _mountains3(g, 23)
+    _impAt(g, cx - 5, 7)
+    _line(g, cx + 6, 23, cx + 14, 21, _P["glowWarm"])
+    _line(g, cx + 6, 21, cx + 14, 23, _P["glowWarm"])
+    for i in range(6):
+        w = 3 - (i // 2)
+        for x in range(cx + 10 - w, cx + 10 + w + 1):
+            _px(g, x, 22 - i, _P["fire1"] if i < 2 else (_P["fire2"] if i < 4 else _P["fire3"]))
+    for k in range(3):
+        _px(g, cx + 9 + (k & 1), 12 - k * 2, _P["ember"])
+
+
+def _scene8(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, H, 0.16)
+    n = max(5, int(W / 16))
+    p: list[list[int]] = []
+    for i in range(n):
+        p.append([int((i + 0.5) * W / n),
+                  3 + _round(3 * abs(math.sin(i * 1.3))) + int(_hash(i + 2, 4) * 3)])
+    for k in range(len(p) - 1):
+        _line(g, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1], _P["starD"])
+    for i, q in enumerate(p):
+        if i % 2:
+            _px(g, q[0], q[1], _P["star"])
+        else:
+            _sparkle(g, q[0], q[1], _P["bright"])
+    _impAt(g, cx, 11)
+
+
+def _scene9(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.26)
+    for x in range(W):
+        _px(g, x, 25, _P["ground"])
+        if x & 1:
+            _px(g, x, 24, _P["groundGlow"])
+    _impAt(g, cx, 7)
+    _mushroom2(g, cx - 12, 25, 5, _P["cap1"], _P["cap1D"])
+    _mushroom2(g, cx + 12, 25, 6, _P["cap2"], _P["cap2D"])
+    _mushroom2(g, cx - 6, 25, 3, _P["cap3"], _P["cap1D"])
+
+
+def _scene10(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.28)
+    _impAt(g, cx, 7)
+    _crystal2(g, cx - 13, 25, 7)
+    _crystal2(g, cx - 9, 25, 4)
+    _crystal2(g, cx + 11, 25, 6)
+    _crystal2(g, cx + 15, 25, 4)
+    _px(g, cx - 11, 24, _P["crysBase"])
+    _px(g, cx + 13, 24, _P["crysBase"])
+
+
+def _scene11(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    _stars(g, H, 0.32)
+    _planet2(g, mb, 8, 5)
+    _impAt(g, cx, 8)
+
+
+def _scene12(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.30)
+    _impAt(g, cx, 4)
+    _crystalball(g, cx + 14, 16, 5)
+
+
+def _scene13(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.30)
+    _impAt(g, cx, 7)
+    _torch2(g, cx - 13, 24, 8)
+    _torch2(g, cx + 13, 24, 8)
+
+
+def _scene14(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.30)
+    _impAt(g, cx, 2)
+    _spellbook(g, cx, 24)
+
+
+def _scene15(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    _stars(g, 6, 0.28)
+    _stormcloud(g, mb, 5)
+    _bolt2(g, mb, 8, 20)
+    _impAt(g, cx, 9)
+
+
+def _scene16(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    _stars(g, H, 0.34)
+    _moonG(g, mb, int(H * 0.22), 4, False)
+    _cloud2(g, mb - 1, int(H * 0.22) + 3, _P["cloud"])
+    _impAt(g, cx, 6)
+
+
+def _scene17(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, H, 0.24)
+    n = max(3, int(W / 40))
+    for i in range(n):
+        x = int(_hash(i + 1, 7) * (W - 8))
+        y = 2 + int(_hash(i + 1, 9) * 9)
+        length = 4 + int(_hash(i, 3) * 4)
+        _meteor2(g, x, y, length, i % 3 == 0)
+    _impAt(g, cx, 9)
+
+
+def _scene18(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 9, 0.28)
+    _lantern2(g, cx + 13, 0, 5)
+    _impAt(g, cx, 8)
+
+
+def _scene19(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    mb = int(W * 0.72)
+    hor = int(H * 0.70)
+    _stars(g, hor - 2, 0.32)
+    _moonG(g, mb, int(H * 0.22), 4, True)
+    _mountains3(g, hor)
+    _impAt(g, cx, hor - 15)
+
+
+def _scene20(g: Grid, W: int) -> None:
+    cx = int(W * GL)
+    _stars(g, 6, 0.14)
+    gy = 1
+    while gy * 4 < 23:
+        gx = 0
+        while gx * 4 < W:
+            if _hash(gx + 9, gy + 5) >= 0.20:
+                gx += 1
+                continue
+            fx = gx * 4 + int(_hash(gx, gy + 3) * 4)
+            fy = gy * 4 + int(_hash(gx + 3, gy) * 4)
+            _firefly(g, fx, fy, _hash(gx, gy) < 0.4)
+            gx += 1
+        gy += 1
+    _impAt(g, cx, 7)
+
+
+SCENES: list[tuple[int, str, SceneBuilder]] = [
+    (1, "a familiar, summoned to help you ship.", _scene1),
+    (2, "the familiar awakens.", _scene2),
+    (3, "two horns, perched and ready.", _scene3),
+    (4, "whisper your wish.", _scene4),
+    (5, "stir the cauldron — what's brewing?", _scene5),
+    (6, "the portal is open. step through.", _scene6),
+    (7, "by emberlight, we code.", _scene7),
+    (8, "drawn in the stars.", _scene8),
+    (9, "let's make some mischief.", _scene9),
+    (10, "small imp, big leverage.", _scene10),
+    (11, "conjured from the void.", _scene11),
+    (12, "gaze in — what shall we build?", _scene12),
+    (13, "ready to raise some hell in the diff.", _scene13),
+    (14, "every great hack needs a familiar.", _scene14),
+    (15, "mischief, compiled.", _scene15),
+    (16, "what are we building tonight?", _scene16),
+    (17, "make a wish.", _scene17),
+    (18, "point me at the problem.", _scene18),
+    (19, "welcome back.", _scene19),
+    (20, "your imp is listening.", _scene20),
+]
