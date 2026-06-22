@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -387,6 +388,12 @@ def _parse_rules(
             raise LoadError("each rule must be a mapping", source)
         rsrc = loc(yaml_path, entry)
         action = _parse_verb(entry, rsrc)
+        release = _parse_lane_attr(entry, "release", rsrc)
+        if release is not None:
+            if not isinstance(action, Goto):
+                raise LoadError(
+                    "release: only valid alongside a goto:/resume: route", rsrc)
+            action = replace(action, release=release)
         mutations = _parse_set(entry["set"], rsrc) if "set" in entry else ()
         if entry.get("else") is True:
             condition: Expr | None = None

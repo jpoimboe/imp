@@ -98,9 +98,10 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
     assert [s.name for s in wf.phases[-1].steps] == [
-        "wait-for-head", "integrate-rebase", "integrator", "integration-reviewer",
-        "integration-verify", "cleanup-merge", "autosquash-resolve-merge",
-        "integration-resolver", "assert-stamped", "merge-to-base"]
+        "wait-for-head", "integrate-rebase", "integrator",
+        "integration-verify", "integration-reviewer",
+        "cleanup-merge", "autosquash-resolve-merge",
+        "assert-stamped", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
 
 
@@ -821,21 +822,6 @@ def test_finalize_merge_gate_is_recommendation_anchored() -> None:
     assert "underspecified" in body
 
 
-def test_integration_resolve_gate_is_recommendation_anchored() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["integration-resolve"].prompt_template_source
-    # Removed framing and the spelled-out two-reply enumeration.
-    assert "Accept this integration and re-enqueue it, or send it back for rework" not in body
-    assert "Spell out the two replies" not in body
-    # New instruction: recommendation-anchored affirmative.
-    assert "recommendation-anchored" in body
-    # Substantive re-enqueue mechanics retained as plain prose.
-    assert "back of the queue" in body
-    # Guardrails retained.
-    assert "never announce it" in body
-    assert "underspecified" in body
-
 
 def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
     from imp.assets import bundled_workflow_dir
@@ -857,3 +843,30 @@ def test_review_base_repin_command_cds_into_project_root() -> None:
     # cd into the worktree before reading HEAD, else it resolves the base-branch tip.
     assert cmd == 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
 
+
+def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+    from imp.engine.state import InMemoryEventLog
+    wf_dir = bundled_workflow_dir("imp")
+    body = load_workflow(wf_dir).agents["spec-reviewer"].prompt_template_source
+    ctx = build_context(change_title="t", event_log=InMemoryEventLog())
+    out = render_prompt(body, ctx, workflow_dir=wf_dir)
+    assert "behavioral impact, not file type" in out
+    for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
+        assert term in out
+
+
+def test_quality_reviewer_renders_canonical_severity_rubric() -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+    from imp.engine.state import InMemoryEventLog
+    wf_dir = bundled_workflow_dir("imp")
+    body = load_workflow(wf_dir).agents["quality-reviewer"].prompt_template_source
+    ctx = build_context(change_title="t", event_log=InMemoryEventLog())
+    out = render_prompt(body, ctx, workflow_dir=wf_dir)
+    assert "behavioral impact, not file type" in out
+    for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
+        assert term in out

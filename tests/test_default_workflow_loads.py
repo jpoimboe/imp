@@ -130,17 +130,6 @@ def test_no_agent_prompt_uses_artifacts_namespace() -> None:
         assert "{{ artifacts" not in body, md.name
 
 
-def test_finalize_merge_route_is_labeled_integration_resolve_is_not() -> None:
-    # The byte-identical {decision: merge} rule lives on BOTH finalize and
-    # integration-resolver; only finalize's is labeled (spec caution).
-    wf = _wf()
-    steps = {s.name: s for s in wf.flat_steps()}
-    fin = steps["finalize"].rules[0]
-    assert fin.label == "preparing to merge"
-    ir = steps["integration-resolver"].rules[0]
-    assert ir.label is None
-
-
 def test_every_nonquiet_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
@@ -161,9 +150,8 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "finalize": "finalizing",
         "wait-for-head": "waiting to merge",
         "integrator": "integrating",
-        "integration-reviewer": "reviewing merge",
         "integration-verify": "testing",
-        "integration-resolver": "resolving merge",
+        "integration-reviewer": "reviewing merge",
         "merge-to-base": "merging",
     }
     for name, label in expected.items():
@@ -194,5 +182,3 @@ def test_route_labels_assigned() -> None:
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"
-    # integration-resolver rework -> plan-writer (its merge rule stays unlabeled)
-    assert by["integration-resolver"].rules[1].label == "addressing review feedback"

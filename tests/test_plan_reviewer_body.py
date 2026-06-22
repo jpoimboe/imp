@@ -21,10 +21,14 @@ def test_plan_reviewer_boundary_list_includes_ordering_and_emit_timing() -> None
     assert "emit" in low  # stateful emit / un-emit timing hedge
 
 
-def test_plan_reviewer_has_two_major_sharpenings() -> None:
-    low = _body().lower()
-    assert "non-trivial risk" in low            # probabilistic defects are Major
-    assert "behavioral impact" in low and "not file type" in low
+def test_plan_reviewer_references_canonical_rubric() -> None:
+    assert '{% include "partials/severity.md" %}' in _body()
+
+
+def test_canonical_rubric_carries_two_major_sharpenings() -> None:
+    partial = (bundled_workflow_dir("imp") / "partials" / "severity.md").read_text().lower()
+    assert "non-trivial risk" in partial        # probabilistic defects are Major
+    assert "behavioral impact" in partial and "not file type" in partial
 
 
 def test_plan_reviewer_routes_recorded_scope_deviations_to_gate() -> None:

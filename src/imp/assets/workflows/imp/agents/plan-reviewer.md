@@ -90,23 +90,9 @@ as a `— needs-decision:` Deferred Followup open item in `progress.md`:
 
 ## Severity & output
 
-Classify every finding. Critical and Major are blocking; Minor and Nit are advisory.
+Classify every finding against the canonical severity rubric:
 
-- **Critical** — the prescribed code is fundamentally wrong: it would not work, or it
-  violates a core invariant the surrounding system relies on.
-- **Major** — a real defect, **or a non-trivial risk of one**, that would produce
-  wrong or missing behavior on some reachable path (a boundary, an error path, a
-  particular call site, or a spec/requirement violation).
-- **Minor** — the code would work, but is less clear or robust than it should be; an
-  optional improvement, not a defect.
-- **Nit** — cosmetic or stylistic only.
-
-Severity tracks behavioral impact, not file type. A defect in configuration, a
-template, a schema, or any other declarative or text artifact the system acts on is
-as behavioral as one in imperative code — do not downgrade it to cosmetic just
-because it is not "real code." If an issue genuinely must be fixed before
-implementation, it is Critical or Major; do not file a real defect as Minor to avoid
-blocking.
+{% include "partials/severity.md" %}
 
 Report `findings` as classified prose, grouped by severity. If there are no issues,
 state that explicitly (e.g., "No findings. Plan is complete and ready for

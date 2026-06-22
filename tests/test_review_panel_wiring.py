@@ -208,8 +208,8 @@ def test_integrator_is_a_rebase_conflict_resolver() -> None:
     assert "--amend" not in text
     assert "git rebase --continue" in text
     assert "integration-notes.md" in text
-    assert "integration: {type: enum" in text
-    assert "wait_for_user" in text
+    assert "deviation: {type: bool}" in text
+    assert "wait_for_user" not in text
 
 
 def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123",
@@ -221,7 +221,7 @@ def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123"
                         change_id="chg",
                         vars={"review_scope": review_scope, "review_base": review_base,
                               "fast_path": False})
-    return render_prompt(body, ctx)
+    return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 
 
 def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
@@ -342,3 +342,10 @@ def test_cleanup_sweep_routes_by_exit_code() -> None:
     assert resolver.file.name == "autosquash-resolve.md"
     assert resolver.rules[-1].action.target == "cleanup-sweep"
     assert resolver.max_loops == 6
+
+
+def test_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
+    out = _render_reviewer(tmp_path, review_scope="plan")
+    assert "behavioral impact, not file type" in out
+    for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
+        assert term in out

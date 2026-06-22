@@ -19,13 +19,13 @@ def test_gate_steps_in_span_merge_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Merge phase gates (pause or backward/self goto), resolved by name so the
+    # Merge-phase gates (pause or backward/self goto), resolved by name so the
     # assertion is stable across the implement-phase step shuffle.
     lo, hi = _idx(wf, "integrate-rebase"), _idx(wf, "merge-to-base")
     assert gate_steps_in_span(wf, lo, hi) == (
-        "integrate-rebase", "integration-verify", "cleanup-merge",
-        "autosquash-resolve-merge", "integration-resolver", "assert-stamped",
-        "merge-to-base",
+        "integrate-rebase", "integrator", "integration-verify",
+        "integration-reviewer", "cleanup-merge", "autosquash-resolve-merge",
+        "assert-stamped", "merge-to-base",
     )
 
 
@@ -83,8 +83,9 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("wait-for-head"), "merge-to-base")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integration-verify", "cleanup-merge",
-        "autosquash-resolve-merge", "integration-resolver", "assert-stamped",
+        "integrate-rebase", "integrator", "integration-verify",
+        "integration-reviewer", "cleanup-merge", "autosquash-resolve-merge",
+        "assert-stamped",
     )
     msg = str(exc.value)
     assert "integrate-rebase" in msg
@@ -130,10 +131,10 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator -> integration-reviewer: span [integrator,integrator] = integrator,
-    # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
-    plan = plan_rewind(_wf(), _state("integrator"), "integration-reviewer")
-    assert plan.to_step == "integration-reviewer"
+    # wait-for-head (18) -> integrate-rebase (19): span [18,18] = wait-for-head, a
+    # non-gate (acquire base, else: continue) -> a forward jump bypassing no gate.
+    plan = plan_rewind(_wf(), _state("wait-for-head"), "integrate-rebase")
+    assert plan.to_step == "integrate-rebase"
 
 
 def test_apply_rewind_sets_step_label_from_target_step() -> None:

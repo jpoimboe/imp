@@ -330,6 +330,9 @@ async def run_change(
                 state.step_label = flat[nxt].label or flat[nxt].name
                 state.resume_pending = None
             elif isinstance(action, Goto):
+                if action.release is not None and state.held_lane is not None:
+                    _release_held_lane(
+                        action.release, change, state, log, step_name=step.name)
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
                     return _complete_or_park(change, state, log, coordinator)
@@ -666,16 +669,23 @@ async def _route_acquire(
     return _finish(log, step, match, state)
 
 
-def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
-    """Pop the lane before the step body, clearing the hold mark."""
+def _release_held_lane(
+    lane_keyword: str, change: Change, state: State, log: EventLog, *, step_name: str,
+) -> None:
+    """Pop the held lane and clear the hold mark, waking the next head."""
     from imp.engine import merge_queue
-    assert step.release is not None
-    lane = _resolve_lane(step.release, change)
+    lane = _resolve_lane(lane_keyword, change)
     merge_queue.pop_and_wake(change.control_root, change.id, lane)
     state.held_lane = None
     state.held_acquire_step = None
     state.save(change.state_dir)
-    _emit(log, "lane_released", {"base": lane, "step": step.name})
+    _emit(log, "lane_released", {"base": lane, "step": step_name})
+
+
+def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
+    """Pop the lane before the step body, clearing the hold mark."""
+    assert step.release is not None
+    _release_held_lane(step.release, change, state, log, step_name=step.name)
 
 
 def _evict_if_holding(change: Change, state: State, log: EventLog) -> bool:
@@ -954,6 +964,7 @@ async def _run_agent_invocation(
                 project_facts=project_facts, guidance=guidance,
                 non_interactive=non_interactive,
             ),
+            workflow_dir=change.workflow_dir,
         )
         system_prompt_override = None
 

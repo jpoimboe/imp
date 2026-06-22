@@ -31,6 +31,6 @@ def test_substantive_steps_stay_loud() -> None:
                  "autosquash-resolve-implement", "autosquash-resolve-sweep",
                  "autosquash-resolve-merge",
                  "integrator", "integration-reviewer",
-                 "integration-resolver", "finalize", "merge-to-base",
+                 "finalize", "merge-to-base",
                  "wait-for-head"):
         assert by_name[name].quiet is False, name
