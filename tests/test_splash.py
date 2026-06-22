@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import random
 
 import pytest
@@ -264,3 +265,37 @@ def test_encode_row_strips_trailing_transparent_columns() -> None:
     row = splash._encode_row(g, 0, 1, color=False)
     assert row == "▀"                  # trailing 9 transparent columns stripped
     assert not row.endswith(" ")
+
+
+def test_splash_block_is_deterministic_with_seeded_rng() -> None:
+    block = splash.splash_block(theme="dark", width=100, color=False,
+                                rng=random.Random(0))
+    idx = random.Random(0).randrange(len(splash.SCENES))
+    assert block.splitlines()[-1] == splash.SCENES[idx][1]
+    assert block.count("\n") >= 17           # 17 grid rows + phrase
+
+
+def test_print_opening_splash_writes_block() -> None:
+    from imp.cli import main
+    out = io.StringIO()
+    main._print_opening_splash(out)
+    text = out.getvalue()
+    assert "▀" in text                       # at least one painted pixel
+    assert text.endswith("\n\n")      # blank line separator after the block
+    assert text.count("\n") >= 19     # 17 grid lines + block print newline + separator
+
+
+def test_opening_splash_suppressed_for_seed_and_noninteractive() -> None:
+    from imp.cli import main
+    # The splash prints only inside this gate, so a False gate means no splash.
+    assert main._should_prompt_opening(seed_text="do x", interactive=True) is False
+    assert main._should_prompt_opening(seed_text=None, interactive=False) is False
+    assert main._should_prompt_opening(seed_text=None, interactive=True) is True
+
+
+def test_capture_scene_splash_smoke(capsys: object) -> None:
+    import scripts.capture_imp_ui as cap
+    cap.scene_splash(color=False, width=80, theme="dark", index=0)
+    captured = capsys.readouterr()           # type: ignore[attr-defined]
+    assert "▀" in captured.out
+    assert splash.SCENES[0][1] in captured.out

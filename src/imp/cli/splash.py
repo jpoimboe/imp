@@ -106,7 +106,8 @@ _ANSI_TOKENS: dict[str, Color | None] = {
     "moon": "bright_white", "moonRing": None, "moonGlow": None,
     "portal": "bright_magenta", "portalG": "magenta", "portalI": "bright_magenta",
     "portalSwirl": "magenta", "rune": "bright_cyan",
-    "mtnFar": "bright_black", "mtnMid": "bright_black", "mtnNear": "bright_black", "snow": "bright_white",
+    "mtnFar": "bright_black", "mtnMid": "bright_black",
+    "mtnNear": "bright_black", "snow": "bright_white",
     "fire1": "red", "fire2": "bright_red", "fire3": "bright_yellow",
     "fireTip": "bright_yellow", "ember": "bright_red", "glowWarm": "bright_black",
     "waxA": "white", "waxB": "bright_black",
@@ -123,9 +124,12 @@ _ANSI_TOKENS: dict[str, Color | None] = {
     "orbRim": "bright_black", "orbStand": "bright_black", "orbStand2": "black",
     "lanMetal": "bright_black", "lanMetal2": "bright_black", "lanCore": "bright_yellow",
     "lanGlow": "yellow", "lanHalo": "bright_black",
-    "bookPage": "white", "bookPageD": "bright_black", "bookSpine": "black", "bookInk": "bright_black",
-    "boltCore": "bright_white", "boltGlow": "bright_blue", "storm": "bright_black", "stormD": "black",
-    "ffWarmC": "bright_yellow", "ffWarmH": "bright_black", "ffCoolC": "bright_cyan", "ffCoolH": "bright_black",
+    "bookPage": "white", "bookPageD": "bright_black",
+    "bookSpine": "black", "bookInk": "bright_black",
+    "boltCore": "bright_white", "boltGlow": "bright_blue",
+    "storm": "bright_black", "stormD": "black",
+    "ffWarmC": "bright_yellow", "ffWarmH": "bright_black",
+    "ffCoolC": "bright_cyan", "ffCoolH": "bright_black",
     "wm": "bright_yellow",
 }
 
@@ -282,7 +286,10 @@ def _rect(g: Grid, x: int, y: int, w: int, h: int, c: Color | None) -> None:
 def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: Color | None) -> None:
     if c is None:
         return
-    x0i = int(x0); y0i = int(y0); x1i = int(x1); y1i = int(y1)
+    x0i = int(x0)
+    y0i = int(y0)
+    x1i = int(x1)
+    y1i = int(y1)
     dx = abs(x1i - x0i)
     dy = abs(y1i - y0i)
     sx = 1 if x0i < x1i else -1
@@ -344,7 +351,10 @@ IMP = [
 ]
 
 # Locked "imp" wordmark (6 rows x 13 cols). X = pixel.
-WM = ["XX           ", "             ", "XX XXXXX XXX ", "XX X X X X  X", "XX X X X XXX ", "         X   "]
+WM = [
+    "XX           ", "             ", "XX XXXXX XXX ",
+    "XX X X X X  X", "XX X X X XXX ", "         X   ",
+]
 
 
 def _impAt(g: Grid, xc: float, oy: int) -> None:
@@ -893,7 +903,7 @@ class _Rng(Protocol):
     def randrange(self, n: int, /) -> int: ...
 
 
-def choose_index(rng: "_Rng | None" = None) -> int:
+def choose_index(rng: _Rng | None = None) -> int:
     r: _Rng = rng if rng is not None else random
     return r.randrange(len(SCENES))
 
@@ -905,12 +915,12 @@ def styled_phrase(phrase: str, *, theme: str, color: bool) -> str:
 
 
 def render_splash(*, theme: str, width: int, color: bool,
-                  rng: "_Rng | None" = None) -> tuple[list[str], str]:
+                  rng: _Rng | None = None) -> tuple[list[str], str]:
     return render_scene(choose_index(rng), theme=theme, width=width, color=color)
 
 
 def splash_block(*, theme: str, width: int, color: bool,
-                 rng: "_Rng | None" = None) -> str:
+                 rng: _Rng | None = None) -> str:
     """The full printable splash: art + wordmark + styled phrase, newline-joined."""
     lines, phrase = render_splash(theme=theme, width=width, color=color, rng=rng)
     return "\n".join([*lines, styled_phrase(phrase, theme=theme, color=color)])
