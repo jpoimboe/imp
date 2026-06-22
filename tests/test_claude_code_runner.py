@@ -15,7 +15,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
@@ -66,10 +66,6 @@ def _inv(
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
         agent_id=agent_id,
         event_log=log,
@@ -1525,7 +1521,7 @@ async def test_task_tool_call_carries_subagent_label(tmp_path, monkeypatch) -> N
     log = InMemoryEventLog()
     explorer = replace(_agent_def(), name="explorer", label="exploring codebase")
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        project_root=tmp_path,events_path=tmp_path / "e.jsonl",
         subagent_defs={"explorer": explorer}, event_log=log)
     state = cc._RunState(agent_id="step:p/s")
 
@@ -1563,7 +1559,7 @@ async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> 
     log = InMemoryEventLog()
     explorer = replace(_agent_def(), name="explorer", label=None)
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        project_root=tmp_path,events_path=tmp_path / "e.jsonl",
         subagent_defs={"explorer": explorer}, event_log=log)
     state = cc._RunState(agent_id="step:p/s")
 

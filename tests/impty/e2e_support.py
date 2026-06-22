@@ -67,10 +67,7 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
     (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
-        "      - name: coder\n        file: agents/coder.md\n"
-        "        fs_permissions:\n"
-        "          - {operations: [read],  paths: [\"**\"], mode: allow}\n"
-        "          - {operations: [write], paths: [\"**\"], mode: allow}\n")
+        "      - name: coder\n        file: agents/coder.md\n")
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)

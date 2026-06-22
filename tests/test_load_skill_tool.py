@@ -18,7 +18,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     (wf / "skills").mkdir(parents=True)
     (wf / "skills" / "refactor.md").write_text("# Refactor\ndo the thing\n")
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
     ctx.change_context = ChangeContext(

@@ -812,7 +812,7 @@ async def _route_agent(
     while True:
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
-            fs_permissions=step.fs_permissions, tier=step.tier, step_name=step.name,
+            tier=step.tier, step_name=step.name,
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={
@@ -924,7 +924,6 @@ async def _run_agent_invocation(
     *,
     agent_id: str,
     agent_def: Any,
-    fs_permissions: Any,
     tier: str,
     step_name: str,
     workflow: Workflow,
@@ -1028,7 +1027,6 @@ async def _run_agent_invocation(
         ),
         user_chat_input_fn=user_chat_input_fn,
         transcript_dir=transcript_dir,
-        fs_permissions=fs_permissions,
         events_path=change.events_path,
         subagent_defs=subagent_defs,
         tiers=tuple(state.resolved_tiers.keys()) if state.resolved_tiers else (),

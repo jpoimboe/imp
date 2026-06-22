@@ -90,7 +90,6 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
 def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
     ctx = ToolContext(
         project_root=worktree,
-        fs_permissions=(),
         events_path=worktree / "events.jsonl",
     )
     ctx.change_context = ChangeContext(
@@ -451,7 +450,6 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
         )
         ctx = ToolContext(
             project_root=wt_path,
-            fs_permissions=(),
             events_path=wt_path / "events.jsonl",
         )
         ctx.change_context = ChangeContext(

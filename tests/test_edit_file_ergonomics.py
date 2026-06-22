@@ -13,16 +13,11 @@ import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import FILE_READ_CAP_BYTES
-from imp.engine.types import FsRule, SourceLoc
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(FsRule(
-            operations=("read", "write"), paths=("**",), mode="allow",
-            source=SourceLoc(file=Path("t.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.coordinator = None

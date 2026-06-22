@@ -34,7 +34,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+events_path=tmp_path / "events.jsonl",
     )
 
 

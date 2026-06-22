@@ -74,7 +74,7 @@ async def _cc_shape(tmp_path: Path) -> dict:
         change_context=ChangeContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=el)
     scripted = [
         assistant(tool_use("s1", "WebSearch", {"query": "q"})),

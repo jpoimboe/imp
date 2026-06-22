@@ -7,7 +7,6 @@ from pathlib import Path, PurePosixPath
 from imp.engine.errors import LoadError
 from imp.engine.types import (
     AgentDef,
-    FsRule,
     Goto,
     SourceLoc,
     Workflow,
@@ -37,7 +36,6 @@ def validate(
     _v_required_blocks_per_kind(workflow, errors)
     _v_empty_phase_is_last(workflow, errors)
     _v_agent_has_file(workflow, errors)
-    _v_fs_permissions_paths(workflow, errors)
     _v_read_only_paths(workflow, errors)
     if configured_tiers is not None:
         _v_step_tier_configured(workflow, configured_tiers, errors)
@@ -197,41 +195,6 @@ def _v_agent_has_file(workflow: Workflow, errors: list[LoadError]) -> None:
             errors.append(LoadError(
                 f"agent step {step.name!r} uses inline prompt:, which is not "
                 "supported yet -- use file: agents/<name>.md", step.source))
-
-
-def _v_fs_permissions_paths(workflow: Workflow, errors: list[LoadError]) -> None:
-    for step in workflow.flat_steps():
-        if step.kind != "agent":
-            continue
-        for rule in step.fs_permissions:
-            _v_check_paths(rule, errors)
-
-
-def _v_check_paths(rule: FsRule, errors: list[LoadError]) -> None:
-    for p in rule.paths:
-        if p.startswith("/"):
-            errors.append(
-                LoadError(
-                    f"fs_permissions path must be worktree-relative (no leading '/'): {p!r}",
-                    rule.source,
-                )
-            )
-        # Use path components so e.g. "var/log/app..log" is not flagged.
-        parts = PurePosixPath(p).parts
-        if any(part == ".." for part in parts):
-            errors.append(
-                LoadError(
-                    f"fs_permissions path may not contain '..' segment: {p!r}",
-                    rule.source,
-                )
-            )
-        if p.startswith("~"):
-            errors.append(
-                LoadError(
-                    f"fs_permissions path may not start with '~': {p!r}",
-                    rule.source,
-                )
-            )
 
 
 def _v_read_only_paths(workflow: Workflow, errors: list[LoadError]) -> None:

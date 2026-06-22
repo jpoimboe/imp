@@ -36,9 +36,6 @@ phases:
         file: agents/front-door.md
         tier: high
         label: chatting
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/changes/*/artifacts/spec/**", ".imp/changes/*/progress.md"], mode: allow}
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
           - {else: true, set: {fast_path: false}, goto: spec-writer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
@@ -49,9 +46,6 @@ phases:
         file: agents/spec-writer.md
         tier: high
         label: writing spec
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/changes/*/artifacts/spec/**", ".imp/changes/*/progress.md"], mode: allow}
         rules:
           - {else: true, continue: true}
 
@@ -87,9 +81,6 @@ phases:
         file: agents/plan-writer.md
         tier: high
         label: writing plan
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/changes/*/artifacts/plans/**", ".imp/changes/*/progress.md"], mode: allow}
 
       - name: plan-verify-commit
         quiet: true
@@ -125,9 +116,6 @@ phases:
         file: agents/task-lead.md
         tier: high
         label: implementing
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
@@ -159,9 +147,6 @@ phases:
         tier: high
         label: resolving fixups
         max_loops: 6
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {else: true, goto: cleanup-implement}
 
@@ -199,9 +184,6 @@ phases:
         tier: high
         label: reviewing code
         max_loops: 6
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/changes/*/**"], mode: allow}   # append deferred observations
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
@@ -211,9 +193,6 @@ phases:
         file: agents/deferred-sweep.md
         tier: medium
         label: resolving deferred items
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
           - {else: true, continue: true}
@@ -243,9 +222,6 @@ phases:
         tier: high
         label: resolving fixups
         max_loops: 6
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {else: true, goto: cleanup-sweep}
 
@@ -300,9 +276,6 @@ phases:
         file: agents/integrator.md
         tier: high
         label: integrating
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {stuck: true}, pause: true}
           - {else: true, continue: true}
@@ -345,9 +318,6 @@ phases:
         tier: high
         label: resolving fixups
         max_loops: 6
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {else: true, goto: cleanup-merge}
 

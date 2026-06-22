@@ -6,7 +6,7 @@ Centralizing them here keeps the two execution paths consistent and gives future
 engine vars a single home.
 
 All paths are host paths. `IMP_PROJECT_ROOT` is the absolute worktree path on the
-host; `fs_permissions` patterns are worktree-relative (no `/project` namespace).
+host. Tool paths are worktree-relative.
 """
 
 from __future__ import annotations

@@ -40,7 +40,7 @@ def _build(tmp_path, tools):
         change_context=ChangeContext(title="t", project_root=tmp_path,
                                      workflow_dir=_ASSET),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
-        fs_permissions=(), events_path=tmp_path / "e.jsonl", subagent_defs={},
+events_path=tmp_path / "e.jsonl", subagent_defs={},
         tiers=(), max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None, resolved_tiers=None,
         coordinator=None).system_prompt

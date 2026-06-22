@@ -7,7 +7,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner, _emit_openai_web_events
 from tests.openai_fakes import (
     FakeResponsesClient,
@@ -77,10 +77,6 @@ def _web_inv(tmp_path: Path, *, event_log=None) -> AgentInvocation:
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",
         event_log=event_log,

@@ -12,7 +12,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.scripted import ScriptedAgentRunner
 
 
@@ -41,8 +41,6 @@ def _inv(tmp_path: Path, *, event_log, user_input_fn) -> AgentInvocation:
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(operations=("read",), paths=("**",), mode="allow",
-                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",
         event_log=event_log,

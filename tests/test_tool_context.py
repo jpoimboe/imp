@@ -8,7 +8,6 @@ import pytest
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.engine.sandbox import SandboxPolicy
-from imp.engine.types import FsRule
 
 
 def test_resolve_project_path(tmp_path: Path) -> None:
@@ -26,10 +25,9 @@ def test_change_context_field(tmp_path: Path) -> None:
     assert ctx.change_context.project_root == tmp_path
 
 
-def _ctx(tmp_path: Path, rules: tuple[FsRule, ...] = ()) -> ToolContext:
+def _ctx(tmp_path: Path) -> ToolContext:
     return ToolContext(
         project_root=tmp_path,
-        fs_permissions=rules,
         events_path=tmp_path / "events.jsonl",
     )
 
@@ -38,8 +36,7 @@ def test_running_processes_starts_empty(tmp_path):
     from imp.agents.tools.context import ToolContext
 
     ctx = ToolContext(
-        project_root=tmp_path,
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+        project_root=tmp_path, events_path=tmp_path / "events.jsonl",
     )
     assert ctx.running_processes == []
 
@@ -52,8 +49,7 @@ def test_terminate_running_processes_drains(tmp_path):
     from imp.agents.tools.context import ToolContext, terminate_running_processes
 
     ctx = ToolContext(
-        project_root=tmp_path,
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+        project_root=tmp_path, events_path=tmp_path / "events.jsonl",
     )
 
     async def _spawn_and_kill():
@@ -85,8 +81,7 @@ def test_terminate_kills_process_group(tmp_path):
 
     from imp.agents.tools.context import ToolContext, terminate_running_processes
 
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
-                      events_path=tmp_path / "e.jsonl")
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     marker = tmp_path / "child_alive"
 
     async def go():
@@ -122,8 +117,7 @@ def test_terminate_uses_named_grace_constant():
 def test_tool_context_has_event_log_field(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
-        events_path=tmp_path / "events.jsonl",
+        project_root=tmp_path, events_path=tmp_path / "events.jsonl",
     )
     assert ctx.event_log is None
     sentinel = object()
@@ -134,16 +128,14 @@ def test_tool_context_has_event_log_field(tmp_path) -> None:
 def test_tool_context_resolved_tiers_defaults_none(tmp_path):
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
-        events_path=tmp_path / "e.jsonl")
+        project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     assert ctx.resolved_tiers is None
 
 
 def test_tool_context_tiers_defaults_empty(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
-        events_path=tmp_path / "events.jsonl")
+        project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     assert ctx.tiers == ()
     ctx.tiers = ("low", "high")
     assert ctx.tiers == ("low", "high")
@@ -254,14 +246,12 @@ def test_authorize_fs_out_of_worktree_sandboxed_write(tmp_path: Path) -> None:
 
 def test_background_registry_and_bg_ids(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
-                      events_path=tmp_path / "events.jsonl")
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     assert ctx.background_processes == {}
     assert ctx.next_bg_id() == "bg1"
     assert ctx.next_bg_id() == "bg2"
     # distinct contexts do not share the counter
-    ctx2 = ToolContext(project_root=tmp_path, fs_permissions=(),
-                       events_path=tmp_path / "events.jsonl")
+    ctx2 = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     assert ctx2.next_bg_id() == "bg1"
 
 
@@ -274,14 +264,12 @@ def test_get_parallel_limiter_is_lazy_and_per_invocation(tmp_path: Path) -> None
     from imp.agents.tools.context import ToolContext
 
     reset_parallelism_cache()
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
-                      events_path=tmp_path / "events.jsonl")
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     assert ctx.parallel_limiter is None        # not created until asked
     lim = ctx.get_parallel_limiter()
     assert lim is ctx.get_parallel_limiter()   # check-then-set, single object
     assert lim.total_tokens == max_parallel_tasks()
-    other = ToolContext(project_root=tmp_path, fs_permissions=(),
-                        events_path=tmp_path / "events.jsonl")
+    other = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     assert other.get_parallel_limiter() is not lim  # fresh limiter per invocation
     reset_parallelism_cache()
 
@@ -303,8 +291,7 @@ def test_terminate_reaps_regrouped_descendant(tmp_path):
     if not Path("/proc").is_dir():
         pytest.skip("descendant reaping needs /proc (Linux)")
 
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
-                      events_path=tmp_path / "e.jsonl")
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     pidfile = tmp_path / "descendant.pid"
     # Parent (registered, its own session via start_new_session) forks a child that
     # setsid()s — leaving the parent's process group — writes its pid, then sleeps.
@@ -357,11 +344,9 @@ def test_change_home_path_maps_empty_to_none() -> None:
 
 def test_tool_context_change_home_defaults_none(tmp_path: Path) -> None:
     from imp.agents.tools.context import ToolContext
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
-                      events_path=tmp_path / "e.jsonl")
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     assert ctx.change_home is None
     ctx.change_home = tmp_path / ".imp" / "changes" / "abc"
     assert ctx.change_home == tmp_path / ".imp" / "changes" / "abc"
-    assert ToolContext(project_root=tmp_path, fs_permissions=(),
-                       events_path=tmp_path / "e.jsonl",
+    assert ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl",
                        change_home=tmp_path).change_home == tmp_path

@@ -12,7 +12,7 @@ from imp.engine.state import JsonlEventLog
 def _ctx(tmp_path: Path) -> ToolContext:
     return ToolContext(
         project_root=tmp_path,
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+events_path=tmp_path / "events.jsonl",
     )
 
 

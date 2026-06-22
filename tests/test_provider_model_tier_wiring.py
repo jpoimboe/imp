@@ -27,7 +27,7 @@ def _invocation(tmp_path: Path, provider: str) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
             tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
-        transcript_dir=tmp_path / "t", fs_permissions=(),
+        transcript_dir=tmp_path / "t",
         events_path=tmp_path / "events.jsonl",
         tiers=("low", "high"))
 

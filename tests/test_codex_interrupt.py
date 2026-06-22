@@ -17,7 +17,6 @@ def anyio_backend() -> str:
 def _ctx(tmp_path: Path) -> ToolContext:
     return ToolContext(
         project_root=tmp_path,
-        fs_permissions=(),
         events_path=tmp_path / "events.jsonl", subagent_defs={},
         provider_name="codex", model_name="gpt-5.5",
         parent_transcript_dir=tmp_path,

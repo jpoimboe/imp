@@ -17,7 +17,7 @@ from imp.agents.runner import ChangeContext
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import _RunState, _wrap_one
 
 
@@ -29,10 +29,6 @@ def anyio_backend() -> str:
 def _ctx(tmp_path: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(FsRule(
-            operations=("read", "write"), paths=("**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.change_context = ChangeContext(

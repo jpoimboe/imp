@@ -41,7 +41,7 @@ class _FakeRunner:
 
 
 def _ctx(tmp_path: Path, *, depth: int) -> ToolContext:
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.provider_name = "anthropic"
     ctx.model_name = "m"

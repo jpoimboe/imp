@@ -20,7 +20,7 @@ class _Log:
 
 def _ctx(tmp_path, *, user_input_fn, non_interactive, coordinator=None):
     return ToolContext(
-        project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        project_root=tmp_path,events_path=tmp_path / "e.jsonl",
         user_input_fn=user_input_fn, non_interactive=non_interactive,
         event_log=_Log(), agent_id="step:review/final-review",
         coordinator=coordinator,

@@ -32,7 +32,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.change import Change
 from imp.engine.replay import build_messages_from_events, reconstruct_request_for_response
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 
@@ -136,9 +136,6 @@ def _inv(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
-                               mode="allow",
-                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
         agent_id=agent_id,
         event_log=event_log,

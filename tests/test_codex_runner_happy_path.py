@@ -10,7 +10,6 @@ from imp.agents.runner import AgentInvocation, ChangeContext
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import (
     AgentDef,
-    FsRule,
     OutputField,
     OutputSchema,
     SourceLoc,
@@ -82,10 +81,6 @@ def _build_invocation(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
-        fs_permissions=(
-            FsRule(operations=("read", "write"), paths=("**",),
-                   mode="allow", source=_SRC),
-        ),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:t",
         event_log=event_log,
@@ -240,7 +235,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
     """
     import anyio as _anyio
 
-    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
     from tests.test_bg_cc_codex_parity import _cleanup, _spawn_bg
 
     _SRC_LOCAL = SourceLoc(file=Path("a.md"), line=1)
@@ -291,10 +286,6 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
-        fs_permissions=(
-            FsRule(operations=("read", "write"), paths=("**",),
-                   mode="allow", source=_SRC_LOCAL),
-        ),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:t",
         event_log=elog,

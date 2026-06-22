@@ -20,7 +20,7 @@ from imp.agents.runner import (
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests._events import control_events
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, thinking, tool_use
@@ -54,9 +54,6 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
-                               mode="allow",
-                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
         agent_id=agent_id,
         event_log=event_log,
@@ -204,9 +201,6 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=inv_dir,
-        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
-                               mode="allow",
-                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log,
         retry_feedback="Gate `test` failed (exit 1). FAIL: assertion",
@@ -860,9 +854,6 @@ async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Pa
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=inv_dir,
-        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
-                               mode="allow",
-                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log,
         balance_on_resume=True,

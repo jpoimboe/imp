@@ -11,7 +11,7 @@ from tests.conftest import _seed_control
 
 
 def _ctx(ch: Change, state: State) -> ToolContext:
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = state
@@ -82,7 +82,7 @@ def test_rename_description_drops_hardcoded_change_dir() -> None:
 
 def test_rename_from_subagent_raises(tmp_path: Path) -> None:
     ch, _ = _make(tmp_path)
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = None              # subagent: no rename authority

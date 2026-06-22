@@ -76,7 +76,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
         initial_messages=(Message(role="user", content=(TextBlock(text="x"),)),),
         change_context=ChangeContext(title="Test", project_root=tmp_path,
                                      workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
-        transcript_dir=tmp_path, fs_permissions=(),
+        transcript_dir=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
     assert inv.agent_id == ""
@@ -107,7 +107,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         change_context=ChangeContext(title="Test", project_root=Path("."),
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
         transcript_dir=Path("."),
-        fs_permissions=(), events_path=Path("e.jsonl"),
+events_path=Path("e.jsonl"),
     )
     assert inv.continuation_fn is None
 
@@ -119,7 +119,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         change_context=ChangeContext(title="Test", project_root=Path("."),
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
         transcript_dir=Path("."),
-        fs_permissions=(), events_path=Path("e.jsonl"),
+events_path=Path("e.jsonl"),
         continuation_fn=lambda last: captured.append(last) or "nudge",
     )
     assert inv2.continuation_fn("prose") == "nudge"
@@ -163,6 +163,6 @@ def test_agent_invocation_resolved_tiers_defaults_none():
         initial_messages=(),
         change_context=ChangeContext(title="x", project_root=Path("."),
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
-        transcript_dir=Path("."), fs_permissions=(),
+        transcript_dir=Path("."),
         events_path=Path("e.jsonl"))
     assert inv.resolved_tiers is None

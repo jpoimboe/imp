@@ -90,7 +90,6 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
     runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
 
     from imp.agents.runner import AgentInvocation
-    from imp.engine.types import FsRule, SourceLoc
     inv = AgentInvocation(
         agent_def=_e2e_agent_def("lead", tools={"complete_step", "task"},
                                  subagents=("reviewer",)),
@@ -100,9 +99,6 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
         change_context=ChangeContext(title="T", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
-                               mode="allow",
-                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
         subagent_defs={"reviewer": _e2e_agent_def("reviewer",
                                                   tools={"complete_step"})},

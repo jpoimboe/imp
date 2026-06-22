@@ -24,7 +24,6 @@ from pathlib import Path
 from imp.agents.runner import AgentInvocation, ChangeContext
 from imp.engine.types import (
     AgentDef,
-    FsRule,
     OutputSchema,
     SourceLoc,
 )
@@ -55,14 +54,6 @@ def _invocation(project_root: Path) -> AgentInvocation:
             workflow_dir=project_root / ".imp" / "change" / "workflow",
         ),
         transcript_dir=project_root / ".imp" / "steps",
-        fs_permissions=(
-            FsRule(
-                operations=("read", "write"),
-                paths=("/project/**",),
-                mode="allow",
-                source=loc,
-            ),
-        ),
         events_path=project_root / "events.jsonl",
     )
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from imp.engine.types import AgentDef, FsRule
+from imp.engine.types import AgentDef
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +86,6 @@ class AgentInvocation:
     initial_messages: tuple[Message, ...]
     change_context: ChangeContext
     transcript_dir: Path                   # .imp/changes/<id>/steps/<phase>/<step>/
-    fs_permissions: tuple[FsRule, ...]
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)

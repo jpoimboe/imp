@@ -65,7 +65,7 @@ def _inv(provider, model, tmp_path):
         system_prompt="", initial_messages=(),
         change_context=ChangeContext(
             tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
-        transcript_dir=tmp_path, fs_permissions=(),
+        transcript_dir=tmp_path,
         events_path=tmp_path / "e.jsonl")
 
 
@@ -115,7 +115,7 @@ async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
                                      project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "td",
-        fs_permissions=(), events_path=tmp_path / "e.jsonl")
+events_path=tmp_path / "e.jsonl")
 
     runner = await spawn_subagent_via_registry(inv)
     # A runner, not a generator: it exposes run() + interrupt().

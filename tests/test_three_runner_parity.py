@@ -18,7 +18,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
@@ -81,10 +81,6 @@ def _shared_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentI
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / f"step-{provider_name}",
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
     )
 

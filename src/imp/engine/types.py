@@ -125,16 +125,6 @@ class OutputSchema:
         return frozenset(f.name for f in self.fields)
 
 
-# ── Filesystem permissions (parsed but unused in Plan 1; validated only) ──────
-
-@dataclass(frozen=True, slots=True)
-class FsRule:
-    operations: tuple[Literal["read", "write"], ...]
-    paths: tuple[str, ...]
-    mode: Literal["allow", "deny"]
-    source: SourceLoc
-
-
 # ── Agent definition (parsed from .md) ────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +169,6 @@ class Step:
     differ_from: str | None = None      # name of another step in this workflow;
                                         # this step's resolved (provider, model)
                                         # is scored to differ from that step's.
-    fs_permissions: tuple[FsRule, ...] = ()
     read_only: tuple[str, ...] = ()  # worktree-relative ro subtrees; folded into sandbox_policy
     max_tool_calls: int | None = None
     max_retries: int = 0

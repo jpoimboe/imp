@@ -10,7 +10,7 @@ from imp.agents.tools.context import ToolContext
 def _ctx(tmp_path: Path, agent_id: str = "step:plan/coder") -> ToolContext:
     run_dir = tmp_path / ".imp" / "change"
     run_dir.mkdir(parents=True, exist_ok=True)
-    return ToolContext(project_root=tmp_path, fs_permissions=(),
+    return ToolContext(project_root=tmp_path,
                        events_path=run_dir / "events.jsonl", agent_id=agent_id)
 
 

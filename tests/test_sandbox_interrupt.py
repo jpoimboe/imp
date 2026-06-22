@@ -55,7 +55,6 @@ def _active_policy(worktree: Path) -> SandboxPolicy:
 def _ctx(worktree: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=worktree,
-        fs_permissions=(),
         events_path=worktree / "events.jsonl",
     )
     ctx.change_context = ChangeContext(

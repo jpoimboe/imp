@@ -12,16 +12,6 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import ToolAborted
 from imp.engine.sandbox import SandboxPolicy
-from imp.engine.types import FsRule, SourceLoc
-
-
-def _allow_all(*ops: str) -> tuple[FsRule, ...]:
-    return (FsRule(
-        operations=tuple(ops),  # type: ignore[arg-type]
-        paths=("**",),
-        mode="allow",
-        source=SourceLoc(file=Path("t.yaml"), line=1),
-    ),)
 
 
 class _Coord:
@@ -32,7 +22,6 @@ class _Coord:
 def _ctx(tmp_path: Path, *ops: str, coord: object | None = None) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=_allow_all(*ops) if ops else (),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.coordinator = coord

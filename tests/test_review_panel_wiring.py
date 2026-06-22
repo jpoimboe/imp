@@ -137,14 +137,6 @@ def test_workflow_comment_describes_single_reviewer() -> None:
     assert "4-member" not in text
 
 
-def test_review_step_can_write_progress_md() -> None:
-    wf = _wf()
-    assert "write_file" in wf.agents["code-reviewer"].tools
-    review = _steps(wf)["code-reviewer"]
-    assert any(r.mode == "allow" and "write" in r.operations
-               for r in review.fs_permissions)
-
-
 def test_code_reviewer_pins_deferred_observation_format() -> None:
     text = (AGENTS / "code-reviewer.md").read_text()
     assert "- [ ] DEFERRED code-reviewer:" in text
@@ -156,7 +148,6 @@ def test_deferred_sweep_step_then_sweep_verify() -> None:
     steps = _steps(_wf())
     sweep = steps["deferred-sweep"]
     assert sweep.kind == "agent" and sweep.file.name == "deferred-sweep.md"
-    assert any(r.mode == "allow" and "write" in r.operations for r in sweep.fs_permissions)
     st = steps["sweep-verify"]
     assert st.kind == "script" and st.command.endswith("run-verify.sh")
     assert isinstance(st.rules[-1].action, Goto)

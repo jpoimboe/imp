@@ -28,7 +28,7 @@ def _inv(provider: str, tools: frozenset[str], explicit_tools: bool = False) -> 
         change_context=ChangeContext(title="t", project_root=Path("/"),
                                      workflow_dir=Path("/")),
         transcript_dir=Path("/"),
-        fs_permissions=(), events_path=Path("/events.jsonl"))
+events_path=Path("/events.jsonl"))
 
 
 @pytest.mark.parametrize("build,provider", [

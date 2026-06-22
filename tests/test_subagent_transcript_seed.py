@@ -10,7 +10,6 @@ def _ctx(tmp_path: Path, agent_id: str = "step:plan/coder") -> ToolContext:
     run.mkdir(parents=True, exist_ok=True)
     return ToolContext(
         project_root=tmp_path,
-        fs_permissions=(),
         events_path=run / "events.jsonl",
         parent_transcript_dir=run / "transcripts" / "plan",
         agent_id=agent_id,

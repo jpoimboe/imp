@@ -19,7 +19,7 @@ from imp.agents.runner import (
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner
 from tests._events import control_events
 from tests.openai_fakes import (
@@ -64,10 +64,6 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
         agent_id=agent_id,
         event_log=event_log,
@@ -201,13 +197,8 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
 
     (tmp_path / "art").mkdir()
     (tmp_path / "f.txt").write_text("x")
-    project_rules = (FsRule(
-        operations=("read",), paths=("/project/**",), mode="allow",
-        source=SourceLoc(file=Path("w.yaml"), line=1),
-    ),)
-
     inv = _inv(tmp_path)
-    inv = replace(inv, fs_permissions=project_rules, max_tool_calls=2)
+    inv = replace(inv, max_tool_calls=2)
 
     # Two assistant turns, each issuing two tool_use blocks. After 2 calls
     # the ceiling trips on the 3rd; the rest are backfilled with errors.

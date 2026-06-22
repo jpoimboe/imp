@@ -2,11 +2,10 @@
 
 Path model: in-worktree files are addressed by paths RELATIVE to the worktree
 root. `resolve_path` resolves both relative-under-root and absolute paths with NO
-containment raise; `authorize_fs` then bounds the result (bounded by the sandbox
-mirror (allow-all when unsandboxed)) so the fs tools reach the same paths as
-`bash`. There is
-no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system
-paths are `bash`'s job, backstopped by the OS sandbox.
+containment raise; `authorize_fs` then bounds the result against the sandbox
+policy so the fs tools reach the same paths as `bash`. Tool paths are
+worktree-relative. No virtual `/project`/`/scratch` namespace; system paths are
+`bash`'s job, backstopped by the OS sandbox.
 """
 
 from __future__ import annotations
@@ -21,13 +20,12 @@ from typing import Any, Literal
 
 from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
-from imp.engine.types import AgentDef, FsRule
+from imp.engine.types import AgentDef
 
 
 @dataclass
 class ToolContext:
     project_root: Path
-    fs_permissions: tuple[FsRule, ...]
     events_path: Path
     # Subagent dispatch fills these:
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)

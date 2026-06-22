@@ -17,16 +17,11 @@ from imp.agents.tools.limits import (
     MATCH_LINE_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
 )
-from imp.engine.types import FsRule, SourceLoc
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("**",), mode="allow",
-            source=SourceLoc(file=Path("t.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.coordinator = None

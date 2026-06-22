@@ -51,9 +51,8 @@ def test_no_virtual_paths_in_tool_descriptions():
 # line move doesn't break the allowlist; a NEW occurrence (not in this set) trips
 # the guard and must be consciously added here (the whole point of the guard).
 _SRC_ALLOWLIST = {
-    "no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system",
     "# `head`/`sed`. The path model is worktree-relative (Part A): no `/project`.",
-    "host; `fs_permissions` patterns are worktree-relative (no `/project` namespace).",
+    "worktree-relative. No virtual `/project`/`/scratch` namespace; system paths are",
 }
 
 

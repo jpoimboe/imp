@@ -45,7 +45,7 @@ from imp.agents.tools import get_registry  # noqa: F401
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.engine.state import JsonlEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.claude_code import ClaudeCodeAgentRunner, _RunState, _wrap_one
 from imp.providers.openai import OpenAIAgentRunner
@@ -127,10 +127,6 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
             workflow_dir=workflow_dir,
         ),
         transcript_dir=tmp_path / f"step-{provider_name}",
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
     )
 
@@ -340,10 +336,6 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
     # as _ctx() in test_claude_code_wrap.py, plus event_log set explicitly).
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(FsRule(
-            operations=("read", "write"), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
         events_path=events_path,
     )
     ctx.change_context = ChangeContext(

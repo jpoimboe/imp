@@ -137,12 +137,9 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
     uses to assert concurrency shape (both calls precede either result).
     """
     from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
-    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
     _SRC = SourceLoc(file=Path("a.md"), line=1)
-    _FS = (FsRule(operations=("read", "write"), paths=("**",),
-                  mode="allow", source=_SRC),)
-
     worker_schema = OutputSchema(
         fields=(OutputField(name="status", type="enum",
                             values=("Success",), required=True),),
@@ -213,7 +210,6 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
                 project_root=tmp_path, workflow_dir=tmp_path, id="c1",
             ),
             transcript_dir=tmp_path / "tx",
-            fs_permissions=_FS,
             events_path=tmp_path / "events.jsonl",
             agent_id="step:coord",
             subagent_defs={"worker_a": worker_a, "worker_b": worker_b},

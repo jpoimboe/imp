@@ -9,7 +9,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, ChangeContext
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.codex_fakes import FakeCodex
 
@@ -53,8 +53,6 @@ def _invocation(tmp_path: Path, *, event_log: object,
         change_context=ChangeContext(
             title="t", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
-        fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
-                               mode="allow", source=_SRC),),
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=event_log, continuation_fn=continuation_fn,
         user_input_fn=user_input_fn)

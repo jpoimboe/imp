@@ -31,7 +31,7 @@ def test_codex_task_description_has_elicitation_language(tmp_path: Path) -> None
     from imp.agents.tools.context import ToolContext
     from imp.providers.codex_mcp import RunState, _register_tool
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl", subagent_defs={},
         provider_name="codex", model_name="gpt-5.5",
         parent_transcript_dir=tmp_path,
@@ -51,7 +51,7 @@ def test_claude_code_task_description_has_elicitation_language(
     from imp.agents.tools.context import ToolContext
     from imp.providers.claude_code import _RunState, _wrap_one
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
     wrapped = _wrap_one("task", make_task_tool(), ctx, _RunState(), sdk_tool)

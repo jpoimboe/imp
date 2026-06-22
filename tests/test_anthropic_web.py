@@ -62,7 +62,7 @@ def _inv(tmp_path: Path, tools: frozenset[str], elog) -> AgentInvocation:
         change_context=ChangeContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=elog)
 
 

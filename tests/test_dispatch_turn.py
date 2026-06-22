@@ -35,7 +35,7 @@ def _agent(name: str) -> AgentDef:
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
     ctx.provider_name = "anthropic"

@@ -43,7 +43,6 @@ from imp.engine.types import (
     Action,
     AgentDef,
     Continue,
-    FsRule,
     Goto,
     Kind,
     Mutation,
@@ -550,39 +549,6 @@ def _typecheck_step_exprs(
         raise LoadError(str(e), step.source) from e
 
 
-# ── Fs permissions ────────────────────────────────────────────────────────────
-
-
-def _parse_fs_rule(
-    raw: dict[str, Any], fallback_source: SourceLoc, yaml_path: Path | None = None
-) -> FsRule:
-    if not isinstance(raw, dict):
-        raise LoadError("fs_permissions entry must be a mapping", fallback_source)
-    source = loc(yaml_path, raw) if yaml_path is not None else fallback_source
-    ops_raw = raw.get("operations") or []
-    paths_raw = raw.get("paths") or []
-    if not isinstance(ops_raw, list) or not isinstance(paths_raw, list):
-        raise LoadError(
-            "fs_permissions 'operations' and 'paths' must be lists", source
-        )
-    ops = tuple(ops_raw)
-    paths = tuple(paths_raw)
-    mode = str(raw.get("mode") or "allow")
-    if mode not in ("allow", "deny"):
-        raise LoadError(
-            f"fs_permissions mode must be 'allow' or 'deny', got {mode!r}", source
-        )
-    if not ops or not paths:
-        raise LoadError("fs_permissions entry needs operations and paths", source)
-    for op in ops:
-        if op not in ("read", "write"):
-            raise LoadError(
-                f"fs_permissions operation must be 'read' or 'write', got {op!r}",
-                source,
-            )
-    return FsRule(operations=ops, paths=paths, mode=mode, source=source)  # type: ignore[arg-type]
-
-
 # ── Step parsing ──────────────────────────────────────────────────────────────
 
 
@@ -672,10 +638,6 @@ def _parse_step(
             tier=str(raw.get("tier") or "medium"),
             differ_from=(str(raw["differ_from"])
                          if raw.get("differ_from") is not None else None),
-            fs_permissions=tuple(
-                _parse_fs_rule(r, source, yaml_path)
-                for r in (raw.get("fs_permissions") or [])
-            ),
             read_only=tuple(str(p) for p in (raw.get("read_only") or [])),
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),

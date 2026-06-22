@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, ChangeContext
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
 
 pytestmark = pytest.mark.skipif(
@@ -85,10 +85,6 @@ def _inv(tmp_path: Path) -> AgentInvocation:
             workflow_dir=tmp_path, id="c1",
         ),
         transcript_dir=tmp_path / "tx",
-        fs_permissions=(
-            FsRule(operations=("read", "write"), paths=("**",),
-                   mode="allow", source=_SRC),
-        ),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:t",
     )

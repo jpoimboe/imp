@@ -20,7 +20,6 @@ from imp.agents.tools.limits import FILE_READ_CAP_BYTES, TOOL_OUTPUT_CAP_BYTES
 def _ctx(tmp_path: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.coordinator = None
@@ -576,13 +575,8 @@ def test_byte_cap_wins_over_head_limit_when_both_fire(tmp_path: Path) -> None:
 # --- cross-tool claims --------------------------------------------------------
 
 def _read_ctx(tmp_path: Path) -> ToolContext:
-    from imp.engine.types import FsRule, SourceLoc
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("**",), mode="allow",
-            source=SourceLoc(file=Path("t.yaml"), line=1),
-        ),),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.coordinator = None

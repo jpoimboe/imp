@@ -84,7 +84,7 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     Mirrors the existing dispatch tests above (spawn_subagent + a 'reviewer'
     def + coordinator + change_context). drive_invocation is monkeypatched by
     the caller, so the spawned runner's events are never consumed."""
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
     ctx.provider_name = "anthropic"
@@ -129,7 +129,7 @@ def test_dispatch_task_surfaces_stalled_kind(tmp_path: Path) -> None:
 def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
     """`.invoke()` must never be called — runner special-cases name=='task'."""
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
     tool = make_task_tool()
@@ -146,7 +146,7 @@ def test_task_tool_schema_has_required_args() -> None:
 @pytest.mark.anyio
 async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     capture: dict = {}
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
     ctx.provider_name = "anthropic"
@@ -172,7 +172,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_dispatch_task_unknown_subagent_raises(tmp_path: Path) -> None:
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
     ctx.subagent_defs = {}
@@ -209,7 +209,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
 
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+events_path=tmp_path / "events.jsonl",
         subagent_defs={"sub": sub_def},
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         parent_transcript_dir=tmp_path / "parent",
@@ -243,7 +243,7 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
     capture: dict = {}
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
         subagent_defs={"helper": _agent("helper")},
         parent_transcript_dir=tmp_path / "steps" / "p" / "s",
@@ -279,7 +279,7 @@ async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
         tier="medium")
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"      # parent vendor
@@ -306,7 +306,7 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     capture: dict = {}
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}  # tier None
     ctx.provider_name = "anthropic"
@@ -373,7 +373,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
         source_path=sub.source_path, source=sub.source, tier="medium")
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"
@@ -413,7 +413,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
         source_path=sub.source_path, source=sub.source, tier="medium")
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"
@@ -453,7 +453,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
         source_path=sub.source_path, source=sub.source, tier="medium")
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"
@@ -483,7 +483,7 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     from imp.providers.config import ProviderModel
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
     ctx.provider_name = "anthropic"
@@ -509,7 +509,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     capture: dict = {}
 
     ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
+        project_root=tmp_path,
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}   # no static tier
     ctx.provider_name = "anthropic"                         # parent vendor
@@ -542,7 +542,7 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
     carries the completion instruction, a nudge continuation, and a resolved
     max_tool_calls — parity with a step invocation."""
     capture: dict = {}
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer", max_tool_calls=9)}
     ctx.provider_name = "anthropic"
@@ -568,7 +568,7 @@ async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
     """Omission #2 backstop: a prose-only subagent that the provider turns into
     agent_incomplete (a Pause category) fails LOUDLY to the parent (RuntimeError
     -> is_error tool_result), not a silent swallow."""
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
     ctx.provider_name = "anthropic"
@@ -608,7 +608,7 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
         return _FakeRunner([{"type": "agent_output",
                              "payload": {"status": "Success"}}])
 
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
     ctx.provider_name = "anthropic"
@@ -639,7 +639,7 @@ async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
     def _trip():
         coord._should_pause = True
 
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
     ctx.provider_name = "anthropic"
@@ -683,7 +683,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
         return _FakeRunner([{"type": "agent_output",
                              "payload": {"status": "Success"}}])
 
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
     ctx.provider_name = "anthropic"
@@ -735,7 +735,7 @@ async def test_subagent_headless_backoff_hits_ceiling(tmp_path: Path,
             "category": "rate_limit", "kind": "429", "message": "slow",
             "detail": {"retry_after_seconds": 15.0}}}])
 
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
     ctx.provider_name = "anthropic"
@@ -763,7 +763,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
     AgentInvocation so sub-subagent backoff ceilings fire correctly at
     nesting depth >1. This test fails if the forwarding is absent."""
     capture: dict = {}
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                      events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"helper": _agent("helper")}
     ctx.provider_name = "anthropic"
@@ -785,7 +785,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
 async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> None:
     """Symmetry: False propagates False (interactive parent -> interactive child)."""
     capture: dict = {}
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                      events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"helper": _agent("helper")}
     ctx.provider_name = "anthropic"
@@ -812,7 +812,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     from imp.engine.sandbox import SandboxPolicy
 
     capture: dict = {}
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                      events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"helper": _agent("helper")}
     ctx.provider_name = "anthropic"
@@ -843,7 +843,7 @@ async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
     from imp.engine.sandbox import SandboxPolicy
 
     capture: dict = {}
-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+    ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"helper": _agent("helper")}
     ctx.provider_name = "anthropic"

@@ -21,7 +21,6 @@ class _Coord:
 def _ctx(tmp_path: Path, coord: object | None = None) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.coordinator = coord
@@ -146,7 +145,7 @@ def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
 
 # --- Reachability-parity tests ---
 
-from imp.agents.permissions import PermissionDenied  # noqa: E402
+from imp.agents.tools.errors import PermissionDenied  # noqa: E402
 from imp.engine.sandbox import SandboxPolicy  # noqa: E402
 
 

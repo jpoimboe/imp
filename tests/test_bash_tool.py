@@ -16,7 +16,6 @@ from imp.agents.tools.context import ToolContext
 def _ctx(tmp_path: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
-        fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.change_context = ChangeContext(

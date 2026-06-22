@@ -261,7 +261,6 @@ async def dispatch_task(
         change_context=cc,
         user_chat_input_fn=None,
         transcript_dir=target_dir,
-        fs_permissions=ctx.fs_permissions,
         events_path=ctx.events_path,
         subagent_defs=child_subagent_defs,
         tiers=ctx.tiers,

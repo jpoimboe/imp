@@ -71,17 +71,6 @@ def test_spec_writer_no_longer_sets_fast_path() -> None:
     assert "fast_path" not in m.var_mutations
 
 
-def test_front_door_writes_only_change_local_artifacts_not_project_tree() -> None:
-    # AC2: the agent reads the project tree but its only write capability is
-    # Change-local artifacts — no worktree/project-tree write until go-live.
-    step = _steps(_wf())["front-door"]
-    write_paths = [p for perm in step.fs_permissions
-                   for p in perm.paths if "write" in perm.operations]
-    assert write_paths                                   # it can write SOMETHING
-    assert all(p.startswith(".imp/changes/") for p in write_paths), write_paths
-    assert not any(p == "**" for p in write_paths)       # never blanket project-tree write
-
-
 def test_front_door_agent_prose_carries_the_three_hats_and_handoff() -> None:
     body = _wf().agents["front-door"].prompt_template_source
     low = body.lower()

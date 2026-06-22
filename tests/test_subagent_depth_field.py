@@ -27,13 +27,13 @@ def test_invocation_subagent_depth_and_coordinator_default() -> None:
                                      project_root=Path("/tmp"),
                                      workflow_dir=Path("/tmp/wf")),
         transcript_dir=Path("/tmp/td"),
-        fs_permissions=(), events_path=Path("/tmp/e.jsonl"))
+events_path=Path("/tmp/e.jsonl"))
     assert inv.subagent_depth == 0
     assert inv.coordinator is None
 
 
 def test_toolcontext_subagent_depth_and_coordinator_default() -> None:
-    ctx = ToolContext(project_root=Path("/tmp"), fs_permissions=(),
+    ctx = ToolContext(project_root=Path("/tmp"),
                       events_path=Path("/tmp/e.jsonl"))
     assert ctx.subagent_depth == 0
     assert ctx.coordinator is None

@@ -27,7 +27,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
-from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner, AnthropicProvider
 from imp.providers.config import ProviderModel
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
@@ -128,8 +128,6 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
-                               mode="allow", source=_SRC),),
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",
         event_log=log,

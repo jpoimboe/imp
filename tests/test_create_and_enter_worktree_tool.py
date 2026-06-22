@@ -11,7 +11,7 @@ from tests.conftest import _git, _seed_control
 
 
 def _ctx(ch: Change, state: State) -> ToolContext:
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = state
@@ -62,7 +62,7 @@ def test_tool_idempotent(tmp_path: Path) -> None:
 def test_tool_from_subagent_raises(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="X", change_id="t4", base_branch="main")
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = None                               # subagent: no go-live authority

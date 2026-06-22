@@ -255,57 +255,8 @@ def test_v14_filename_must_match_name(tmp_path: Path) -> None:
     assert any("filename stem is 'coder'" in str(e) for e in ei.value.errors)
 
 
-# ── _v_fs_permissions_paths ───────────────────────────────────────────────────
-
-
-def test_v11_fs_permissions_bad_paths(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/stub.md
-                fs_permissions:
-                  - {operations: [read], paths: ['../escape'], mode: allow}
-        """, agents={"stub": _OK_AGENT})
-    with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf)
-    assert any("'..'" in str(e) for e in ei.value.errors)
-
-
-def test_v11_fs_permissions_rejects_absolute_path(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/stub.md
-                fs_permissions:
-                  - {operations: [read], paths: ['/etc/**'], mode: allow}
-        """, agents={"stub": _OK_AGENT})
-    with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf)
-    assert any("leading '/'" in str(e) for e in ei.value.errors)
-
-
-def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
-    """Paths with '..' inside a filename component should NOT be flagged."""
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/stub.md
-                fs_permissions:
-                  - {operations: [read], paths: ['var/log/app..log'], mode: allow}
-        """, agents={"stub": _OK_AGENT})
-    load_workflow(wf)  # must not raise
+def test_read_only_dotted_filename_allowed(tmp_path: Path) -> None:
+    load_workflow(_read_only_wf(tmp_path, "var/log/app..log"))  # should not raise
 
 
 # ── _v_step_tier_configured ──────────────────────────────────────────────────

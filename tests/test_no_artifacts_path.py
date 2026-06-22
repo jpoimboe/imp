@@ -2,7 +2,7 @@ from imp.agents.tools.context import ToolContext
 
 
 def _ctx(tmp_path):
-    return ToolContext(project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl")
+    return ToolContext(project_root=tmp_path,events_path=tmp_path / "e.jsonl")
 
 
 def test_absolute_path_resolves_without_virtual_namespace(tmp_path) -> None:

@@ -244,7 +244,6 @@ class CodexAgentRunner:
         tools = _build_tools(invocation)
         ctx = ToolContext(
             project_root=cwd,
-            fs_permissions=invocation.fs_permissions,
             events_path=invocation.events_path,
             subagent_defs=invocation.subagent_defs,
             provider_name=invocation.provider_name,

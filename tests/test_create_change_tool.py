@@ -21,7 +21,7 @@ def _make(tmp_path: Path) -> tuple[Change, State]:
 
 
 def _ctx(ch: Change, state: State | None) -> ToolContext:
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = state
