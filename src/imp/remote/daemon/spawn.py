@@ -44,6 +44,22 @@ def create_change(control_root: Path, prompt: str) -> None:
         _imp("new", "--non-interactive", "--message", prompt), env, control_root)
 
 
+def resume_change(control_root: Path, token: str) -> str:
+    """Resolve a token to a single Change and spawn a detached `imp resume` for it."""
+    from imp.cli.main import _iter_change_ids
+    matches = [cid for cid in _iter_change_ids(control_root) if token in cid]
+    if len(matches) != 1:
+        if not matches:
+            return f"No change matches {token!r}."
+        return f"{token!r} is ambiguous: {', '.join(matches)}"
+    target = matches[0]
+    env = _base_env()
+    env["IMP_REMOTE_AUTOSUBSCRIBE"] = "1"
+    _spawn_detached(
+        _imp("resume", target, "--non-interactive"), env, control_root)
+    return f"Resuming @{target}…"
+
+
 def abandon_change(control_root: Path, change_id: str) -> int:
     """Abandon a Change via `imp abandon --yes`, synchronously; returns its exit code."""
     return _run_foreground(

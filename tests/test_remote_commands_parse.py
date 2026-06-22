@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.remote.daemon.commands import (
     ABANDON_USAGE,
     NEW_USAGE,
+    RESUME_USAGE,
     ROUTE_HINT,
     SEARCH_USAGE,
     UNKNOWN_COMMAND,
@@ -12,6 +13,7 @@ from imp.remote.daemon.commands import (
     ListChanges,
     Notice,
     Reply,
+    Resume,
     Search,
     parse,
 )
@@ -98,3 +100,11 @@ def test_slash_search_with_query_is_a_search() -> None:
 
 def test_slash_search_empty_is_a_usage_notice() -> None:
     assert parse("/search   ", None, fake_resolve) == Notice(SEARCH_USAGE)
+
+
+def test_slash_resume_with_token_is_a_resume() -> None:
+    assert parse("/resume 2026-06-17", None, fake_resolve) == Resume("2026-06-17")
+
+
+def test_slash_resume_empty_is_a_usage_notice() -> None:
+    assert parse("/resume   ", None, fake_resolve) == Notice(RESUME_USAGE)

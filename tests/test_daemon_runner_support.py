@@ -310,6 +310,32 @@ async def test_search_hits_render_as_one_notice() -> None:
 
 
 @pytest.mark.anyio
+async def test_resume_relays_the_control_message_as_a_notice() -> None:
+    from imp.remote.daemon.commands import Notice, Resume
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        resume=lambda token: f"Resuming {token}",
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Resume("abc"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == "Resuming abc"
+
+
+@pytest.mark.anyio
 async def test_search_no_hits_reports_no_match() -> None:
     from imp.remote.daemon.commands import Notice, Search
     from imp.remote.daemon.control import ControlPlane

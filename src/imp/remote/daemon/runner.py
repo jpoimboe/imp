@@ -32,6 +32,7 @@ from imp.remote.daemon.commands import (
     Replay,
     Reply,
     Response,
+    Resume,
     Search,
     Subscribe,
     Unsubscribe,
@@ -303,6 +304,9 @@ async def _handle_command(
                 for cid, title, status, _created in hits
             ]
             responses.put(Notice("\n".join(lines)))
+    elif isinstance(command, Resume):
+        message = await anyio.to_thread.run_sync(control.resume, command.token)
+        responses.put(Notice(message))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
     elif isinstance(command, Notice):
@@ -361,6 +365,7 @@ async def run_daemon(
     abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
     search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
+    resume: Callable[[str], str] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
 ) -> None:
@@ -372,6 +377,7 @@ async def run_daemon(
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
     search = search or (lambda q: archive_read.search_archive(control_root, q))
+    resume = resume or (lambda token: spawn.resume_change(control_root, token))
 
     spath = socket_path(control_root)
     outbound: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -394,7 +400,7 @@ async def run_daemon(
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n),
-        search=search)
+        search=search, resume=resume)
     adapter = make_adapter(env, inbound.put, focus)
 
     log_handlers = _install_file_logging(control_root, env)

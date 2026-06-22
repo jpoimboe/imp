@@ -64,17 +64,23 @@ class Search:
 
 
 @dataclass(frozen=True)
+class Resume:
+    token: str
+
+
+@dataclass(frozen=True)
 class ListResult:
     changes: list[ChangeInfo]
 
 
 Command = (
     Reply | Create | Abandon | ListChanges | Help | Notice |
-    Subscribe | Unsubscribe | Replay | Search)
+    Subscribe | Unsubscribe | Replay | Search | Resume)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
 SEARCH_USAGE = "Usage: /search <query>"
+RESUME_USAGE = "Usage: /resume <id or search text>"
 ABANDON_USAGE = (
     "To abandon a Change, reply to one of its messages or use @handle "
     "(e.g. /abandon @ab12cd).")
@@ -91,6 +97,7 @@ HELP_TEXT = (
     "/replay [n] (reply, @handle, or subscribed) — re-send last n messages\n"
     "/abandon (reply or @handle) — stop a Change\n"
     "/search <query> — search archived conversations by title or id\n"
+    "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
     "/help — this message\n"
     "Reply to a Change's message (or @handle) to answer it.")
 
@@ -140,6 +147,8 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
             return Replay(change_id, n)
         if verb == "search":
             return Search(rest) if rest else Notice(SEARCH_USAGE)
+        if verb == "resume":
+            return Resume(rest) if rest else Notice(RESUME_USAGE)
         return Notice(UNKNOWN_COMMAND)
     change_id, body = resolve_lookup(text, reply_to)
     return Reply(change_id, body) if change_id is not None else Notice(ROUTE_HINT)
