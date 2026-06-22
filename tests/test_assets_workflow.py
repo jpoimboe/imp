@@ -573,7 +573,7 @@ def test_task_lead_tolerated_routes_to_cleanup() -> None:
     # cleanup-implement, skipping the verify gate; it carries no var.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
-        output={"status": "Success", "done": True, "deviation": False,
+        output={"status": "Success", "deviation": False,
                 "verify_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
@@ -581,18 +581,19 @@ def test_task_lead_tolerated_routes_to_cleanup() -> None:
     assert m.var_mutations == {}
 
 
-def test_task_lead_normal_return_does_not_route_to_verify() -> None:
+def test_task_lead_normal_return_advances_to_verify() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["task-lead"].rules
-    # A normal "more tasks remain" return loops back to task-lead, untouched by the
-    # verify_tolerated rule.
+    # task-lead implements the whole plan in one entry; a normal (non-deviation,
+    # non-tolerated) return advances to the verify gate. There is no per-task
+    # self-loop — the implement loop lives inside the single entry.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
-        output={"status": "Success", "done": False, "deviation": False,
-                "verify_tolerated": False, "summary": "next"},
+        output={"status": "Success", "deviation": False,
+                "verify_tolerated": False, "summary": "plan done"},
     )
-    assert isinstance(m.action, Goto) and m.action.target == "task-lead"
+    assert isinstance(m.action, Continue)
 
 
 def test_verify_red_resumes_task_lead() -> None:

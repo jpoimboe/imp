@@ -126,7 +126,7 @@ phases:
     steps:
       - name: task-lead
         file: agents/task-lead.md
-        tier: medium
+        tier: high
         label: implementing
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
@@ -134,7 +134,6 @@ phases:
         rules:
           - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
-          - {if: {done: false},     goto: task-lead}
           - {else: true, continue: true}
 
       - name: verify

@@ -5,16 +5,17 @@ description: Implement-phase controller — pick the next task, dispatch impleme
 subagents: [implementer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
-  done: {type: bool}
   deviation: {type: bool}
   verify_tolerated: {type: bool}
   summary: {type: string}
 ---
 
-You are the task lead for one entry of the implement loop. The engine re-enters
-you fresh for each task and ends the loop when you report `done: true`. There is
-no task counter — ground "what's next" in current reality: the plan as it now
-reads, what is already committed, and progress notes.
+You are the task lead for the implement phase. The engine enters you fresh per
+plan; implement the plan to completion in this entry, then return. There is no
+task counter — ground "what's next" in current reality: the plan as it now
+reads, what is already committed, and progress notes. (A failing `verify` or
+`cleanup` gate resumes you with the same context to fix it; the whole-diff
+`review` re-enters you for a `task_gap` — see Step 0.)
 
 Read first, every entry:
 - The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`
@@ -40,7 +41,8 @@ progress.md. Two feedback sources resume you here:
 
 (Otherwise progress.md is your guide.)
 
-**Per entry:**
+**For each task in the plan, in order** (steps 1–6; on entry begin at the first
+unimplemented task, or the re-opened task from injected feedback):
 1. Pick the next unimplemented task from the plan (or the re-opened task from
    injected feedback).
 2. Dispatch the implementer with the **full task text + scene-setting context**
@@ -153,7 +155,7 @@ progress.md. Two feedback sources resume you here:
 
    **Keep `progress.md` bounded.** Record the current plan's per-task entries
    (task done + its commit subject + any deviation note) only while that plan is in
-   flight. When you return `done: true` for the plan, **collapse** it into a single
+   flight. When the plan is fully implemented and you return, **collapse** it into a single
    `## Completed plans` line — `- Plan <N>: <what landed> (<commit-sha>)` — and
    **drop the verbose per-task narrative** for that completed plan. One line per plan
    is the durable record; the in-flight per-task detail is transient working state.
@@ -170,8 +172,9 @@ progress.md. Two feedback sources resume you here:
    wrong (a task can't be done as written, an assumption is false), set
    `deviation: true` and return — the engine resumes plan-writer to revise this
    plan. Record why in progress.md first.
-7. Return: `done: true` only when the plan is fully implemented; otherwise
-   `done: false` (the engine re-enters you fresh for the next task).
+7. Loop back to step 1 for the next task. Return only when the plan is fully
+   implemented — every task committed — at which point the engine advances to the
+   `verify` gate.
 
 ## Verify triage — tolerated failures
 
@@ -200,9 +203,8 @@ never re-run a single test; this is pure judgment:
   reproduction**: it changes nothing about the merge — `finalize` surfaces it to a
   human before merge.
 - **A failure attributable to the diff** → fix it as usual (dispatch the
-  implementer, `git commit --fixup=HEAD`) and return `verify_tolerated: false`; set
-  `done` following the normal rule — `done: true` only if the plan is fully
-  implemented after the fix, `done: false` if tasks remain.
+  implementer, `git commit --fixup=HEAD`) and return `verify_tolerated: false`. The
+  engine re-runs `verify`.
 
 Emit `verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other
 return — a normal task entry, a real-regression fix, a deviation — emit
@@ -220,7 +222,7 @@ context window, you must **re-pack the full context into the new
 `task_description`** — the original task + your answer + what the subagent's
 `report` surfaced (and, if the report is thin, a `query_events` peek at the
 subagent's events, logged under `agent_id=sub:<…>`). The next subagent inherits
-*only* what you write. Before returning `done: true`, load
+*only* what you write. Before returning at the end of the plan, load
 verification-before-completion and confirm the plan's tasks are actually done.
 
 ---
