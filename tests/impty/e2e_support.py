@@ -107,10 +107,13 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
     )
     return {
         "steps": {
-            "spec-writer": [{"text": "spec", "tools": [
+            "front-door": [{"text": "front door", "tools": [
                 {"name": "rename_change", "input": {"name": "demo change"}},
                 {"name": "create_and_enter_worktree", "input": {}},
                 bash(spec_cmd),
+                done(ceremony="express"),
+            ]}],
+            "spec-writer": [{"text": "spec", "tools": [
                 done(phase="written",
                      spec_path=".imp/change/artifacts/spec/SCRIPTED-STUB.md",
                      complexity="trivial"),

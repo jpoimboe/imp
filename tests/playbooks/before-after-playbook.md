@@ -38,7 +38,7 @@ are two git trees you check out side by side.
 
 ```bash
 REPO=$(git rev-parse --show-toplevel)
-ID=2026-06-11-9k6zii                 # the Change id (see `imp status --all`)
+ID=2026-06-11-9k6zii                 # the Change id (see `imp ls --all`)
 BR=imp/$ID                           # the Change's branch
 BASE=$(python3 -c "import json;print(json.load(open('$REPO/.imp/worktrees/$ID/.imp/change/change.json'))['base_branch'])" 2>/dev/null || echo master)
 
@@ -70,7 +70,7 @@ git -C "$AFTER" log "$MB"..HEAD --oneline       # the feat: commits name the sur
 ```
 
 Walk the diff and write down every **user-visible** surface it touches — the things
-a person reads on screen. Typical imp surfaces: `imp status` rows, `imp resume`
+a person reads on screen. Typical imp surfaces: `imp ls` rows, `imp resume`
 resolution (picker / nothing / ambiguous / gone), run headers, the rename line, the
 `wait_for_user` prompt, pause / merge-blocked lines, the transcript (phase / agent /
 prose / tool-summary / quiet steps), error messages, colours. Ignore pure-internal

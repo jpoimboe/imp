@@ -232,6 +232,10 @@ def render_question_block(text: str, width: int, depth: int, color: bool,
     return out or [indent]
 
 
+def chrome_suppressed(node: Any) -> bool:
+    return getattr(node, "chrome", None) == "none"
+
+
 def quiet_step_is_silent(node: nv.StepNode) -> bool:
     """A quiet step stays hidden on the happy path (open, a clean linear continue, or
     a silent routing goto) and surfaces its full block only on a non-linear outcome
@@ -460,11 +464,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # The phase start line is surrounded by blank lines: the blank ABOVE comes
         # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
         # priming the children walk so the first step gets a lead-in blank.
-        yield header_line(node, depth=depth, color=color, gutters=gutters)
+        suppress = chrome_suppressed(node)
+        if not suppress:
+            yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
                                     prime=True, live_viewer=live_viewer)
-        if node.closed and nv.phase_elapsed(node) is not None:
+        if not suppress and node.closed and nv.phase_elapsed(node) is not None:
             # Blank ABOVE the phase-complete line (it's surrounded too); the blank
             # BELOW comes from the root walk (spaces_after(PhaseNode)).
             yield _gutter_indent(depth, gutters, color)
@@ -481,13 +487,17 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # indenting a further level and burying the agent's words. Phases no longer
         # indent their steps either — the transcript is flat at column 0; subagent
         # folds add their own level + gutter internally. (design: aligned indent)
-        yield header_line(node, depth=depth, color=color, gutters=gutters)
+        suppress = chrome_suppressed(node)
+        if not suppress:
+            yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
         # speaker label and the speech don't bunch (design: §5.4 air). Priming the
         # children walk (rather than emitting the blank here) means a first child
         # that ALSO wants a blank above — an error — gets a single separator, not a
         # doubled one.
-        yield from _render_children(node.children, depth=depth, full=full,
+        children = ([c for c in node.children if not isinstance(c, nv.BreadcrumbLine)]
+                    if suppress else node.children)
+        yield from _render_children(children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
                                     prime=True, live_viewer=live_viewer)
         if full and node.agent_output:

@@ -119,3 +119,39 @@ def test_cmd_status_named_row_skips_events_load(
     monkeypatch.setattr(m, "_load_events_for_id", boom)
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0
+
+
+def test_cmd_status_lists_saved_under_backlog(tmp_path: Path, capsys) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Live", change_id="live1", base_branch="main")
+    ch = Change.create(tmp_path, title="Saved one", change_id="saved1",
+                       base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "saved"
+    st.save(ch.state_dir)
+
+    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Backlog" in out                                # headed section
+    assert "live1" in out and "saved1" in out
+    # The saved row sits under the Backlog heading, after the in-progress live row.
+    assert out.index("live1") < out.index("Backlog") < out.index("saved1")
+    # A saved change never appears in the in-progress section.
+    assert "saved1" not in out[:out.index("Backlog")]
+
+
+def test_cmd_status_shows_raw_state_not_draft_label(tmp_path: Path, capsys) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="Draftish", change_id="d1",
+                             base_branch="main")     # un-materialized
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
+    assert "paused" in d1_line          # raw Status, not the old display-only label
+    assert "draft" not in d1_line

@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.prompts import build_context, render_prompt
+from imp.assets import bundled_workflow_dir
+from imp.engine.state import JsonlEventLog
+
 AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 
 # Subagents (non-interactive, dispatched via `task`): the contract under test.
@@ -481,3 +485,48 @@ def test_no_agent_prompt_mentions_breakage_or_bypass_gate() -> None:
         text = md.read_text().lower()
         assert "breakage" not in text, md.name
         assert "bypass gate" not in text, md.name
+
+
+def test_spec_writer_recognizes_front_door_handoff() -> None:
+    body = _read("spec-writer.md")
+    # The handoff opening and its adopt-with-light-review section are named.
+    assert "Adopt the spec drafted with the user and finalize it:" in body
+    assert "Front-door handoff" in body
+    # head_changed is re-derived from the two persisted heads, not the tool return.
+    assert "change.cur_base_head" in body
+    assert "change.orig_base_head" in body
+
+
+def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> None:
+    body = _read("spec-writer.md")
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    moved = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc",
+        cur_base_head="NEW", orig_base_head="OLD",
+        project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp")).lower()
+    # Key on a phrase unique to the handoff true-branch — NOT "reconcile any
+    # drift", which also appears (line-wrapped) in spec-writer's unrelated
+    # build-gate block and would make this assertion brittle to reflow.
+    assert "the base branch advanced since the draft started" in moved   # head_changed=true
+    assert "adopt near-silently" not in moved
+
+    same = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc",
+        cur_base_head="SAME", orig_base_head="SAME",
+        project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp")).lower()
+    assert "adopt near-silently" in same           # head_changed=false branch
+    assert "the base branch advanced since the draft started" not in same
+
+    headless_moved = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc",
+        cur_base_head="NEW", orig_base_head="OLD",
+        non_interactive=True,
+        project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp")).lower()
+    assert "the base branch advanced since the draft started" in headless_moved
+    assert "do **not** call `wait_for_user`" in headless_moved

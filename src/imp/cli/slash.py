@@ -54,6 +54,55 @@ def handle_slash_line(
         # to resume), it is a no-op that re-prompts rather than a skill lookup.
         output_fn("/continue resumes a paused run; there is nothing to resume here.")
         return REPROMPT
+    if cmd == "ls":
+        import argparse
+
+        from imp.cli.main import _cmd_status
+        show_all = args in ("-a", "--all", "all")
+        _cmd_status(argparse.Namespace(all=show_all), change.control_root)
+        return REPROMPT
+    if cmd == "search":
+        if not args:
+            output_fn("Usage: /search <query>")
+            return REPROMPT
+        from imp.engine.archive import read as archive_read
+        hits = archive_read.search_archive(change.control_root, args)
+        if not hits:
+            output_fn(f"No archived changes match {args!r}.")
+        else:
+            for change_id, title, status, _created in hits:
+                output_fn(f"  {change_id}  {title or '(untitled)'}  [{status or '-'}]")
+        return REPROMPT
+    if cmd == "abandon":
+        return "/abandon"
+    if cmd == "save":
+        return "/save"
+    if cmd == "resume":
+        if not args:
+            output_fn("Usage: /resume <id|query>")
+            return REPROMPT
+        from imp.cli.main import _change_home, _iter_change_ids
+        from imp.engine.archive import read as archive_read
+        from imp.engine.archive import record, records_root
+        control = change.control_root
+        matches = [cid for cid in _iter_change_ids(control) if args in cid]
+        if len(matches) != 1:
+            if not matches:
+                output_fn(f"No change matches {args!r}.")
+            else:
+                output_fn(f"{args!r} is ambiguous: {', '.join(matches)}")
+            return REPROMPT
+        target = matches[0]
+        if _change_home(control, target).exists():
+            output_fn(f"{target} is live; continue it with `imp resume {target}`.")
+            return REPROMPT
+        rec = record.read_record(records_root(control), target)
+        if rec is None or not rec.get("resumable"):
+            output_fn(f"{target} is not resumable.")
+            return REPROMPT
+        archive_read.rehydrate_change(control, target)
+        output_fn(f"Rehydrated {target}; continue it with `imp resume {target}`.")
+        return REPROMPT
 
     try:
         body = load_skill_body(change.workflow_dir / "skills", cmd)
@@ -84,6 +133,11 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
     out("  /continue          Resume a paused run (at the post-interrupt prompt)")
+    out("  /ls [-a]           List your changes (-a adds completed/abandoned)")
+    out("  /search <query>    Search archived changes by title or id")
+    out("  /save              Save this conversation to your Backlog")
+    out("  /abandon           Abandon the current change")
+    out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
@@ -219,7 +273,7 @@ async def ask_line_with_slash(
                     if result is REPROMPT:
                         print("")  # one blank between slash output and the reprompt
                         continue
-                    assert isinstance(result, str)  # handle_slash_line returns str (skill body)
+                    assert isinstance(result, str)  # skill body or a literal command like /abandon
                     return result
             finally:
                 # Flush deferred live-driver blocks exactly once on solicit exit

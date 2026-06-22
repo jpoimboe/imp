@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -42,7 +43,12 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, recovery, worktree
-from imp.engine.abandon import tear_down_change
+from imp.engine.abandon import (
+    archive_conversation,
+    discard_conversation,
+    save_to_backlog,
+    tear_down_change,
+)
 from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
@@ -404,6 +410,71 @@ def _handle_terminal_outcome(
     return 1
 
 
+def _had_exchange(log: Any) -> bool:
+    """True if the user contributed at least one message to a conversation."""
+    events = list(log.read())
+    waited = {
+        ev.get("payload", {}).get("id")
+        for ev in events
+        if ev.get("type") == "tool_call"
+        and ev.get("payload", {}).get("name") == "wait_for_user"
+        and ev.get("payload", {}).get("id") is not None
+    }
+    for ev in events:
+        etype = ev.get("type")
+        if etype in ("opening_intent", "user_message", "user_interjected"):
+            return True
+        if etype == "tool_result" and ev.get("payload", {}).get("id") in waited:
+            return True
+    return False
+
+
+async def _apply_disposition_locked(
+    fn: Callable[[Change], None], change: Change, *,
+    attempts: int = 100, delay: float = 0.1,
+) -> None:
+    """Apply a lock-taking disposition with retry while the daemon still holds the lock."""
+    for _ in range(attempts - 1):
+        try:
+            await anyio.to_thread.run_sync(fn, change)
+            return
+        except LockHeld:
+            await anyio.sleep(delay)
+    await anyio.to_thread.run_sync(fn, change)
+
+
+async def _maybe_apply_leave_disposition(
+    change: Change, leave_mode: str | None, leave_state: dict[str, str],
+) -> int | None:
+    """Finalize a left phase-0 conversation. Returns 0 when applied, None to defer."""
+    if leave_mode is None or leave_state.get("intent") == "abandon":
+        return None
+    try:
+        change = Change.load(change.control_root, change.id)
+    except (LoadError, LoadErrors):
+        return None  # home gone — defer to the normal path
+    if change.materialized:
+        return None  # a real in-flight change, not a phase-0 leave
+    explicit_save = leave_state.get("intent") == "save"
+    try:
+        if not explicit_save and not _had_exchange(change.event_log()):
+            await _apply_disposition_locked(discard_conversation, change)
+            return 0
+        if explicit_save or leave_mode == "new":
+            await _apply_disposition_locked(save_to_backlog, change)
+            print(f"imp: saved '{change.title or change.id}' to your Backlog "
+                  f"(resume with `imp resume {change.id}`)")
+            return 0
+        await _apply_disposition_locked(archive_conversation, change)
+        print(f"imp: conversation saved — resume with `imp resume {change.id}` "
+              f"or find it later with `imp search`")
+        return 0
+    except LockHeld:
+        print(f"imp: '{change.id}' is still busy and was left running "
+              f"(resume with `imp resume {change.id}`)", file=sys.stderr)
+        return None
+
+
 def _session_exit_code(change: Change, coord: Any) -> int:
     result = infer_session_result(change)
     outcome = _handle_terminal_outcome(change, result, coord)
@@ -579,7 +650,8 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
         resume: bool = False, from_target: str | None = None,
-        opening_intent: str | None = None) -> int:
+        opening_intent: str | None = None,
+        leave_mode: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
@@ -587,6 +659,7 @@ async def _run_tui_session(
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume, from_target=from_target,
         opening_intent=opening_intent)
+    leave_state: dict[str, str] = {}
 
     async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)
@@ -600,7 +673,7 @@ async def _run_tui_session(
                     with contextlib.suppress(TimeoutError):
                         await run_terminal_client(
                             attach=attach, driver=app, coord=coord, solicit=_solicit,
-                            change_id=change.id)
+                            change_id=change.id, leave_state=leave_state)
                 finally:
                     app.exit()
 
@@ -609,6 +682,9 @@ async def _run_tui_session(
             tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
+    disposition_rc = await _maybe_apply_leave_disposition(change, leave_mode, leave_state)
+    if disposition_rc is not None:
+        return disposition_rc
     return _session_exit_code(change, coord)
 
 
@@ -680,7 +756,7 @@ async def _run_fresh_session(
         seed_opening=seed_opening, status=status)
 
 
-async def _async_cmd_new(args: argparse.Namespace) -> int:
+async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -789,7 +865,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(_run_header_line(
             change.id, change.title, "new", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, seed_opening=opening_text,
-                                      opening_intent=opening_intent)
+                                      opening_intent=opening_intent,
+                                      leave_mode=leave_mode)
 
     print(_run_header_line(
         change.id, change.title, "new", color=should_use_color(sys.stdout)))
@@ -803,11 +880,15 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     return await run_session_client(
         change, driver=driver, coord=coord, solicit=solicit,
         seed_opening=opening_text, status=status,
-        opening_intent=opening_intent)
+        opening_intent=opening_intent, leave_mode=leave_mode)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    return anyio.run(_async_cmd_new, args)
+    return anyio.run(functools.partial(_async_cmd_new, leave_mode="new"), args)
+
+
+def _cmd_chat(args: argparse.Namespace) -> int:
+    return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
 async def _async_cmd_run(args: argparse.Namespace) -> int:
@@ -906,13 +987,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     rc = await _maybe_resume_backlog(args, control, change_id)
     if rc is not None:
         return rc
-    try:
-        change = Change.load(control, change_id)
-    except LayoutMismatch as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
-    except (LoadError, LoadErrors):
-        return _resume_gone(control, change_id)
+    loaded = _load_or_rehydrate(control, change_id)
+    if isinstance(loaded, int):
+        return loaded
+    change = loaded
     state = State.load(change.state_dir)
     # `running` is allowed through: the status may be stale if a previous run
     # crashed without updating it. The daemon resolves the ambiguity at connect time.
@@ -1569,9 +1647,34 @@ def _resume_gone(control: Path, change_id: str) -> int:
     return 2
 
 
+def _rehydrate_resumable(control: Path, change_id: str) -> Change | None:
+    from imp.engine.archive import record, records_root
+    rec = record.read_record(records_root(control), change_id)
+    if rec is None or not rec.get("resumable"):
+        return None
+    try:
+        archive_read.rehydrate_change(control, change_id)
+        return Change.load(control, change_id)
+    except (FileExistsError, LoadError, LoadErrors):
+        return None
+
+
+def _load_or_rehydrate(control: Path, change_id: str) -> Change | int:
+    try:
+        return Change.load(control, change_id)
+    except LayoutMismatch as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    except (LoadError, LoadErrors):
+        change = _rehydrate_resumable(control, change_id)
+        if change is None:
+            return _resume_gone(control, change_id)
+        return change
+
+
 # Spec §10: in-flight statuses; completed Changes live in the archive.
 _INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
-RESUMABLE = ("paused", "errored", "merge_blocked", "draft")
+RESUMABLE = ("paused", "errored", "merge_blocked", "draft", "saved")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1671,15 +1774,35 @@ def _status_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
     for change_id in _list_change_homes(control):
         cdir = _change_home(control, change_id)
-        state_json = (cdir / "state" / "state.json").read_bytes()
-        change_json = (cdir / "change.json").read_bytes()
+        try:
+            state_json = (cdir / "state" / "state.json").read_bytes()
+            change_json = (cdir / "change.json").read_bytes()
+        except FileNotFoundError:
+            continue
         last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
             continue
-        status = _draft_label(_effective_status(row[1], cdir), change_json)
+        status = _effective_status(row[1], cdir)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _saved_rows(control: Path) -> list[_Row]:
+    rows: list[_Row] = []
+    for change_id in _list_change_homes(control):
+        cdir = _change_home(control, change_id)
+        try:
+            state_json = (cdir / "state" / "state.json").read_bytes()
+            change_json = (cdir / "change.json").read_bytes()
+        except FileNotFoundError:
+            continue
+        last = _last_event_iso(cdir / "events.jsonl") or ""
+        row = _status_row(change_id, state_json, change_json, last)
+        if row is None or row[1] != "saved":
             continue
         rows.append(row)
     return rows
@@ -1703,6 +1826,7 @@ def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
 
 def _resumable_rows(control: Path) -> list[_Row]:
     rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
+    rows += _saved_rows(control)
     return _sort_rows_newest_first(rows)
 
 
@@ -1720,7 +1844,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past change{plural} — see `imp status --all`)",
+            f"({past} past change{plural} — see `imp ls --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 
@@ -1987,7 +2111,8 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         return 0
     now = datetime.now(UTC)
     inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
+    backlog_rows = _sort_rows_newest_first(
+        _backlog_rows(control) + _saved_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not backlog_rows and not past:
         print(_NO_CHANGES_MESSAGE)
@@ -2002,10 +2127,13 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         print(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
-    for r in backlog_rows:
-        print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w))
+    if backlog_rows:
+        print()
+        print(pal.ansi("Backlog", "dim", enabled=color))
+        for r in backlog_rows:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+                last_iso=r[3], now=now, color=color, name_width=name_w))
     if past:
         if inflight or backlog_rows:
             print()
@@ -2013,6 +2141,17 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
             print(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
                 last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
+    return 0
+
+
+def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
+    control = _control if _control is not None else _control_root()
+    hits = archive_read.search_archive(control, args.query)
+    if not hits:
+        print(f"No archived changes match {args.query!r}.")
+        return 0
+    for change_id, title, status, _created in hits:
+        print(f"{change_id}  {title or '(untitled)'}  [{status or '-'}]")
     return 0
 
 
@@ -2038,9 +2177,10 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("new", "Start a new Change (optional opening message; opens with the spec-writer)."),
+    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
+    ("new", "Scope a new change in conversation (optional opening message)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
-    ("status", "List in-flight Changes (-a also shows completed and abandoned)."),
+    ("ls", "List your changes (-a also shows completed and abandoned)."),
     ("log", "Show a Change's narrative as plain text."),
     ("abandon", "Tear down a Change's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
@@ -2133,6 +2273,23 @@ def _build_parser() -> argparse.ArgumentParser:
                             "committed imp/workflows/NAME fork overrides it.")
     p_new.set_defaults(func=_cmd_new)
 
+    p_chat = sub.add_parser(
+        "chat",
+        help="Open a conversation with imp (ask questions, scout work, or "
+             "scope a change).")
+    p_chat.add_argument(
+        "opening", nargs="?", metavar="MESSAGE",
+        help="Optional opening message; omit to start with an interactive prompt.")
+    p_chat.add_argument("--non-interactive", action="store_true",
+                        help="Headless: no live prompt; supply the reply via --message.")
+    p_chat.add_argument("--message", metavar="TEXT", default=None,
+                        help="Headless reply consumed by the first wait_for_user; "
+                             "requires --non-interactive.")
+    p_chat.add_argument("--tui", action="store_true",
+                        help="Render the conversation in a full-screen, scrollable "
+                             "viewer; falls back to streaming on a non-tty.")
+    p_chat.set_defaults(func=_cmd_chat)
+
     p_run = sub.add_parser(
         "run", help="Run a playbook by name (or pick one interactively).")
     p_run.add_argument(
@@ -2221,20 +2378,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Which artifact to print (default: a detail card).")
     p_show.set_defaults(func=_cmd_show)
 
-    p_status = sub.add_parser(
-        "status",
-        help="List in-flight Changes (use -a for completed and abandoned).",
+    p_ls = sub.add_parser(
+        "ls", aliases=["list", "status"],
+        help="List your changes (use -a for completed and abandoned).",
         description=(
-            "List in-flight Changes as a table (id, status, step, last "
-            "activity, title). Use -a/--all to also show completed and "
-            "abandoned Changes."
+            "List your in-progress changes and the Backlog (saved-for-later "
+            "changes). Use -a/--all to also show completed and abandoned changes."
         ),
     )
-    p_status.add_argument(
+    p_ls.add_argument(
         "-a", "--all", action="store_true",
-        help="Also list completed and abandoned Changes (default: in-flight only).",
+        help="Also list completed and abandoned changes "
+             "(default: in-progress + Backlog).",
     )
-    p_status.set_defaults(func=_cmd_status)
+    p_ls.set_defaults(func=_cmd_status)
+
+    p_search = sub.add_parser(
+        "search",
+        help="Search archived changes by title or id.",
+        description=(
+            "Search the archive (completed, abandoned, and left conversations) "
+            "for changes whose title or id contains the query substring."),
+    )
+    p_search.add_argument(
+        "query", metavar="QUERY",
+        help="Substring matched case-insensitively against a change's title or id.")
+    p_search.set_defaults(func=_cmd_search)
 
     p_config = sub.add_parser(
         "config",

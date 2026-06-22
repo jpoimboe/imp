@@ -2,7 +2,7 @@
 
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
 "attach" (the opening handshake), "input" (a gate reply), or "control" (an
-interrupt/detach/abandon action). The daemon -> client frame is "event", wrapping
+interrupt/detach/abandon/save action). The daemon -> client frame is "event", wrapping
 one curated engine event. Encoders return a line WITHOUT a trailing newline; the
 caller frames it (matching remote/daemon/protocol.py:make_hello)."""
 from __future__ import annotations
@@ -16,7 +16,8 @@ _MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently det
 CONTROL_INTERRUPT = "interrupt"
 CONTROL_DETACH = "detach"
 CONTROL_ABANDON = "abandon"
-_CONTROL_ACTIONS = frozenset({CONTROL_INTERRUPT, CONTROL_DETACH, CONTROL_ABANDON})
+CONTROL_SAVE = "save"
+_CONTROL_ACTIONS = frozenset({CONTROL_INTERRUPT, CONTROL_DETACH, CONTROL_ABANDON, CONTROL_SAVE})
 
 
 @dataclass(frozen=True, slots=True)

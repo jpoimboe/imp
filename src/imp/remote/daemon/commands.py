@@ -59,16 +59,36 @@ class Replay:
 
 
 @dataclass(frozen=True)
+class Search:
+    query: str
+
+
+@dataclass(frozen=True)
+class Resume:
+    token: str
+
+
+@dataclass(frozen=True)
+class Save:
+    change_id: str | None
+
+
+@dataclass(frozen=True)
 class ListResult:
     changes: list[ChangeInfo]
 
 
 Command = (
     Reply | Create | Abandon | ListChanges | Help | Notice |
-    Subscribe | Unsubscribe | Replay)
+    Subscribe | Unsubscribe | Replay | Search | Resume | Save)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
+SEARCH_USAGE = "Usage: /search <query>"
+RESUME_USAGE = "Usage: /resume <id or search text>"
+SAVE_USAGE = (
+    "To save a conversation, reply to one of its messages or use @handle "
+    "(e.g. /save @ab12cd).")
 ABANDON_USAGE = (
     "To abandon a Change, reply to one of its messages or use @handle "
     "(e.g. /abandon @ab12cd).")
@@ -78,11 +98,15 @@ ROUTE_HINT = (
 HELP_TEXT = (
     "Commands:\n"
     "/list — show changes (● = subscribed)\n"
+    "/ls — alias for /list\n"
     "/new <prompt> — start a Change\n"
     "/subscribe (reply or @handle) — follow a Change's narrative\n"
     "/unsubscribe — mute narrative (lifecycle alerts stay on)\n"
     "/replay [n] (reply, @handle, or subscribed) — re-send last n messages\n"
     "/abandon (reply or @handle) — stop a Change\n"
+    "/search <query> — search archived conversations by title or id\n"
+    "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
+    "/save (reply or @handle) — save a conversation to your Backlog\n"
     "/help — this message\n"
     "Reply to a Change's message (or @handle) to answer it.")
 
@@ -112,7 +136,7 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
         word, _, rest = stripped.partition(" ")
         rest = rest.strip()
         verb = word[1:].lower()
-        if verb == "list":
+        if verb in ("list", "ls"):
             return ListChanges()
         if verb == "help":
             return Help()
@@ -130,6 +154,12 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
             n = _parse_replay_n(rest)
             change_id = _resolve_target(rest, reply_to, resolve_lookup, "replay")
             return Replay(change_id, n)
+        if verb == "search":
+            return Search(rest) if rest else Notice(SEARCH_USAGE)
+        if verb == "resume":
+            return Resume(rest) if rest else Notice(RESUME_USAGE)
+        if verb == "save":
+            return Save(_resolve_target(rest, reply_to, resolve_lookup, "save"))
         return Notice(UNKNOWN_COMMAND)
     change_id, body = resolve_lookup(text, reply_to)
     return Reply(change_id, body) if change_id is not None else Notice(ROUTE_HINT)

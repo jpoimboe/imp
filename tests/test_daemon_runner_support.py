@@ -250,3 +250,225 @@ async def test_reply_to_unknown_change_surfaces_a_user_facing_notice() -> None:
     assert isinstance(notice, Notice)
     assert "2026-06-17-gone" in notice.text
     assert "unknown or pruned" in notice.text
+
+
+@pytest.mark.anyio
+async def test_search_hits_render_as_one_notice() -> None:
+    from imp.remote.daemon.commands import Notice, Search
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    received_queries: list[str] = []
+
+    def fake_search(q: str) -> list[tuple[str, str, str, str]]:
+        received_queries.append(q)
+        return [("2026-06-17-fff", "Dark mode", "saved", "2026-06-17")]
+
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        search=fake_search,
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Search("dark"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "@2026-06-17-fff" in notice.text
+    assert "Dark mode" in notice.text
+    assert "[saved]" in notice.text
+    assert received_queries == ["dark"]
+
+    # Also verify multi-hit path joins results with newlines
+    control2 = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        search=lambda _q: [
+            ("2026-06-17-aaa", "First", "saved", "2026-06-17"),
+            ("2026-06-18-bbb", "Second", "running", "2026-06-18"),
+        ],
+    )
+    responses2: queue.Queue = queue.Queue()
+    await runner._handle_command(Search("x"), control2, responses2)
+    notice2 = responses2.get_nowait()
+    assert isinstance(notice2, Notice)
+    assert "@2026-06-17-aaa" in notice2.text
+    assert "@2026-06-18-bbb" in notice2.text
+    assert "\n" in notice2.text
+
+
+@pytest.mark.anyio
+async def test_resume_relays_the_control_message_as_a_notice() -> None:
+    from imp.remote.daemon.commands import Notice, Resume
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        resume=lambda token: f"Resuming {token}",
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Resume("abc"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == "Resuming abc"
+
+
+@pytest.mark.anyio
+async def test_save_calls_control_save_and_confirms() -> None:
+    from imp.remote.daemon.commands import Notice, Save
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    saved: list[str] = []
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        save=lambda cid: saved.append(cid),
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Save("2026-06-17-zzz"), control, responses)
+    assert saved == ["2026-06-17-zzz"]
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "Backlog" in notice.text
+
+
+@pytest.mark.anyio
+async def test_save_untargeted_with_focus_uses_the_focused_change() -> None:
+    from imp.remote.daemon.commands import Save
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    saved: list[str] = []
+    focus = Focus()
+    focus.focus_on("2026-06-17-foc")
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=focus,
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        save=lambda cid: saved.append(cid),
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Save(None), control, responses)
+    assert saved == ["2026-06-17-foc"]
+
+
+@pytest.mark.anyio
+async def test_save_unreachable_session_surfaces_a_notice() -> None:
+    from imp.remote.daemon.commands import Notice, Save
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    def boom(_cid: str) -> None:
+        raise TimeoutError("socket wedged")
+
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        save=boom,
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Save("2026-06-17-zzz"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "Couldn't reach" in notice.text
+    assert "Backlog" not in notice.text
+
+
+@pytest.mark.anyio
+async def test_save_untargeted_with_no_focus_returns_usage_notice() -> None:
+    from imp.remote.daemon.commands import SAVE_USAGE, Notice, Save
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    saved: list[str] = []
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),  # no focused change
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        save=lambda cid: saved.append(cid),
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Save(None), control, responses)
+    assert saved == []  # save was not called
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == SAVE_USAGE
+
+
+@pytest.mark.anyio
+async def test_search_no_hits_reports_no_match() -> None:
+    from imp.remote.daemon.commands import Notice, Search
+    from imp.remote.daemon.control import ControlPlane
+    from imp.remote.daemon.focus import Focus
+
+    async def deliver(_cid: str, _text: str) -> None:
+        return None
+
+    control = ControlPlane(
+        deliver=deliver,
+        create=lambda _p: None,
+        abandon=lambda _c: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda _c: None,
+        recent_narrative=lambda _c, _n: [],
+        search=lambda _q: [],
+    )
+    responses: queue.Queue = queue.Queue()
+    await runner._handle_command(Search("nope"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "'nope'" in notice.text

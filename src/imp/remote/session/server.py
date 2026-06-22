@@ -9,7 +9,12 @@ from typing import Any
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
-from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_DETACH, CONTROL_INTERRUPT
+from imp.remote.session.protocol import (
+    CONTROL_ABANDON,
+    CONTROL_DETACH,
+    CONTROL_INTERRUPT,
+    CONTROL_SAVE,
+)
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
 
 _log = logging.getLogger("imp.remote.session.server")
@@ -39,7 +44,9 @@ class SessionServer:
         self._on_first_attach = on_first_attach
         self._first_attach_fired: bool = False
         self.abandoned = False
+        self.saved = False
         self._abandon_requested = False
+        self._save_requested = False
         self._serve_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         self._last_gate_event: dict[str, Any] | None = None
@@ -193,6 +200,13 @@ class SessionServer:
             with contextlib.suppress(anyio.WouldBlock):
                 self._control_send.send_nowait(action)
             return
+        if action == CONTROL_SAVE:
+            # Same guaranteed-delivery pattern as abandon: flag is always set;
+            # enqueue is best-effort so the loop wakes immediately when possible.
+            self._save_requested = True
+            with contextlib.suppress(anyio.WouldBlock):
+                self._control_send.send_nowait(action)
+            return
         try:
             self._control_send.send_nowait(action)
         except anyio.WouldBlock:
@@ -203,6 +217,9 @@ class SessionServer:
         async for action in self._control_recv:
             if self._abandon_requested:
                 await self._dispatch_control(CONTROL_ABANDON)
+                return
+            if self._save_requested:
+                await self._dispatch_control(CONTROL_SAVE)
                 return
             await self._dispatch_control(action)
 
@@ -217,4 +234,9 @@ class SessionServer:
                 self._on_abandon()
             if self._serve_scope is None:
                 raise RuntimeError("abandon dispatched outside serve()")
+            self._serve_scope.cancel()
+        elif action == CONTROL_SAVE:
+            self.saved = True
+            if self._serve_scope is None:
+                raise RuntimeError("save dispatched outside serve()")
             self._serve_scope.cancel()

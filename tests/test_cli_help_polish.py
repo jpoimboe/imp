@@ -18,10 +18,17 @@ def test_abandon_documents_token_positional() -> None:
     assert "which Change to abandon" in help_text
 
 
-def test_status_has_description() -> None:
-    sp = _subparser("status")
-    assert "in-flight Changes" in sp.format_help()
+def test_ls_has_description() -> None:
+    sp = _subparser("ls")
+    assert "Backlog" in sp.format_help()
     assert sp.description is not None
+
+
+def test_ls_aliases_resolve_to_the_same_handler() -> None:
+    from imp.cli.main import _build_parser, _cmd_status
+    parser = _build_parser()
+    for name in ("ls", "list", "status"):
+        assert parser.parse_args([name]).func is _cmd_status
 
 
 def test_config_has_description() -> None:

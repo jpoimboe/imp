@@ -50,6 +50,19 @@ def completed_rows(
         conn.close()
 
 
+def search_archive(
+    control_root: Path, query: str,
+) -> list[tuple[str, str, str, str]]:
+    db = index_path(control_root)
+    if not db.exists():
+        return []
+    conn = index.connect(db)
+    try:
+        return index.search(conn, query)
+    finally:
+        conn.close()
+
+
 def read_events(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
     if rec is None:
@@ -68,6 +81,9 @@ def read_change_json(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
     if rec is None:
         return None
+    meta = rec.get("change_meta")
+    if meta is not None:
+        return json.dumps(meta).encode("utf-8")
     return json.dumps({
         "id": rec["id"], "title": rec["title"], "base_branch": rec["base"],
         "created_at": rec["created_at"], "depends_on": rec["depends_on"],
@@ -109,6 +125,23 @@ def newest_plan_name(control_root: Path, change_id: str) -> str | None:
         if pick:
             return pick
     return None
+
+
+def rehydrate_change(control_root: Path, change_id: str) -> Path:
+    """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
+    change_dir = control_root / ".imp" / "changes" / change_id
+    if change_dir.exists():
+        raise FileExistsError(f"live home for {change_id!r} already exists")
+    change_json = read_change_json(control_root, change_id)
+    if change_json is None:
+        raise FileNotFoundError(f"no archived record for {change_id!r}")
+    state_json = read_state_json(control_root, change_id)
+    events = read_events(control_root, change_id)
+    (change_dir / "state").mkdir(parents=True)
+    (change_dir / "change.json").write_bytes(change_json)
+    (change_dir / "state" / "state.json").write_bytes(state_json or b"{}")
+    (change_dir / "events.jsonl").write_bytes(events or b"")
+    return change_dir
 
 
 def last_event_iso(control_root: Path, change_id: str) -> str | None:

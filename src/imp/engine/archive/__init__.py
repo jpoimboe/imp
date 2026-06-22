@@ -42,15 +42,16 @@ def _parse_events(raw: bytes) -> list[dict[str, Any]]:
 def archive_change(
     control_root: Path, change_id: str, *,
     events_path: Path, change_json_path: Path, state_json_path: Path,
+    resumable: bool = False,
 ) -> None:
-    """Finalize one completed/abandoned Change into the archive. Idempotent."""
+    """Finalize one completed/abandoned/left Change into the archive. Idempotent."""
     events_bytes = events_path.read_bytes() if events_path.exists() else b""
     store = LocalBlobStore(blobs_root(control_root))
     events_hash = store.put(events_bytes)
 
     change_meta = json.loads(change_json_path.read_text())
     final_state = json.loads(state_json_path.read_text())
-    rec = record.build_record(change_meta, final_state, events_hash)
+    rec = record.build_record(change_meta, final_state, events_hash, resumable=resumable)
     record.write_record(records_root(control_root), rec)
 
     conn = index.connect(index_path(control_root))

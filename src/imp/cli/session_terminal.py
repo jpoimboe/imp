@@ -34,6 +34,7 @@ async def run_terminal_client(
     coord: InterruptCoordinator,
     solicit: Callable[[str], Awaitable[str]],
     change_id: str = "",
+    leave_state: dict[str, str] | None = None,
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=1)
@@ -74,9 +75,16 @@ async def run_terminal_client(
                                     confirm = await solicit(
                                         f"abandon `{change_id}`? [y/N]")
                                     if confirm.strip().lower() in ("y", "yes"):
+                                        if leave_state is not None:
+                                            leave_state["intent"] = "abandon"
                                         await controls.abandon()
                                         return
                                     continue
+                                if reply.strip() == "/save":
+                                    if leave_state is not None:
+                                        leave_state["intent"] = "save"
+                                    coord.escalation_event.set()
+                                    return
                                 await client.send_input(reply)
                                 break
                     except EOFError:

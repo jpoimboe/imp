@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 import filelock
 
 Status = Literal[
-    "running", "paused", "completed", "errored", "merge_blocked", "abandoned"
+    "running", "paused", "saved", "completed", "errored", "merge_blocked",
+    "abandoned"
 ]
 
 

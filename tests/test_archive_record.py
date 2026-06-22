@@ -28,6 +28,8 @@ def test_build_record_maps_fields_from_change_and_state() -> None:
         "base": "main",
         "created_at": "2026-06-01T00:00:00+00:00",
         "depends_on": ["beta"],
+        "change_meta": _change_meta(),
+        "resumable": False,
         "final_state": _final_state(),
         "events_hash": "hash123",
     }
@@ -61,3 +63,11 @@ def test_list_record_ids(tmp_path: Path) -> None:
 
 def test_list_record_ids_missing_dir_returns_empty(tmp_path: Path) -> None:
     assert record.list_record_ids(tmp_path / "nope") == []
+
+
+def test_build_record_stores_full_meta_and_resumable_flag() -> None:
+    meta = {**_change_meta(), "materialized": False, "orig_base_head": "abc999"}
+    rec = record.build_record(meta, _final_state(), "h", resumable=True)
+    assert rec["resumable"] is True
+    assert rec["change_meta"] == meta            # whole change.json preserved
+    assert rec["change_meta"]["orig_base_head"] == "abc999"

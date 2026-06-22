@@ -26,7 +26,7 @@ async def test_nothing_to_resume_prints_hint(monkeypatch, tmp_path: Path, capsys
     assert rc == 0
     assert "Nothing to resume." in out
     assert "3 past changes" in out
-    assert "imp status --all" in out
+    assert "imp ls --all" in out
 
 
 @pytest.mark.anyio

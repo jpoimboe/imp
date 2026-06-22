@@ -1,6 +1,6 @@
 name: feature
 description: |
-  spec -> (plan -> implement*)* -> merge
+  front-door -> spec -> (plan -> implement*)* -> merge
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
@@ -28,6 +28,24 @@ defaults:
   max_tool_calls: 10000
 
 phases:
+  # ── front-door: phase 0, a bare conversation (chrome:none). It answers
+  # questions, scouts existing work, or scopes a build; on go-live it sets the
+  # ceremony and routes into the pipeline. express skips the spec beat entirely
+  # (the new edge); full enters spec-writer for adopt-with-light-review.
+  - name: front-door
+    chrome: none
+    steps:
+      - name: front-door
+        file: agents/front-door.md
+        tier: high
+        label: chatting
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: [".imp/changes/*/artifacts/spec/**", ".imp/changes/*/progress.md"], mode: allow}
+        rules:
+          - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
+          - {else: true, set: {fast_path: false}, goto: spec-writer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
+
   - name: spec
     steps:
       - name: spec-writer
@@ -38,13 +56,12 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: [".imp/changes/*/artifacts/spec/**", ".imp/changes/*/progress.md"], mode: allow}
         rules:
-          - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
+          - {else: true, continue: true}
 
       - name: spec-verify-commit
         quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: plan-writer}   # trivial fast path: skip spec-reviewer, enter planning
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 

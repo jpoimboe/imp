@@ -112,7 +112,8 @@ def test_new_tui_on_non_tty_warns_and_routes_to_session_client(
     called = {"n": 0}
 
     async def _fake_client(change, *, driver, coord, solicit,
-                           seed_opening=None, status=None, opening_intent=None) -> int:
+                           seed_opening=None, status=None, opening_intent=None,
+                           leave_mode=None) -> int:
         called["n"] += 1
         return 0
 
@@ -229,7 +230,9 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
             super().__init__(**kwargs)
             captured.append(self)
 
-    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
+    async def _fake_terminal_client(
+        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+    ) -> None:
         driver.on_event({"id": "1", "agent_id": None, "type": "change_created",
                          "payload": {"slug": "s", "title": "t"}})
 
@@ -252,7 +255,9 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
 
 @pytest.mark.anyio
 async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
-    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
+    async def _fake_terminal_client(
+        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+    ) -> None:
         await coord.signal_pause(reason="ctrl-c")     # sets should_pause + reason
 
     monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
@@ -275,7 +280,9 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
         async def solicit(self, change) -> str:
             return "the reply"
 
-    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
+    async def _fake_terminal_client(
+        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+    ) -> None:
         replies.append(await solicit("prompt?"))
 
     monkeypatch.setattr(m, "TuiApp", _SolicitApp)
@@ -303,7 +310,9 @@ async def test_run_tui_session_threads_resume_from_target_to_attach(monkeypatch)
         seen["from_target"] = from_target
         return lambda on_event: None
 
-    async def _fake_terminal_client(*, attach, driver, coord, solicit, change_id: str = "") -> None:
+    async def _fake_terminal_client(
+        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+    ) -> None:
         return None
 
     monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)

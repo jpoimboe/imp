@@ -80,3 +80,21 @@ def completed_rows(
         (cid, status or "", step or "-", last or "", title or "", created or "", None)
         for (cid, status, step, title, created, last) in rows
     ]
+
+
+def search(
+    conn: sqlite3.Connection, query: str,
+) -> list[tuple[str, str, str, str]]:
+    # Escape LIKE metacharacters so a `%`/`_`/`\` in the user's query matches
+    # literally instead of acting as a wildcard.
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{escaped}%"
+    rows = conn.execute(
+        "SELECT id, title, status, created_at FROM changes"
+        " WHERE id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
+        " ORDER BY created_at DESC, id",
+        (like, like)).fetchall()
+    return [
+        (cid, title or "", status or "", created or "")
+        for (cid, title, status, created) in rows
+    ]

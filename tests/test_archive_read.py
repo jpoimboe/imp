@@ -32,7 +32,8 @@ def _archive(control: Path, cid: str, status: str) -> bytes:
     change_json = control / f"{cid}-change.json"
     change_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["dep1"]}))
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["dep1"],
+        "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": status, "step": None, "merge_commit": "c0ffee"}))
@@ -125,3 +126,50 @@ def test_status_of_returns_status_from_record(tmp_path: Path) -> None:
 def test_status_of_returns_none_when_not_archived(tmp_path: Path) -> None:
     _git_init(tmp_path)
     assert status_of(tmp_path, "ghost") is None
+
+
+def test_read_change_json_prefers_stored_meta(tmp_path: Path) -> None:
+    from imp.engine import archive
+    from imp.engine.archive import read as archive_read
+
+    events = tmp_path / "events.jsonl"
+    events.write_text("")
+    change_json = tmp_path / "change.json"
+    change_json.write_text(json.dumps({
+        "id": "conv", "title": "Conv", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+        "project_root": str(tmp_path), "materialized": False,
+        "orig_base_head": "deadbeef", "layout_version": 2}))
+    state_json = tmp_path / "state.json"
+    state_json.write_text(json.dumps({"id": "conv", "status": "paused", "step": "front-door"}))
+
+    archive.archive_change(
+        tmp_path, "conv", events_path=events,
+        change_json_path=change_json, state_json_path=state_json, resumable=True)
+
+    raw = archive_read.read_change_json(tmp_path, "conv")
+    assert raw is not None
+    meta = json.loads(raw)
+    assert meta["materialized"] is False           # faithful: not hardcoded True
+    assert meta["orig_base_head"] == "deadbeef"    # preserved for the head_changed check
+    assert meta["layout_version"] == 2
+
+
+def test_read_change_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
+    from imp.engine.archive import record, records_root
+
+    legacy_rec = {
+        "id": "old", "title": "Old", "base": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+        "final_state": {"id": "old", "status": "completed"},
+        "events_hash": "abc",
+    }
+    record.write_record(records_root(tmp_path), legacy_rec)
+    raw = read_change_json(tmp_path, "old")
+    assert raw is not None
+    meta = json.loads(raw)
+    assert meta["id"] == "old"
+    assert meta["title"] == "Old"
+    assert meta["base_branch"] == "main"
+    assert meta["materialized"] is True
+    assert "change_meta" not in meta
