@@ -91,6 +91,7 @@ class PhaseNode:
     name: str
     children: list[Any] = field(default_factory=list)
     closed: bool = False
+    chrome: str | None = None
     collapsible = False
 
 
@@ -108,6 +109,7 @@ class StepNode:
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
     label: str | None = None           # step display label (step_started.payload.label)
+    chrome: str | None = None          # "none" → suppress this step's header
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     route_label: str | None = None     # route reason (rule label) of the entering rule
@@ -695,7 +697,7 @@ NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
 
-def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
+def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it
     to the workflow root, and make it the current scope. There are no
@@ -710,7 +712,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
         return
     if self._current_phase is not None:
         self._current_phase.closed = True   # let the live cursor pop the drained phase
-    phase = PhaseNode(name=name)
+    phase = PhaseNode(name=name, chrome=chrome)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
@@ -773,13 +775,14 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.agent_output = None
             existing.label = p.get("label")
             existing.command = p.get("command")
+            existing.chrome = p.get("chrome")
             existing.resumed = bool(p.get("resumed", False))
             existing.route_label = p.get("route_label")
             if existing is self._first_step:
                 _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
-    _ensure_phase(self, phase)
+    _ensure_phase(self, phase, p.get("chrome"))
     # interactive defaults False — it is re-sourced from the event stream (an
     # awaiting_user_input event marks the step interactive); step_started no
     # longer carries an interactive key.
@@ -788,6 +791,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     start_ts=event.get("timestamp"),
                     quiet=bool(p.get("quiet", False)),
                     label=p.get("label"),
+                    chrome=p.get("chrome"),
                     command=p.get("command"),
                     resumed=bool(p.get("resumed", False)),
                     route_label=p.get("route_label"))
