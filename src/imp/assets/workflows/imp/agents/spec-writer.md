@@ -29,6 +29,13 @@ How you open depends on your **opening message**:
   opening message). The intent is already in hand: go straight to
   **adopt-with-light-review** (see “Seeded with a draft spec” below). Do
   **not** open with a contentless “what do you want?” question.
+- **Front-door handoff** — the opening message is the adopt preamble
+  `Adopt the spec drafted with the user and finalize it:`. A complete draft spec
+  already exists on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md`,
+  written with the user in the front-door conversation, and the change is
+  **already set up** (the worktree exists). Go straight to **Front-door handoff
+  (phase 1 adopt)** below — do **not** re-brainstorm, do **not** call
+  `create_and_enter_worktree`, and do **not** run the build-or-save gate.
 - **Opening intent in hand** — the opening message is plain prose that is
   neither `Implement this spec` nor `<imp:begin/>`. The user ran
   `imp new "<message>"`, so the message **is** their verbatim opening intent —
@@ -153,6 +160,37 @@ Because the opening message begins with `Implement this spec`, you are in
 
 Complexity classification is unchanged (see "Classifying complexity"): a large
 draft is still `standard` even though you asked nothing.
+
+## Front-door handoff (phase 1 adopt)
+
+This is the standard arrival from the front-door conversation. The draft spec is
+already on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the
+change is already materialized — your job is to **adopt and finalize** it, not to
+re-author it. Skip the opening `wait_for_user`, do not call
+`create_and_enter_worktree`, and do not run the build-or-save gate (the front door
+already handled all of that).
+
+Re-derive whether the base branch moved since the draft started by comparing the
+two persisted heads — do **not** rely on any earlier tool return, which did not
+survive the boundary into this step:
+
+{% if change.cur_base_head and change.cur_base_head != change.orig_base_head %}
+The base branch advanced since the draft started. Re-read the files the draft
+assumed and **reconcile any drift** in this same turn; leave the rest as drafted.
+{% if not run.non_interactive %}Ask, via `wait_for_user`, only where the spec
+actually conflicts with the now-current code.{% else %}This is a headless run, so
+do **not** call `wait_for_user`: reconcile the drift yourself against current code
+and proceed (a genuine intent-fork at the "Ask vs. decide" high bar still parks).{% endif %}
+{% else %}
+The base has not moved. **Adopt near-silently**: light edits only, usually no
+questions.
+{% endif %}
+
+Normalize the draft just enough to imp's structure (ensure a **Goal** and
+**Acceptance criteria** are present), run the same pre-commit self-review as in
+"Writing the Spec", commit with `imp artifact-commit spec`, and finish with
+`complete_step(phase="written", …)`. Classify `complexity` as usual (a large draft
+is still `standard`).
 
 ## Naming the Change (imp-specific)
 
