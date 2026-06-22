@@ -17,7 +17,10 @@ def save_change(control_root: Path, change_id: str) -> None:
     if session_is_resident(control_root, change_id):
         _deliver_save_resident(control_root, change_id)
     else:
-        save_to_backlog(Change.load(control_root, change_id))
+        ch = Change.load(control_root, change_id)
+        if ch.materialized:
+            return
+        save_to_backlog(ch)
 
 
 _SAVE_CLOSE_TIMEOUT = 10  # seconds to wait for resident session to close on save
