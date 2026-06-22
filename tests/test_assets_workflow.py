@@ -51,7 +51,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
         "implementer", "quality-reviewer",
     }
     dispatchers = {"task-lead", "deferred-sweep",
-                   "plan-writer", "spec-writer"}
+                   "plan-writer", "spec-writer", "front-door"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -135,8 +135,8 @@ def test_spec_writer_declares_complexity_output() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     spec_writer = wf.agents["spec-writer"]
     assert "complexity" in spec_writer.output_schema.field_names()
-    # Pin the enum shape too: the downstream fast_path set: gates on the exact
-    # values, so a renamed/added value would silently break that wiring.
+    # complexity drives the thin-spec decision only; fast_path is owned by the
+    # front-door phase now, so a renamed value no longer silently breaks routing.
     field = next(f for f in spec_writer.output_schema.fields if f.name == "complexity")
     assert field.type == "enum"
     assert field.values == ("trivial", "standard")
@@ -220,20 +220,16 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     assert m.var_mutations == {"spec_minors_integrated": False}
 
 
-def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
+def test_front_door_sets_fast_path_from_ceremony() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["spec-writer"].rules
-    # The spec-writer rule sets fast_path from output.complexity only.
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"phase": "written", "complexity": "trivial",
-                               "status": "Success"})
-    assert m.var_mutations["fast_path"] is True
-
-    m2 = evaluate_rules(rules, vars=_BASE_VARS,
-                        output={"phase": "written", "complexity": "standard",
-                                "status": "Success"})
-    assert m2.var_mutations["fast_path"] is False
+    rules = _steps(wf)["front-door"].rules
+    express = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={"status": "Success", "ceremony": "express"})
+    assert express.var_mutations["fast_path"] is True
+    full = evaluate_rules(rules, vars=_BASE_VARS,
+                          output={"status": "Success", "ceremony": "full"})
+    assert full.var_mutations["fast_path"] is False
 
 
 def test_commit_tool_is_removed_from_registry() -> None:
@@ -465,11 +461,10 @@ def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
 def test_no_goto_spec_writer_edge() -> None:
     from pathlib import Path
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
-    # Every edge back into spec-writer must be a `resume:` (transcript kept), so a
-    # resumed spec-writer always has its rename_change result in history and never
-    # needs the slug from the system prompt. A fresh `goto: spec-writer` would
-    # drop the transcript and reintroduce the dependency Part A removes.
-    assert "goto: spec-writer" not in wf
+    # Rework edges back into spec-writer must be `resume:` (transcript kept), so a
+    # resumed spec-writer always has its rename_change result in history. The one
+    # permitted `goto: spec-writer` is front-door's forward entry on the full path.
+    assert wf.count("goto: spec-writer") == 1  # only front-door's forward entry
     assert "goto: spec_writer" not in wf
 
 
@@ -512,20 +507,6 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     assert link.resolve() == target.resolve(), (
         f"{link} resolves to {link.resolve()}, expected {target.resolve()}"
     )
-
-
-def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["spec-verify-commit"].rules
-    # Clean commit on the fast path -> straight into planning, skipping spec-reviewer.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "fast_path": True},
-        output={"exit": 0, "stdout": "", "stderr": ""},
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
 
 
 def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:

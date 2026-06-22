@@ -52,14 +52,13 @@ def test_default_workflow_script_covers_the_fast_path_agents() -> None:
 
     script = default_workflow_script("IMP_DOGFOOD_t2t2t2")
     steps = script["steps"]
-    # Every agent the trivial fast path invokes on the way to completion + merge.
-    for agent in ("spec-writer", "plan-writer", "task-lead",
+    for agent in ("front-door", "spec-writer", "plan-writer", "task-lead",
                   "code-reviewer", "deferred-sweep", "plan-cycle-check", "finalize"):
         assert agent in steps, f"{agent} missing from the default-workflow script"
 
-    # spec-writer marks the change trivial → fast path; task-lead writes the sentinel.
-    spec_done = steps["spec-writer"][0]["tools"][-1]["input"]
-    assert spec_done["complexity"] == "trivial"
+    # front-door goes live and chooses the express ceremony → fast path.
+    fd_done = steps["front-door"][0]["tools"][-1]["input"]
+    assert fd_done["ceremony"] == "express"
     lead_bash = steps["task-lead"][0]["tools"][0]["input"]["command"]
     assert "IMP_DOGFOOD_t2t2t2" in lead_bash and "src/sentinel.py" in lead_bash
     lead_done = steps["task-lead"][0]["tools"][-1]["input"]

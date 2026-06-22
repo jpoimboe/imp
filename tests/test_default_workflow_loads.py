@@ -19,7 +19,7 @@ def _wf():
 def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
     assert wf.name == "feature"
-    assert [p.name for p in wf.phases] == ["spec", "plan", "implement", "merge"]
+    assert [p.name for p in wf.phases] == ["front-door", "spec", "plan", "implement", "merge"]
 
 
 def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
@@ -134,6 +134,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
+        "front-door": "chatting",
         "spec-writer": "writing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan",

@@ -63,6 +63,7 @@ non-soliciting exception):
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
 | Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Deviation revise mode (below): revise only pending tasks; escalate to a corrective N+1 if it implicates an already-implemented task. |
+| Front-door express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): author a new corrective plan N+1 from `comments`; never revise the settled plan. |

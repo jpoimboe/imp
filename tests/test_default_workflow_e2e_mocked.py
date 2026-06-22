@@ -37,6 +37,7 @@ def _canned_anthropic(**overrides):
     fields = {
         "outcome": "ok",
         "status": "Success",
+        "ceremony": "full",
         "verdict": "approve", "findings": "none",
         "decision": "merge", "comments": "",
         "phase": "written", "spec_path": "stub-spec.md",
@@ -78,6 +79,7 @@ def _openai_step_aware(**kwargs):
     fields = {
         "outcome": "ok",
         "status": "Success",
+        "ceremony": "full",
         "verdict": verdict, "findings": "none",
         "decision": "merge", "comments": "",
         "phase": "written", "spec_path": "stub-spec.md",
@@ -317,6 +319,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                 cc_tool_use("c0", "complete_step", {
                     "outcome": "ok",
                     "status": "Success",
+                    "ceremony": "full",
                     "verdict": verdict, "findings": "none",
                     "decision": "merge", "comments": "",
                     "phase": "written", "spec_path": "stub-spec.md",
@@ -424,17 +427,16 @@ async def test_fast_path_skips_reviewers_and_review(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # complexity:trivial -> spec-writer sets fast_path=true. The fast path skips
-    # spec-reviewer (A.1: spec-verify-commit routes straight to plan-writer with no
-    # unseen change), plan-review (plan-verify-commit fast-path rule), and the whole
-    # review -> deferred-sweep -> sweep-verify block (A.2: plan-cycle-check fast-path
-    # routes straight to finalize).
-    # The run still reaches planning, implementation, and merge.
+    # ceremony:express -> front-door sets fast_path=true and routes straight to
+    # plan-writer, skipping the spec beat (spec-writer + spec-reviewer), plan-review
+    # (plan-verify-commit fast-path rule), and the whole review -> deferred-sweep ->
+    # sweep-verify block (plan-cycle-check fast-path -> finalize). The run still
+    # reaches planning, implementation, and merge.
     def _default_trivial(**kwargs):
         system = kwargs.get("system", "")
         if _IR_SIG in system:
             return _canned_anthropic(verdict="ok")
-        return _canned_anthropic(complexity="trivial")
+        return _canned_anthropic(ceremony="express")
 
     fake = FakeAsyncAnthropic([], default_response=_default_trivial)
 
@@ -454,11 +456,12 @@ async def test_fast_path_skips_reviewers_and_review(
 
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
-    assert "spec-reviewer" not in started, started    # A.1: skipped on fast path
+    assert "spec-writer" not in started, started      # express skips the spec beat
+    assert "spec-reviewer" not in started, started     # spec beat skipped on express
     assert "plan-reviewer" not in started, started     # plan-verify-commit fast-path rule
-    assert "code-reviewer" not in started, started     # A.2: skipped on fast path
-    assert "deferred-sweep" not in started, started    # A.2
-    assert "sweep-verify" not in started, started      # A.2
+    assert "code-reviewer" not in started, started
+    assert "deferred-sweep" not in started, started
+    assert "sweep-verify" not in started, started
     assert "plan-writer" in started, started           # planning still runs
     assert "task-lead" in started, started             # implementation still runs
 
