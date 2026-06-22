@@ -44,3 +44,34 @@ def test_ls_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsys)
 
     assert handle_slash_line("/ls -a", change=change, output_fn=[].append) is REPROMPT
     assert "doneid" in capsys.readouterr().out              # -a surfaces the archive
+
+
+def test_search_builtin_prints_matching_archived_change(tmp_path: Path) -> None:
+    import json
+
+    from imp.engine import archive
+    events = tmp_path / "e.jsonl"
+    events.write_text("")
+    change_json = tmp_path / "c.json"
+    change_json.write_text(json.dumps({
+        "id": "darkid", "title": "Dark mode toggle", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "s.json"
+    state_json.write_text(json.dumps({"id": "darkid", "status": "abandoned", "step": "spec"}))
+    archive.archive_change(
+        tmp_path, "darkid", events_path=events,
+        change_json_path=change_json, state_json_path=state_json)
+
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/search dark", change=change, output_fn=out.append)
+    assert result is REPROMPT
+    assert any("darkid" in line and "Dark mode toggle" in line for line in out)
+
+
+def test_search_builtin_requires_a_query(tmp_path: Path) -> None:
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/search", change=change, output_fn=out.append)
+    assert result is REPROMPT
+    assert any("Usage: /search" in line for line in out)

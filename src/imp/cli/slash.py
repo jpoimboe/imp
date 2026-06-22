@@ -61,6 +61,18 @@ def handle_slash_line(
         show_all = args in ("-a", "--all", "all")
         _cmd_status(argparse.Namespace(all=show_all), change.control_root)
         return REPROMPT
+    if cmd == "search":
+        if not args:
+            output_fn("Usage: /search <query>")
+            return REPROMPT
+        from imp.engine.archive import read as archive_read
+        hits = archive_read.search_archive(change.control_root, args)
+        if not hits:
+            output_fn(f"No archived changes match {args!r}.")
+        else:
+            for change_id, title, status, _created in hits:
+                output_fn(f"  {change_id}  {title or '(untitled)'}  [{status or '-'}]")
+        return REPROMPT
 
     try:
         body = load_skill_body(change.workflow_dir / "skills", cmd)
@@ -92,6 +104,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /skills            List loadable skills")
     out("  /continue          Resume a paused run (at the post-interrupt prompt)")
     out("  /ls [-a]           List your changes (-a adds completed/abandoned)")
+    out("  /search <query>    Search archived changes by title or id")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
