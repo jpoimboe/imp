@@ -1674,7 +1674,7 @@ def _load_or_rehydrate(control: Path, change_id: str) -> Change | int:
 
 # Spec §10: in-flight statuses; completed Changes live in the archive.
 _INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
-RESUMABLE = ("paused", "errored", "merge_blocked", "draft")
+RESUMABLE = ("paused", "errored", "merge_blocked", "draft", "saved")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1826,6 +1826,7 @@ def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
 
 def _resumable_rows(control: Path) -> list[_Row]:
     rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
+    rows += _saved_rows(control)
     return _sort_rows_newest_first(rows)
 
 

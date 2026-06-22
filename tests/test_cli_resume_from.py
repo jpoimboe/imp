@@ -44,6 +44,20 @@ def test_resume_from_rejects_nonresumable_status(tmp_path, monkeypatch) -> None:
     assert rc == 2
 
 
+def test_resume_admits_saved_status(tmp_path, monkeypatch, capsys) -> None:
+    # "saved" is in RESUMABLE; the status guard must not reject it.
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "saved"
+    st.save(ch.state_dir)
+    monkeypatch.chdir(tmp_path)
+    rc = main(["resume", "feat", "--from", "no-such-step"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nothing to resume" not in err   # status guard passed; error is something else
+
+
 def test_resume_from_unknown_target_rc2(tmp_path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
