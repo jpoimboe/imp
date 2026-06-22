@@ -220,6 +220,7 @@ class Workflow:
     agents: dict[str, AgentDef] = field(hash=False)
     workflow_dir: Path
     source: SourceLoc
+    persona_source: str = ""
 
     def flat_steps(self) -> tuple[Step, ...]:
         return tuple(s for p in self.phases for s in p.steps)

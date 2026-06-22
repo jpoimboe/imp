@@ -61,7 +61,7 @@ def test_executor_reexports_agent_run_result() -> None:
 
 
 def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -> None:
-    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
+    from imp.engine.agent_run import _CORE_HEAD, build_agent_invocation
 
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
@@ -75,7 +75,7 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         resolved_tiers=None, coordinator=None, subagent_depth=2)
 
     # System prompt = base persona + rendered body + the complete_step contract.
-    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert inv.system_prompt.startswith(_CORE_HEAD)
     assert "RENDERED BODY" in inv.system_prompt
     assert "complete_step" in inv.system_prompt
     # Non-interactive -> a nudge continuation is wired (omission #1/#2 closed).
@@ -95,7 +95,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
     # An agent holding `bash` gets the relative-paths note appended to its
     # body (between the rendered body and the completion contract), so every
     # bash-capable agent learns the rule without each prompt re-pasting it.
-    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
+    from imp.engine.agent_run import _CORE_HEAD, build_agent_invocation
 
     inv = build_agent_invocation(
         agent_def=_agent(tools={"complete_step", "bash"}),
@@ -109,7 +109,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
-    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert inv.system_prompt.startswith(_CORE_HEAD)
     assert "RENDERED BODY" in inv.system_prompt
     assert "IMP_PROJECT_ROOT" in inv.system_prompt
     assert "relative to the project root" in inv.system_prompt
@@ -509,7 +509,7 @@ def test_build_agent_invocation_prepends_base_persona(tmp_path: Path) -> None:
     # The fresh-assembly branch puts the always-on base persona FIRST, then the
     # rendered agent role, then bash note (iff bash), then the engine-seed note,
     # then the completion instruction — in that exact order.
-    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
+    from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 
     inv = build_agent_invocation(
         agent_def=_agent(tools={"complete_step", "bash"}),
@@ -524,8 +524,8 @@ def test_build_agent_invocation_prepends_base_persona(tmp_path: Path) -> None:
         resolved_tiers=None, coordinator=None)
 
     sp = inv.system_prompt
-    assert sp.startswith(_AGENT_BASE_PROMPT)
-    assert sp.index(_AGENT_BASE_PROMPT) < sp.index("RENDERED BODY")
+    assert sp.startswith(_CORE_HEAD)
+    assert sp.index(_CORE_TAIL) < sp.index("RENDERED BODY")
     assert sp.index("RENDERED BODY") < sp.index("IMP_PROJECT_ROOT")
     assert sp.index("IMP_PROJECT_ROOT") < sp.index("<imp:begin/>")
     assert sp.index("<imp:begin/>") < sp.index("complete_step")
@@ -537,9 +537,9 @@ def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
 
 
 def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
-    from imp.engine.agent_run import _AGENT_BASE_PROMPT
+    from imp.engine.agent_run import _CORE_HEAD
     inv = _build_inv(tmp_path)
-    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert inv.system_prompt.startswith(_CORE_HEAD)
     assert "BODY" in inv.system_prompt
     assert "Session start: `<imp:begin/>`" in inv.system_prompt   # seed note appended
 
@@ -581,7 +581,7 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
     """Every agent's system prompt carries the `<imp:begin/>` engine-seed note,
     regardless of whether it has the `bash` tool. The note sits between any
     body addenda and the completion contract."""
-    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
+    from imp.engine.agent_run import _CORE_HEAD, build_agent_invocation
 
     # Without bash: still gets the engine-seed note.
     inv = build_agent_invocation(
@@ -600,7 +600,7 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
     # The note explains the tag is engine-emitted, not user input.
     assert "engine" in inv.system_prompt.lower()
     # Order: base persona first, rendered body present, engine-seed note before completion contract.
-    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert inv.system_prompt.startswith(_CORE_HEAD)
     assert "RENDERED BODY" in inv.system_prompt
     assert inv.system_prompt.index("<imp:begin/>") < inv.system_prompt.index(
         "complete_step")

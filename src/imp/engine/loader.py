@@ -792,6 +792,9 @@ def load_workflow(
             root_source,
         )
 
+    persona_path = workflow_dir / "persona.md"
+    persona_source = persona_path.read_text() if persona_path.is_file() else ""
+
     workflow = Workflow(
         name=str(raw.get("name", workflow_dir.name)),
         description=str(raw.get("description", "")),
@@ -801,6 +804,7 @@ def load_workflow(
         agents=agents,
         workflow_dir=workflow_dir,
         source=root_source,
+        persona_source=persona_source,
     )
 
     # Run validators and print warnings; raise on errors.

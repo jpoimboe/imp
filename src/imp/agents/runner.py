@@ -74,6 +74,7 @@ class ChangeContext:
     change_home: str = ""
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = ""
+    persona_source: str = ""
 
 
 @dataclass(frozen=True, slots=True)

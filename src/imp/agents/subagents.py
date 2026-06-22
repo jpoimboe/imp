@@ -215,6 +215,9 @@ async def dispatch_task(
     rendered_prompt = render_prompt(
         subagent_def.prompt_template_source, prompt_ctx,
         workflow_dir=cc.workflow_dir)
+    rendered_persona = render_prompt(
+        cc.persona_source, prompt_ctx, workflow_dir=cc.workflow_dir,
+    ) if cc.persona_source else ""
 
     # Resolve (provider, model). Precedence (design §4):
     #   1. runtime tier (truthy AND in the resolved map) — OVERRIDES static.
@@ -251,6 +254,7 @@ async def dispatch_task(
         provider_name=sub_provider,
         model_name=sub_model,
         rendered_system_prompt=rendered_prompt,
+        rendered_persona=rendered_persona,
         initial_messages=(Message(
             role="user", content=(TextBlock(text=task_description),)),),
         change_context=cc,
