@@ -176,7 +176,8 @@ class LiveDriver:
                 if force or _container_closed(cur.container):
                     if (isinstance(cur.container, nv.PhaseNode)
                           and _container_closed(cur.container)
-                          and nv.phase_elapsed(cur.container) is not None):
+                          and nv.phase_elapsed(cur.container) is not None
+                          and not rt.chrome_suppressed(cur.container)):
                         # The phase-complete line is surrounded by blanks: arm
                         # prev_prose for the blank ABOVE, and pass prose=True so the
                         # next phase header gets the blank BELOW (matching the batch
@@ -203,22 +204,26 @@ class LiveDriver:
                 # under the header instead of burying it — must match
                 # render_text._render. (aligned indent)
                 gutters = self._gutters()
-                if rt.spaces_before(child):
+                suppress = rt.chrome_suppressed(child)
+                if not suppress and rt.spaces_before(child):
                     self._prev_prose = True
                 if (self._suppressing and isinstance(child, nv.PhaseNode)
                         and child.name == self._start_phase):
                     self._suppressing = False
                     self._prev_prose = False
-                self._stream_or_hold(
-                    rt.header_line(child, depth=cur.depth, color=self._color,
-                                   gutters=gutters),
-                    depth=cur.depth, gutters=gutters)
-                if isinstance(child, (nv.StepNode, nv.PhaseNode)):
+                if not suppress:
+                    self._stream_or_hold(
+                        rt.header_line(child, depth=cur.depth, color=self._color,
+                                       gutters=gutters),
+                        depth=cur.depth, gutters=gutters)
+                if not suppress and isinstance(child, (nv.StepNode, nv.PhaseNode)):
                     self._prev_prose = True
                 child_depth = cur.depth
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:
-                self._emit_leaf(child, cur.depth, gutters=self._gutters())
+                if not (isinstance(child, nv.BreadcrumbLine)
+                        and rt.chrome_suppressed(cur.container)):
+                    self._emit_leaf(child, cur.depth, gutters=self._gutters())
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if (node is self._builder._opening_intent_node
