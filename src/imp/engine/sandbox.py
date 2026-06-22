@@ -39,6 +39,7 @@ class SandboxPolicy:
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
     change_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
+    readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
 
     def allows_read(self, path: Path) -> bool:
         """In-process mirror of the sandbox's read exposure: the whole host is
@@ -54,16 +55,17 @@ class SandboxPolicy:
         source of truth shared by build_sandbox_argv (which formats each entry to
         argv) and allows_write (which evaluates last-covering-wins). kind is one
         of rw / ro / mask_dir / mask_file; only rw grants write. The order is
-        load-bearing: the two ro overlays (git_ro_remask, extra_readable) are NOT
-        globally last-wins — a later writable bind re-exposes a path they cover —
-        only the secret masks are unconditionally last. Add a new bind here and
-        BOTH consumers pick it up; the argv-parity test enforces no drift."""
+        load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
+        are NOT globally last-wins — a later writable bind re-exposes a path they
+        cover — only the secret masks are unconditionally last. Add a new bind here
+        and BOTH consumers pick it up; the argv-parity test enforces no drift."""
         return [
             ("/tmp", "rw"),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
             *([(self.change_home, "rw")] if self.change_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
+            *[(p, "ro") for p in self.readonly_overlays],
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],
             *[(w, "rw") for w in self.extra_writable],

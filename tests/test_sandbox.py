@@ -550,3 +550,54 @@ def test_resolve_policy_binds_change_home_rw(tmp_path):
     # ...and the bwrap argv carries the matching rw bind.
     argv = " ".join(build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={}))
     assert f"--bind {home} {home}" in argv
+
+
+def test_readonly_overlay_denies_write_inside_allows_sibling():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=(), secret_files=(),
+        readonly_overlays=("/wt/src",),
+    )
+    assert p.allows_write(Path("/wt/src/app.py")) is False     # inside the overlay
+    assert p.allows_write(Path("/wt/docs/readme.md")) is True   # sibling stays rw
+
+
+def test_readonly_overlay_whole_worktree_keeps_change_home_writable():
+    p = _policy(
+        worktree="/ctl/.imp/worktrees/abc",
+        change_home="/ctl/.imp/changes/abc",
+        git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=(), secret_files=(),
+        readonly_overlays=("/ctl/.imp/worktrees/abc",),
+    )
+    # Whole-worktree ro overlay: source is locked...
+    assert p.allows_write(Path("/ctl/.imp/worktrees/abc/src/x.py")) is False
+    # ...but change_home lives OUTSIDE the worktree, so it stays rw.
+    assert p.allows_write(Path("/ctl/.imp/changes/abc/progress.md")) is True
+
+
+def test_writable_cache_wins_over_readonly_overlay():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=("/wt/cache",),
+        extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(),
+        readonly_overlays=("/wt",),  # whole worktree ro
+    )
+    assert p.allows_write(Path("/wt/src/x.py")) is False   # locked by overlay
+    assert p.allows_write(Path("/wt/cache/pip")) is True   # cache punches through
+
+
+def test_argv_binds_match_bind_plan_with_readonly_overlay():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=("/ctl/.git/hooks",), writable_caches=(),
+        extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(),
+        readonly_overlays=("/wt/vendored",),
+    )
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    assert _parse_argv_binds(argv) == p.bind_plan()           # no drift
+    assert ("/wt/vendored", "ro") in p.bind_plan()
