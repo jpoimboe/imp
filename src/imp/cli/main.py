@@ -910,13 +910,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     rc = await _maybe_resume_backlog(args, control, change_id)
     if rc is not None:
         return rc
-    try:
-        change = Change.load(control, change_id)
-    except LayoutMismatch as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
-    except (LoadError, LoadErrors):
-        return _resume_gone(control, change_id)
+    loaded = _load_or_rehydrate(control, change_id)
+    if isinstance(loaded, int):
+        return loaded
+    change = loaded
     state = State.load(change.state_dir)
     # `running` is allowed through: the status may be stale if a previous run
     # crashed without updating it. The daemon resolves the ambiguity at connect time.
@@ -1571,6 +1568,31 @@ def _resume_gone(control: Path, change_id: str) -> int:
         return 0
     print(f"imp: no Change matches {change_id!r}", file=sys.stderr)
     return 2
+
+
+def _rehydrate_resumable(control: Path, change_id: str) -> Change | None:
+    from imp.engine.archive import record, records_root
+    rec = record.read_record(records_root(control), change_id)
+    if rec is None or not rec.get("resumable"):
+        return None
+    try:
+        archive_read.rehydrate_change(control, change_id)
+        return Change.load(control, change_id)
+    except (FileExistsError, LoadError, LoadErrors):
+        return None
+
+
+def _load_or_rehydrate(control: Path, change_id: str) -> Change | int:
+    try:
+        return Change.load(control, change_id)
+    except LayoutMismatch as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    except (LoadError, LoadErrors):
+        change = _rehydrate_resumable(control, change_id)
+        if change is None:
+            return _resume_gone(control, change_id)
+        return change
 
 
 # Spec §10: in-flight statuses; completed Changes live in the archive.
