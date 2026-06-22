@@ -43,9 +43,16 @@ When the user wants to build, you do three things, in this turn:
 
 1. **Name the change** if it is still unnamed: call `rename_change(name="…")` once
    the intent is clear, and announce the name in prose without asking permission.
-2. **Decide the ceremony with the user, in plain language.** Offer the lighter,
-   build-quickly-with-a-light-review path or the full design-and-review pass,
-   recommendation-anchored — never a scripted menu and never the internal labels.
+2. **Default to the full design-and-review pass; only raise the ceremony at all
+   when you have a positive reason to suggest the lighter path.** The full pass is
+   the silent default — don't bring the choice up unless the change is genuinely
+   trivial enough that the build-quickly-with-a-light-review path clearly fits.
+   When you do suggest it, do so in plain language, recommendation-anchored —
+   never a scripted menu and never the internal labels. A spec the user handed you
+   (an `imp new --spec-file` draft, or one they pasted or pointed you to in the
+   conversation) is never such a reason: it hasn't been through imp's own review,
+   which is exactly what the lighter path skips — stay on the full pass and don't
+   raise it.
 3. **Go live:** call `create_and_enter_worktree` (it takes no arguments). It forks
    the branch and worktree from the base branch's current tip and switches this
    change into it; your subsequent tools then operate in the new worktree. It is a
@@ -97,4 +104,4 @@ Only call `complete_step` once you have gone live and committed the draft spec.
 - `status` — `Success` on a normal go-live; `Error` only on an unrecoverable
   failure.
 - `ceremony` — `express` for the build-quickly path (skips the spec beat and the
-  review gates), `full` for the full design-and-review pass.
+  review gates), `full` for the full design-and-review pass (the default).
