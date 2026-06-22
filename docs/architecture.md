@@ -70,7 +70,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/change/` (gitignored) and are committed to a per-change `refs/imp/journal-wip/<id>` ref as they're written. The final merge is lock-protected; at completion the wip ref is folded into the orphan `refs/imp/journal` ref, so each change's events, transcripts, and artifacts survive even after the worktree is pruned.
+All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/change/` (gitignored) and are committed to a per-change `refs/imp/journal-wip/<id>` ref as they're written. The final merge is lock-protected; at completion the change is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each change's events and artifacts survive even after the worktree is pruned (the `journal-wip` ref persists the artifacts; the archive persists the events).
 
 ```mermaid
 flowchart LR
@@ -78,7 +78,7 @@ flowchart LR
   WT --> MERGE["merge-to-base<br/>(RepoGitLock)"]
   WT --> RM["remove worktree<br/>(on completion)"]
   WT --> WIP[("refs/imp/journal-wip/&lt;id&gt;<br/>spec · plan artifacts")]
-  WIP -. "fold on completion" .-> J[("journal.py<br/>refs/imp/journal")]
+  RM -. "on completion" .-> ARC[("archive/__init__.py<br/>.imp/archive (blobs · record · index)<br/>events.jsonl")]
   ADD --> REPO[("git repo")]
   MERGE --> REPO
 ```
@@ -109,7 +109,7 @@ flowchart LR
 | Providers | `providers/*.py`, `providers/resolve.py` | `resolve_run()` maps tiers→(provider, model) once per run; each provider implements the `AgentRunner` protocol. |
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
-| Git | `engine/worktree.py`, `engine/journal.py` | Worktree create/remove, lock-protected merge-to-base, per-change `journal-wip` artifact ref folded into `refs/imp/journal`. |
+| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, per-change `journal-wip` artifact ref; at completion the change is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
 | Workflow / playbook assets | `assets/__init__.py` | Bundled workflows and playbooks ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one, and playbook resolution unions shipped with committed by stem. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
@@ -238,7 +238,7 @@ flowchart TD
   in([from review]) --> BFC{"base-fresh-check"}
   BFC -->|"base unchanged"| M2B{"merge-to-base<br/>(lock-protected)"}
   BFC -->|"base advanced"| reint([→ integrate-rebase])
-  M2B -->|MERGED| done([change complete<br/>worktree removed · journal kept])
+  M2B -->|MERGED| done([change complete<br/>worktree removed · archived])
   M2B -->|STALE| reint
 ```
 
