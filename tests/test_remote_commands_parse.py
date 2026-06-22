@@ -66,6 +66,10 @@ def test_slash_abandon_unresolvable_handle_is_a_usage_notice() -> None:
     assert parse("/abandon @nope", None, fake_resolve) == Notice(ABANDON_USAGE)
 
 
+def test_slash_ls_is_an_alias_for_listchanges() -> None:
+    assert parse("/ls", None, fake_resolve) == ListChanges()
+
+
 def test_unknown_command_points_at_help() -> None:
     assert parse("/frobnicate", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 

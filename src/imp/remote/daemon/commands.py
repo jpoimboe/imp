@@ -78,6 +78,7 @@ ROUTE_HINT = (
 HELP_TEXT = (
     "Commands:\n"
     "/list — show changes (● = subscribed)\n"
+    "/ls — alias for /list\n"
     "/new <prompt> — start a Change\n"
     "/subscribe (reply or @handle) — follow a Change's narrative\n"
     "/unsubscribe — mute narrative (lifecycle alerts stay on)\n"
@@ -112,7 +113,7 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
         word, _, rest = stripped.partition(" ")
         rest = rest.strip()
         verb = word[1:].lower()
-        if verb == "list":
+        if verb in ("list", "ls"):
             return ListChanges()
         if verb == "help":
             return Help()
