@@ -319,7 +319,7 @@ def test_route_script_renders_command_template(tmp_path) -> None:
     change = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        cur_base_head="basesha",
+        cur_base_head="basesha", orig_base_head="basesha",
         change_dir=tmp_path / ".imp" / "change",
     )
     step = Step(

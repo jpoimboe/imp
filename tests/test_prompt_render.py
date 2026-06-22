@@ -263,3 +263,27 @@ def test_render_without_workflow_dir_cannot_resolve_include(tmp_path: Path) -> N
     ctx = build_context(change_title="t", event_log=log)
     with pytest.raises(PromptRenderError):
         render_prompt('{% include "partials/frag.md" %}', ctx)
+
+
+def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.engine.state import JsonlEventLog
+
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    ctx = build_context(
+        change_title="t", event_log=log, change_id="abc",
+        cur_base_head="NEWTIP", orig_base_head="OLDTIP")
+    # Both heads render, so a template can branch on whether the base moved.
+    out = render_prompt(
+        "{{ change.orig_base_head }}|{{ change.cur_base_head }}|"
+        "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",
+        ctx)
+    assert out == "OLDTIP|NEWTIP|MOVED"
+
+    same = build_context(
+        change_title="t", event_log=log, change_id="abc",
+        cur_base_head="X", orig_base_head="X")
+    out2 = render_prompt(
+        "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",
+        same)
+    assert out2 == "SAME"
