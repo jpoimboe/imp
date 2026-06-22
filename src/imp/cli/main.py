@@ -1720,7 +1720,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past change{plural} — see `imp status --all`)",
+            f"({past} past change{plural} — see `imp ls --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 
@@ -2221,20 +2221,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Which artifact to print (default: a detail card).")
     p_show.set_defaults(func=_cmd_show)
 
-    p_status = sub.add_parser(
-        "status",
-        help="List in-flight Changes (use -a for completed and abandoned).",
+    p_ls = sub.add_parser(
+        "ls", aliases=["list", "status"],
+        help="List your changes (use -a for completed and abandoned).",
         description=(
-            "List in-flight Changes as a table (id, status, step, last "
-            "activity, title). Use -a/--all to also show completed and "
-            "abandoned Changes."
+            "List your in-progress changes and the Backlog (saved-for-later "
+            "changes). Use -a/--all to also show completed and abandoned changes."
         ),
     )
-    p_status.add_argument(
+    p_ls.add_argument(
         "-a", "--all", action="store_true",
-        help="Also list completed and abandoned Changes (default: in-flight only).",
+        help="Also list completed and abandoned changes "
+             "(default: in-progress + Backlog).",
     )
-    p_status.set_defaults(func=_cmd_status)
+    p_ls.set_defaults(func=_cmd_status)
 
     p_config = sub.add_parser(
         "config",
