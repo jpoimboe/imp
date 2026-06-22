@@ -58,14 +58,9 @@ let a "read it as a whole" lens talk you out of blocking a genuine gap.
 
 ## Severity Vocabulary
 
-Classify each finding:
+Classify each finding against the canonical severity rubric:
 
-- **Critical** — a gap or contradiction that would cause the implementation to be fundamentally wrong or unverifiable
-- **Major** — a requirement so ambiguous or incomplete it would predictably cause a wrong implementation or missing behavior
-- **Minor** — worth fixing but would not block a competent implementor from getting it right
-- **Nit** — cosmetic, stylistic, or very minor wording improvements
-
-**Critical and Major are blocking.** Minor and Nit are advisory.
+{% include "partials/severity.md" %}
 
 ## Calibration
 

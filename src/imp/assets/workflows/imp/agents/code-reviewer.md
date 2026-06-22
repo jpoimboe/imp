@@ -90,14 +90,9 @@ Read all of these and the diff before forming your assessment.
 
 ## Severity Classification
 
-Classify each finding:
+Classify each finding against the canonical severity rubric:
 
-- **Critical** — bugs, security issues, data loss risks, broken functionality; must
-  be fixed.
-- **Major** — architecture problems, missing features, poor error handling, test
-  gaps; must be fixed.
-- **Minor / Nit** — code style, optimization opportunities, documentation polish;
-  recorded as open items, not blockers.
+{% include "partials/severity.md" %}
 
 Categorize by actual severity. Not everything is Critical. Acknowledge what was done
 well before listing issues — accurate praise helps trust the rest of the feedback. If

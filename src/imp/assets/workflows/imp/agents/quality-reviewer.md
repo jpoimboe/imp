@@ -63,12 +63,9 @@ Review the task's diff for code quality. Evaluate:
 
 ## Severity Classification
 
-Classify each finding:
+Classify each finding against the canonical severity rubric:
 
-- **Critical** — serious quality problem that will cause bugs, prevent testing, or make code unmaintainable; must be fixed
-- **Major** — significant quality issue that reduces correctness or maintainability; must be fixed
-- **Minor** — quality improvement that's worthwhile but not urgent; should be addressed but can be deferred
-- **Nit** — small style or cosmetic issue; can be deferred as a followup
+{% include "partials/severity.md" %}
 
 Set `blocking: true` if any Critical or Major findings are present. Set `blocking: false` if findings are Minor/Nit only, or if there are no findings.
 

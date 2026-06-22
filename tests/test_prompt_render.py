@@ -246,3 +246,20 @@ def test_cur_base_head_defaults_empty(tmp_path: Path) -> None:
         change_title="t", event_log=_log(tmp_path / "events.jsonl", []),
     )
     assert render_prompt("{{ change.cur_base_head }}", ctx) == ""
+
+
+def test_render_resolves_include_with_workflow_dir(tmp_path: Path) -> None:
+    (tmp_path / "partials").mkdir()
+    (tmp_path / "partials" / "frag.md").write_text("SHARED-FRAGMENT\n")
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    out = render_prompt(
+        '{% include "partials/frag.md" %}', ctx, workflow_dir=tmp_path)
+    assert "SHARED-FRAGMENT" in out
+
+
+def test_render_without_workflow_dir_cannot_resolve_include(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    with pytest.raises(PromptRenderError):
+        render_prompt('{% include "partials/frag.md" %}', ctx)

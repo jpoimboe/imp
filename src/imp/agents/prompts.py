@@ -16,6 +16,7 @@ Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import jinja2
@@ -136,7 +137,7 @@ def build_context(
     )
 
 
-_env = jinja2.Environment(
+_ENV_KWARGS: dict[str, Any] = dict(
     undefined=jinja2.StrictUndefined,
     autoescape=False,
     keep_trailing_newline=True,
@@ -144,15 +145,33 @@ _env = jinja2.Environment(
     lstrip_blocks=True,
 )
 
+_env = jinja2.Environment(**_ENV_KWARGS)
 
-def render_prompt(template_source: str, ctx: PromptContext) -> str:
-    """Render the template. Strict on top-level names; lenient inside namespaces."""
+
+def _env_for(workflow_dir: Path | None) -> jinja2.Environment:
+    # FileSystemLoader lets {% include %} resolve partials; loader-less env is the default.
+    if workflow_dir is None:
+        return _env
+    return jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(workflow_dir)), **_ENV_KWARGS)
+
+
+def render_prompt(
+    template_source: str, ctx: PromptContext, *, workflow_dir: Path | None = None,
+) -> str:
+    """Render the template. Strict on top-level names; lenient inside namespaces.
+    Pass workflow_dir to resolve `{% include %}` of shared partials."""
     try:
-        return _env.from_string(template_source).render(
+        return _env_for(workflow_dir).from_string(template_source).render(
             change=ctx.change, events=ctx.events, vars=ctx.vars,
             project=ctx.project, run=ctx.run,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e
     except jinja2.exceptions.TemplateError as e:
+        raise PromptRenderError(f"template error: {e}") from e
+    except TypeError as e:
+        # Jinja2 raises TypeError (not TemplateError) for includes without a loader.
+        if "no loader" not in str(e):
+            raise
         raise PromptRenderError(f"template error: {e}") from e

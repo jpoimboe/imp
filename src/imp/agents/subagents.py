@@ -212,7 +212,9 @@ async def dispatch_task(
         guidance=cc.guidance,
         non_interactive=False,
     )
-    rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
+    rendered_prompt = render_prompt(
+        subagent_def.prompt_template_source, prompt_ctx,
+        workflow_dir=cc.workflow_dir)
 
     # Resolve (provider, model). Precedence (design §4):
     #   1. runtime tier (truthy AND in the resolved map) — OVERRIDES static.

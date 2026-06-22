@@ -81,13 +81,15 @@ def test_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -> Non
     whole = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", cur_base_head="BASE",
-        vars={"review_scope": "change", "review_base": "RB"}))
+        vars={"review_scope": "change", "review_base": "RB"}),
+        workflow_dir=bundled_workflow_dir("imp"))
     assert "git diff BASE..imp/abc" in whole
     assert "..HEAD" not in whole
 
     batch = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", cur_base_head="BASE",
-        vars={"review_scope": "plan", "review_base": "RB"}))
+        vars={"review_scope": "plan", "review_base": "RB"}),
+        workflow_dir=bundled_workflow_dir("imp"))
     assert "git diff RB..imp/abc" in batch
     assert "..HEAD" not in batch
