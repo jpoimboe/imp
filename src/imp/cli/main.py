@@ -2042,9 +2042,10 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("new", "Start a new Change (optional opening message; opens with the spec-writer)."),
+    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
+    ("new", "Scope a new change in conversation (optional opening message)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
-    ("status", "List in-flight Changes (-a also shows completed and abandoned)."),
+    ("ls", "List your changes (-a also shows completed and abandoned)."),
     ("log", "Show a Change's narrative as plain text."),
     ("abandon", "Tear down a Change's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
