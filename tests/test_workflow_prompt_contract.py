@@ -40,6 +40,13 @@ ALL_AGENT_FILES = sorted(p.name for p in AGENTS_DIR.glob("*.md"))
 
 
 @pytest.mark.parametrize("name", ALL_AGENT_FILES)
+def test_no_agent_prompt_references_tolerated_failures_file(name: str) -> None:
+    assert "tolerated-failures.md" not in (AGENTS_DIR / name).read_text(), (
+        f"{name}: references the retired tolerated-failures.md record — "
+        "tolerations are ordinary Deferred Followups needs-decision lines now")
+
+
+@pytest.mark.parametrize("name", ALL_AGENT_FILES)
 def test_no_hardcoded_change_dir_literal(name: str) -> None:
     text = (AGENTS_DIR / name).read_text()
     # `.imp/change` not followed by 's' — catches `.imp/change/` and the bare
@@ -403,6 +410,7 @@ def test_deferred_sweep_passes_through_pre_classified_needs_decision() -> None:
     assert "pre-classified human" in low       # recognizes the spec/plan-authored marker
     assert "leave the line exactly as-is" in low  # the pass-through instruction
     assert "never dismiss it" in low            # passed through, not risk-dismissed
+    assert "only entries with no disposition tag" in low  # drain-only-untagged invariant pinned
 
 
 def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
@@ -421,8 +429,10 @@ def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
 def test_deferred_sweep_documents_verify_triage() -> None:
     text = SWEEP.read_text()
     low = text.lower()
-    # The change-local record and the signal it emits.
-    assert "tolerated-failures.md" in text
+    # The toleration is a Deferred Followups line sourced `sweep-verify`; the
+    # separate record is retired.
+    assert "tolerated-failures.md" not in text
+    assert "DEFERRED sweep-verify:" in text
     assert "sweep_tolerated: true" in text
     assert "sweep_tolerated: false" in text
     # The single attributability judgment, against the diff.

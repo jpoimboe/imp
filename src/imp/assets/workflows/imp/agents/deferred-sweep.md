@@ -44,11 +44,19 @@ parse already skips them. Leave them untouched.
 
 A `- [ ] DEFERRED ` line that already carries a `— needs-decision: <why>` marker is a
 **pre-classified human decision** — authored directly by `spec-writer`/`plan-writer`
-for a concern only a human can settle, or recorded by a prior sweep pass. Recognize
-the `— needs-decision:` marker and **leave the line exactly as-is**: do not
+for a concern only a human can settle, recorded by a prior sweep pass, or born as a
+**toleration** at the `verify` / `sweep-verify` gate (source `verify` / `sweep-verify`).
+Recognize the `— needs-decision:` marker and **leave the line exactly as-is**: do not
 re-evaluate it on the risk gate, do not fix it, and **never dismiss it**. It is a
 human-decision item, not a followup to maybe fix; it must survive verbatim to the
 `finalize` merge gate, which presents it in its per-item walk.
+
+**Drain-only-untagged invariant.** This sweep drains **only entries with no disposition tag**
+— a `- [ ] DEFERRED ` line carrying NO trailing `— …` marker. Any line already carrying
+`— needs-decision:` (including a toleration) or a terminal tag (`— fixed` / `— dismissed` /
+`— seeded` / `— ignored-at-gate`) is already triaged; leave it untouched. This is the
+de-facto contract today; it is pinned here so no future pruning rule can silently sweep a
+toleration out mid-gate.
 
 ## Per item — gate on risk, not scope
 
@@ -158,24 +166,29 @@ drains the Deferred Followups list as described above and does NOT perform triag
 `sweep-verify` gate `resume`d you with the verify failure output — performs **triage only**:
 do NOT re-drain the Deferred Followups list, just adjudicate the failures.
 
-On a triage entry, the engine also makes the change-local tolerated record
-`{{ change.home }}/tolerated-failures.md` available (it may be absent/empty — the common case). It
-is one untagged list; each entry is a failure signature plus a one-line justification of why
-this change is not responsible for it (pre-existing on the base, or
-non-deterministic/environmental):
+On a triage entry, reason over the OPAQUE failure text against the diff
+(`review_base..HEAD`) — pure judgment, you never re-run a single test.
 
-`- <test id / failure signature>: <why this change is not responsible>`
+Record a toleration as a normal `## Deferred Followups` entry in
+`{{ change.home }}/progress.md`, born directly in `— needs-decision:` state with the
+originating gate as its `<source>` — here `sweep-verify`, never an agent. The EXACT
+shape:
 
-Reason over the OPAQUE failure text against the diff (`review_base..HEAD`) — pure judgment,
-you never re-run a single test:
+`- [ ] DEFERRED sweep-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
 
-- **Every current failure is already recorded in `tolerated-failures.md`, or is plainly not
-  attributable to the diff** → append any not-yet-listed such failure (create the file with a
-  `# Tolerated failures` heading if absent) in the shape above, make NO commit, and return
-  `sweep_tolerated: true`. The workflow forward-advances past `sweep-verify` instead of
-  re-looping. A toleration is **visibility, not reproduction**: it changes nothing about the
-  merge — `finalize` surfaces it to a human before merge (`sweep-verify` runs before
-  `finalize`).
+The `sweep-verify` source is the discriminator the convergence check greps for.
+
+- **Every current failure is already recorded as a `DEFERRED sweep-verify:` line in
+  `## Deferred Followups`, or is plainly not attributable to the diff** → append any
+  not-yet-recorded such failure as a line in the shape above (create the
+  `## Deferred Followups` heading if absent), make NO commit, and return
+  `sweep_tolerated: true`. Run the convergence check by grepping `## Deferred
+  Followups` for `DEFERRED sweep-verify:` lines and matching each line's embedded
+  failure signature against the current failure output. The workflow forward-advances
+  past `sweep-verify` instead of re-looping. A toleration born `— needs-decision:` is
+  inert to the list drain via the pass-through rule above. A toleration is
+  **visibility, not reproduction**: it changes nothing about the merge — `finalize`
+  surfaces it to a human before merge (`sweep-verify` runs before `finalize`).
 - **A failure attributable to the diff** → fix it via the implementer and return
   `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the implementer to make
   a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
