@@ -605,6 +605,15 @@ def _parse_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool:
     return val
 
 
+def _parse_phase_chrome(praw: dict[str, Any], source: SourceLoc) -> str | None:
+    chrome = praw.get("chrome")
+    if chrome is None:
+        return None
+    if chrome != "none":
+        raise LoadError("a phase's `chrome:` only accepts the value `none`", source)
+    return "none"
+
+
 def _parse_step(
     raw: dict[str, Any],
     phase_name: str,
@@ -613,6 +622,7 @@ def _parse_step(
     agents: dict[str, AgentDef],
     var_types: dict[str, ExprType],
     yaml_path: Path,
+    chrome: str | None = None,
 ) -> Step:
     fallback = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
@@ -672,6 +682,7 @@ def _parse_step(
             label=label,
             acquire=acquire,
             release=release,
+            chrome=chrome,
         )
     elif kind == "script":
         step = Step(
@@ -682,6 +693,7 @@ def _parse_step(
             timeout_seconds=raw.get("timeout"),
             quiet=quiet,
             label=label,
+            chrome=chrome,
         )
     elif kind in ("merge_and_exit_worktree",):
         step = Step(
@@ -689,6 +701,7 @@ def _parse_step(
             on_max_retries=on_max, max_loops=max_loops, source=source,
             quiet=quiet,
             label=label,
+            chrome=chrome,
         )
     else:  # branch
         step = Step(
@@ -698,6 +711,7 @@ def _parse_step(
             label=label,
             acquire=acquire,
             release=release,
+            chrome=chrome,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).
@@ -771,8 +785,10 @@ def load_workflow(
         steps_raw = praw["steps"]
         if not isinstance(steps_raw, list):
             raise LoadError(f"phase {pname!r}: 'steps' must be a list", psrc)
+        phase_chrome = _parse_phase_chrome(praw, psrc)
         steps = tuple(
-            _parse_step(s, pname, workflow_dir, defaults, agents, var_types, yaml_path)
+            _parse_step(s, pname, workflow_dir, defaults, agents, var_types,
+                        yaml_path, chrome=phase_chrome)
             for s in steps_raw
         )
         phase_objs.append(Phase(name=pname, steps=steps, source=psrc))

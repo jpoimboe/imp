@@ -190,6 +190,7 @@ class Step:
     label: str | None = None
     acquire: str | None = None  # lane keyword "base" → change.base_branch; branch steps only
     release: str | None = None  # runs before step body; agent steps only
+    chrome: str | None = None   # "none" → suppress phase+step headers (bare conversation)
 
 
 @dataclass(frozen=True, slots=True)
