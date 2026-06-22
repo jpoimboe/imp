@@ -55,3 +55,46 @@ def test_fg_bg_openers_truecolor_and_named() -> None:
     assert splash._fg_open("bright_yellow") == "\x1b[93m"
     assert splash._bg_open("red") == "\x1b[41m"
     assert splash._fg_open(None) == ""
+
+
+def test_imul_is_unsigned_low_word() -> None:
+    # JS Math.imul low 32 bits, kept unsigned. (2^31-1)*2 -> 0xFFFFFFFE.
+    assert splash._imul(2147483647, 2) == 0xFFFFFFFE
+    assert splash._imul(0xFFFFFFFF, 0xFFFFFFFF) == 1
+
+
+def test_hash_zero_and_determinism() -> None:
+    assert splash._hash(0, 0) == 0.0
+    assert splash._hash(3, 7) == splash._hash(3, 7)
+    assert 0.0 <= splash._hash(3, 7) < 1.0
+    assert splash._hash(1, 0) != splash._hash(0, 1)
+
+
+def test_px_bounds_and_none() -> None:
+    g = splash._make_grid(5)
+    splash._px(g, -1, 0, (1, 1, 1))
+    splash._px(g, 5, 0, (1, 1, 1))
+    splash._px(g, 99, 0, (1, 1, 1))
+    assert all(cell is None for row in g for cell in row)
+    splash._px(g, 2, 0, (1, 1, 1))
+    assert g[0][2] == (1, 1, 1)
+    splash._px(g, 2, 0, None)            # None never clears
+    assert g[0][2] == (1, 1, 1)
+
+
+def test_carve_clears_a_filled_disc() -> None:
+    g = splash._make_grid(20)
+    splash._discE(g, 10, 14, 4, 4, (9, 9, 9))
+    assert g[14][10] == (9, 9, 9)
+    splash._carve(g, 10, 14, 4, 4)
+    assert g[14][10] is None
+
+
+def test_stars_are_deterministic_and_placed() -> None:
+    splash._use_theme("dark")
+    g1 = splash._make_grid(60)
+    g2 = splash._make_grid(60)
+    splash._stars(g1, 28, 0.3)
+    splash._stars(g2, 28, 0.3)
+    assert g1 == g2
+    assert any(cell is not None for row in g1 for cell in row)

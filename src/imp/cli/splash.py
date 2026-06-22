@@ -11,6 +11,8 @@ verbatim from the reference THEMES table.
 """
 from __future__ import annotations
 
+import math
+
 from imp.cli import palette as pal
 
 Color = tuple[int, int, int] | str
@@ -164,3 +166,164 @@ def _bg_open(c: Color | None) -> str:
     if isinstance(c, tuple):
         return f"\x1b[48;2;{c[0]};{c[1]};{c[2]}m"
     return f"\x1b[{_NAMED[c][1]}m"
+
+
+H = 28
+GL = 0.382
+
+# The current palette, set by _use_theme before any scene/primitive runs. The
+# scene builders are (grid, W) -> None per spec, so the palette is module state,
+# mirroring the reference renderer's global `P`.
+_P: dict[str, Color | None] = {}
+
+
+def _use_theme(theme: str) -> None:
+    global _P
+    _P = _build_palette(theme)
+
+
+def _make_grid(w: int) -> Grid:
+    return [[None] * w for _ in range(H)]
+
+
+def _round(v: float) -> int:
+    """JS Math.round: round half toward +infinity."""
+    return math.floor(v + 0.5)
+
+
+def _imul(a: int, b: int) -> int:
+    """JS Math.imul: unsigned 32-bit low word."""
+    return ((a & 0xFFFFFFFF) * (b & 0xFFFFFFFF)) & 0xFFFFFFFF
+
+
+def _hash(x: int, y: int) -> float:
+    """Reference multiply-xor-shift hash, returns a float in [0, 1)."""
+    h = (_imul(int(x), 374761393) + _imul(int(y), 668265263)) & 0xFFFFFFFF
+    h = _imul(h ^ (h >> 13), 1274126177)
+    h ^= h >> 16
+    return (h & 0xFFFFFFFF) / 4294967296.0
+
+
+def _px(g: Grid, x: float, y: float, c: Color | None) -> None:
+    xi = _round(x)
+    yi = _round(y)
+    if c is not None and 0 <= yi < len(g) and 0 <= xi < len(g[0]):
+        g[yi][xi] = c
+
+
+def _discE(g: Grid, cx: float, cy: float, rx: float, ry: float, c: Color | None) -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy <= 1:
+                g[y][x] = c
+
+
+def _carve(g: Grid, cx: float, cy: float, rx: float, ry: float) -> None:
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy <= 1:
+                g[y][x] = None
+
+
+def _ringE(g: Grid, cx: float, cy: float, rx: float, ry: float,
+           c: Color | None, inn: float, out: float) -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            d = dx * dx + dy * dy
+            if inn <= d <= out:
+                _px(g, x, y, c)
+
+
+def _glowFill(g: Grid, cx: float, cy: float, rx: float, ry: float, c: Color | None) -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy < 0.66 and (x + y) & 1 and g[y][x] is None:
+                g[y][x] = c
+
+
+def _glowRing(g: Grid, cx: float, cy: float, r: float, c: Color | None) -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / (r + 2.4)
+            dy = (y - cy) / (r + 2.4)
+            d = dx * dx + dy * dy
+            if 0.62 <= d <= 1.0 and (x + y) & 1 and g[y][x] is None:
+                _px(g, x, y, c)
+
+
+def _rect(g: Grid, x: int, y: int, w: int, h: int, c: Color | None) -> None:
+    if c is None:
+        return
+    for j in range(h):
+        for i in range(w):
+            _px(g, x + i, y + j, c)
+
+
+def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: Color | None) -> None:
+    if c is None:
+        return
+    x0i = int(x0); y0i = int(y0); x1i = int(x1); y1i = int(y1)
+    dx = abs(x1i - x0i)
+    dy = abs(y1i - y0i)
+    sx = 1 if x0i < x1i else -1
+    sy = 1 if y0i < y1i else -1
+    e = dx - dy
+    while True:
+        _px(g, x0i, y0i, c)
+        if x0i == x1i and y0i == y1i:
+            break
+        e2 = 2 * e
+        if e2 > -dy:
+            e -= dy
+            x0i += sx
+        if e2 < dx:
+            e += dx
+            y0i += sy
+
+
+def _stars(g: Grid, maxY: float, dens: float) -> None:
+    w = len(g[0])
+    s = 3
+    gy = 0
+    while gy * s < maxY:
+        gx = 0
+        while gx * s < w:
+            if _hash(gx, gy) >= dens:
+                gx += 1
+                continue
+            jx = gx * s + int(_hash(gx + 101, gy) * s)
+            jy = gy * s + int(_hash(gx, gy + 57) * s)
+            if jy >= maxY:
+                gx += 1
+                continue
+            br = _hash(gx + 7, gy + 13)
+            color = _P["bright"] if br < 0.12 else (_P["star"] if br < 0.55 else _P["starD"])
+            _px(g, jx, jy, color)
+            gx += 1
+        gy += 1
+
+
+def _sparkle(g: Grid, x: float, y: float, c: Color | None) -> None:
+    xi = _round(x)
+    yi = _round(y)
+    _px(g, xi, yi, c)
+    _px(g, xi - 1, yi, c)
+    _px(g, xi + 1, yi, c)
+    _px(g, xi, yi - 1, c)
+    _px(g, xi, yi + 1, c)
