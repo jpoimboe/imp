@@ -22,7 +22,12 @@ from typing import Any, ClassVar
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
 # (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
-_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
+# emit_notice renders as a verbatim block elsewhere; showing it here too would
+# double-print as a clipped `text=…` in the recap.
+# update_step_label would register as activity in the very status line it exists to
+# keep clean.
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user",
+                                   "emit_notice", "update_step_label"})
 
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge_and_exit_worktree"})
