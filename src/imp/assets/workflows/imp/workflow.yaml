@@ -18,6 +18,9 @@ vars:
   review_base:            {type: string, default: ""}    # SHA defining the per-plan review diff range
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-plan, not re-paneled
   integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
+  plan_index:             {type: int, default: 1}         # current plan number, rendered in plan/task step labels
+  plan_total:             {type: int, default: 0}         # anticipated total plans (0 = unknown → drops the denominator); sole emitter plan-cycle-check
+  task_total:             {type: int, default: 0}         # tasks in the current plan, set by plan-finalized
 
 defaults:
   max_retries: 3
@@ -81,7 +84,7 @@ phases:
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
-        label: writing plan
+        label: "writing plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
 
       - name: plan-verify-commit
         quiet: true
@@ -117,7 +120,7 @@ phases:
       - name: task-lead
         file: agents/task-lead.md
         tier: high
-        label: implementing
+        label: "implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         rules:
           - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}

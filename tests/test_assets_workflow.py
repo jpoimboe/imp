@@ -721,7 +721,10 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     assert wf.agents["researcher"].label == "researching"
     assert wf.agents["implementer"].label == "implementing task"
     assert wf.agents["quality-reviewer"].label == "reviewing changes"
+    # plan-writer's label is on the workflow step, not the agent frontmatter
     for name, a in wf.agents.items():
+        if name == "plan-writer":
+            continue
         assert a.label, f"agent {name!r} has no label"
 
 
