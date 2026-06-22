@@ -681,14 +681,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
-    try:
-        control = _control_root()
-        worktree.check_preconditions(control)
-        worktree.ensure_imp_ignored(control)
-        base = worktree.current_branch(control)
-    except worktree.PreconditionError as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
+    control = _control_root()
+    worktree.check_preconditions(control)
+    worktree.ensure_imp_ignored(control)
+    base = worktree.current_branch(control)
 
     if getattr(args, "description", None) and getattr(args, "backlog", None) is None:
         print("imp: --description requires --backlog", file=sys.stderr)
@@ -2383,6 +2379,9 @@ def main(argv: list[str] | None = None) -> int:
         # Forcing the flush now moves that write where the handler can catch it.
         sys.stdout.flush()
         return rc
+    except worktree.PreconditionError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     except BrokenPipeError:
         # A reader (e.g. `imp log | less` quit before draining) closed the pipe.
         # Redirect stdout to devnull so the interpreter's final flush can't
