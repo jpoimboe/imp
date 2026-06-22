@@ -137,10 +137,16 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "front-door": "chatting",
         "spec-writer": "writing spec",
         "spec-reviewer": "reviewing spec",
-        "plan-writer": "writing plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}",
+        "plan-writer": (
+            "writing plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+        ),
         "plan-reviewer": "reviewing plan",
         "plan-finalized": "finalizing plan",
-        "task-lead": "implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}",
+        "task-lead": (
+            "implementing · plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+        ),
         "verify": "testing",
         "autosquash-resolve-implement": "resolving fixups",
         "autosquash-resolve-merge": "resolving fixups",
