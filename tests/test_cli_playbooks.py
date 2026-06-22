@@ -38,10 +38,21 @@ def test_render_empty_args_blanks_the_variable(tmp_path: Path) -> None:
     assert playbooks.render_playbook(pb, "") == "x==y\n"
 
 
-def test_project_playbooks_take_precedence_over_shipped(tmp_path: Path) -> None:
+def test_project_playbooks_union_with_shipped(tmp_path: Path) -> None:
     _write(tmp_path, "only-here", "local\n")
     names = {pb.name for pb in playbooks.list_playbooks(tmp_path)}
-    assert names == {"only-here"}  # project dir present → shipped NOT merged in
+    assert "only-here" in names
+    assert {"ux", "interrupt", "dead-code"} <= names  # shipped still visible
+
+
+def test_project_playbook_overrides_shipped_same_stem(tmp_path: Path) -> None:
+    _write(tmp_path, "dead-code", "LOCAL OVERRIDE BODY\n")
+    pb = playbooks.find_playbook(tmp_path, "dead-code")
+    assert pb is not None
+    assert pb.body.strip() == "LOCAL OVERRIDE BODY"
+    # Only that stem is replaced; the other shipped playbooks remain.
+    names = {p.name for p in playbooks.list_playbooks(tmp_path)}
+    assert {"ux", "interrupt"} <= names
 
 
 def test_falls_back_to_shipped_when_no_project_dir(tmp_path: Path) -> None:
