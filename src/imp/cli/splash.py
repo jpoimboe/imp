@@ -327,3 +327,277 @@ def _sparkle(g: Grid, x: float, y: float, c: Color | None) -> None:
     _px(g, xi + 1, yi, c)
     _px(g, xi, yi - 1, c)
     _px(g, xi, yi + 1, c)
+
+
+# Locked mascot sprite (15 rows x 16 cols). Legend: o=body, O=horn/dark-edge,
+# W=eye glint, b=eye, space=transparent.
+IMP = [
+    "   O        O   ", "  O          O  ", "  O          O  ", "   O        O   ",
+    "    OO    OO    ",
+    "    oooooooo    ", "   oooooooooo   ", "  oooWbooWbooo  ", "  ooobboobbooo  ",
+    "  oooooooooooo  ", "  oooooooooooo  ", "   oooooooooo   ", "    oooooooo    ",
+    "    oo    oo    ", "   oo      oo   ",
+]
+
+# Locked "imp" wordmark (6 rows x 13 cols). X = pixel.
+WM = ["XX           ", "             ", "XX XXXXX XXX ", "XX X X X X  X", "XX X X X XXX ", "         X   "]
+
+
+def _impAt(g: Grid, xc: float, oy: int) -> None:
+    m = {"o": _P["impO"], "O": _P["impH"], "W": _P["impW"], "b": _P["impB"]}
+    ox = _round(xc - 8)
+    for r in range(len(IMP)):
+        for c in range(len(IMP[r])):
+            ch = IMP[r][c]
+            if ch == " " or ch not in m:
+                continue
+            _px(g, ox + c, oy + r, m[ch])
+
+
+def _moonG(g: Grid, cx: int, cy: int, r: int, cres: bool) -> None:
+    _glowRing(g, cx, cy, r, _P["moonGlow"])
+    _discE(g, cx, cy, r, r, _P["moon"])
+    if _P["moonRing"]:
+        _ringE(g, cx, cy, r + 0.6, r + 0.6, _P["moonRing"], 0.7, 1.28)
+    if cres:
+        _carve(g, cx + _round(r * 0.65), cy - 1, r, r)
+
+
+def _candle2(g: Grid, x: int, baseY: int, h: int) -> None:
+    for j in range(h):
+        _px(g, x, baseY - j, _P["waxA"])
+        _px(g, x + 1, baseY - j, _P["waxB"])
+    _px(g, x, baseY - h, _P["fire2"])
+    _px(g, x + 1, baseY - h, _P["fire2"])
+    _px(g, x, baseY - h - 1, _P["fire3"])
+    _px(g, x, baseY - h - 2, _P["fireTip"])
+    _px(g, x - 2, baseY - h - 1, _P["glowWarm"])
+    _px(g, x + 2, baseY - h - 1, _P["glowWarm"])
+    _px(g, x, baseY - h - 4, _P["glowWarm"])
+
+
+def _cauldron2(g: Grid, cx: int, topY: int, w: int) -> None:
+    r = w / 2
+    y = topY
+    while y < topY + r:
+        x = int(cx - r)
+        while x <= cx + r:
+            dx = (x - cx) / r
+            dy = (y - topY) / r
+            d = dx * dx + dy * dy
+            if d <= 1:
+                _px(g, x, y, _P["potD"] if d > 0.66 else _P["pot"])
+            x += 1
+        y += 1
+    x = int(cx - r - 1)
+    while x <= cx + r + 1:
+        if abs((x - cx) / (r + 1)) <= 1:
+            _px(g, x, topY - 1, _P["rim"])
+            _px(g, x, topY, _P["rim"])
+        x += 1
+    x = int(cx - r + 1)
+    while x <= cx + r - 1:
+        _px(g, x, topY + 1, _P["brew"] if (x + topY) & 1 else _P["brewB"])
+        x += 1
+    for i in range(5):
+        bx = int(cx - r + 2 + int(_hash(i + 3, 2) * (2 * r - 3)))
+        by = int(topY - 1 - int(_hash(i, 5) * 4))
+        _px(g, bx, by, _P["brewB"])
+    _px(g, cx - 2, topY - 4, _P["steam"])
+    _px(g, cx + 1, topY - 6, _P["steam"])
+    _px(g, cx, topY - 8, _P["steam"])
+    _px(g, int(cx - r + 1), int(topY + r), _P["potD"])
+    _px(g, int(cx + r - 1), int(topY + r), _P["potD"])
+
+
+def _portal2(g: Grid, cx: int, cy: int) -> None:
+    _ringE(g, cx, cy, 7, 11, _P["portal"], 0.82, 1.06)
+    _ringE(g, cx, cy, 5.4, 8.6, _P["portalI"], 0.78, 1.06)
+    for y in range(cy - 11, cy + 11):
+        if not (0 <= y < len(g)):
+            continue
+        for x in range(cx - 7, cx + 7):
+            dx = (x - cx) / 7
+            dy = (y - cy) / 11
+            if dx * dx + dy * dy < 0.6 and 0 <= x < len(g[0]) and g[y][x] is None:
+                _px(g, x, y, _P["portalSwirl"] if (x + y) & 1 else _P["portalG"])
+    _sparkle(g, cx, cy - 6, _P["portalI"])
+    _sparkle(g, cx - 2, cy + 4, _P["rune"])
+
+
+def _crystal2(g: Grid, x: int, baseY: int, h: int) -> None:
+    for j in range(h):
+        w = int((h - j) / 2)
+        for dx in range(-w, w + 1):
+            _px(g, x + dx, baseY - j, _P["crysShade"] if dx < 0 else _P["crysLit"])
+    _px(g, x, baseY - h, _P["crysTip"])
+    _px(g, x, baseY - h + 1, _P["crysTip"])
+
+
+def _mushroom2(g: Grid, x: int, baseY: int, h: int, cap: Color | None, capD: Color | None) -> None:
+    for j in range(h):
+        _px(g, x, baseY - j, _P["mushStem"])
+    _discE(g, x, baseY - h, 3, 2, cap)
+    _px(g, x - 2, baseY - h + 1, capD)
+    _px(g, x + 2, baseY - h + 1, capD)
+    _px(g, x - 1, baseY - h - 1, _P["mushSpot"])
+    _px(g, x + 1, baseY - h, _P["mushSpot"])
+    _px(g, x - 2, baseY - 1, _P["mushGlow"])
+    _px(g, x + 2, baseY - 1, _P["mushGlow"])
+
+
+def _planet2(g: Grid, cx: int, cy: int, r: int) -> None:
+    _discE(g, cx, cy, r, r, _P["planetA"])
+    for y in range(cy - r, cy + r + 1):
+        if ((y - cy + 99) & 3) == 0:
+            for x in range(cx - r, cx + r + 1):
+                if 0 <= y < len(g) and 0 <= x < len(g[0]) and g[y][x] is not None:
+                    _px(g, x, y, _P["planetB"])
+    for y in range(cy - r, cy + r + 1):
+        for x in range(cx, cx + r + 1):
+            dx = (x - cx) / r
+            dy = (y - cy) / r
+            if dx * dx + dy * dy <= 1 and dx > 0.38:
+                _px(g, x, y, _P["planetC"])
+    _ringE(g, cx, cy, r + 4, r * 0.5, _P["ring"], 0.84, 1.12)
+
+
+def _torch2(g: Grid, x: int, baseY: int, h: int) -> None:
+    for j in range(h):
+        _px(g, x, baseY - j, _P["torchPole"])
+    _px(g, x - 1, baseY - h + 2, _P["torchBr"])
+    _px(g, x + 1, baseY - h + 2, _P["torchBr"])
+    _discE(g, x, baseY - h - 1, 2, 3, _P["fire2"])
+    _discE(g, x, baseY - h - 1, 1, 2, _P["fire3"])
+    _px(g, x, baseY - h - 3, _P["fire3"])
+    _px(g, x, baseY - h - 4, _P["fireTip"])
+    _px(g, x - 2, baseY - h - 1, _P["glowWarm"])
+    _px(g, x + 2, baseY - h - 1, _P["glowWarm"])
+
+
+def _cloud2(g: Grid, cx: int, cy: int, c: Color | None) -> None:
+    _discE(g, cx, cy, 6, 2, c)
+    _discE(g, cx - 4, cy + 1, 3, 2, c)
+    _discE(g, cx + 4, cy + 1, 4, 2, c)
+    _discE(g, cx - 1, cy - 1, 3, 2, c)
+
+
+def _meteor2(g: Grid, x: int, y: int, length: int, bright: bool) -> None:
+    for k in range(length):
+        t = k / length
+        if t < 0.3:
+            c = _P["bright"] if bright else _P["star"]
+        elif t < 0.7:
+            c = _P["star"]
+        else:
+            c = _P["starD"]
+        _px(g, x + k, y - k, c)
+    _sparkle(g, x, y, _P["bright"] if bright else _P["star"])
+
+
+def _mountains3(g: Grid, baseY: int) -> None:
+    w = len(g[0])
+    for x in range(w):
+        h = _round(4 + 2 * math.sin(x * 0.09 + 2))
+        for y in range(baseY - h, baseY + 1):
+            if 0 <= y < len(g) and g[y][x] is None:
+                _px(g, x, y, _P["mtnFar"])
+    for x in range(w):
+        h = _round(7 + 3 * math.sin(x * 0.16) + 2 * math.sin(x * 0.07 + 1))
+        for y in range(baseY - h, baseY + 1):
+            _px(g, x, y, _P["mtnMid"])
+        if h >= 10:
+            _px(g, x, baseY - h, _P["snow"])
+            _px(g, x, baseY - h + 1, _P["snow"])
+    for x in range(w):
+        h = _round(3 + 2 * math.sin(x * 0.13 + 4))
+        for y in range(baseY - h, baseY + 1):
+            _px(g, x, y, _P["mtnNear"])
+
+
+def _firefly(g: Grid, x: int, y: int, warm: bool) -> None:
+    core = _P["ffWarmC"] if warm else _P["ffCoolC"]
+    halo = _P["ffWarmH"] if warm else _P["ffCoolH"]
+    _px(g, x, y, core)
+    _px(g, x - 1, y, halo)
+    _px(g, x + 1, y, halo)
+    _px(g, x, y - 1, halo)
+    _px(g, x, y + 1, halo)
+
+
+def _spellbook(g: Grid, cx: int, baseY: int) -> None:
+    for dx in range(-7, 8):
+        x = cx + dx
+        a = abs(dx)
+        top = baseY - 3 - _round(a * 0.35)
+        for y in range(top, baseY + 1):
+            _px(g, x, y, _P["bookPageD"] if a >= 6 else _P["bookPage"])
+    for y in range(baseY - 4, baseY + 1):
+        _px(g, cx, y, _P["bookSpine"])
+    for dx in range(-5, -1):
+        _px(g, cx + dx, baseY - 2, _P["bookInk"])
+    for dx in range(2, 6):
+        _px(g, cx + dx, baseY - 2, _P["bookInk"])
+    _px(g, cx - 2, baseY - 7, _P["rune"])
+    _px(g, cx + 2, baseY - 9, _P["portal"])
+    _px(g, cx, baseY - 11, _P["rune"])
+
+
+def _stormcloud(g: Grid, cx: int, cy: int) -> None:
+    _discE(g, cx, cy, 5, 2, _P["storm"])
+    _discE(g, cx - 4, cy + 1, 3, 2, _P["storm"])
+    _discE(g, cx + 4, cy + 1, 3, 2, _P["storm"])
+    _discE(g, cx, cy + 1, 6, 2, _P["stormD"])
+
+
+def _bolt2(g: Grid, x0: int, y0: int, y1: int) -> None:
+    pts = [
+        [x0, y0],
+        [x0 - 2, y0 + _round((y1 - y0) * 0.35)],
+        [x0 + 2, y0 + _round((y1 - y0) * 0.62)],
+        [x0 - 1, y1],
+    ]
+    for k in range(len(pts) - 1):
+        _line(g, pts[k][0] + 1, pts[k][1], pts[k + 1][0] + 1, pts[k + 1][1], _P["boltGlow"])
+    for k in range(len(pts) - 1):
+        _line(g, pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1], _P["boltCore"])
+    _line(g, pts[1][0], pts[1][1], pts[1][0] + 3, pts[1][1] + 3, _P["boltCore"])
+
+
+def _crystalball(g: Grid, cx: int, cy: int, r: int) -> None:
+    _discE(g, cx, cy, r, r, _P["glass"])
+    _glowFill(g, cx, cy, r, r, _P["mist"])
+    _px(g, cx - 1, cy, _P["portal"])
+    _px(g, cx + 1, cy + 1, _P["rune"])
+    _px(g, cx + 1, cy - 1, _P["portalI"])
+    _px(g, cx - 2, cy - 2, _P["orbHi"])
+    _px(g, cx - 1, cy - 2, _P["orbHi2"])
+    _ringE(g, cx, cy, r + 0.4, r + 0.4, _P["orbRim"], 0.78, 1.18)
+    for dx in range(-2, 3):
+        _px(g, cx + dx, cy + r + 1, _P["orbStand"])
+    _px(g, cx - 3, cy + r + 2, _P["orbStand2"])
+    _px(g, cx + 3, cy + r + 2, _P["orbStand2"])
+    _px(g, cx - 2, cy + r + 2, _P["orbStand"])
+    _px(g, cx + 2, cy + r + 2, _P["orbStand"])
+    _px(g, cx, cy + r + 2, _P["orbStand"])
+
+
+def _lantern2(g: Grid, x: int, topY: int, length: int) -> None:
+    for j in range(length):
+        _px(g, x, topY + j, _P["lanMetal2"])
+    by = topY + length
+    _px(g, x, by, _P["lanMetal"])
+    _px(g, x - 1, by + 1, _P["lanMetal"])
+    _px(g, x + 1, by + 1, _P["lanMetal"])
+    _rect(g, x - 2, by + 2, 5, 4, _P["lanMetal2"])
+    _rect(g, x - 1, by + 3, 3, 2, _P["lanGlow"])
+    _px(g, x, by + 3, _P["lanCore"])
+    _px(g, x - 2, by + 3, _P["lanMetal"])
+    _px(g, x + 2, by + 3, _P["lanMetal"])
+    _px(g, x, by + 2, _P["lanMetal"])
+    _px(g, x - 1, by + 6, _P["lanMetal"])
+    _px(g, x, by + 6, _P["lanMetal"])
+    _px(g, x + 1, by + 6, _P["lanMetal"])
+    _px(g, x, by + 7, _P["lanMetal"])
+    _px(g, x - 3, by + 4, _P["lanHalo"])
+    _px(g, x + 3, by + 4, _P["lanHalo"])

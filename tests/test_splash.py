@@ -98,3 +98,32 @@ def test_stars_are_deterministic_and_placed() -> None:
     splash._stars(g2, 28, 0.3)
     assert g1 == g2
     assert any(cell is not None for row in g1 for cell in row)
+
+
+def test_imp_sprite_matches_locked_bitmap() -> None:
+    splash._use_theme("dark")
+    p = splash._build_palette("dark")
+    g = splash._make_grid(40)
+    splash._impAt(g, 16, 0)              # xc=16 -> ox=round(16-8)=8
+    assert g[0][8 + 3] == p["impH"]      # IMP[0] = "   O        O   "
+    assert g[5][8 + 4] == p["impO"]      # IMP[5] = "    oooooooo    "
+    assert g[7][8 + 5] == p["impW"]      # IMP[7] = "  oooWbooWbooo  " glint
+    assert g[7][8 + 6] == p["impB"]      # eye
+    assert g[0][8 + 0] is None           # leading space = transparent
+
+
+def test_imp_sprite_is_deterministic() -> None:
+    splash._use_theme("dark")
+    g1 = splash._make_grid(40)
+    g2 = splash._make_grid(40)
+    splash._impAt(g1, 16, 0)
+    splash._impAt(g2, 16, 0)
+    assert g1 == g2
+
+
+def test_moonG_fills_a_disc() -> None:
+    splash._use_theme("dark")
+    p = splash._build_palette("dark")
+    g = splash._make_grid(40)
+    splash._moonG(g, 20, 8, 3, False)
+    assert g[8][20] == p["moon"]
