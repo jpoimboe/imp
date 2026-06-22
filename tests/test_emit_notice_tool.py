@@ -11,7 +11,7 @@ NOTICE = "plan 2/4 · 2 tasks\n   1. add widget\n   2. wire widget"
 
 
 def _ctx(ch: Change) -> ToolContext:
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.event_log = ch.event_log()
     ctx.agent_id = "step:plan/plan-finalized"

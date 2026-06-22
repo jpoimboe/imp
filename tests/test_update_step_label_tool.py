@@ -9,7 +9,7 @@ from tests.conftest import _seed_control
 
 
 def _ctx(ch: Change) -> ToolContext:
-    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
+    ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.event_log = ch.event_log()
     ctx.agent_id = "step:implement/task-lead"
