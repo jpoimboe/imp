@@ -40,6 +40,13 @@ ALL_AGENT_FILES = sorted(p.name for p in AGENTS_DIR.glob("*.md"))
 
 
 @pytest.mark.parametrize("name", ALL_AGENT_FILES)
+def test_no_agent_prompt_references_tolerated_failures_file(name: str) -> None:
+    assert "tolerated-failures.md" not in (AGENTS_DIR / name).read_text(), (
+        f"{name}: references the retired tolerated-failures.md record — "
+        "tolerations are ordinary Deferred Followups needs-decision lines now")
+
+
+@pytest.mark.parametrize("name", ALL_AGENT_FILES)
 def test_no_hardcoded_change_dir_literal(name: str) -> None:
     text = (AGENTS_DIR / name).read_text()
     # `.imp/change` not followed by 's' — catches `.imp/change/` and the bare
@@ -304,8 +311,11 @@ def test_plan_writer_states_soft_task_size_target() -> None:
 def test_task_lead_documents_verify_triage() -> None:
     text = (AGENTS_DIR / "task-lead.md").read_text()
     low = text.lower()
-    assert "tolerated-failures.md" in text          # the change-local record path
-    assert "verify_tolerated" in text               # the signal it emits
+    assert "tolerated-failures.md" not in text       # the separate record is retired
+    assert "DEFERRED verify:" in text                # the gate-sourced toleration line
+    assert "## Deferred Followups" in text           # recorded in the followups list
+    assert "— needs-decision:" in text          # born in needs-decision state (em dash)
+    assert "verify_tolerated" in text                # the signal it emits
     assert "attributable" in low                     # the single attributability judgment
     assert "review_base..HEAD" in text               # judged against the diff
     # The two-category taxonomy is gone — no tags, no "green at baseline", no union set.
@@ -334,14 +344,23 @@ def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
 def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     text = (AGENTS_DIR / "finalize.md").read_text()
     low = text.lower()
-    assert "tolerated-failures.md" in text
-    assert "<signature>: <justification>" in text    # the untagged entry shape
-    assert "as its own" in text  # each entry surfaced individually
-    assert "[baseline]" not in text
-    assert "[flaky]" not in text
-    # The max_loops pause meaning is documented (non-converging triage).
+    # No separate tolerated-failures record or section — tolerations are ordinary
+    # needs-decision items now, surfaced through the existing walk.
+    assert "tolerated-failures.md" not in text
+    assert "Surface tolerated verification failures" not in text
+    assert "<signature>: <justification>" not in text
+    # They reach finalize as DEFERRED verify:/sweep-verify needs-decision lines.
+    assert "DEFERRED verify:" in text
+    assert "sweep-verify" in text
+    assert "needs-decision" in low
+    # finalize must not re-run the failure or editorialize its current status.
+    assert "already fixed" in low
+    assert "re-run the failure" in low
+    # The max_loops pause meaning is still documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
+    assert "[baseline]" not in text
+    assert "[flaky]" not in text
 
 
 PLAN_WRITER = AGENTS_DIR / "plan-writer.md"
@@ -391,6 +410,7 @@ def test_deferred_sweep_passes_through_pre_classified_needs_decision() -> None:
     assert "pre-classified human" in low       # recognizes the spec/plan-authored marker
     assert "leave the line exactly as-is" in low  # the pass-through instruction
     assert "never dismiss it" in low            # passed through, not risk-dismissed
+    assert "only entries with no disposition tag" in low  # drain-only-untagged invariant pinned
 
 
 def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
@@ -409,8 +429,10 @@ def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
 def test_deferred_sweep_documents_verify_triage() -> None:
     text = SWEEP.read_text()
     low = text.lower()
-    # The change-local record and the signal it emits.
-    assert "tolerated-failures.md" in text
+    # The toleration is a Deferred Followups line sourced `sweep-verify`; the
+    # separate record is retired.
+    assert "tolerated-failures.md" not in text
+    assert "DEFERRED sweep-verify:" in text
     assert "sweep_tolerated: true" in text
     assert "sweep_tolerated: false" in text
     # The single attributability judgment, against the diff.
