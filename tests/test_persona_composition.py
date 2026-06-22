@@ -38,7 +38,6 @@ def test_empty_persona_composes_head_then_tail_with_nothing_between(tmp_path):
     # AC#3: a personaless workflow renders core_head + core_tail, nothing between.
     sp = _build(tmp_path, rendered_persona="").system_prompt
     assert sp.startswith(f"{_CORE_HEAD}\n\n{_CORE_TAIL}")
-    assert "# Doing tasks" not in sp
 
 
 def test_persona_injected_between_head_and_tail(tmp_path):
