@@ -1,14 +1,4 @@
-"""The startup splash: a once-printed, randomly-chosen pixel-art scene.
-
-Ported from the canonical reference renderer
-docs/superpowers/specs/mockups/2026-06-22-imp-startup-splash.html. Pixel art is
-half-blocks: 1 art-pixel is 1 char column wide x 1/2 row tall; the H=28 canvas
-encodes to 14 terminal rows. Geometry is deterministic (hash-based, never
-`random`); only the scene index is random per launch. Anchor roles (imp body,
-portal, runes, stars) come from palette.py so the splash stays in sync with the
-rest of the UI; the many derived shades are splash-local constants ported
-verbatim from the reference THEMES table.
-"""
+"""The startup splash: a once-printed, randomly-chosen pixel-art scene."""
 from __future__ import annotations
 
 import math
