@@ -460,9 +460,9 @@ mechanical 200-line rename) is `standard`, not `trivial` — low ambiguity is no
 low complexity.
 
 **Signal the path in plain language, never the label.** On the `standard` path,
-say nothing to the user about the classification. On the fast path (`trivial`), give
+say nothing to them about the classification. On the fast path (`trivial`), give
 a brief plain-language heads-up that you're proceeding directly — e.g. "this is small enough that I'll just make the change directly" — and never name the internal
-`trivial` label or call it a "fast path" to the user. On a trivial change this
+`trivial` label or call it a "fast path" to them. On a trivial change this
 heads-up and the build affirmative may collapse into one question; the
 resumable-draft decline still applies if the user declines.
 
