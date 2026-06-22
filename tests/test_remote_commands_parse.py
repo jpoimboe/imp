@@ -4,6 +4,7 @@ from imp.remote.daemon.commands import (
     ABANDON_USAGE,
     NEW_USAGE,
     ROUTE_HINT,
+    SEARCH_USAGE,
     UNKNOWN_COMMAND,
     Abandon,
     Create,
@@ -11,6 +12,7 @@ from imp.remote.daemon.commands import (
     ListChanges,
     Notice,
     Reply,
+    Search,
     parse,
 )
 from imp.remote.daemon.telegram_adapter import parse_handle
@@ -88,3 +90,11 @@ def test_non_slash_unresolvable_is_a_route_hint() -> None:
 
 def test_bare_at_handle_with_no_text_is_a_route_hint() -> None:
     assert parse("@good", None, fake_resolve) == Notice(ROUTE_HINT)
+
+
+def test_slash_search_with_query_is_a_search() -> None:
+    assert parse("/search dark mode", None, fake_resolve) == Search("dark mode")
+
+
+def test_slash_search_empty_is_a_usage_notice() -> None:
+    assert parse("/search   ", None, fake_resolve) == Notice(SEARCH_USAGE)

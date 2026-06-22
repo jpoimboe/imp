@@ -18,6 +18,7 @@ import anyio
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
+from imp.engine.archive import read as archive_read
 from imp.remote.daemon.commands import (
     HELP_TEXT,
     ROUTE_HINT,
@@ -31,6 +32,7 @@ from imp.remote.daemon.commands import (
     Replay,
     Reply,
     Response,
+    Search,
     Subscribe,
     Unsubscribe,
 )
@@ -291,6 +293,16 @@ async def _handle_command(
         except Exception:
             _log.warning("list_changes failed", exc_info=True)
             responses.put(Notice("Error: could not list changes."))
+    elif isinstance(command, Search):
+        hits = await anyio.to_thread.run_sync(control.search, command.query)
+        if not hits:
+            responses.put(Notice(f"No archived conversations match {command.query!r}."))
+        else:
+            lines = [
+                f"@{handle_for(cid)}  {title or '(untitled)'}  [{status or '-'}]"
+                for cid, title, status, _created in hits
+            ]
+            responses.put(Notice("\n".join(lines)))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
     elif isinstance(command, Notice):
@@ -348,6 +360,7 @@ async def run_daemon(
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
+    search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
 ) -> None:
@@ -358,6 +371,7 @@ async def run_daemon(
     create = create or (lambda prompt: spawn.create_change(control_root, prompt))
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
+    search = search or (lambda q: archive_read.search_archive(control_root, q))
 
     spath = socket_path(control_root)
     outbound: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -379,7 +393,8 @@ async def run_daemon(
         focus=focus,
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
-            control_root, cid, n))
+            control_root, cid, n),
+        search=search)
     adapter = make_adapter(env, inbound.put, focus)
 
     log_handlers = _install_file_logging(control_root, env)
