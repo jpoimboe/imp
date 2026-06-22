@@ -810,6 +810,10 @@ def _cmd_new(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_new, args)
 
 
+def _cmd_chat(args: argparse.Namespace) -> int:
+    return anyio.run(_async_cmd_new, args)
+
+
 async def _async_cmd_run(args: argparse.Namespace) -> int:
     control = _control_root()
     name = args.name
@@ -2132,6 +2136,23 @@ def _build_parser() -> argparse.ArgumentParser:
                             "project default. A bundled name needs no commit; a "
                             "committed imp/workflows/NAME fork overrides it.")
     p_new.set_defaults(func=_cmd_new)
+
+    p_chat = sub.add_parser(
+        "chat",
+        help="Open a conversation with imp (ask questions, scout work, or "
+             "scope a change).")
+    p_chat.add_argument(
+        "opening", nargs="?", metavar="MESSAGE",
+        help="Optional opening message; omit to start with an interactive prompt.")
+    p_chat.add_argument("--non-interactive", action="store_true",
+                        help="Headless: no live prompt; supply the reply via --message.")
+    p_chat.add_argument("--message", metavar="TEXT", default=None,
+                        help="Headless reply consumed by the first wait_for_user; "
+                             "requires --non-interactive.")
+    p_chat.add_argument("--tui", action="store_true",
+                        help="Render the conversation in a full-screen, scrollable "
+                             "viewer; falls back to streaming on a non-tty.")
+    p_chat.set_defaults(func=_cmd_chat)
 
     p_run = sub.add_parser(
         "run", help="Run a playbook by name (or pick one interactively).")
