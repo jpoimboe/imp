@@ -20,7 +20,7 @@ def record_path(control_root: Path, change_id: str) -> Path:
 
 def write_record(
     control_root: Path, *, change_id: str, title: str, description: str,
-    depends_on: list[str], created_by: str,
+    depends_on: list[str], created_by: str, workflow: str | None = None,
 ) -> Path:
     if not title.strip():
         raise ValueError("backlog record title must be non-empty")
@@ -31,6 +31,7 @@ def write_record(
         "id": change_id, "title": title, "description": description,
         "depends_on": list(depends_on), "created_by": created_by,
         "created_at": datetime.now(UTC).isoformat(),
+        "workflow": workflow,
     }, indent=2, sort_keys=True))
     return path
 
@@ -88,6 +89,7 @@ def materialize_record(
         raise FileNotFoundError(f"no backlog record {change_id!r}")
     change = Change.create(
         control_root, title=rec["title"], change_id=change_id,
-        base_branch=base_branch, depends_on=rec["depends_on"])
+        base_branch=base_branch, depends_on=rec["depends_on"],
+        workflow=rec.get("workflow"))
     remove_record(control_root, change_id)
     return change

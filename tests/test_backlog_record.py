@@ -113,3 +113,21 @@ def test_readiness_resolves_from_archive_index(tmp_path: Path) -> None:
 
     assert backlog.readiness(tmp_path, ["dep1"]) == (True, [])
     assert backlog.readiness(tmp_path, ["dep1", "ghost"]) == (False, ["ghost"])
+
+
+def test_write_record_persists_workflow(tmp_path: Path) -> None:
+    backlog.write_record(
+        tmp_path, change_id="wf0001", title="T", description="",
+        depends_on=[], created_by="human", workflow="mine")
+    rec = backlog.read_record(tmp_path, "wf0001")
+    assert rec is not None
+    assert rec["workflow"] == "mine"
+
+
+def test_write_record_without_workflow_reads_none(tmp_path: Path) -> None:
+    backlog.write_record(
+        tmp_path, change_id="wf0002", title="T", description="",
+        depends_on=[], created_by="human")
+    rec = backlog.read_record(tmp_path, "wf0002")
+    assert rec is not None
+    assert "workflow" in rec and rec["workflow"] is None

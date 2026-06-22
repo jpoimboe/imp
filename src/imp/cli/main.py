@@ -56,7 +56,7 @@ from imp.engine.workflow_lifecycle import (
     perform_workflow_update,
     workflow_update_notice,
 )
-from imp.providers.config import parse_default_workflow
+from imp.providers.config import parse_default_workflow, validate_workflow_name
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.attach import build_session_attach
 
@@ -623,7 +623,7 @@ def _record_backlog(args: argparse.Namespace, control: Path) -> int:
             title=args.backlog,
             description=getattr(args, "description", None) or "",
             depends_on=list(getattr(args, "depends_on", None) or []),
-            created_by="human")
+            created_by="human", workflow=getattr(args, "workflow", None))
     except ValueError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -700,6 +700,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print("imp: --description requires --backlog", file=sys.stderr)
         return 2
 
+    wf_arg = getattr(args, "workflow", None)
+    if wf_arg is not None and not validate_workflow_name(wf_arg):
+        print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
+        return 2
+
     if getattr(args, "backlog", None) is not None:
         if getattr(args, "title", None):
             print("imp: --backlog and --title cannot be combined "
@@ -767,7 +772,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     title = seed.title if seed.title is not None else ""
     try:
         change = Change.create_draft(control, title=title, change_id=change_id,
-                                     base_branch=base)
+                                     base_branch=base, workflow=wf_arg)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -2202,6 +2207,10 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="A change id this backlog Change depends on "
                             "(repeatable). Gates ready/blocked; never changes the "
                             "base branch.")
+    p_new.add_argument("--workflow", metavar="NAME", default=None,
+                       help="Run this Change on workflow NAME instead of the "
+                            "project default. A bundled name needs no commit; a "
+                            "committed imp/workflows/NAME fork overrides it.")
     p_new.set_defaults(func=_cmd_new)
 
     p_run = sub.add_parser(
