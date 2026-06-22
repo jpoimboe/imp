@@ -10,7 +10,7 @@ from imp.engine.types import Goto
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "review_scope": "plan",
-    "review_base": "", "tasks_since_review": 0, "review_batch_size": 7,
+    "review_base": "",
     "change_panel_done": False, "integration_fork": "",
 }
 
