@@ -96,6 +96,7 @@ class Change:
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
+    workflow: str | None = None  # per-Change workflow name; None = project default
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite change.json under the
@@ -148,9 +149,11 @@ class Change:
 
     @property
     def live_workflow_dir(self) -> Path:
+        from imp.assets import resolve_workflow_dir
         from imp.providers.config import parse_default_workflow
-        name = parse_default_workflow(self.project_root / "imp" / "project.yaml")
-        return self.project_root / "imp" / "workflows" / name
+        name = self.workflow or parse_default_workflow(
+            self.project_root / "imp" / "project.yaml")
+        return resolve_workflow_dir(self.project_root, name)
 
     @property
     def workflow_dir(self) -> Path:
@@ -171,7 +174,7 @@ class Change:
     @classmethod
     def create(
         cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
-        depends_on: list[str] | None = None,
+        depends_on: list[str] | None = None, workflow: str | None = None,
     ) -> Change:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
         internal state at the control root (.imp/changes/<id>). Raises
@@ -192,6 +195,7 @@ class Change:
             "cur_base_head": cur_base_head,
             "layout_version": LAYOUT_VERSION,
             "imp_commit": _imp_commit(control_root),
+            "workflow": workflow,
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -201,33 +205,26 @@ class Change:
         config = load_effective_config(
             project_root=wt_path, control_root=control_root,
         ).config
-        # The branch's own tracked workflow IS the source — read it directly from
-        # the worktree, no snapshot copy. This seed load doubles as the single
-        # validator: raises LoadError on an absent/malformed workflow, or
-        # LoadErrors when the workflow parses but fails validation (e.g. a step
-        # references a model_tier not present in the merged config).
         try:
+            from imp.assets import resolve_workflow_dir
             from imp.providers.config import parse_default_workflow
-            wf_name = parse_default_workflow(wt_path / "imp" / "project.yaml")
-            workflow = load_workflow(
-                wt_path / "imp" / "workflows" / wf_name,
+            wf_name = workflow or parse_default_workflow(
+                wt_path / "imp" / "project.yaml")
+            loaded_workflow = load_workflow(
+                resolve_workflow_dir(wt_path, wf_name),
                 configured_tiers=config.tier_names(),
                 project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
-            # Validation now runs post-create_worktree, so a base branch lacking a
-            # readable imp/workflows/<name> (or carrying a malformed
-            # default-workflow: value) would otherwise leak the just-created
-            # branch+worktree. Roll both back so a failed create leaves nothing.
             worktree.destroy_worktree(control_root, change_id)
             shutil.rmtree(change_dir, ignore_errors=True)
             raise
-        flat = workflow.flat_steps()
+        flat = loaded_workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(flat[0].label or flat[0].name) if flat else None,
             status="running",
-            vars=apply_var_overrides(workflow.vars, config.var_overrides),
+            vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},
         ).save(change_dir / "state")
 
@@ -235,7 +232,7 @@ class Change:
         change = cls(
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
-            cur_base_head=cur_base_head,
+            cur_base_head=cur_base_head, workflow=workflow,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
@@ -246,7 +243,7 @@ class Change:
     @classmethod
     def create_draft(
         cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
-        depends_on: list[str] | None = None,
+        depends_on: list[str] | None = None, workflow: str | None = None,
     ) -> Change:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -272,6 +269,7 @@ class Change:
             "orig_base_head": orig_base_head,
             "layout_version": LAYOUT_VERSION,
             "imp_commit": _imp_commit(control_root),
+            "workflow": workflow,
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -282,21 +280,23 @@ class Change:
             project_root=control_root, control_root=control_root,
         ).config
         try:
-            wf_name = parse_default_workflow(control_root / "imp" / "project.yaml")
-            workflow = load_workflow(
-                control_root / "imp" / "workflows" / wf_name,
+            from imp.assets import resolve_workflow_dir
+            wf_name = workflow or parse_default_workflow(
+                control_root / "imp" / "project.yaml")
+            loaded_workflow = load_workflow(
+                resolve_workflow_dir(control_root, wf_name),
                 configured_tiers=config.tier_names(),
                 project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
             shutil.rmtree(change_dir, ignore_errors=True)
             raise
-        flat = workflow.flat_steps()
+        flat = loaded_workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(flat[0].label or flat[0].name) if flat else None,
             status="running",
-            vars=apply_var_overrides(workflow.vars, config.var_overrides),
+            vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},
         ).save(change_dir / "state")
 
@@ -304,6 +304,7 @@ class Change:
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
             change_dir=change_dir, materialized=False, orig_base_head=orig_base_head,
+            workflow=workflow,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
@@ -332,4 +333,5 @@ class Change:
             materialized=meta.get("materialized", True),
             orig_base_head=meta.get("orig_base_head", ""),
             cur_base_head=meta.get("cur_base_head", ""),
+            workflow=meta.get("workflow"),
         )

@@ -69,7 +69,9 @@ def test_change_missing_workflow_dir_raises_naming_path(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as exc:
         Change.create(tmp_path, title="X", change_id="2026-06-15-ghost1",
                       base_branch="main")
-    assert "workflows/ghost" in str(exc.value).replace("\\", "/")
+    msg = str(exc.value)
+    assert "ghost" in msg
+    assert "imp" in msg and "patent" in msg
 
 
 def test_validate_workflow_name_accepts_plain_segment() -> None:

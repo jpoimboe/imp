@@ -11,11 +11,13 @@ from tests.conftest import _git, _init_repo, _seed_control
 
 
 def _seed_control_without_workflow(root: Path) -> None:
-    """Seeds the control root with imp/config.yaml but NO imp/workflows/imp,
-    so that workflow loading raises LoadError."""
+    """Seeds the control root with project.yaml and tier config but NO
+    imp/workflows/imp, so resolution falls back to the bundled workflow."""
     _init_repo(root)
     (root / "imp").mkdir()
-    (root / "imp" / "config.yaml").write_text(
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n  low: {anthropic: x}\n  medium: {anthropic: x}\n  high: {anthropic: x}\n"
     )
@@ -65,7 +67,8 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert set(meta) == {"id", "title", "base_branch", "created_at",
                          "depends_on", "project_root", "materialized",
-                         "cur_base_head", "layout_version", "imp_commit"}
+                         "cur_base_head", "layout_version", "imp_commit",
+                         "workflow"}
 
 
 def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
@@ -78,14 +81,13 @@ def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> Non
     assert not (ch.change_dir / "workflow").exists()
 
 
-def test_create_without_workflow_raises_and_leaves_no_orphan(tmp_path: Path) -> None:
+def test_create_without_committed_workflow_resolves_bundled(tmp_path: Path) -> None:
+    from imp.assets import bundled_workflow_dir
     _seed_control_without_workflow(tmp_path)
-    with pytest.raises(LoadError):
-        Change.create(tmp_path, title="X", change_id="nowf", base_branch="main")
-    # The branch+worktree created before validation must be torn down.
-    assert not (tmp_path / ".imp" / "worktrees" / "nowf").exists()
-    assert "imp/nowf" not in _git(tmp_path, "branch", "--list", "imp/nowf").stdout
-    assert not (tmp_path / ".imp" / "changes" / "nowf").exists()
+    ch = Change.create(tmp_path, title="X", change_id="bund01", base_branch="main")
+    # No committed imp/workflows/imp -> the installed bundled workflow runs.
+    assert ch.workflow_dir == bundled_workflow_dir("imp")
+    assert (tmp_path / ".imp" / "worktrees" / "bund01").exists()
 
 
 def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
@@ -240,11 +242,13 @@ def test_create_draft_records_orig_base_head(tmp_path: Path) -> None:
     assert meta["project_root"] == str(tmp_path)
 
 
-def test_create_draft_refuses_bad_workflow_and_leaves_no_home(tmp_path: Path) -> None:
+def test_create_draft_without_committed_workflow_resolves_bundled(tmp_path: Path) -> None:
+    from imp.assets import bundled_workflow_dir
     _seed_control_without_workflow(tmp_path)
-    with pytest.raises(LoadError):
-        Change.create_draft(tmp_path, title="X", change_id="drf3", base_branch="main")
-    assert not (tmp_path / ".imp" / "changes" / "drf3").exists()
+    ch = Change.create_draft(tmp_path, title="X", change_id="drf3", base_branch="main")
+    # No committed imp/workflows/imp -> the installed bundled workflow runs.
+    assert ch.live_workflow_dir == bundled_workflow_dir("imp")
+    assert (tmp_path / ".imp" / "changes" / "drf3").exists()
 
 
 def test_create_draft_refuses_invalid_workflow_and_leaves_no_home(
@@ -375,3 +379,54 @@ def test_migrate_v1_to_v2(tmp_path: Path) -> None:
     assert migrated["cur_base_head"] == old_tip      # backfill = merge-base(main, branch HEAD)
     assert loaded.orig_base_head == old_tip
     assert loaded.cur_base_head == old_tip
+
+
+def test_create_draft_persists_and_resolves_workflow_override(tmp_path: Path) -> None:
+    import shutil
+    _seed_control(tmp_path)
+    shutil.copytree(tmp_path / "imp" / "workflows" / "imp",
+                    tmp_path / "imp" / "workflows" / "mine")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "fork")
+    ch = Change.create_draft(tmp_path, title="X", change_id="dft001",
+                             base_branch="main", workflow="mine")
+    assert ch.workflow == "mine"
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["workflow"] == "mine"
+    loaded = Change.load(tmp_path, "dft001")
+    assert loaded.workflow == "mine"
+    # The override is consulted ahead of default-workflow: imp.
+    assert loaded.live_workflow_dir == tmp_path / "imp" / "workflows" / "mine"
+
+
+def test_create_draft_unknown_workflow_rolls_back(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    with pytest.raises(LoadError):
+        Change.create_draft(tmp_path, title="X", change_id="dft002",
+                             base_branch="main", workflow="bogus")
+    assert not (tmp_path / ".imp" / "changes" / "dft002").exists()
+
+
+def test_create_persists_and_resolves_workflow_override(tmp_path: Path) -> None:
+    import shutil
+    _seed_control(tmp_path)
+    shutil.copytree(tmp_path / "imp" / "workflows" / "imp",
+                    tmp_path / "imp" / "workflows" / "mine")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "fork")
+    ch = Change.create(tmp_path, title="X", change_id="crt001",
+                       base_branch="main", workflow="mine")
+    assert ch.workflow == "mine"
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["workflow"] == "mine"
+    loaded = Change.load(tmp_path, "crt001")
+    assert loaded.workflow == "mine"
+    assert loaded.live_workflow_dir == loaded.project_root / "imp" / "workflows" / "mine"
+
+
+def test_create_unknown_workflow_rolls_back(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    with pytest.raises(LoadError):
+        Change.create(tmp_path, title="X", change_id="crt002",
+                      base_branch="main", workflow="bogus")
+    assert not (tmp_path / ".imp" / "changes" / "crt002").exists()
