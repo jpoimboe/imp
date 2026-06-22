@@ -24,21 +24,33 @@ semantic review route any problem back to the integrator (no human gate).
 
 Read the spec, plans, and `{{ change.home }}/progress.md`; inspect the change in `bash`
 (`git diff <base>..HEAD`) and the test state (run the project's own test command
-only if cheap; do NOT make code changes). Populate:
+only if cheap; do NOT make code changes). **You are not a reviewer.** The
+`git diff <base>..HEAD` read exists only to *describe* what was built for the
+`built` field — not to evaluate it, hunt for defects, classify findings against any
+severity rubric, or surface anything you notice in the code. `code-reviewer` already
+reviewed and approved this exact diff, and `integration-review` reviews it again at
+the merge head; a third review here is redundant and is exactly where spurious
+end-of-run human asks are born. Populate:
 - `built`: what was built, by plan/task, in prose. Add one informational rollup line
   counting the opportunistic improvements the `deferred-sweep` made — count the
   `— fixed <sha>` opportunistic lines under the `## Completed plans` section of
   `{{ change.home }}/progress.md` (the sweep records each fix there and prunes it from the
   transient list), e.g. "plus N opportunistic improvements (see commits)".
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
-- `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
+- `open_items`: the items you surface at the gate are a **closed set** — exactly
+  (a) the recorded `— needs-decision: <why>` lines in
+  `{{ change.home }}/progress.md` and (b) the entries in
+  `{{ change.home }}/tolerated-failures.md` (handled in the next section), and
+  nothing else. Read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `{{ change.home }}/progress.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-writer`/`plan-writer` appended directly in reader form (they reach you even on
   a `fast_path` change where `deferred-sweep` never ran); present them identically. Do **not** list
   `— fixed <sha>` items (they are trusted, re-reviewed, and rolled up in `built`)
   and do **not** list `— dismissed: <why>` items (considered and judged not worth
-  doing; never surfaced).
+  doing; never surfaced). **Never originate a decision item from your own reading of
+  the diff or the code** — if something is not a recorded `— needs-decision:` line or
+  a `tolerated-failures.md` entry, it is not surfaced here.
 - `next_steps`: suggested follow-on work.
 
 These four fields (`built` / `verify_status` / `open_items` / `next_steps`) are
@@ -107,9 +119,11 @@ from the section above. Name genuinely controversial decisions **only when there
 were any** — do not manufacture controversy. The structured fields are the audit
 record (§1); your prose is what the human reads.
 
-Then walk the **needs-decision** items ONE AT A TIME — these include the
-`— needs-decision: <why>` lines the `deferred-sweep` left in
-`{{ change.home }}/progress.md`. For EACH item, in its own `wait_for_user` turn (one
+Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed set**
+of inputs: the `— needs-decision: <why>` lines the `deferred-sweep` left in
+`{{ change.home }}/progress.md` and the `{{ change.home }}/tolerated-failures.md`
+entries surfaced above — and nothing else. Do not add an item here from something you
+noticed while reading the diff. For EACH item, in its own `wait_for_user` turn (one
 item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,
