@@ -12,7 +12,7 @@ from imp.engine.executor import RunResult
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
 from imp.remote.session.discover import session_socket_path
-from imp.remote.session.protocol import CONTROL_ABANDON
+from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_SAVE
 
 
 @pytest.fixture
@@ -1134,3 +1134,39 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
 
     assert result is RunResult.PAUSED
     assert spawned == []   # a user-pause exit suppresses the handoff-repair hook
+
+
+@pytest.mark.anyio
+async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-sav")
+    sock = str(session_socket_path(change.control_root, change.id))
+    saved: list[Change] = []
+    torn: list[Change] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> None:
+        await anyio.sleep_forever()   # only a save-cancel ends this run
+
+    async with anyio.create_task_group() as tg:
+        async def _serve() -> None:
+            await serve_change_session(
+                change, run_fn=fake_run, hibernate=False,
+                tear_down=lambda ch: torn.append(ch),
+                save_left=lambda ch: saved.append(ch))
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        await client.send_control(CONTROL_SAVE)
+        with anyio.fail_after(5):
+            while not saved:
+                await anyio.sleep(0.02)
+        assert saved == [change]
+        assert torn == []
+        await client.aclose()
+        tg.cancel_scope.cancel()
