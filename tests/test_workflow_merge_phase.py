@@ -146,7 +146,8 @@ def test_finalize_merge_routes_to_wait_for_head() -> None:
             "open_items": "", "next_steps": ""}
     m = evaluate_rules(rules, vars={}, output={**base, "decision": "merge"})
     assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
-    m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1}, output={**base, "decision": "rework"})
+    m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
+                       output={**base, "decision": "rework"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
     m = evaluate_rules(rules, vars={}, output={**base, "decision": "other"})
     assert isinstance(m.action, Pause)
