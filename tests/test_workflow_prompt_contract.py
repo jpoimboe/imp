@@ -443,13 +443,13 @@ def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
 def test_integration_prompts_use_recorded_endpoints() -> None:
     review = (AGENTS_DIR / "integration-review.md").read_text()
     integ = (AGENTS_DIR / "integrator.md").read_text()
-    # Consumers parse the labeled endpoint lines, not a post-rebase merge-base diff.
+    # integration-review still parses the labeled endpoint lines until Task 4 rewrites it.
     assert "Integration-fork:" in review
     assert "Integration-base:" in review
     assert 'git diff "$(git merge-base "$BASE" HEAD)" "$BASE"' not in review
-    # The integrator re-records the endpoints and replants cur_base_head.
-    assert "Integration-fork:" in integ
-    assert "Integration-base:" in integ
+    # The integrator reads the fork from the workflow var and replants cur_base_head.
+    assert "vars.integration_fork" in integ
+    assert "Integration-fork:" not in integ
     assert "cur_base_head" in integ
 
 

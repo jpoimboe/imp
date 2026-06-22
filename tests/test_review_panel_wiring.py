@@ -207,9 +207,11 @@ def test_integrator_is_a_rebase_conflict_resolver() -> None:
     assert "MERGE_HEAD" not in text
     assert "--amend" not in text
     assert "git rebase --continue" in text
-    assert "integration-notes.md" in text
-    assert "deviation: {type: bool}" in text
+    assert "integration-notes.md" not in text
+    assert "stuck: {type: bool}" in text
     assert "wait_for_user" not in text
+    # AC9: still instructs the cur_base_head := B replant on the conflicted-rebase path
+    assert "cur_base_head" in text
 
 
 def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123",

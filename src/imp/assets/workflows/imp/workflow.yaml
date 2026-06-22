@@ -294,9 +294,7 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {if: {deviation: true}, release: base, goto: plan-writer,
-             label: "integration needs a new plan",
-             feedback: "The integration pass found the plan needs revision. Findings:"}
+          - {if: {stuck: true}, pause: true}
           - {else: true, continue: true}
 
       - name: integration-verify
