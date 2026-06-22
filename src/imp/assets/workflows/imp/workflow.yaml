@@ -4,22 +4,19 @@ description: |
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
-# reviewer judging the medium-tier implementer's work), not by vendor. Review fires on
-# an ACCUMULATED-TASK cadence decided by plan-cycle-check, the sole coverage guard: a
-# single `code-reviewer` runs as the `code-reviewer` step directly — per batch
-# (review_base..HEAD) when tasks_since_review crosses review_batch_size, and once over
-# the whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
+# reviewer judging the medium-tier implementer's work), not by vendor. Review fires
+# PER PLAN: plan-cycle-check, the sole coverage guard, routes each settled plan
+# through a single `code-reviewer` step over review_base..HEAD, plus once over the
+# whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
 # is paired with each review; verify and plan-reviewer stay per-plan.
 
 vars:
   fast_path:              {type: bool, default: false}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
-  review_scope:           {type: string, default: plan}  # plan | change — per-batch vs end-of-change review
-  review_base:            {type: string, default: ""}    # SHA defining the per-batch review diff range
-  tasks_since_review:     {type: int, default: 0}         # accumulated implemented-task counter
-  review_batch_size:      {type: int, default: 7}         # N: per-batch review fires when the counter crosses this
-  change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-batch, not re-paneled
+  review_scope:           {type: string, default: plan}  # plan | change — per-plan vs end-of-change review
+  review_base:            {type: string, default: ""}    # SHA defining the per-plan review diff range
+  change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-plan, not re-paneled
   integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
 
 defaults:
@@ -168,35 +165,32 @@ phases:
         rules:
           - {else: true, goto: cleanup-implement}
 
-      # SOLE arbiter of coverage AND review cadence. Increments tasks_since_review by the
-      # just-completed plan's task count (read from the plan file) and emits the running
-      # total as `running_tasks`. First-match-wins; more_plans:false wins over the counter.
+      # SOLE coverage guard. First-match-wins: the more_plans:true rule is tested first,
+      # so a plan with uncovered scope remaining is reviewed before the coverage-complete
+      # branches are considered. It no longer arbitrates review cadence or increments any
+      # task counter — review now fires once per plan.
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
         tier: medium
         label: checking plan coverage
         rules:
-          # batch full (more scope remains AND counter crossed N) -> per-batch review.
+          # More scope remains -> review THIS plan (review_base..HEAD) before the next plan.
           # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
           # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
-          # per-batch review as the full panel.
-          - {if: "output.more_plans and output.running_tasks >= review_batch_size",
-             set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"}, goto: code-reviewer}
-          # more scope, batch not full -> supercycle to plan-writer (skip review/sweep this lap)
-          - {if: {more_plans: true}, set: {tasks_since_review: "output.running_tasks", review_scope: "'plan'"},
-             goto: plan-writer, label: "write next plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
+          # per-plan review as the full panel.
+          - {if: {more_plans: true}, set: {review_scope: "'plan'"}, goto: code-reviewer}
           # coverage complete, trivial change -> no panel, straight to finalize
-          # (the per-batch cleanup already folded+stamped this batch)
-          - {if: {fast_path: true}, set: {tasks_since_review: "output.running_tasks"}, goto: finalize}
-          # coverage complete AND the full panel already ran once -> a corrective/gap-fix batch
-          # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD diff
-          # (review_scope='plan'), not a fresh whole-change panel each round.
-          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", tasks_since_review: "output.running_tasks"}, goto: code-reviewer}
+          # (the per-plan cleanup already folded+stamped this plan)
+          - {if: {fast_path: true}, goto: finalize}
+          # coverage complete AND the full panel already ran once -> a corrective/gap-fix plan
+          # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD
+          # diff (review_scope='plan'), not a fresh whole-change panel each round.
+          - {if: {change_panel_done: true}, set: {review_scope: "'plan'"}, goto: code-reviewer}
           # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
           # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
-          - {else: true, set: {review_scope: "'change'", change_panel_done: true, tasks_since_review: "output.running_tasks"}, goto: code-reviewer}
+          - {else: true, set: {review_scope: "'change'", change_panel_done: true}, goto: code-reviewer}
 
-      # The review step IS the code-reviewer (no coordinator/panel): per-batch it
+      # The review step IS the code-reviewer (no coordinator/panel): per-plan it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
       # cur_base_head..HEAD. It routes — verdict is approve | task_gap only (coverage is
       # plan-cycle-check's call, never the reviewer's).
@@ -255,23 +249,23 @@ phases:
         rules:
           - {else: true, goto: cleanup-sweep}
 
-      # After a batch's review + sweep settle, advance the diff base to HEAD and reset
-      # the counter. The end-of-change pass (review_scope==change) is the last review,
-      # so route it to finalize (the per-batch cleanup already stamped); a per-batch
-      # pass returns to plan-writer for the next plan.
+      # After a plan's review + sweep settle, advance the diff base to HEAD. The
+      # end-of-change pass (review_scope==change) is the last review, so route it to
+      # finalize (the per-plan cleanup already stamped); a per-plan pass returns to
+      # plan-writer for the next plan.
       - name: review-base-repin
         quiet: true
         command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
         rules:
-          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: finalize}
+          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout}, goto: finalize}
           # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
-          # never re-enters with more_plans:true; every post-panel per-batch settle is therefore
-          # terminal -> route a corrective/gap-fix batch to finalize, not the next plan. (This keys
+          # never re-enters with more_plans:true; every post-panel per-plan settle is therefore
+          # terminal -> route a corrective/gap-fix plan to finalize, not the next plan. (This keys
           # solely on change_panel_done; it is correct only while more_plans means uncovered SPEC
           # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
           # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
-          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: finalize}
-          - {if: {exit: 0}, set: {review_base: output.stdout, tasks_since_review: 0}, goto: plan-writer}
+          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout}, goto: finalize}
+          - {if: {exit: 0}, set: {review_base: output.stdout}, goto: plan-writer}
           - {else: true, pause: true}
 
       - name: finalize
