@@ -108,7 +108,7 @@ outbox() { curl -s "$FAKE_URL/_outbox" | python3 -m json.tool; }
    from `outbox`, then `inject_reply "approve" <message_id>`. (A reply-to threads to the Change;
    `@<handle> approve` also works.) Run `outbox` again and confirm the Change proceeds toward merge,
    verifying the reply was routed correctly.
-4. Drive to **completion + merge**. Confirm: `cd "$WT" && imp status --all` shows the change
+4. Drive to **completion + merge**. Confirm: `cd "$WT" && imp ls --all` shows the change
    **completed** and the working tree is clean.
 
 **Resilience (environmental, not product).** If the run dies for an environmental reason, re-run or
@@ -127,7 +127,7 @@ With the first Change merged:
    `@<handle>  <title> — <status> · <step>` form, readable at a glance on a phone.
 3. **Second `/new` + `/abandon`** — `inject "/new add a throwaway README note"`; once its first
    message appears, `inject_reply "/abandon" <message_id>` (or `inject "/abandon @<handle>"`);
-   confirm the "Abandoning @<handle>…" ack and that `imp status --all` no longer lists it as live.
+   confirm the "Abandoning @<handle>…" ack and that `imp ls --all` no longer lists it as live.
 4. **Unaddressed-message hint** — `inject "hello?"` with no reply-to and no `@handle`; confirm
    `outbox` shows the route hint ("Couldn't route that — reply to a Change's message, prefix
    @handle, or send /list."), not a silent drop.
@@ -182,7 +182,7 @@ all-green invariant summary, and an explicit "no defects observed" note.
 
 ```bash
 kill "$DAEMON_PID" "$FAKE_PID" 2>/dev/null
-cd "$WT" && imp status | grep . && imp abandon <id>   # skip if no open change
+cd "$WT" && imp ls | grep . && imp abandon <id>   # skip if no open change
 rm -rf "$WT"
 git -C "$REPO" status --short   # only the new report file should appear
 ```
