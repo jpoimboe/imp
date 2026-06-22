@@ -25,7 +25,7 @@ import anyio
 
 from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.cli import change_row, playbooks, resume_select
+from imp.cli import change_row, playbooks, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver, compute_start_phase
@@ -133,6 +133,13 @@ def _should_prompt_opening(
     if not interactive:
         return False
     return seed_text is None
+
+
+def _print_opening_splash(stream: Any) -> None:
+    block = splash.splash_block(theme=pal.active_theme(), width=_term_width(),
+                                color=should_use_color(stream))
+    print(block, file=stream)
+    print(file=stream)
 
 
 def _normalize_opening_reply(reply: str) -> str | None:
@@ -739,6 +746,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
+        _print_opening_splash(sys.stdout)
         prompt = Prompt(
             editing_mode=_editing_mode(control),
             color=should_use_color(sys.stdout))

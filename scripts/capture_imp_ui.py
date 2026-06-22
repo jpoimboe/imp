@@ -95,7 +95,20 @@ def scene_prompt(*, color: bool) -> None:
         p.ask()
 
 
-_SCENES = {"stream": "replay recorded journal", "prompt": "interactive input field"}
+def scene_splash(*, color: bool, width: int, theme: str = "dark",
+                index: int = 0) -> None:
+    from imp.cli import palette as pal
+    from imp.cli import splash
+
+    pal.set_theme(theme)
+    lines, phrase = splash.render_scene(index, theme=theme, width=width, color=color)
+    sys.stdout.write("\n".join(lines) + "\n")
+    sys.stdout.write(splash.styled_phrase(phrase, theme=theme, color=color) + "\n")
+    sys.stdout.flush()
+
+
+_SCENES = {"stream": "replay recorded journal", "prompt": "interactive input field",
+           "splash": "startup splash scene"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -105,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=None, help="stream: first N events")
     ap.add_argument("--width", type=int, default=100, help="render width (cols)")
     ap.add_argument("--no-color", dest="color", action="store_false")
+    ap.add_argument("--theme", default="dark", help="splash: theme (dark/light/ansi)")
+    ap.add_argument("--scene-index", type=int, default=0, help="splash: scene 0-19")
     ap.set_defaults(color=True)
     a = ap.parse_args(argv)
 
@@ -116,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
         scene_stream(color=a.color, width=a.width, limit=a.limit)
     elif a.scene == "prompt":
         scene_prompt(color=a.color)
+    elif a.scene == "splash":
+        scene_splash(color=a.color, width=a.width, theme=a.theme, index=a.scene_index)
     return 0
 
 
