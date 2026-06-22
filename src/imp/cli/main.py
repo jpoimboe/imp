@@ -42,7 +42,12 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, recovery, worktree
-from imp.engine.abandon import tear_down_change
+from imp.engine.abandon import (
+    archive_conversation,
+    discard_conversation,
+    save_to_backlog,
+    tear_down_change,
+)
 from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
@@ -402,6 +407,71 @@ def _handle_terminal_outcome(
             )
     _emit_paused_summary(change)
     return 1
+
+
+def _had_exchange(log: Any) -> bool:
+    """True if the user contributed at least one message to a conversation."""
+    events = list(log.read())
+    waited = {
+        ev.get("payload", {}).get("id")
+        for ev in events
+        if ev.get("type") == "tool_call"
+        and ev.get("payload", {}).get("name") == "wait_for_user"
+        and ev.get("payload", {}).get("id") is not None
+    }
+    for ev in events:
+        etype = ev.get("type")
+        if etype in ("opening_intent", "user_message", "user_interjected"):
+            return True
+        if etype == "tool_result" and ev.get("payload", {}).get("id") in waited:
+            return True
+    return False
+
+
+async def _apply_disposition_locked(
+    fn: Callable[[Change], None], change: Change, *,
+    attempts: int = 100, delay: float = 0.1,
+) -> None:
+    """Apply a lock-taking disposition with retry while the daemon still holds the lock."""
+    for _ in range(attempts - 1):
+        try:
+            await anyio.to_thread.run_sync(fn, change)
+            return
+        except LockHeld:
+            await anyio.sleep(delay)
+    await anyio.to_thread.run_sync(fn, change)
+
+
+async def _maybe_apply_leave_disposition(
+    change: Change, leave_mode: str | None, leave_state: dict[str, str],
+) -> int | None:
+    """Finalize a left phase-0 conversation. Returns 0 when applied, None to defer."""
+    if leave_mode is None or leave_state.get("intent") == "abandon":
+        return None
+    try:
+        change = Change.load(change.control_root, change.id)
+    except (LoadError, LoadErrors):
+        return None  # home gone — defer to the normal path
+    if change.materialized:
+        return None  # a real in-flight change, not a phase-0 leave
+    explicit_save = leave_state.get("intent") == "save"
+    try:
+        if not explicit_save and not _had_exchange(change.event_log()):
+            await _apply_disposition_locked(discard_conversation, change)
+            return 0
+        if explicit_save or leave_mode == "new":
+            await _apply_disposition_locked(save_to_backlog, change)
+            print(f"imp: saved '{change.title or change.id}' to your Backlog "
+                  f"(resume with `imp resume {change.id}`)")
+            return 0
+        await _apply_disposition_locked(archive_conversation, change)
+        print(f"imp: conversation saved — resume with `imp resume {change.id}` "
+              f"or find it later with `imp search`")
+        return 0
+    except LockHeld:
+        print(f"imp: '{change.id}' is still busy and was left running "
+              f"(resume with `imp resume {change.id}`)", file=sys.stderr)
+        return None
 
 
 def _session_exit_code(change: Change, coord: Any) -> int:
