@@ -61,3 +61,20 @@ def archive_conversation(change: Change) -> None:
         worktree.remove_worktree(control, change_id, force=True)
         worktree.delete_branch(control, change_id)
     shutil.rmtree(change.change_dir, ignore_errors=True)
+
+
+def save_to_backlog(change: Change) -> None:
+    """Save a left conversation to the Backlog (status 'saved', home kept, not archived)."""
+    with ProjectLock(change.change_dir / "lock").acquire():
+        state = State.load(change.state_dir)
+        state.status = "saved"
+        state.save(change.state_dir)
+        change.event_log().append(
+            agent_id=None, type="conversation_saved", payload={})
+
+
+def discard_conversation(change: Change) -> None:
+    """Discard a zero-exchange open — no archive, no record; raises LockHeld if runner is live."""
+    with ProjectLock(change.change_dir / "lock").acquire():
+        pass
+    shutil.rmtree(change.change_dir, ignore_errors=True)
