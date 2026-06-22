@@ -249,3 +249,36 @@ async def test_apply_disposition_locked_raises_on_stuck_lock(tmp_path: Path) -> 
     with lock.acquire(), pytest.raises(LockHeld):
         await m._apply_disposition_locked(
             save_to_backlog, ch, attempts=1, delay=0.0)
+
+
+@pytest.mark.anyio
+async def test_disposition_lock_held_after_retries_prints_busy_and_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _draft_with_exchange(tmp_path, "lh2")
+
+    async def _always_lock_held(fn, change, **kwargs):
+        raise LockHeld(Path("/fake/lock"), None)
+
+    monkeypatch.setattr(m, "_apply_disposition_locked", _always_lock_held)
+    rc = await m._maybe_apply_leave_disposition(ch, "chat", {})
+    assert rc is None
+    captured = capsys.readouterr()
+    assert "still busy" in captured.err
+
+
+@pytest.mark.anyio
+async def test_disposition_returns_none_when_reload_raises_load_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine.errors import LoadError
+    _seed_control(tmp_path)
+    ch = _draft_with_exchange(tmp_path, "le1")
+
+    def _raise(*args, **kwargs):
+        raise LoadError("home gone")
+
+    monkeypatch.setattr(m.Change, "load", _raise)
+    rc = await m._maybe_apply_leave_disposition(ch, "chat", {})
+    assert rc is None
