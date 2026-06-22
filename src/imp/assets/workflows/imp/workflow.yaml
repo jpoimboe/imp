@@ -246,7 +246,7 @@ phases:
           # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
           # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
           - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout}, goto: finalize}
-          - {if: {exit: 0}, set: {review_base: output.stdout}, goto: plan-writer}
+          - {if: {exit: 0}, set: {review_base: output.stdout, plan_index: "var.plan_index + 1"}, goto: plan-writer}
           - {else: true, pause: true}
 
       - name: finalize
@@ -256,7 +256,7 @@ phases:
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}
-          - {if: {decision: rework}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── merge: the FIFO merge queue. Only the head touches the base. ───────
