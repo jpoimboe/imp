@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import json
 import logging
 import os
@@ -649,7 +650,8 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
         resume: bool = False, from_target: str | None = None,
-        opening_intent: str | None = None) -> int:
+        opening_intent: str | None = None,
+        leave_mode: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
@@ -657,6 +659,7 @@ async def _run_tui_session(
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume, from_target=from_target,
         opening_intent=opening_intent)
+    leave_state: dict[str, str] = {}
 
     async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)
@@ -670,7 +673,7 @@ async def _run_tui_session(
                     with contextlib.suppress(TimeoutError):
                         await run_terminal_client(
                             attach=attach, driver=app, coord=coord, solicit=_solicit,
-                            change_id=change.id)
+                            change_id=change.id, leave_state=leave_state)
                 finally:
                     app.exit()
 
@@ -679,6 +682,9 @@ async def _run_tui_session(
             tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
+    disposition_rc = await _maybe_apply_leave_disposition(change, leave_mode, leave_state)
+    if disposition_rc is not None:
+        return disposition_rc
     return _session_exit_code(change, coord)
 
 
@@ -750,7 +756,7 @@ async def _run_fresh_session(
         seed_opening=seed_opening, status=status)
 
 
-async def _async_cmd_new(args: argparse.Namespace) -> int:
+async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -859,7 +865,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(_run_header_line(
             change.id, change.title, "new", color=should_use_color(sys.stdout)))
         return await _run_tui_session(change, seed_opening=opening_text,
-                                      opening_intent=opening_intent)
+                                      opening_intent=opening_intent,
+                                      leave_mode=leave_mode)
 
     print(_run_header_line(
         change.id, change.title, "new", color=should_use_color(sys.stdout)))
@@ -873,7 +880,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     return await run_session_client(
         change, driver=driver, coord=coord, solicit=solicit,
         seed_opening=opening_text, status=status,
-        opening_intent=opening_intent)
+        opening_intent=opening_intent, leave_mode=leave_mode)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -881,7 +888,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
-    return anyio.run(_async_cmd_new, args)
+    return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
 async def _async_cmd_run(args: argparse.Namespace) -> int:
