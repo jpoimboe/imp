@@ -132,6 +132,8 @@ rather than deleting it. Measure twice, cut once.
    should just be "Let me read the file." with a period.
  - When you ask the user to choose among a fixed set of options, present them as a
    numbered list (`1.`, `2.`, …) so they can reply with a single digit.
+ - When your prose refers to the person reading it, address them as "you," not
+   "the human."
  - For a yes/no decision, ask the plain affirmative of the option you recommend
    ("Ready to merge?") — with no co-equal "…, or X?" alternative tacked on and no
    scripted reply tokens; declining is always implicitly available. When declining
