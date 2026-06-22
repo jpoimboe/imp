@@ -395,3 +395,19 @@ def test_merge_to_base_has_no_expected_base_sha_param() -> None:
     assert "expected_base_sha" not in sig.parameters
 
 
+def test_find_control_root_not_a_repo_points_at_imp_init(tmp_path: Path) -> None:
+    with pytest.raises(wt.PreconditionError) as ei:
+        wt.find_control_root(tmp_path)
+    msg = str(ei.value)
+    assert "not an imp project" in msg
+    assert "imp init" in msg
+
+
+def test_preconditions_message_drops_git_init_hint(tmp_path: Path) -> None:
+    with pytest.raises(wt.PreconditionError) as ei:
+        wt.check_preconditions(tmp_path)
+    msg = str(ei.value)
+    assert "not a git repository" in msg   # existing wording kept
+    assert "git init" not in msg           # the parenthetical hint is gone
+
+

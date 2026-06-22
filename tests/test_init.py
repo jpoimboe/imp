@@ -35,6 +35,16 @@ def _stub_theme_detection(monkeypatch):
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
 
 
+@pytest.fixture(autouse=True)
+def _git_repo(tmp_path, monkeypatch):
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "t")
+    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "t@t")
+    monkeypatch.setenv("GIT_COMMITTER_NAME", "t")
+    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "t@t")
+
+
 def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
@@ -238,7 +248,8 @@ def test_init_help_describes_what_it_does(capsys: pytest.CaptureFixture[str]) ->
         parser.parse_args(["init", "-h"])
     help_text = capsys.readouterr().out
     assert "default workflow" in help_text
-    assert "never makes a git commit" in help_text
+    assert "never makes a git commit" not in help_text
+    assert "initial commit" in help_text.lower()
 
 
 def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
@@ -253,9 +264,7 @@ def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
     assert "IMP_TELEGRAM_TOKEN" in text and "IMP_TELEGRAM_CHAT_ID" in text
 
 
-def test_post_init_manifest_does_not_claim_project_yaml_committed(
-    tmp_path: Path,
-) -> None:
+def test_post_init_manifest_notes_the_commit(tmp_path: Path) -> None:
     lines: list[str] = []
     run_init(
         project_root=tmp_path,
@@ -264,9 +273,8 @@ def test_post_init_manifest_does_not_claim_project_yaml_committed(
         output_fn=lines.append,
     )
     manifest = "\n".join(lines)
-    assert "imp/project.yaml" in manifest
-    assert "committed" not in manifest          # no false "already committed" claim
-    assert "track in git" in manifest           # correct intent: user tracks it
+    assert "Committed imp/project.yaml." in manifest
+    assert "track in git" not in manifest
 
 
 def test_already_initialized_with_existing_user_config_claims_no_write(

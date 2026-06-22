@@ -46,7 +46,9 @@ def find_control_root(start: Path) -> Path:
     `git rev-parse --git-common-dir` -> its parent (spec §3, §5.3)."""
     proc = _git(start, "rev-parse", "--git-common-dir")
     if proc.returncode != 0:
-        raise PreconditionError(f"{start} is not a git repository")
+        raise PreconditionError(
+            "not an imp project — run `imp init` to set up imp here"
+        )
     common = Path(proc.stdout.strip())
     if not common.is_absolute():
         common = (start / common)
@@ -56,7 +58,7 @@ def find_control_root(start: Path) -> Path:
 def check_preconditions(root: Path) -> None:
     """Hard requirements git worktree add + branch creation need (spec §5.1)."""
     if _git(root, "rev-parse", "--git-dir").returncode != 0:
-        raise PreconditionError(f"{root} is not a git repository (run `git init`)")
+        raise PreconditionError(f"{root} is not a git repository")
     if _git(root, "rev-parse", "HEAD").returncode != 0:
         raise PreconditionError(
             "repository has no commits yet; make an initial commit first"

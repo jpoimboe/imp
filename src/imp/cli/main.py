@@ -27,7 +27,7 @@ from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, playbooks, resume_select, splash
 from imp.cli import palette as pal
-from imp.cli.init import run_init
+from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
@@ -503,6 +503,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
     try:
         run_init(project, input_fn=input, output_fn=print)
+    except GitSetupDeclined as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     except FileExistsError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -681,14 +684,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
-    try:
-        control = _control_root()
-        worktree.check_preconditions(control)
-        worktree.ensure_imp_ignored(control)
-        base = worktree.current_branch(control)
-    except worktree.PreconditionError as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
+    control = _control_root()
+    worktree.check_preconditions(control)
+    worktree.ensure_imp_ignored(control)
+    base = worktree.current_branch(control)
 
     if getattr(args, "description", None) and getattr(args, "backlog", None) is None:
         print("imp: --description requires --backlog", file=sys.stderr)
@@ -2073,13 +2072,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser(
         "init",
-        help="Scaffold imp in this git repository.",
+        help="Set up imp here (initializes git if needed).",
         description=(
-            "Set up imp in the current git repository: create imp/ with the\n"
-            "default workflow, write imp/project.yaml (the version-controlled\n"
-            "workflow + project settings), detect your terminal theme, and\n"
-            "bootstrap your machine-local config (providers and theme).\n"
-            "Only touches the filesystem — never makes a git commit."
+            "Set up imp in this directory: optionally initialize a git\n"
+            "repository, write imp/project.yaml (the version-controlled\n"
+            "workflow + project settings) with the default workflow, detect\n"
+            "your terminal theme, and bootstrap your machine-local config\n"
+            "(providers and theme). Makes an initial commit of\n"
+            "imp/project.yaml and .gitignore."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -2383,6 +2383,9 @@ def main(argv: list[str] | None = None) -> int:
         # Forcing the flush now moves that write where the handler can catch it.
         sys.stdout.flush()
         return rc
+    except worktree.PreconditionError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
     except BrokenPipeError:
         # A reader (e.g. `imp log | less` quit before draining) closed the pipe.
         # Redirect stdout to devnull so the interpreter's final flush can't
