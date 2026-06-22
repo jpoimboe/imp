@@ -70,8 +70,8 @@ def test_load_or_rehydrate_returns_loaded_change_for_resumable(tmp_path: Path) -
 
 def test_load_or_rehydrate_returns_loaded_change_when_live(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", change_id="conv",
-                             base_branch="main")
+    Change.create_draft(tmp_path, title="Conv", change_id="conv",
+                        base_branch="main")
     result = m._load_or_rehydrate(tmp_path, "conv")
     assert isinstance(result, Change)
     assert result.id == "conv"

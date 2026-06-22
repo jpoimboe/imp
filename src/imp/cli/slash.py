@@ -75,6 +75,32 @@ def handle_slash_line(
         return REPROMPT
     if cmd == "abandon":
         return "/abandon"
+    if cmd == "resume":
+        if not args:
+            output_fn("Usage: /resume <id|query>")
+            return REPROMPT
+        from imp.cli.main import _change_home, _iter_change_ids
+        from imp.engine.archive import read as archive_read
+        from imp.engine.archive import record, records_root
+        control = change.control_root
+        matches = [cid for cid in _iter_change_ids(control) if args in cid]
+        if len(matches) != 1:
+            if not matches:
+                output_fn(f"No change matches {args!r}.")
+            else:
+                output_fn(f"{args!r} is ambiguous: {', '.join(matches)}")
+            return REPROMPT
+        target = matches[0]
+        if _change_home(control, target).exists():
+            output_fn(f"{target} is live; continue it with `imp resume {target}`.")
+            return REPROMPT
+        rec = record.read_record(records_root(control), target)
+        if rec is None or not rec.get("resumable"):
+            output_fn(f"{target} is not resumable.")
+            return REPROMPT
+        archive_read.rehydrate_change(control, target)
+        output_fn(f"Rehydrated {target}; continue it with `imp resume {target}`.")
+        return REPROMPT
 
     try:
         body = load_skill_body(change.workflow_dir / "skills", cmd)
@@ -108,6 +134,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /ls [-a]           List your changes (-a adds completed/abandoned)")
     out("  /search <query>    Search archived changes by title or id")
     out("  /abandon           Abandon the current change")
+    out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
