@@ -68,6 +68,9 @@ def read_change_json(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
     if rec is None:
         return None
+    meta = rec.get("change_meta")
+    if meta is not None:
+        return json.dumps(meta).encode("utf-8")
     return json.dumps({
         "id": rec["id"], "title": rec["title"], "base_branch": rec["base"],
         "created_at": rec["created_at"], "depends_on": rec["depends_on"],
