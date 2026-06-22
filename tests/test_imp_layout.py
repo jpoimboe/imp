@@ -25,7 +25,7 @@ def _init(tmp_path: Path) -> None:
 def test_init_writes_committed_imp_tree(tmp_path: Path) -> None:
     _init(tmp_path)
     assert (tmp_path / "imp" / "project.yaml").exists()
-    assert (tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml").exists()
+    assert not (tmp_path / "imp" / "workflows").exists()
     proj = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     # New shape: a workflow ref + empty vars. Bindings/providers are NOT here
     # (the floor owns tiers; providers are user-homed).
