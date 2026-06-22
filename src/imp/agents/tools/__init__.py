@@ -122,6 +122,7 @@ def _register_builtins() -> None:
         nav,
         query_events,
         rename_change,
+        step_label,
     )
 
 
