@@ -747,3 +747,21 @@ def test_read_only_rejects_home_path(tmp_path: Path) -> None:
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(_read_only_wf(tmp_path, "~/secrets"))
     assert any("'~'" in str(e) for e in ei.value.errors)
+
+
+def test_read_only_on_non_agent_step_is_silently_ignored(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                command: echo hi
+                read_only: ['.']
+                rules:
+                  - {else: true, continue: true}
+        """)
+    loaded = load_workflow(wf)
+    step = next(s for s in loaded.flat_steps() if s.name == "s")
+    assert step.read_only == ()
