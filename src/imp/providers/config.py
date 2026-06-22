@@ -125,6 +125,17 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
     return facts, guidance
 
 
+def validate_workflow_name(name: str) -> bool:
+    """A workflow name is a single path segment: non-blank, no '/' or '\\',
+    no leading '.'."""
+    return (
+        bool(name.strip())
+        and "/" not in name
+        and "\\" not in name
+        and not name.startswith(".")
+    )
+
+
 def parse_default_workflow(path: Path) -> str:
     """Read imp/project.yaml `default-workflow:` field. Absent → 'imp'. Read
     directly from the project layer, not merged into the layered Config.
@@ -142,8 +153,7 @@ def parse_default_workflow(path: Path) -> str:
     name = raw.get("default-workflow")
     if name is None:
         return "imp"
-    if (not isinstance(name, str) or not name.strip() or "/" in name or "\\" in name
-            or name.startswith(".")):
+    if not isinstance(name, str) or not validate_workflow_name(name):
         raise LoadError(
             "'default-workflow' must be a single workflow name "
             "(no path separators)",

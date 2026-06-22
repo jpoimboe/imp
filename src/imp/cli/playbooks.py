@@ -37,12 +37,12 @@ def _project_dir(control: Path) -> Path:
 
 
 def _playbook_paths(control: Path) -> list[Path]:
+    by_stem: dict[str, Path] = {p.stem: p for p in shipped_playbook_paths()}
     project = _project_dir(control)
     if project.is_dir():
-        local = sorted(project.glob("*.md"))
-        if local:
-            return local
-    return shipped_playbook_paths()
+        for p in project.glob("*.md"):
+            by_stem[p.stem] = p
+    return [by_stem[stem] for stem in sorted(by_stem)]
 
 
 def _load(path: Path) -> Playbook:

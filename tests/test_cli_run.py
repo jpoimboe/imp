@@ -28,10 +28,12 @@ def test_run_parses_name_args_and_findings_only() -> None:
 
 
 @pytest.mark.anyio
-async def test_pick_playbook_single_auto_selects(tmp_path: Path) -> None:
-    _write_pb(tmp_path, "solo")
-    assert await m._pick_playbook(
-        tmp_path, non_interactive=False) == "solo"
+async def test_pick_playbook_single_auto_selects(monkeypatch, tmp_path: Path) -> None:
+    from imp.cli.playbooks import Playbook
+    monkeypatch.setattr(
+        m.playbooks, "list_playbooks",
+        lambda _: [Playbook(name="solo", description="d-solo", body="body")])
+    assert await m._pick_playbook(tmp_path, non_interactive=False) == "solo"
 
 
 @pytest.mark.anyio

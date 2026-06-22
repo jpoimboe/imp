@@ -34,7 +34,8 @@ def test_init_writes_project_yaml_without_bindings(
     assert "theme" not in proj
     assert proj["default-workflow"] == "imp"
     assert "workflow" not in proj
-    assert (root / "imp" / "workflows" / "imp" / ".pristine").is_file()
+    assert not (root / "imp" / "workflows").exists()
+    assert not (root / "imp" / "playbooks").exists()
 
 
 def test_init_bootstraps_user_config(
@@ -65,7 +66,6 @@ def test_init_idempotent_on_existing_clone(
     # Project file left untouched; user config now bootstrapped.
     assert (root / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
     assert (xdg / "imp" / "config.yaml").exists()
-    assert (root / "imp" / "workflows" / "imp" / ".pristine").is_file()
 
 
 def test_init_leaves_existing_user_config(

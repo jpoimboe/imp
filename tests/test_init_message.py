@@ -38,36 +38,6 @@ def test_fresh_machine_already_initialized_project(
 
     assert "Project already initialized" in text
     assert "Bootstrapped" in text
-    assert "Project already initialized — your machine's config" not in text
-
-
-def test_already_initialized_mentions_playbook_backfill(
-    tmp_path: Path, monkeypatch
-) -> None:
-    # already_initialized=True but playbooks missing → output mentions the backfill.
-    imp_dir = tmp_path / "imp"
-    imp_dir.mkdir()
-    (imp_dir / "project.yaml").write_text("workflow: default\nvars: {}\n")
-    (imp_dir / "workflows").mkdir()
-    (imp_dir / "workflows" / "default").mkdir()
-    # No playbooks dir: backfill should be reported.
-
-    lines: list[str] = []
-    _run(tmp_path, monkeypatch, lines)
-    text = "\n".join(lines)
-
-    assert "Added playbook library" in text
-
-
-def test_already_initialized_no_playbook_message_when_present(
-    tmp_path: Path, monkeypatch
-) -> None:
-    # Full first init creates playbooks; a second init must NOT claim to add them.
-    first: list[str] = []
-    _run(tmp_path, monkeypatch, first)
-    second: list[str] = []
-    _run(tmp_path, monkeypatch, second)
-    assert "Added playbook library" not in "\n".join(second)
 
 
 def test_already_initialized_message_separates_project_and_machine(
@@ -83,7 +53,6 @@ def test_already_initialized_message_separates_project_and_machine(
     assert "Project already initialized" in text
     # The machine/user-config status is a SEPARATE statement, not joined into the
     # project sentence by an em dash.
-    assert "Project already initialized — your machine's config" not in text
     machine_lines = [ln for ln in second if "machine config" in ln]
     assert machine_lines  # at least one line mentions machine config
     project_lines = [ln for ln in second if "Project already initialized" in ln]

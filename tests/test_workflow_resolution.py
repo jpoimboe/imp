@@ -69,4 +69,57 @@ def test_change_missing_workflow_dir_raises_naming_path(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as exc:
         Change.create(tmp_path, title="X", change_id="2026-06-15-ghost1",
                       base_branch="main")
-    assert "workflows/ghost" in str(exc.value).replace("\\", "/")
+    msg = str(exc.value)
+    assert "ghost" in msg
+    assert "imp" in msg and "patent" in msg
+
+
+def test_validate_workflow_name_accepts_plain_segment() -> None:
+    from imp.providers.config import validate_workflow_name
+    assert validate_workflow_name("imp") is True
+    assert validate_workflow_name("my-fork") is True
+
+
+def test_validate_workflow_name_rejects_bad_segments() -> None:
+    from imp.providers.config import validate_workflow_name
+    for bad in ["", "   ", "a/b", "a\\b", ".hidden"]:
+        assert validate_workflow_name(bad) is False
+
+
+def test_resolve_workflow_dir_prefers_committed(tmp_path: Path) -> None:
+    from imp.assets import resolve_workflow_dir
+    committed = tmp_path / "imp" / "workflows" / "imp"
+    committed.mkdir(parents=True)
+    (committed / "workflow.yaml").write_text("name: fork\n")
+    assert resolve_workflow_dir(tmp_path, "imp") == committed
+
+
+def test_resolve_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
+    from imp.assets import bundled_workflow_dir, resolve_workflow_dir
+    # Nothing committed under tmp_path -> the installed bundled workflow.
+    assert resolve_workflow_dir(tmp_path, "imp") == bundled_workflow_dir("imp")
+
+
+def test_resolve_workflow_dir_unknown_names_valid_set(tmp_path: Path) -> None:
+    from imp.assets import resolve_workflow_dir
+    with pytest.raises(LoadError) as exc:
+        resolve_workflow_dir(tmp_path, "bogus")
+    msg = str(exc.value)
+    assert "bogus" in msg
+    assert "imp" in msg and "patent" in msg  # bundled set is named in the error
+
+
+def test_resolve_workflow_dir_rejects_invalid_name(tmp_path: Path) -> None:
+    from imp.assets import resolve_workflow_dir
+    with pytest.raises(LoadError):
+        resolve_workflow_dir(tmp_path, "../evil")
+    with pytest.raises(LoadError):
+        resolve_workflow_dir(tmp_path, "bad/name")
+
+
+def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -> None:
+    from imp.assets import available_workflow_names
+    (tmp_path / "imp" / "workflows" / "mine").mkdir(parents=True)
+    names = available_workflow_names(tmp_path)
+    assert {"imp", "patent", "mine"} <= set(names)
+    assert names == sorted(names)

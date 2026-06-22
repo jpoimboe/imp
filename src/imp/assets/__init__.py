@@ -46,3 +46,46 @@ def playbooks_dir() -> Path:
 
 def shipped_playbook_paths() -> list[Path]:
     return sorted(playbooks_dir().glob("*.md"))
+
+
+def bundled_workflow_names() -> list[str]:
+    """Sorted names of every bundled workflow (the 'managed' set)."""
+    root = Path(str(files("imp.assets").joinpath("workflows")))
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir() if p.is_dir())
+
+
+def available_workflow_names(project_root: Path) -> list[str]:
+    """Bundled names union committed imp/workflows/* names, sorted."""
+    names = set(bundled_workflow_names())
+    committed = project_root / "imp" / "workflows"
+    if committed.is_dir():
+        names |= {p.name for p in committed.iterdir() if p.is_dir()}
+    return sorted(names)
+
+
+def resolve_workflow_dir(project_root: Path, name: str) -> Path:
+    """Resolve a workflow name to a real dir: a committed imp/workflows/<name>
+    (a fork, or the imp-repo dogfood symlink) wins; else the bundled workflow;
+    else LoadError naming the valid set."""
+    from imp.providers.config import validate_workflow_name
+    if not validate_workflow_name(name):
+        from imp.engine.errors import LoadError
+        from imp.engine.types import SourceLoc
+        raise LoadError(
+            f"invalid workflow name {name!r}",
+            SourceLoc(file=project_root / "imp" / "project.yaml", line=1),
+        )
+    committed = project_root / "imp" / "workflows" / name
+    if committed.is_dir():
+        return committed
+    if is_bundled_workflow(name):
+        return bundled_workflow_dir(name)
+    from imp.engine.errors import LoadError
+    from imp.engine.types import SourceLoc
+    raise LoadError(
+        f"unknown workflow {name!r}; available: "
+        f"{', '.join(available_workflow_names(project_root))}",
+        SourceLoc(file=project_root / "imp" / "project.yaml", line=1),
+    )

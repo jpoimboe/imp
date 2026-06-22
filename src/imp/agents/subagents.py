@@ -189,14 +189,15 @@ async def dispatch_task(
     subagent_def = ctx.subagent_defs[subagent_name]
     _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
 
+    from imp.assets import resolve_workflow_dir
     from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
 
     cc = ctx.change_context or ChangeContext(
         id="", title="", project_root=ctx.project_root,
-        # No change context → no change_dir, no snapshot; live dir is the only option.
-        workflow_dir=(
-            ctx.project_root / "imp" / "workflows"
-            / parse_default_workflow(ctx.project_root / "imp" / "project.yaml")
+        # No change context -> no change_dir, no snapshot; live dir is the only option.
+        workflow_dir=resolve_workflow_dir(
+            ctx.project_root,
+            parse_default_workflow(ctx.project_root / "imp" / "project.yaml"),
         ),
     )
 

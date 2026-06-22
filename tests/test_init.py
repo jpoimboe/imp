@@ -55,8 +55,7 @@ def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     assert "theme" not in data
     assert "roles" not in data
 
-    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
-    assert wf.is_file()
+    assert not (tmp_path / "imp" / "workflows").exists()
     # No per-.imp .gitignore anymore; .imp/ is ignored wholesale.
     assert not (tmp_path / ".imp").exists()
 

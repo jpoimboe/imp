@@ -15,21 +15,18 @@ model question — it just records the enabled providers + detected theme.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from imp.assets import bundled_workflow_dir, playbooks_dir
 from imp.cli.verify_detect import (
     detect_verify_command,
     format_verify_command_yaml,
     resolve_verify_choice,
 )
 from imp.engine.sandbox import sandbox_available
-from imp.engine.workflow_lifecycle import write_pristine
 from imp.remote.drivers import REGISTRY
 
 # The order providers are presented in the picker. Bindings (tier→model) are
@@ -262,9 +259,6 @@ def run_init(
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:
         imp_dir.mkdir(parents=True, exist_ok=True)
-        (imp_dir / "workflows").mkdir(exist_ok=True)
-        shutil.copytree(bundled_workflow_dir("imp"), imp_dir / "workflows" / "imp")
-        write_pristine(imp_dir / "workflows" / "imp")
         body = yaml.safe_dump(
             _build_project_config(), sort_keys=False, default_flow_style=False)
         verify_detect = detect_verify_fn or detect_verify_command
@@ -278,18 +272,6 @@ def run_init(
                 + format_verify_command_yaml(chosen)
             )
         project_file.write_text(body + verify_block + _facts_hint())
-    elif not (imp_dir / "workflows" / "imp").is_dir():
-        # Belt-and-suspenders (finding L2): a real teammate clone has project.yaml
-        # AND workflows committed together, so the gate above is correct. But a
-        # *partially* initialized tree (project.yaml present, workflows missing)
-        # would otherwise silently skip workflow creation. Backfill them.
-        (imp_dir / "workflows").mkdir(parents=True, exist_ok=True)
-        shutil.copytree(bundled_workflow_dir("imp"), imp_dir / "workflows" / "imp")
-        write_pristine(imp_dir / "workflows" / "imp")
-
-    backfilled_playbooks = not (imp_dir / "playbooks").is_dir()
-    if backfilled_playbooks:
-        shutil.copytree(playbooks_dir(), imp_dir / "playbooks")
 
     # --- bootstrap user config (only if the machine has none) ---
     user_path = user_config_path()
@@ -313,8 +295,6 @@ def run_init(
     output_fn("")
     if already_initialized:
         output_fn("Project already initialized (imp/project.yaml is committed).")
-        if backfilled_playbooks:
-            output_fn("Added playbook library (imp/playbooks/ — track in git).")
         if wrote_user_config:
             output_fn("Bootstrapped your machine config (providers, theme).")
         else:
@@ -322,8 +302,6 @@ def run_init(
     else:
         output_fn("Created:")
         output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
-        output_fn("  imp/workflows/imp/")
-        output_fn("  imp/playbooks/")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
     output_fn("")
     output_fn("Try: imp new \"Add a dark-mode toggle\"")
