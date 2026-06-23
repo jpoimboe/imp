@@ -65,9 +65,8 @@ def decide(
 
     Most RetryWithBackoff categories retry forever: delay = 1·2^n, unbounded.
     `auth` is capped at 7 attempts — beyond that it Pauses for human attention.
-    `hint_delay_seconds` (a server Retry-After) is honored as max(hint, our delay)
-    but capped at 60s so a misbehaving upstream header can't strand us; that 60s
-    cap is on the *hint only*, not on our own doubling.
+    `hint_delay_seconds` (a server Retry-After) is honored as max(hint, our delay),
+    capped at 60s so a misbehaving upstream header can't strand us.
     """
     cls, cap = _POLICY.get(category, (Pause, None))
     if cls is Pause:
