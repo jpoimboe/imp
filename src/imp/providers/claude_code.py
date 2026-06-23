@@ -16,12 +16,17 @@ runners:
     tool_results, so the runner watches for the next assistant message and
     extracts the captured args from a shared state dict.
 
-`extra_args={"no-session-persistence": None}` is the documented forwarding
-path for `--no-session-persistence` (spec §6.11; verified in Spike 7 and
-SDK `_internal/transport/subprocess_cli.py`). That flag alone is insufficient:
-CC 2.x still writes an `ai-title` session stub to ~/.claude/projects/, so the
-subprocess env also sets `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` to suppress all
-CC-side history writes (imp persists its own transcripts).
+History writes are suppressed differently depending on run mode.  Fresh starts
+run against an isolated ephemeral `CLAUDE_CONFIG_DIR` created by
+`materialize_fresh_config_dir` and removed in `run()`'s finally block; with a
+private home directory the suppression flags are unnecessary.  Resume and
+stream-json-replay paths have no ephemeral config dir, so they keep
+`CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` in the subprocess env and pass
+`extra_args={"no-session-persistence": None}` (the documented forwarding path
+for `--no-session-persistence`; spec §6.11, verified in Spike 7 and SDK
+`_internal/transport/subprocess_cli.py`) to avoid writing to `~/.claude`
+(CC 2.x otherwise writes an `ai-title` session stub to ~/.claude/projects/).
+Imp persists its own transcripts.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ import signal
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
@@ -84,10 +90,12 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_store_for,
+    store_has_conversation_body,
 )
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -963,12 +971,15 @@ class ClaudeCodeAgentRunner:
         # _run_loop from invocation.transcript_dir; wired into the SDK via the
         # `stderr` callback so a CLI exit-1 carries its cause. None until built.
         self._stderr_sink: Any = None
+        # ephemeral CLAUDE_CONFIG_DIR for a fresh run; run()'s finally removes it
+        self._config_dir: Path | None = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None,
                        *, session_store: Any = None,
                        session_id: str | None = None,
-                       resume: str | None = None) -> Any:
+                       resume: str | None = None,
+                       config_dir: Path | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
@@ -986,33 +997,25 @@ class ClaudeCodeAgentRunner:
         mcp_servers: dict[str, Any] = {"imp": mcp_server}
         if impty_server is not None:
             mcp_servers["impty"] = impty_server
+        # blank external keys so a parent ANTHROPIC_* can't hijack the nested claude's backend auth
+        env: dict[str, str] = {
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_AUTH_TOKEN": "",
+        }
+        extra_args: dict[str, Any]
+        if config_dir is not None:
+            # isolated home → suppression flags pointless and they starve session_store;
+            # the batcher resolves projects_dir from this env
+            env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+            extra_args = {}
+        else:
+            # resume/replay keep the flags so they don't write ~/.claude
+            env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
+            extra_args = {"no-session-persistence": None}
         return ClaudeAgentOptions(
             model=self.model,
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
-            # The claude_code provider drives the `claude` CLI, which
-            # authenticates via its OWN backend (OAuth/subscription, Vertex, or
-            # Bedrock). ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are the
-            # *external-key* auth path used by the direct-SDK `anthropic`
-            # provider — never by claude_code. If either is present in the
-            # parent env, claude switches to it as an external key; a bogus or
-            # mismatched value then fails with "Invalid API key · Fix external
-            # API key" (exit 0, surfaced as assistant text → AuthError → empty
-            # review). The SDK merges options.env OVER the inherited env, and an
-            # empty string makes claude fall back to its backend auth (verified
-            # live), so blank both here to make the nested claude immune to
-            # whatever ANTHROPIC_* the parent process happens to export.
-            env={
-                "ANTHROPIC_API_KEY": "",
-                "ANTHROPIC_AUTH_TOKEN": "",
-                # imp persists its own transcripts; the nested claude must write
-                # NOTHING to ~/.claude/projects/. --no-session-persistence (below)
-                # suppresses the conversation body but NOT the ai-title stub: CC
-                # 2.x writes a single-record {"type":"ai-title",...} session file
-                # even under that flag, polluting `claude --resume`. There is no
-                # title-only knob; this var suppresses ALL CC-side history writes,
-                # killing the stub at source.
-                "CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1",
-            },
+            env=env,
             # Pin the `claude` subprocess to the change's project_root. Without
             # this the SDK launches claude with cwd=None and leaves $PWD as
             # inherited, so claude keys off a stale $PWD and edits/commits the
@@ -1029,7 +1032,7 @@ class ClaudeCodeAgentRunner:
             disallowed_tools=disallowed,
             setting_sources=[],
             strict_mcp_config=True,
-            extra_args={"no-session-persistence": None},
+            extra_args=extra_args,
             session_store=session_store,
             session_id=session_id,
             resume=resume,
@@ -1101,6 +1104,9 @@ class ClaudeCodeAgentRunner:
             self._client = None
             if self._stderr_sink is not None:
                 self._stderr_sink.close()
+            if self._config_dir is not None:
+                shutil.rmtree(self._config_dir, ignore_errors=True)
+                self._config_dir = None
 
     async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         from imp.engine.state import JsonlEventLog
@@ -1188,25 +1194,16 @@ class ClaudeCodeAgentRunner:
         # history in position.
         native_resume = (
             (not is_fresh)
-            and bool(await store.load(skey))
+            and store_has_conversation_body(await store.load(skey))
             and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
         )
-        # TEMP DOGFOOD UNBLOCK (change wxczhw): native resume is categorically
-        # broken while CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 + no-session-persistence
-        # starve session_store down to a lone ai-title stub — `--resume` then
-        # always hits "No conversation found", and every paused step deadlocks on
-        # resume. Force the working stream-json replay path until wxczhw lands the
-        # CLAUDE_CONFIG_DIR-isolation fix (docs/superpowers/specs/
-        # 2026-06-23-claude-config-dir-isolation-and-stderr-surfacing-design.md),
-        # which isolates an ephemeral home, drops those flags, and repairs native
-        # resume. wxczhw edits this exact block, so its merge-conflict resolution
-        # should recognize this override as the thing to replace — delete this
-        # line and keep wxczhw's native_resume logic.
-        native_resume = False
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
+        config_dir: Path | None = None
         if is_fresh:
+            config_dir = materialize_fresh_config_dir()
+            self._config_dir = config_dir
             opt_store, opt_session_id, opt_resume = (
                 store, resume_session_id(aid), None)
         elif native_resume:
@@ -1221,7 +1218,7 @@ class ClaudeCodeAgentRunner:
             opts = self._build_options(
                 invocation, mcp_server, list(tools), impty_server=impty_server,
                 session_store=opt_store, session_id=opt_session_id,
-                resume=opt_resume)
+                resume=opt_resume, config_dir=config_dir)
         else:
             opts = None
 
@@ -1321,8 +1318,7 @@ class ClaudeCodeAgentRunner:
                 # Name-only schemas: the in-process MCP server owns the full
                 # input schemas; unlike anthropic/openai we don't pass them here.
                 tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
-                params={"no-session-persistence": None,
-                        "env.CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1"},
+                params={"env.CLAUDE_CONFIG_DIR": str(config_dir)},
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):

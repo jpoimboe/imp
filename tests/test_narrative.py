@@ -2253,3 +2253,31 @@ def test_lane_events_render_no_fallback_breadcrumb() -> None:
     step = tree.root.children[0].children[0]
     fbs = [c for c in step.children if isinstance(c, nv.FallbackLine)]
     assert fbs == []
+
+
+def test_error_node_falls_back_to_stderr_tail_when_no_full_summary() -> None:
+    # A TerminatedError / unknown-path error carries stderr_tail (and exit_code)
+    # but no full_summary. The renderer must surface the real stderr instead of
+    # leaving detail empty (the "Check stderr output for details" regression).
+    b = nv.NarrativeBuilder()
+    b.add(ev("e1", "error", category="terminated",
+             message="claude_code agent terminated with an error (cause unknown)",
+             detail={"stderr_tail": "Error: Session ID abc is already in use.",
+                     "exit_code": 1}))
+    err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert "Session ID abc is already in use." in err.detail
+    assert "exit code 1" in err.detail
+
+    # stderr_tail with no exit_code → detail is just the tail.
+    b2 = nv.NarrativeBuilder()
+    b2.add(ev("e2", "error", category="unknown", message="boom",
+              detail={"stderr_tail": "boom on stderr"}))
+    err2 = next(k for k in b2.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err2.detail == "boom on stderr"
+
+    # full_summary still wins when present (LoopError path unchanged).
+    b3 = nv.NarrativeBuilder()
+    b3.add(ev("e3", "error", category="loop", message="x",
+              detail={"full_summary": "the full summary", "stderr_tail": "ignored"}))
+    err3 = next(k for k in b3.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err3.detail == "the full summary"

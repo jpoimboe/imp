@@ -127,3 +127,11 @@ def session_key(project_root: Path, agent_id: str) -> dict[str, str]:
 
 def session_store_for(transcript_dir: Path) -> ImpSessionStore:
     return ImpSessionStore(transcript_dir / "claude_session")
+
+
+def store_has_conversation_body(entries: list[dict[str, Any]] | None) -> bool:
+    """True iff the store holds a resumable body — any entry that is not the CC ai-title stub."""
+    return any(
+        isinstance(e, dict) and e.get("type") != "ai-title"
+        for e in (entries or [])
+    )
