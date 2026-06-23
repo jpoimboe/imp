@@ -72,7 +72,7 @@ def test_new_idea_with_title_flag_is_error(
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(main._async_cmd_new(
         argparse.Namespace(idea="A title", description=None, depends_on=[],
-                           title="conflicting", base_branch=None, from_target=None,
+                           title="conflicting", base_branch=None,
                            non_interactive=True, message=None, tui=False,
                            opening=None, spec_file=None, playbook=None,
                            findings_only=False, workflow=None)))
@@ -88,7 +88,7 @@ def test_description_without_idea_is_error(
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(main._async_cmd_new(
         argparse.Namespace(idea=None, description="some text", depends_on=[],
-                           title=None, base_branch=None, from_target=None,
+                           title=None, base_branch=None,
                            non_interactive=True, message=None, tui=False,
                            opening=None, spec_file=None, playbook=None,
                            findings_only=False, workflow=None)))
@@ -119,7 +119,7 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(main, "_record_idea", _fake_record)
     rc = asyncio.run(main._async_cmd_new(
         argparse.Namespace(idea="b", description=None, depends_on=[], title=None,
-                           base_branch=None, from_target=None,
+                           base_branch=None,
                            non_interactive=False, message=None, tui=False,
                            seed=None, seed_file=None, workflow=None)))
     assert rc == 0

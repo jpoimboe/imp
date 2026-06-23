@@ -298,34 +298,6 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
     assert replies == ["the reply"]
 
 
-@pytest.mark.anyio
-async def test_run_tui_session_threads_resume_from_target_to_attach(monkeypatch) -> None:
-    seen: dict[str, object] = {}
-
-    def _fake_attach(
-        change, *, seed_opening=None, resume=False, from_target=None, opening_intent=None
-    ):
-        seen["seed_opening"] = seed_opening
-        seen["resume"] = resume
-        seen["from_target"] = from_target
-        return lambda on_event: None
-
-    async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
-    ) -> None:
-        return None
-
-    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
-    monkeypatch.setattr(m, "run_terminal_client", _fake_terminal_client)
-    monkeypatch.setattr(m, "build_session_attach", _fake_attach)
-    monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
-    monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
-
-    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"), resume=True, from_target="review")
-
-    assert rc == 0
-    assert seen == {"seed_opening": None, "resume": True, "from_target": "review"}
-
 
 def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
     from tests.conftest import _seed_control
@@ -340,18 +312,16 @@ def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
 
     seen: dict[str, object] = {}
 
-    async def _fake_tui(change, *, seed_opening=None, resume=False,
-                        from_target=None) -> int:
+    async def _fake_tui(change, *, seed_opening=None, resume=False) -> int:
         seen["resume"] = resume
-        seen["from_target"] = from_target
         return 0
 
     monkeypatch.setattr(m, "_run_tui_session", _fake_tui)
     monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
 
-    args = argparse.Namespace(token="feat", from_target=None, tui=True,
+    args = argparse.Namespace(token="feat", tui=True,
                               non_interactive=False, message=None)
     rc = anyio.run(m._async_cmd_resume, args)
 
     assert rc == 0
-    assert seen == {"resume": True, "from_target": None}
+    assert seen == {"resume": True}

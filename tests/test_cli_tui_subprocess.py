@@ -26,7 +26,7 @@ _CHILD = textwrap.dedent(
 
     m.run_session_client = fake_client
     m.make_interactive_solicit = lambda *a, **k: (lambda _p: None)
-    args = argparse.Namespace(token="feat", from_target=None, tui=True)
+    args = argparse.Namespace(token="feat", tui=True)
     sys.exit(anyio.run(m._async_cmd_resume, args))
     """
 )
