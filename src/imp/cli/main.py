@@ -137,6 +137,34 @@ def _normalize_opening_reply(reply: str) -> str | None:
     return reply.strip() or None
 
 
+def _is_interactive(
+    *, non_interactive: bool, stdin: Any = None, stdout: Any = None,
+) -> bool:
+    """An interactive entry: not flagged off, both streams are ttys, and color
+    is on. The splash banner and the opening prompt both gate on this so the
+    no-color / non-interactive paths show neither (spec AC6)."""
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    return (not non_interactive
+            and getattr(stdin, "isatty", lambda: False)()
+            and getattr(stdout, "isatty", lambda: False)()
+            and should_use_color(stdout))
+
+
+def _print_splash_banner(*, interactive: bool, stream: Any = None) -> None:
+    """Leading blank line then the splash scene, printed on an interactive entry
+    only. Shared by new/chat and resume so the banner is identical everywhere.
+    A no-op when not interactive or when the scene is empty."""
+    if not interactive:
+        return
+    out = sys.stdout if stream is None else stream
+    block = splash.splash_block(theme=pal.active_theme(), width=_term_width(), color=True)
+    if not block:
+        return
+    print(file=out)
+    print(block, file=out)
+
+
 class SeedError(Exception):
     """A bad spec-seed source: a missing/unreadable --spec-file, or two seed
     sources combined."""
@@ -781,17 +809,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
-    interactive = (not non_interactive
-                   and sys.stdin.isatty() and sys.stdout.isatty())
+    interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
+    _print_splash_banner(interactive=interactive)
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         color = should_use_color(sys.stdout)
-        block = splash.splash_block(
-            theme=pal.active_theme(), width=_term_width(), color=color)
-        if block:
-            print(block)
-            print()
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(width=_term_width(),
