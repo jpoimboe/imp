@@ -251,10 +251,11 @@ async def test_genuine_fatal_no_interrupt_keeps_transcript_for_replay(tmp_path: 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
-    class _AuthRunner:
+    class _FatalRunner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             yield {"type": "error", "payload": {
-                "category": "auth", "kind": "AuthError", "message": "401"}}
+                "category": "terminated", "kind": "TerminatedError",
+                "message": "agent terminated with an error (cause unknown)"}}
         async def interrupt(self) -> None:
             pass
 
@@ -262,7 +263,7 @@ async def test_genuine_fatal_no_interrupt_keeps_transcript_for_replay(tmp_path: 
         name = "fake"
         model = "m"
         def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
-            return _AuthRunner()
+            return _FatalRunner()
 
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
     result = await run_change(change)  # no coordinator interrupt

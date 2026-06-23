@@ -648,18 +648,18 @@ class _CategoryErrorRunner:
 
 
 @pytest.mark.anyio
-async def test_auth_error_pauses_without_burning_retries(tmp_path: Path) -> None:
+async def test_fatal_error_pauses_without_burning_retries(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
     runner = _CategoryErrorRunner(
-        category="auth", kind="AuthError",
-        message="Invalid API key — Anthropic returned 401",
+        category="terminated", kind="TerminatedError",
+        message="agent terminated with an error (cause unknown)",
     )
 
-    class _AuthProvider:
+    class _FatalProvider:
         name = "fake"
         model = "m"
 
@@ -667,7 +667,7 @@ async def test_auth_error_pauses_without_burning_retries(tmp_path: Path) -> None
             return runner
 
     resolve.register_provider(
-        "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
+        "fake", env_check=lambda: True, factory=lambda _m: _FatalProvider(),
     )
 
     result = await run_change(change, on_event=lambda _e: None)

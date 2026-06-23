@@ -220,10 +220,40 @@ async def test_drive_invocation_fatal_error(tmp_path: Path) -> None:
 
     coord = InterruptCoordinator()
     runner = _Runner([{"type": "error", "payload": {
-        "category": "auth", "kind": "AuthError", "message": "401"}}])
+        "category": "terminated", "kind": "TerminatedError", "message": "boom"}}])
     res = await drive_invocation(_inv(tmp_path), runner,
                                  coordinator=coord, log=None, emit_events=False)
     assert res.fatal is True
+    assert res.error is not None and res.error.category == "terminated"
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_auth_backs_off_below_cap(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "auth", "kind": "http_401", "message": "401"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False,
+                                 prior_backoff_attempts=0)
+    assert res.fatal is False
+    assert res.delay is not None and res.delay > 0
+    assert res.error is not None and res.error.category == "auth"
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_auth_pauses_after_cap(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "auth", "kind": "http_401", "message": "401"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False,
+                                 prior_backoff_attempts=7)
+    assert res.fatal is True
+    assert res.delay is None
     assert res.error is not None and res.error.category == "auth"
 
 

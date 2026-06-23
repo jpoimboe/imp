@@ -116,34 +116,34 @@ def _seed_single_agent(root: Path) -> Change:
 async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     tmp_path: Path,
 ) -> None:
-    """A category=auth (fatal) error pauses immediately and the emitted
-    workflow_paused payload carries reason=auth / kind=AuthError, plumbed from
-    the classified ErrorInfo through Pause(reason, kind)."""
+    """A category=terminated (fatal) error pauses immediately and the emitted
+    workflow_paused payload carries reason=terminated / kind=TerminatedError,
+    plumbed from the classified ErrorInfo through Pause(reason, kind)."""
     change = _seed_single_agent(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
-    class _AuthRunner:
+    class _FatalRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             yield {"type": "error", "payload": {
-                "category": "auth",
-                "kind": "AuthError",
-                "message": "Invalid API key — 401",
+                "category": "terminated",
+                "kind": "TerminatedError",
+                "message": "agent terminated with an error (cause unknown)",
             }}
 
         async def interrupt(self) -> None:
             pass
 
-    class _AuthProvider:
+    class _FatalProvider:
         name = "fake"
         model = "m"
 
         def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
-            return _AuthRunner()
+            return _FatalRunner()
 
     resolve.register_provider(
-        "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
+        "fake", env_check=lambda: True, factory=lambda _m: _FatalProvider(),
     )
 
     events: list[dict] = []
@@ -152,8 +152,8 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert len(paused) == 1
-    assert paused[0]["payload"]["reason"] == "auth"
-    assert paused[0]["payload"]["kind"] == "AuthError"
+    assert paused[0]["payload"]["reason"] == "terminated"
+    assert paused[0]["payload"]["kind"] == "TerminatedError"
 
     state = State.load(change.state_dir)
     assert state.status == "paused"

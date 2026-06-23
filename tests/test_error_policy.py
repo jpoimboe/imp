@@ -7,7 +7,7 @@ from imp.providers.errors import Category
 
 
 def test_pause_categories_return_pause_regardless_of_attempts() -> None:
-    for cat in ("auth", "config", "quota", "content_filter",
+    for cat in ("config", "quota", "content_filter",
                 "context_window", "unknown"):
         for attempts in (0, 1, 2, 99):
             assert isinstance(
@@ -77,7 +77,7 @@ def test_hint_capped_at_60s() -> None:
 
 def test_hint_ignored_for_pause_category() -> None:
     d = ep.decide(
-        "auth", prior_backoff_attempts=0, hint_delay_seconds=5.0,
+        "config", prior_backoff_attempts=0, hint_delay_seconds=5.0,
     )
     assert isinstance(d, ep.Pause)
 
@@ -105,3 +105,31 @@ def test_retry_after_hint_still_capped_at_60() -> None:
     from imp.engine.error_policy import RetryWithBackoff, decide
     d = decide("network", prior_backoff_attempts=0, hint_delay_seconds=300)
     assert isinstance(d, RetryWithBackoff) and d.delay_seconds == 60.0
+
+
+def test_auth_retries_with_backoff_below_cap() -> None:
+    expected = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+    for n, want in enumerate(expected):
+        d = ep.decide("auth", prior_backoff_attempts=n)
+        assert isinstance(d, ep.RetryWithBackoff)
+        assert d.delay_seconds == want
+
+
+def test_auth_pauses_at_and_above_cap() -> None:
+    for n in (7, 8, 99):
+        assert isinstance(
+            ep.decide("auth", prior_backoff_attempts=n), ep.Pause,
+        )
+
+
+def test_auth_hint_honored_below_cap() -> None:
+    d = ep.decide("auth", prior_backoff_attempts=0, hint_delay_seconds=10.0)
+    assert isinstance(d, ep.RetryWithBackoff)
+    assert d.delay_seconds == 10.0
+
+
+def test_uncapped_backoff_categories_never_pause_at_high_attempts() -> None:
+    for cat in ("rate_limit", "network"):
+        d = ep.decide(cat, prior_backoff_attempts=50)
+        assert isinstance(d, ep.RetryWithBackoff)
+        assert d.delay_seconds == float(2 ** 50)

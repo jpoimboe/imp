@@ -108,6 +108,8 @@ from imp.providers.web_native import (
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
+    "Invalid authentication credentials",
+    "Failed to authenticate",
 )
 
 _QUOTA_PATTERNS = (
@@ -116,10 +118,10 @@ _QUOTA_PATTERNS = (
 )
 
 # Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
-# the underlying Anthropic API returns a non-2xx. 4xx codes → ApiError/
-# RateLimitError; 5xx codes → NetworkError (network category → RetryWithBackoff,
-# same routing as SDK InternalServerError; previously fell through to None and
-# were treated as agent text → wrong nudge loop).
+# the underlying Anthropic API returns a non-2xx. 401/403 → AuthError; 408 and
+# 5xx → NetworkError; 429 → RateLimitError; other 4xx → ApiError (Pause);
+# previously the 5xx case fell through to None and was treated as agent text →
+# wrong nudge loop.
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
 _TRANSIENT_PHRASES = (
@@ -139,7 +141,8 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
 
     Auth/quota patterns are checked first so they win when both substrings
     appear. The API-error regex matches "API Error: <code>":
-    429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
+    401/403 → AuthError with kind="http_<code>"; 408 → NetworkError (transient
+    timeout); 429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
     5xx → NetworkError (network category → RetryWithBackoff; §10).
     """
     for pat in _AUTH_PATTERNS:
@@ -153,6 +156,12 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
         code = int(m.group(1))
         if code == 429:
             return perr.RateLimitError(f"claude CLI: {text[:200]}")
+        if code in (401, 403):
+            auth_exc = perr.AuthError(f"claude CLI: {text[:200]}")
+            auth_exc.kind = f"http_{code}"  # type: ignore[attr-defined]
+            return auth_exc
+        if code == 408:
+            return perr.NetworkError(f"claude CLI: {text[:200]}")
         if 400 <= code < 500:
             exc = perr.ApiError(f"claude CLI: {text[:200]}")
             # Carried through to make_error_event(kind=...) at the call sites so
@@ -202,6 +211,9 @@ def _termination_from_result(
     status = detail["api_error_status"]
     if labeled is None and isinstance(status, int) and 500 <= status < 600:
         labeled = perr.NetworkError(f"claude_code: api_error_status={status}")
+    if labeled is None and status in (401, 403):
+        labeled = perr.AuthError(f"claude_code: api_error_status={status}")
+        labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
     if isinstance(labeled, (perr.QuotaError, perr.AuthError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
