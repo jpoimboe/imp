@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from imp.engine import backlog
 from imp.engine.change import LAYOUT_VERSION
 
 
@@ -513,15 +512,17 @@ def test_main_log_backlog_routes_through_pager(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A backlog-only Change (no events) renders its card through
+    """A backlog Change (no conversation) renders its card through
     _page_or_print on a TTY (Popen once, cleanup ran)."""
     import imp.cli.main as m
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
 
     slug = "backlog-only"
-    backlog.write_record(
-        tmp_path, change_id=slug, title="queued work",
-        description="", depends_on=[], created_by="user",
-    )
+    _seed_control(tmp_path)
+    Change.create_draft(
+        tmp_path, title="queued work", change_id=slug, base_branch="main",
+        origin="followup", seed_opening="queued work")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)

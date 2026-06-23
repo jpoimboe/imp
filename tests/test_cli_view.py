@@ -374,14 +374,15 @@ def test_log_backlog_id_renders_card(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine import backlog
+    from imp.engine.change import Change
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    backlog.write_record(
-        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
-        description="wire up OAuth login", depends_on=[], created_by="human")
+    Change.create_draft(
+        tmp_path, title="Add OAuth", change_id="2026-06-16-bkg111",
+        base_branch="main", origin="followup",
+        seed_opening="Add OAuth\n\nwire up OAuth login")
     rc = main(["log", "2026-06-16-bkg111"])
     assert rc == 0
     out = capsys.readouterr().out

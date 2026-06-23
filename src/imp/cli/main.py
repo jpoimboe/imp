@@ -1275,23 +1275,52 @@ def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _backlog_card(rec: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
-    ready, unmerged = backlog.readiness(control, rec["depends_on"])
+def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | None:
+    """change.json of a LIVE un-materialized, never-conversed Backlog home (idea or
+    followup) — sourced from the worktree home only, never the archive: an abandoned
+    home leaves an archived materialized:false change.json that would otherwise render
+    as a queued `status: backlog` brief instead of a History item. None for any
+    archived-only, materialized, or already-conversed id."""
+    cdir = _change_home(control, change_id)
+    cj = cdir / "change.json"
+    if not cj.exists():
+        return None
+    try:
+        meta: dict[str, Any] = json.loads(cj.read_bytes())
+    except json.JSONDecodeError:
+        return None
+    if meta.get("materialized", True):
+        return None
+    try:
+        change = Change.load(control, change_id)
+    except (LoadError, LoadErrors):
+        return None
+    if _first_user_message(list(change.event_log().read())) is not None:
+        return None
+    return meta
+
+
+def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
+    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
     readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
-    created = rec.get("created_at")
+    created = meta.get("created_at")
     lines = [
-        f"id:         {rec['id']}",
-        f"title:      {rec['title'] or '(unnamed)'}",
+        f"id:         {meta['id']}",
+        f"title:      {meta.get('title') or '(unnamed)'}",
         "status:     backlog",
+        f"provenance: {meta.get('origin', 'draft')}",
         f"readiness:  {readiness}",
         f"created:    {created or '-'} ({change_row.relative_age(created, now=now)})",
     ]
-    if rec["depends_on"]:
-        lines.append(f"depends_on: {', '.join(rec['depends_on'])}")
-    description = rec.get("description") or ""
-    if description:
+    if meta.get("depends_on"):
+        lines.append(f"depends_on: {', '.join(meta['depends_on'])}")
+    body = meta.get("seed_opening") or ""
+    title = meta.get("title") or ""
+    if title and (body == title or body.startswith(title + "\n")):
+        body = body[len(title):].lstrip("\n")
+    if body:
         lines.append("")
-        lines.append(description)
+        lines.append(body)
     return lines
 
 
@@ -1325,9 +1354,9 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
 
 
 def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
-    rec = backlog.read_record(control, change_id)
-    if rec is not None:
-        return _backlog_card(rec, control, now=now)
+    meta = _unstarted_backlog_meta(control, change_id)
+    if meta is not None:
+        return _backlog_card(meta, control, now=now)
     return _change_card(control, change_id, now=now)
 
 
@@ -1338,10 +1367,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
     except SystemExit:
         return 2
     resource = args.resource
-    rec = backlog.read_record(control, change_id)
-    if rec is not None:
+    meta = _unstarted_backlog_meta(control, change_id)
+    if meta is not None:
         if resource is None:
-            for line in _backlog_card(rec, control, now=datetime.now(UTC)):
+            for line in _backlog_card(meta, control, now=datetime.now(UTC)):
                 print(line)
             return 0
         if resource == "status":
@@ -1536,13 +1565,13 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if change_id is None:
         print(_NO_CHANGES_MESSAGE)
         return 0
+    meta = _unstarted_backlog_meta(control, change_id)
+    if meta is not None:
+        lines: Iterable[str] = _backlog_card(meta, control, now=datetime.now(UTC))
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
     events = _load_events_for_id(control, change_id)
     if events is None:
-        rec = backlog.read_record(control, change_id)
-        if rec is not None:
-            lines: Iterable[str] = _backlog_card(rec, control, now=datetime.now(UTC))
-            _page_or_print(lines, no_pager=args.no_pager)
-            return 0
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
 
