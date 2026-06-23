@@ -39,6 +39,7 @@ _DARK: dict[str, Color | None] = {
     "ground": (0x1A, 0x16, 0x22), "groundGlow": (0x24, 0x1C, 0x30),
     "sun": (0xFF, 0xB2, 0x4A), "sunGlow": (0x5A, 0x3A, 0x1A),
     "branch": (0x5A, 0x3A, 0x1F), "peak": (0x3A, 0x3F, 0x4E), "snow": (0xD8, 0xE0, 0xEE),
+    "planet": (0xC0, 0x7A, 0x3A), "planetRing": (0x9A, 0xB0, 0xD0),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -53,6 +54,7 @@ _LIGHT: dict[str, Color | None] = {
     "ground": (0xB6, 0xB6, 0xB6), "groundGlow": (0xA8, 0xA8, 0xA8),
     "sun": (0xC2, 0x61, 0x1F), "sunGlow": (0xD8, 0xB8, 0x78),
     "branch": (0x6A, 0x4A, 0x2A), "peak": (0x8A, 0x90, 0x9E), "snow": (0xC8, 0xCE, 0xD8),
+    "planet": (0x9A, 0x5A, 0x20), "planetRing": (0x6A, 0x80, 0xA0),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -66,6 +68,7 @@ _ANSI_P: dict[str, Color | None] = {
     "ground": "bright_black", "groundGlow": "bright_black",
     "sun": "bright_yellow", "sunGlow": "yellow",
     "branch": "yellow", "peak": "bright_black", "snow": "bright_white",
+    "planet": "yellow", "planetRing": "cyan",
 }
 
 
@@ -370,6 +373,21 @@ def _mountains(g: Grid, base_y: int) -> None:
         _px(g, cx + 1, cap_y + 1, _P["snow"])
 
 
+def _planet(g: Grid, cx: int, cy: int, r: int) -> None:
+    _disc(g, cx, cy, r, r, _P["planet"])
+    _ring(g, cx, cy, r + 2.5, (r + 2.5) * 0.42, _P["planetRing"], 0.80, 1.0)
+
+
+def _galaxy(g: Grid, cx: int, cy: int) -> None:
+    pts = [(0, 0), (2, 0), (-2, 0), (3, 1), (-3, -1), (4, 1), (-4, -1),
+           (1, -1), (-1, 1), (5, 1), (-5, -1), (2, 2), (-2, -2)]
+    for k, (dx, dy) in enumerate(pts):
+        near = abs(dx) + abs(dy) < 3
+        c = _P["starBright"] if near else (_P["star"] if k % 2 else _P["starDim"])
+        _px(g, cx + dx, cy + dy, c)
+    _spark(g, cx, cy, _P["starBright"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -455,6 +473,18 @@ def _mountain_moon(g: Grid) -> None:
     _left_imp(g)
 
 
+def _ringed_planet(g: Grid) -> None:
+    _stars(g, 0, 14, 0.12)
+    _planet(g, 24, 7, 4)
+    _left_imp(g)
+
+
+def _galaxy_scene(g: Grid) -> None:
+    _stars(g, 0, 14, 0.10)
+    _galaxy(g, 25, 7)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -467,6 +497,8 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_the_void, "conjured from the void."),
     (_crescent_perch, "perched and ready."),
     (_mountain_moon, "welcome back."),
+    (_ringed_planet, "a world, from nothing."),
+    (_galaxy_scene, "lost in the stack? i know the way."),
 ]
 
 MIN_WIDTH = 32

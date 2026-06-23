@@ -283,3 +283,29 @@ def test_mountains_paint_a_snow_cap_above_the_peak_fill() -> None:
             for x, cell in enumerate(row) if cell == splash._P["peak"]]
     assert snow and peak
     assert min(y for _, y in snow) < min(y for _, y in peak)
+
+
+def test_task3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_ringed_planet", "a world, from nothing."),
+        ("_galaxy_scene", "lost in the stack? i know the way."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_planet_paints_both_a_body_disc_and_a_ring() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._planet(g, 24, 7, 4)
+    body = any(cell == splash._P["planet"] for row in g for cell in row)
+    ring = any(cell == splash._P["planetRing"] for row in g for cell in row)
+    assert body and ring
