@@ -40,6 +40,24 @@ def test_plan_writer_label_renders_position(tmp_path: Path) -> None:
     assert bare == "plan 1 · writing"
 
 
+def test_plan_reviewer_label_renders_position(tmp_path: Path) -> None:
+    ch = _change(tmp_path)
+    label = _label("plan-reviewer")
+    full = _render_label(label, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
+    assert full == "plan 2/4 · reviewing"
+    bare = _render_label(label, ch, ch.event_log(), _state(plan_index=1, plan_total=0))
+    assert bare == "plan 1 · reviewing"
+
+
+def test_plan_finalized_label_renders_position(tmp_path: Path) -> None:
+    ch = _change(tmp_path)
+    label = _label("plan-finalized")
+    full = _render_label(label, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
+    assert full == "plan 2/4 · finalizing"
+    bare = _render_label(label, ch, ch.event_log(), _state(plan_index=1, plan_total=0))
+    assert bare == "plan 1 · finalizing"
+
+
 def test_task_lead_label_renders_plan_position(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     out = _render_label(_label("task-lead"), ch, ch.event_log(),
