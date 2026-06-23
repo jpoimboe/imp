@@ -70,8 +70,10 @@ from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
 from imp.agents.transcript import (
+    RESUME_MANIFEST_HEADER,
     Transcript,
     balance_success_on_resume,
+    build_resume_manifest,
     inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
@@ -82,6 +84,11 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+from imp.providers.claude_code_session_store import (
+    resume_session_id,
+    session_key,
+    session_store_for,
+)
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -949,7 +956,10 @@ class ClaudeCodeAgentRunner:
         self._impty_driver: Any = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
-                       tool_names: list[str], impty_server: Any = None) -> Any:
+                       tool_names: list[str], impty_server: Any = None,
+                       *, session_store: Any = None,
+                       session_id: str | None = None,
+                       resume: str | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
@@ -1010,6 +1020,9 @@ class ClaudeCodeAgentRunner:
             setting_sources=[],
             strict_mcp_config=True,
             extra_args={"no-session-persistence": None},
+            session_store=session_store,
+            session_id=session_id,
+            resume=resume,
         )
 
     def _build_client(self, opts: Any) -> Any:
@@ -1134,19 +1147,61 @@ class ClaudeCodeAgentRunner:
             impty_tools = await _make_impty_sdk_tools(self._impty_driver)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
 
+        # Session-store routing. A FRESH run mirrors its clean session into the
+        # store (session_id pins the key). A resume drives claude-p's NATIVE
+        # session resume when that store holds bytes (resume= materializes from
+        # imp's own bytes — faithful, no stream-json placeholder corruption);
+        # absent a stored session it falls back to stream-json replay + manifest.
+        # resume= and session_id are mutually exclusive in the SDK: native resume
+        # passes resume= and leaves session_id unset.
+        existing = transcript.load()
+        is_fresh = not existing
+        store = session_store_for(invocation.transcript_dir)
+        skey = session_key(invocation.change_context.project_root, aid)
+        # Native resume is sound ONLY when existing's final turn was actually
+        # flushed to the store. The SDK mirror batcher flushes solely at a `result`
+        # boundary, so the only resume shape whose final turn carries a result is
+        # MISSING_COMPLETE_STEP (the agent stopped on assistant prose — the ckx9f5
+        # target). Every other shape leaves its final turn UNflushed and outside
+        # the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
+        # AWAITING_USER and DANGLING_TOOL_USE (and the balance_on_resume flag's path)
+        # end on an unflushed, interrupted assistant tool_use whose id lives in neither
+        # claude-p's loaded session nor the slice — so the surgery's tool_result would be
+        # orphaned (the unmatched-tool_use 400 this change targets). Those
+        # downgrade to stream-json replay, which re-streams the whole balanced
+        # history in position.
+        native_resume = (
+            (not is_fresh)
+            and bool(await store.load(skey))
+            and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
+        )
+        # Native resume sends only messages[resume_base:] — the turns appended on
+        # THIS entry; claude-p already holds the rest in its loaded session.
+        resume_base = len(existing)
+        if is_fresh:
+            opt_store, opt_session_id, opt_resume = (
+                store, resume_session_id(aid), None)
+        elif native_resume:
+            opt_store, opt_session_id, opt_resume = (
+                store, None, resume_session_id(aid))
+        else:
+            opt_store, opt_session_id, opt_resume = (None, None, None)
         # Build options only when we'll use the real SDK (mcp_server is not None).
         # When a client_factory is injected (tests), skip building options to
         # avoid constructing ClaudeAgentOptions with mcp_server=None.
         if mcp_server is not None:
             opts = self._build_options(
-                invocation, mcp_server, list(tools), impty_server=impty_server)
+                invocation, mcp_server, list(tools), impty_server=impty_server,
+                session_store=opt_store, session_id=opt_session_id,
+                resume=opt_resume)
         else:
             opts = None
 
-        existing = transcript.load()
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
+            # ids for which repair synthesized placeholders — must not be named succeeded
+            dangling_ids: set[str] = set()
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Persist a synthetic tool_result so the SEND_TO_LLM path has a
             # balanced transcript; emit `tool_result` events so `imp log`
@@ -1160,6 +1215,7 @@ class ClaudeCodeAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
+                        dangling_ids.add(rb.tool_use_id)
             inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
@@ -1202,6 +1258,24 @@ class ClaudeCodeAgentRunner:
             if resume_state is not ResumeState.AWAITING_USER:
                 drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
+            # ckx9f5: name prior tool calls succeeded so stream-json replay's placeholder
+            # errors don't trigger redo; skip the balance path (retry feedback stays last).
+            if not invocation.balance_on_resume and not native_resume:
+                _last_user = next(
+                    (m for m in reversed(messages) if m.role == "user"), None)
+                _already_manifested = _last_user is not None and any(
+                    isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
+                    for b in _last_user.content
+                )
+                if not _already_manifested:
+                    manifest = build_resume_manifest(
+                        messages, exclude_tool_use_ids=frozenset(dangling_ids))
+                    if manifest is not None:
+                        manifest_msg = Message(
+                            role="user", content=(TextBlock(text=manifest),))
+                        messages.append(manifest_msg)
+                        transcript.append(manifest_msg)
+                        elog.append_user_message(agent_id=aid, message=manifest_msg)
         else:
             messages = []
             for m in invocation.initial_messages:
@@ -1264,7 +1338,8 @@ class ClaudeCodeAgentRunner:
             # code). Each outer iteration runs its OWN receive_response() so a
             # follow-up turn is consumed from a fresh generator (issue 7:
             # receive_response() terminates after the first ResultMessage).
-            next_query: Any = _stream_history(messages)
+            next_query: Any = _stream_history(
+                messages[resume_base:] if native_resume else messages)
             while True:
                 await client.query(next_query)
                 requery = False

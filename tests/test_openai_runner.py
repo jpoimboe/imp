@@ -1,6 +1,7 @@
 # tests/test_openai_runner.py
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -757,3 +758,31 @@ async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Pa
     assert [e["type"] for e in control_events(events)] == ["agent_output"]
     assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
                for m in t.load() for b in m.content)
+
+
+@pytest.mark.anyio
+async def test_resume_preserves_tool_output_and_omits_manifest(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="read_file", input={"path": "/project/x"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="GROUNDED"),)))
+
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
+    ])
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: fake,
+    )
+    [ev async for ev in runner.run(inv)]
+
+    sent = json.dumps(fake.responses.calls[0]["input"])
+    assert "GROUNDED" in sent
+    assert "replay artifact" not in sent

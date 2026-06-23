@@ -58,6 +58,58 @@ RESUME_DURABILITY_NOTE = (
     "run git log / git status)."
 )
 
+RESUME_MANIFEST_HEADER = (
+    "[resume] This step is resuming. The tool results above were reconstructed "
+    "from before the resume and may display as errors — that is a replay "
+    "artifact, not a real failure. Every tool call listed below SUCCEEDED; do "
+    "not redo this grounded work. Any files written and commits made are durable "
+    "on disk."
+)
+
+_MANIFEST_WRITE_TOOLS = {"write_file", "edit_file"}
+
+
+def build_resume_manifest(
+    messages: list[Message], *,
+    exclude_tool_use_ids: frozenset[str] = frozenset(),
+) -> str | None:
+    """Summarize prior tool activity for a stream-json fallback resume.
+
+    Names each prior tool call as having SUCCEEDED and frames the (possibly
+    error-shaped) replayed tool_results as a replay artifact, so the model does
+    not discard grounded work. For durable write calls echoes the path and the
+    content/replacement that reached disk. Tool_use ids in
+    `exclude_tool_use_ids` are skipped — used for a genuinely-dangling last
+    tool_use (killed between call and result) that must NOT be claimed
+    succeeded. Returns None when the history holds no non-control tool calls to
+    summarize.
+    """
+    lines: list[str] = []
+    for m in messages:
+        if m.role != "assistant":
+            continue
+        for b in m.content:
+            if not isinstance(b, ToolUseBlock):
+                continue
+            if b.id in exclude_tool_use_ids:
+                continue
+            name = b.name[len("mcp__imp__"):] \
+                if b.name.startswith("mcp__imp__") else b.name
+            if name in ("complete_step", "wait_for_user"):
+                continue
+            line = f"- {name} — succeeded"
+            if name in _MANIFEST_WRITE_TOOLS:
+                path = b.input.get("path")
+                body = b.input.get("content", b.input.get("new"))
+                if path is not None:
+                    line += f" (wrote {path})"
+                if body is not None:
+                    line += f"\n{body}"
+            lines.append(line)
+    if not lines:
+        return None
+    return RESUME_MANIFEST_HEADER + "\n\n" + "\n".join(lines)
+
 
 class Transcript:
     def __init__(self, path: Path) -> None:

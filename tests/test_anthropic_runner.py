@@ -1,6 +1,7 @@
 # tests/test_anthropic_runner.py
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -866,3 +867,30 @@ async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Pa
     # The injected user turn carries the continue nudge.
     assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
                for m in transcript.load() for b in m.content)
+
+
+@pytest.mark.anyio
+async def test_resume_preserves_tool_result_and_omits_manifest(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    transcript = Transcript(inv.transcript_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="resume me"),)))
+    transcript.append(Message(role="assistant", content=(
+        ToolUseBlock(id="u1", name="read_file", input={"path": "/project/x"}),)))
+    transcript.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="u1", content="GROUNDED"),)))
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success"})),
+    ])
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    [e async for e in runner.run(inv)]
+
+    sent = json.dumps(fake.messages.calls[0]["messages"])
+    # Original tool_result content survives the replay untouched…
+    assert "GROUNDED" in sent
+    # …and the claude_code-only manifest framing never reaches anthropic.
+    assert "replay artifact" not in sent

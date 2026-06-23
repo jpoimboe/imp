@@ -11,6 +11,7 @@ from imp.agents.transcript import (
     RESUME_SUPERSEDED_NOTE,
     Transcript,
     balance_success_on_resume,
+    build_resume_manifest,
     inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
 )
@@ -331,3 +332,73 @@ def test_repair_noop_when_trailing_user_already_balanced(tmp_path: Path) -> None
         t.append(m)
     assert repair_dangling_tool_use_on_resume(msgs, t) is None
     assert len(msgs) == 2
+
+
+def test_build_resume_manifest_names_calls_succeeded_and_echoes_writes() -> None:
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                         input={"path": "spec.md"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t1", content="SPEC", is_error=True),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t2", name="mcp__imp__write_file",
+                         input={"path": "plan.md", "content": "PLANBODY"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t2", content="ok", is_error=True),)),
+    ]
+    out = build_resume_manifest(messages)
+    assert out is not None
+    assert "read_file — succeeded" in out
+    assert "write_file — succeeded" in out
+    assert "plan.md" in out
+    assert "PLANBODY" in out
+    assert "replay artifact" in out
+
+
+def test_build_resume_manifest_none_without_tool_calls() -> None:
+    messages = [Message(role="assistant", content=(TextBlock(text="hi"),))]
+    assert build_resume_manifest(messages) is None
+
+
+def test_build_resume_manifest_skips_control_tools() -> None:
+    messages = [Message(role="assistant", content=(
+        ToolUseBlock(id="c", name="mcp__imp__complete_step", input={}),
+        ToolUseBlock(id="w", name="mcp__imp__wait_for_user", input={}),))]
+    assert build_resume_manifest(messages) is None
+
+
+def test_build_resume_manifest_excludes_named_dangling_ids() -> None:
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                         input={"path": "a.md"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t1", content="A", is_error=True),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t2", name="mcp__imp__read_file",
+                         input={"path": "b.md"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t2", content="B", is_error=True),)),
+    ]
+    # Both calls without exclusion → both named succeeded.
+    assert build_resume_manifest(messages).count("read_file — succeeded") == 2
+    # Excluding t2 (the genuinely-dangling one) drops exactly its line.
+    out = build_resume_manifest(messages, exclude_tool_use_ids=frozenset({"t2"}))
+    assert out is not None
+    assert out.count("read_file — succeeded") == 1
+
+
+def test_build_resume_manifest_echoes_edit_file_new_body() -> None:
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="e1", name="mcp__imp__edit_file",
+                         input={"path": "x.py", "old": "A", "new": "NEWBODY"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="e1", content="ok", is_error=True),)),
+    ]
+    out = build_resume_manifest(messages)
+    assert out is not None
+    assert "edit_file — succeeded" in out
+    assert "x.py" in out
+    assert "NEWBODY" in out
