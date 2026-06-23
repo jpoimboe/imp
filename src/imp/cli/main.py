@@ -255,43 +255,17 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
 
 def _pause_lines(
     name: str, phase: str | None, token: str,
-    *, reason: str | None = None, color: bool, recover_phase: str | None = None,
+    *, reason: str | None = None, color: bool,
 ) -> list[str]:
     at = f"  at {phase}" if phase else ""
     why = f"  ({reason})" if reason else ""
     glyph = "⏸ " if color else ""
-    lines = [
+    return [
         ansi(f"{glyph}Paused  {name}{at}{why}", *pal.NODE_COLORS["lifecycle"],
              enabled=color),
         ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
              enabled=color),
     ]
-    if recover_phase is not None:
-        lines.append(ansi(
-            f"   recover: imp resume {token} --from {recover_phase}",
-            *pal.NODE_COLORS["lifecycle"], enabled=color))
-    return lines
-
-
-def _recover_phase(change: Change) -> str | None:
-    try:
-        state = State.load(change.state_dir)
-    except FileNotFoundError:
-        return None
-    if state.step is None or state.resume_pending != state.step:
-        return None
-    phase = _phase_from_events(list(change.event_log().read()))
-    if phase is None:
-        return None
-    transcript_dir = change.change_dir / "steps" / phase / state.step
-    from imp.agents.transcript import Transcript
-    # A plain `imp resume` now replays-and-continues any kept transcript.
-    # Offer `--from <phase>` as the force-a-fresh-re-run escape hatch whenever
-    # such a transcript exists; a never-ran step (empty/absent transcript) still
-    # re-runs fresh on a plain resume, so it needs no hint.
-    if not Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
-        return None
-    return phase
 
 
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
@@ -304,8 +278,7 @@ def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
-    for ln in _pause_lines(name, phase, token, color=color,
-                            recover_phase=_recover_phase(change)):
+    for ln in _pause_lines(name, phase, token, color=color):
         print(ln)
 
 
