@@ -192,12 +192,14 @@ def _ring(g: Grid, cx: float, cy: float, rx: float, ry: float,
 def _glow_ring(g: Grid, cx: float, cy: float, r: float, c: Color | None) -> None:
     if c is None:
         return
+    ring_expand = 2.0
+    ring_inner = 0.62
     for y in range(len(g)):
         for x in range(len(g[0])):
-            dx = (x - cx) / (r + 2.0)
-            dy = (y - cy) / (r + 2.0)
+            dx = (x - cx) / (r + ring_expand)
+            dy = (y - cy) / (r + ring_expand)
             d = dx * dx + dy * dy
-            if 0.62 <= d <= 1.0 and (x + y) & 1 and g[y][x] is None:
+            if ring_inner <= d <= 1.0 and (x + y) & 1 and g[y][x] is None:
                 _px(g, x, y, c)
 
 
@@ -215,6 +217,7 @@ def _stars(g: Grid, y0: int, y1: int, dens: float) -> None:
     """Hash-placed stars confined to the accent columns (x >= 19) so they never
     collide with the imp and a chosen scene renders identically every time."""
     s = 3
+    bright_frac, dim_frac = 0.12, 0.55
     gy = 0
     while gy * s < y1:
         gx = 0
@@ -228,8 +231,8 @@ def _stars(g: Grid, y0: int, y1: int, dens: float) -> None:
                 gx += 1
                 continue
             br = _hash(gx + 7, gy + 13)
-            color = (_P["starBright"] if br < 0.12
-                     else (_P["star"] if br < 0.55 else _P["starDim"]))
+            color = (_P["starBright"] if br < bright_frac
+                     else (_P["star"] if br < dim_frac else _P["starDim"]))
             _px(g, jx, jy, color)
             gx += 1
         gy += 1
