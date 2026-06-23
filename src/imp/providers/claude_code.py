@@ -108,6 +108,8 @@ from imp.providers.web_native import (
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
+    "Invalid authentication credentials",
+    "Failed to authenticate",
 )
 
 _QUOTA_PATTERNS = (

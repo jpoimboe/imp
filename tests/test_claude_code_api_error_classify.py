@@ -105,3 +105,18 @@ def test_codeless_phrase_on_different_line_is_none() -> None:
         "An Internal server error happened to a coworker last week."
     )
     assert _classify_agent_text(multiline2) is None
+
+
+def test_invalid_authentication_credentials_phrase_is_auth() -> None:
+    exc = _classify_agent_text("Invalid authentication credentials")
+    assert isinstance(exc, perr.AuthError)
+
+
+def test_failed_to_authenticate_phrase_is_auth() -> None:
+    exc = _classify_agent_text("Failed to authenticate")
+    assert isinstance(exc, perr.AuthError)
+
+
+def test_lowercase_failed_to_authenticate_prose_is_not_auth() -> None:
+    assert _classify_agent_text(
+        "the script failed to authenticate against the mock server") is None
