@@ -217,11 +217,16 @@ class CodexAgentRunner:
                     return
                 tail = None
                 if self._stderr_sink is not None:
-                    # The codex SDK surfaces subprocess stderr only inside the
-                    # exception message (CodexExecError has no .stderr); store the
-                    # whole message so the tail carries the CLI's own explanation.
-                    self._stderr_sink.feed(str(exc))
+                    # Prefer what the streaming tee captured live. Only when it
+                    # captured nothing do we fall back to str(exc): the codex SDK
+                    # surfaces subprocess stderr solely inside the CodexExecError
+                    # message (no .stderr attribute), which also re-embeds any
+                    # already-teed stderr and already lands in the event's
+                    # `message` — so feeding it unconditionally would duplicate.
                     tail = self._stderr_sink.tail()
+                    if not tail:
+                        self._stderr_sink.feed(str(exc))
+                        tail = self._stderr_sink.tail()
                 yield perr.make_unknown_error_event(
                     exc, detail={"stderr_tail": tail} if tail else None)
                 return
