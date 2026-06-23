@@ -434,3 +434,51 @@ def test_summon_ring_paints_a_sigil_ring_and_accents() -> None:
     ring = any(cell == splash._P["sigilDim"] for row in g for cell in row)
     accent = any(cell == splash._P["sigil"] for row in g for cell in row)
     assert ring and accent
+
+
+def test_task2p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_crystal_ball_scene", "gaze in — what shall we build?"),
+        ("_lantern_scene", "the lantern's lit. lead the way."),
+        ("_crystal_cluster", "small imp, big leverage."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_orb_paints_a_glass_body_with_a_bright_glint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._orb(g, 24, 7, 3)
+    body = any(cell == splash._P["glass"] for row in g for cell in row)
+    glint = any(cell == splash._P["glassCore"] for row in g for cell in row)
+    assert body and glint
+
+
+def test_lantern_paints_a_frame_around_a_flame() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._lantern(g, 24, 4)
+    frame = any(cell == splash._P["lanternFrame"] for row in g for cell in row)
+    flame = any(cell == splash._P["fireTip"] for row in g for cell in row)
+    assert frame and flame
+
+
+def test_crystal_paints_a_lit_tip_above_its_body() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._crystal(g, 25, 12, 6)
+    body_ys = [y for y, row in enumerate(g)
+               for cell in row if cell == splash._P["crystal"]]
+    tip_ys = [y for y, row in enumerate(g)
+              for cell in row if cell == splash._P["crystalLight"]]
+    assert body_ys and tip_ys
+    assert min(tip_ys) < min(body_ys)

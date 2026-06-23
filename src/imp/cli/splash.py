@@ -47,6 +47,9 @@ _DARK: dict[str, Color | None] = {
     "mushroomGlow": (0x2A, 0x4A, 0x3A),
     "sigil": (0xB0, 0x7A, 0xE0), "sigilDim": (0x5A, 0x3A, 0x7A),
     "portal": (0x7A, 0xC8, 0xE0), "portalCore": (0x18, 0x24, 0x42),
+    "glass": (0x7A, 0xA8, 0xC8), "glassCore": (0xD8, 0xEC, 0xF6),
+    "lanternFrame": (0x8A, 0x6A, 0x3A),
+    "crystal": (0x8A, 0xC0, 0xE0), "crystalLight": (0xD0, 0xE8, 0xF4),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -69,6 +72,9 @@ _LIGHT: dict[str, Color | None] = {
     "mushroomGlow": (0xB0, 0xD0, 0xC0),
     "sigil": (0x6A, 0x3A, 0xB0), "sigilDim": (0x9A, 0x80, 0xC0),
     "portal": (0x2A, 0x7A, 0xA0), "portalCore": (0x2A, 0x40, 0x60),
+    "glass": (0x5A, 0x80, 0xA0), "glassCore": (0x2A, 0x5A, 0x80),
+    "lanternFrame": (0x6A, 0x4A, 0x20),
+    "crystal": (0x4A, 0x80, 0xA0), "crystalLight": (0x2A, 0x5A, 0x80),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -89,6 +95,9 @@ _ANSI_P: dict[str, Color | None] = {
     "mushroomStem": "white", "mushroomCap": "green", "mushroomGlow": "bright_black",
     "sigil": "magenta", "sigilDim": "bright_black",
     "portal": "cyan", "portalCore": "blue",
+    "glass": "cyan", "glassCore": "bright_white",
+    "lanternFrame": "yellow",
+    "crystal": "bright_cyan", "crystalLight": "bright_white",
 }
 
 
@@ -448,6 +457,35 @@ def _mushroom(g: Grid, x: int, base_y: int, h: int) -> None:
     _px(g, x, cap_y + 1, _P["mushroomGlow"])
 
 
+def _orb(g: Grid, cx: int, cy: int, r: int) -> None:
+    _px(g, cx - 1, cy + r + 1, _P["branch"])
+    _px(g, cx, cy + r + 1, _P["branch"])
+    _px(g, cx + 1, cy + r + 1, _P["branch"])
+    _disc(g, cx, cy, r, r, _P["glass"])
+    _px(g, cx - 1, cy - 1, _P["glassCore"])
+    _px(g, cx, cy - 1, _P["glassCore"])
+
+
+def _lantern(g: Grid, x: int, top_y: int) -> None:
+    _px(g, x, top_y, _P["lanternFrame"])
+    _rect(g, x - 2, top_y + 1, 5, 1, _P["lanternFrame"])
+    for j in range(1, 5):
+        _px(g, x - 2, top_y + 1 + j, _P["lanternFrame"])
+        _px(g, x + 2, top_y + 1 + j, _P["lanternFrame"])
+    _rect(g, x - 2, top_y + 6, 5, 1, _P["lanternFrame"])
+    _px(g, x, top_y + 4, _P["fire1"])
+    _px(g, x, top_y + 3, _P["fire3"])
+    _px(g, x, top_y + 2, _P["fireTip"])
+
+
+def _crystal(g: Grid, x: int, base_y: int, h: int) -> None:
+    for j in range(h):
+        spread = (h - j) // 2
+        for dx in range(-spread, spread + 1):
+            _px(g, x + dx, base_y - j, _P["crystal"])
+    _px(g, x, base_y - h, _P["crystalLight"])
+
+
 def _summon_ring(g: Grid, cx: int, cy: int) -> None:
     _ring(g, cx, cy, 6, 2.4, _P["sigilDim"], 0.72, 1.0)
     for dx in (-5, -3, 0, 3, 5):
@@ -625,6 +663,26 @@ def _rune_sigil(g: Grid) -> None:
     _left_imp(g)
 
 
+def _crystal_ball_scene(g: Grid) -> None:
+    _stars(g, 0, 5, 0.10)
+    _orb(g, 24, 7, 3)
+    _left_imp(g)
+
+
+def _lantern_scene(g: Grid) -> None:
+    _stars(g, 0, 4, 0.10)
+    _lantern(g, 24, 4)
+    _left_imp(g)
+
+
+def _crystal_cluster(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _crystal(g, 22, 12, 4)
+    _crystal(g, 25, 12, 6)
+    _crystal(g, 28, 12, 3)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -649,6 +707,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_summoning_circle, "the circle is drawn."),
     (_open_portal, "the portal is open. step through."),
     (_rune_sigil, "the runes are ready."),
+    (_crystal_ball_scene, "gaze in — what shall we build?"),
+    (_lantern_scene, "the lantern's lit. lead the way."),
+    (_crystal_cluster, "small imp, big leverage."),
 ]
 
 MIN_WIDTH = 32
