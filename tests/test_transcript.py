@@ -368,6 +368,27 @@ def test_build_resume_manifest_skips_control_tools() -> None:
     assert build_resume_manifest(messages) is None
 
 
+def test_build_resume_manifest_excludes_named_dangling_ids() -> None:
+    messages = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                         input={"path": "a.md"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t1", content="A", is_error=True),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t2", name="mcp__imp__read_file",
+                         input={"path": "b.md"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t2", content="B", is_error=True),)),
+    ]
+    # Both calls without exclusion → both named succeeded.
+    assert build_resume_manifest(messages).count("read_file — succeeded") == 2
+    # Excluding t2 (the genuinely-dangling one) drops exactly its line.
+    out = build_resume_manifest(messages, exclude_tool_use_ids=frozenset({"t2"}))
+    assert out is not None
+    assert out.count("read_file — succeeded") == 1
+
+
 def test_build_resume_manifest_echoes_edit_file_new_body() -> None:
     messages = [
         Message(role="assistant", content=(

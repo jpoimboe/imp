@@ -69,14 +69,20 @@ RESUME_MANIFEST_HEADER = (
 _MANIFEST_WRITE_TOOLS = {"write_file", "edit_file"}
 
 
-def build_resume_manifest(messages: list[Message]) -> str | None:
+def build_resume_manifest(
+    messages: list[Message], *,
+    exclude_tool_use_ids: frozenset[str] = frozenset(),
+) -> str | None:
     """Summarize prior tool activity for a stream-json fallback resume.
 
     Names each prior tool call as having SUCCEEDED and frames the (possibly
     error-shaped) replayed tool_results as a replay artifact, so the model does
     not discard grounded work. For durable write calls echoes the path and the
-    content/replacement that reached disk. Returns None when the history holds
-    no non-control tool calls to summarize.
+    content/replacement that reached disk. Tool_use ids in
+    `exclude_tool_use_ids` are skipped — used for a genuinely-dangling last
+    tool_use (killed between call and result) that must NOT be claimed
+    succeeded. Returns None when the history holds no non-control tool calls to
+    summarize.
     """
     lines: list[str] = []
     for m in messages:
@@ -84,6 +90,8 @@ def build_resume_manifest(messages: list[Message]) -> str | None:
             continue
         for b in m.content:
             if not isinstance(b, ToolUseBlock):
+                continue
+            if b.id in exclude_tool_use_ids:
                 continue
             name = b.name[len("mcp__imp__"):] \
                 if b.name.startswith("mcp__imp__") else b.name
