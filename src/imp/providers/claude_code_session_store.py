@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -78,6 +79,12 @@ class ImpSessionStore:
         if not path.exists():
             return None
         return self._read(path)
+
+    async def delete(self, key: Mapping[str, Any]) -> None:
+        if key.get("subpath"):
+            self._path(key).unlink(missing_ok=True)
+            return
+        shutil.rmtree(self._base(key), ignore_errors=True)
 
     async def list_subkeys(self, key: Mapping[str, Any]) -> list[str]:
         base = self._base(key)

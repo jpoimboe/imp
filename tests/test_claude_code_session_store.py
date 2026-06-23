@@ -135,3 +135,29 @@ def test_list_subkeys_includes_nested_file_named_main(tmp_path: Path) -> None:
         store.list_subkeys, {"project_key": main["project_key"],
                              "session_id": main["session_id"]})
     assert subkeys == ["subagents/main"]
+
+
+def test_delete_main_key_cascades_to_subagents(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub = {**main, "subpath": "subagents/agent-1"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub, [{"type": "user", "uuid": "a"}])
+
+    anyio.run(store.delete, main)
+
+    assert anyio.run(store.load, main) is None
+    assert anyio.run(store.load, sub) is None
+
+
+def test_delete_subpath_removes_only_that_entry(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub = {**main, "subpath": "subagents/agent-1"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub, [{"type": "user", "uuid": "a"}])
+
+    anyio.run(store.delete, sub)
+
+    assert anyio.run(store.load, sub) is None
+    assert anyio.run(store.load, main) == [{"type": "user", "uuid": "m"}]
