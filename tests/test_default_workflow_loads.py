@@ -137,32 +137,41 @@ def test_every_nonquiet_step_has_its_label() -> None:
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
         "front-door": "chatting",
-        "spec-writer": "writing spec",
-        "spec-reviewer": "reviewing spec",
+        "spec-writer": "spec · writing",
+        "spec-reviewer": "spec · reviewing",
         "plan-writer": (
-            "writing plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+            "plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
         ),
-        "plan-reviewer": "reviewing plan",
-        "plan-finalized": "finalizing plan",
+        "plan-reviewer": (
+            "plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+        ),
+        "plan-finalized": (
+            "plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · finalizing"
+        ),
         "task-lead": (
-            "implementing · plan {{ vars.plan_index }}"
+            "code · plan {{ vars.plan_index }}"
             "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         ),
-        "verify": "testing",
-        "autosquash-resolve-implement": "resolving fixups",
-        "autosquash-resolve-merge": "resolving fixups",
-        "plan-cycle-check": "checking plan coverage",
-        "plan-code-reviewer": "reviewing code",
-        "deferred-sweep": "resolving deferred items",
-        "sweep-verify": "testing",
-        "autosquash-resolve-sweep": "resolving fixups",
-        "finalize": "finalizing",
-        "wait-for-head": "waiting to merge",
-        "reconciler": "integrating",
-        "integration-verify": "testing",
-        "integration-reviewer": "reviewing merge",
-        "merge-to-base": "merging",
+        "verify": "code · testing",
+        "autosquash-resolve-implement": "code · resolving fixups",
+        "autosquash-resolve-merge": "merge · resolving fixups",
+        "plan-cycle-check": "code · checking plan coverage",
+        "plan-code-reviewer": (
+            "code · plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+        ),
+        "deferred-sweep": "code · cleaning up deferred tasks",
+        "sweep-verify": "code · testing",
+        "autosquash-resolve-sweep": "code · resolving fixups",
+        "finalize": "code · finalizing",
+        "wait-for-head": "merge · waiting",
+        "reconciler": "merge · reconciling",
+        "integration-verify": "merge · testing",
+        "integration-reviewer": "merge · reviewing",
+        "merge-to-base": "merge · finalizing",
     }
     for name, label in expected.items():
         assert by[name].label == label, name

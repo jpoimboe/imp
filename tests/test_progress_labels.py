@@ -35,19 +35,19 @@ def test_plan_writer_label_renders_position(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     label = _label("plan-writer")
     full = _render_label(label, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
-    assert full == "writing plan 2/4"
+    assert full == "plan 2/4 · writing"
     bare = _render_label(label, ch, ch.event_log(), _state(plan_index=1, plan_total=0))
-    assert bare == "writing plan 1"
+    assert bare == "plan 1 · writing"
 
 
 def test_task_lead_label_renders_plan_position(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     out = _render_label(_label("task-lead"), ch, ch.event_log(),
                         _state(plan_index=2, plan_total=4))
-    assert out == "implementing · plan 2/4"
+    assert out == "code · plan 2/4"
     bare = _render_label(_label("task-lead"), ch, ch.event_log(),
                          _state(plan_index=1, plan_total=0))
-    assert bare == "implementing · plan 1"
+    assert bare == "code · plan 1"
 
 
 def test_plan_writer_frontmatter_label_removed() -> None:

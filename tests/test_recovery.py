@@ -149,7 +149,10 @@ def test_apply_rewind_sets_step_label_from_target_step() -> None:
     # step_label is the target step's resolved label (label or name), NOT None
     # and NOT a stale value from before the reroute.
     assert st.step == "plan-code-reviewer"
-    assert st.step_label == "reviewing code"
+    assert st.step_label == (
+        "code · plan {{ vars.plan_index }}"
+        "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+    )
 
 
 def test_apply_rewind_clears_step_label_when_to_step_is_none() -> None:
