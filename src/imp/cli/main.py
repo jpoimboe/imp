@@ -929,29 +929,28 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_run, args)
 
 
-async def _maybe_resume_backlog(
-    args: argparse.Namespace, control: Path, change_id: str,
-) -> int | None:
-    """Materialize and run a backlog record; returns None if change_id is not a backlog id."""
-    rec = backlog.read_record(control, change_id)
-    if rec is None:
+def _resume_seed(change: Change) -> str | None:
+    """Return the seed_opening for an un-materialized home that has no prior conversation.
+
+    Returns None for a materialized change, a home without a seed, or any home
+    that already holds a conversation (those resume into their existing event-log)."""
+    if change.materialized or not change.seed_opening:
         return None
-    base = worktree.current_branch(control)
-    ready, unmerged = backlog.readiness(control, rec["depends_on"])
-    if not ready:
-        print(f"imp: backlog Change {change_id} is blocked on unmerged dep(s): "
-              f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
+    events = _load_events_for_id(change.control_root, change.id) or []
+    if _first_user_message(events) is not None:
+        return None
+    return change.seed_opening
+
+
+def _warn_if_blocked(change: Change) -> None:
     try:
-        change = backlog.materialize_record(control, change_id, base_branch=base)
-    except (LoadError, LoadErrors) as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
-    except worktree.BranchExists:
-        print(f"imp: Change {change_id!r} already has a live branch but its backlog "
-              f"record was left behind; delete `.imp/backlog/{change_id}.json` and "
-              f"resume the existing Change", file=sys.stderr)
-        return 2
-    return await _run_fresh_session(change, args=args, seed_opening=backlog.seed_opening(rec))
+        deps = json.loads((change.change_dir / "change.json").read_bytes()).get("depends_on", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    ready, unmerged = backlog.readiness(change.control_root, deps)
+    if not ready:
+        print(f"imp: backlog Change {change.id} is blocked on unmerged dep(s): "
+              f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
 def _validate_from_target(
@@ -993,13 +992,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change_id = _resolve_id(control, args.token)
         except SystemExit:
             return 2
-    rc = await _maybe_resume_backlog(args, control, change_id)
-    if rc is not None:
-        return rc
     loaded = _load_or_rehydrate(control, change_id)
     if isinstance(loaded, int):
         return loaded
     change = loaded
+    seed = _resume_seed(change)
+    if seed is not None:
+        _warn_if_blocked(change)
+        return await _run_fresh_session(change, args=args, seed_opening=seed)
     state = State.load(change.state_dir)
     # `running` is allowed through: the status may be stale if a previous run
     # crashed without updating it. The daemon resolves the ambiguity at connect time.
