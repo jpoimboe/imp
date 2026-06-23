@@ -1438,7 +1438,16 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
     detail = ""
     d = p.get("detail")
     if isinstance(d, dict):
-        detail = str(d.get("full_summary") or "")
+        if d.get("full_summary"):
+            detail = str(d["full_summary"])
+        elif d.get("stderr_tail"):
+            tail = str(d["stderr_tail"])
+            exit_code = d.get("exit_code")
+            detail = (
+                f"exit code {exit_code}\n{tail}"
+                if isinstance(exit_code, int)
+                else tail
+            )
     self._append(ErrorNode(
         message=str(p.get("message", "?")), category=p.get("category"),
         is_warning=False, detail=detail))
