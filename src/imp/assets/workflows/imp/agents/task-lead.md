@@ -46,7 +46,7 @@ unimplemented task, or the re-opened task from injected feedback):
 1. Pick the next unimplemented task from the plan (or the re-opened task from
    injected feedback). As soon as you know which task it is, push the live status
    position — call
-   `update_step_label(label="implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · task <N>/{{ vars.task_total }}")`,
+   `update_step_label(label="code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · task <N>/{{ vars.task_total }} · writing")`,
    replacing `<N>` with this task's own number from its `## Task <N>` heading. This
    updates only the live status bar; it introduces no task counter and changes
    nothing about how you pick work.
@@ -85,6 +85,10 @@ unimplemented task, or the re-opened task from injected feedback):
    **not** run the project's full suite, lint, or typecheck yourself: the phase-level
    `verify` gate is the authoritative combined check and runs once after the
    implement phase, so a run here only duplicates it. State only what was actually run.
+
+   Before dispatching the reviewer, flip the live verb:
+   `update_step_label(label="code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · task <N>/{{ vars.task_total }} · reviewing")`
+   (same `<N>` as this task's `## Task <N>` heading).
 
    {% if vars.fast_path %}
    **Fast-path: the spec waived tests.** When you dispatch the coder for a

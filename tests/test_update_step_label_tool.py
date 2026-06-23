@@ -12,7 +12,7 @@ def _ctx(ch: Change) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.event_log = ch.event_log()
-    ctx.agent_id = "step:implement/task-lead"
+    ctx.agent_id = "step:code/task-lead"
     return ctx
 
 
@@ -28,10 +28,10 @@ def test_tool_is_registered() -> None:
 def test_update_emits_event_with_opaque_string(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     tool = get_registry()["update_step_label"]
-    tool.invoke(_ctx(ch), {"label": "implementing · plan 2/4 · task 3/6"})
+    tool.invoke(_ctx(ch), {"label": "code · plan 2/4 · task 3/6 · writing"})
 
     emitted = [e for e in ch.event_log().read()
                if e["type"] == "step_label_updated"]
     assert emitted
-    assert emitted[-1]["payload"]["label"] == "implementing · plan 2/4 · task 3/6"
-    assert emitted[-1]["agent_id"] == "step:implement/task-lead"
+    assert emitted[-1]["payload"]["label"] == "code · plan 2/4 · task 3/6 · writing"
+    assert emitted[-1]["agent_id"] == "step:code/task-lead"

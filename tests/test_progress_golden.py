@@ -18,18 +18,18 @@ def _stream() -> list[dict]:
         ev("5", "notice", agent_id="step:plan/plan-finalized", text=NOTICE),
         ev("6", "step_completed", step="plan-finalized", kind="agent",
            action={"verb": "goto", "target": "task-lead"}, var_mutations={"task_total": 2}),
-        ev("7", "step_started", step="task-lead", kind="agent", phase="implement",
-           model="m", provider="anthropic", label="implementing · plan 1/2"),
-        ev("8", "step_label_updated", agent_id="step:implement/task-lead",
-           label="implementing · plan 1/2 · task 1/2"),
-        ev("9", "step_label_updated", agent_id="step:implement/task-lead",
-           label="implementing · plan 1/2 · task 2/2"),
+        ev("7", "step_started", step="task-lead", kind="agent", phase="code",
+           model="m", provider="anthropic", label="code · plan 1/2"),
+        ev("8", "step_label_updated", agent_id="step:code/task-lead",
+           label="code · plan 1/2 · task 1/2 · writing"),
+        ev("9", "step_label_updated", agent_id="step:code/task-lead",
+           label="code · plan 1/2 · task 2/2 · writing"),
         ev("10", "step_completed", step="task-lead", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
-        ev("11", "step_started", step="task-lead", kind="agent", phase="implement",
-           model="m", provider="anthropic", label="implementing · plan 2/2"),
-        ev("12", "step_label_updated", agent_id="step:implement/task-lead",
-           label="implementing · plan 2/2 · task 1/3"),
+        ev("11", "step_started", step="task-lead", kind="agent", phase="code",
+           model="m", provider="anthropic", label="code · plan 2/2"),
+        ev("12", "step_label_updated", agent_id="step:code/task-lead",
+           label="code · plan 2/2 · task 1/3 · writing"),
     ]
 
 
@@ -43,10 +43,10 @@ def test_golden_status_bar_tracks_live_task_position() -> None:
     stream = _stream()
     for e in stream[:8]:   # through the first live push (task 1/2)
         b.add(e)
-    assert b.current_activity().step_label == "implementing · plan 1/2 · task 1/2"
+    assert b.current_activity().step_label == "code · plan 1/2 · task 1/2 · writing"
     for e in stream[8:]:
         b.add(e)
-    assert b.current_activity().step_label == "implementing · plan 2/2 · task 1/3"
+    assert b.current_activity().step_label == "code · plan 2/2 · task 1/3 · writing"
 
 
 def test_golden_breadcrumbs_never_leak_live_task_position() -> None:
