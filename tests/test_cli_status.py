@@ -7,7 +7,7 @@ import imp.cli.main as m
 from imp.cli.main import _cmd_status, _status_rows
 from imp.engine.change import Change
 from imp.engine.state import State
-from tests.conftest import _seed_control
+from tests.conftest import _git, _seed_control
 
 
 def test_status_lists_inflight_worktrees(tmp_path: Path) -> None:
@@ -133,6 +133,22 @@ def test_create_draft_seeds_raw_templated_label(tmp_path: Path) -> None:
     st = State.load(ch.state_dir)
     # No render at create time (change/log unavailable): the raw template is seeded,
     # NOT "seeding 7".
+    assert st.step_label == "seeding {{ vars.k }}"
+
+
+def test_create_seeds_raw_templated_label(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf.write_text(
+        "name: t\ndescription: \"\"\n"
+        "vars:\n  k: {type: int, default: 7}\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/stub.md, label: \"seeding {{ vars.k }}\"}\n"
+    )
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "add templated label")
+    ch = Change.create(tmp_path, title="A", change_id="crttpl", base_branch="main")
+    st = State.load(ch.state_dir)
     assert st.step_label == "seeding {{ vars.k }}"
 
 
