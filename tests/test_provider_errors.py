@@ -54,6 +54,18 @@ def test_make_unknown_error_event_shape() -> None:
     assert p["detail"] == {}
 
 
+def test_make_unknown_error_event_attaches_detail() -> None:
+    ev = perr.make_unknown_error_event(
+        RuntimeError("boom"), detail={"stderr_tail": "fatal: nope"})
+    assert ev["payload"]["category"] == "unknown"
+    assert ev["payload"]["detail"] == {"stderr_tail": "fatal: nope"}
+
+
+def test_make_unknown_error_event_detail_defaults_empty() -> None:
+    ev = perr.make_unknown_error_event(RuntimeError("boom"))
+    assert ev["payload"]["detail"] == {}
+
+
 def test_terminated_error_is_first_class_pause_category() -> None:
     from typing import get_args
 

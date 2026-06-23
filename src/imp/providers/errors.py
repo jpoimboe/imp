@@ -106,17 +106,19 @@ def make_error_event(exc: ProviderError, *, kind: str = "") -> dict[str, object]
     }
 
 
-def make_unknown_error_event(exc: BaseException) -> dict[str, object]:
+def make_unknown_error_event(
+    exc: BaseException, detail: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Build the canonical 'unknown' error event for the runner's
     top-level fallback ``except Exception`` branch. Single source of
-    truth so the wire format stays consistent.
-    """
+    truth so the wire format stays consistent. ``detail`` lets the runner
+    attach captured diagnostics (e.g. the subprocess ``stderr_tail``)."""
     return {
         "type": "error",
         "payload": {
             "category": "unknown",
             "kind": type(exc).__name__,
             "message": f"unclassified provider error: {exc}",
-            "detail": {},
+            "detail": detail or {},
         },
     }
