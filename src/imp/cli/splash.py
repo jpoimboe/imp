@@ -137,7 +137,7 @@ def _rect(g: Grid, x: int, y: int, w: int, h: int, c: Color | None) -> None:
 def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: Color | None) -> None:
     if c is None:
         return
-    x0i, y0i, x1i, y1i = int(x0), int(y0), int(x1), int(y1)
+    x0i, y0i, x1i, y1i = _round(x0), _round(y0), _round(x1), _round(y1)
     dx = abs(x1i - x0i)
     dy = abs(y1i - y0i)
     sx = 1 if x0i < x1i else -1
