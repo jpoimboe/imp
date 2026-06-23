@@ -214,7 +214,6 @@ def test_lifecycle_role_is_nonbold_yellow_in_all_themes() -> None:
                                                  enabled=True)
 
 
-
 def test_wordmark_role_resolves_per_theme() -> None:
     pal.set_theme("dark")
     assert pal._ANSI["wordmark"] == "\x1b[38;2;255;154;60m"   # #FF9A3C
