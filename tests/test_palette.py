@@ -223,6 +223,22 @@ def test_user_bg_style_truecolor_and_degraded() -> None:
     assert pal.user_bg_style(enabled=True) == "bg:#e4eaf2"
 
 
+def test_wordmark_role_resolves_per_theme() -> None:
+    pal.set_theme("dark")
+    assert pal._ANSI["wordmark"] == "\x1b[38;2;255;154;60m"   # #FF9A3C
+    pal.set_theme("light")
+    assert pal._ANSI["wordmark"] == "\x1b[38;2;194;97;31m"    # #C2611F
+    pal.set_theme("ansi")
+    assert pal._ANSI["wordmark"] == "\x1b[33m"                # plain yellow
+
+
+def test_theme_escapes_returns_explicit_theme_map_without_set_theme() -> None:
+    assert pal.active_theme() == "ansi"
+    assert pal.theme_escapes("dark")["wordmark"] == "\x1b[38;2;255;154;60m"
+    assert pal.active_theme() == "ansi"                       # global untouched
+    assert pal.theme_escapes("bogus")["wordmark"] == "\x1b[33m"  # unknown → ansi
+
+
 def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
     braille = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     assert pal.spinner_frame(0) == "⠋"

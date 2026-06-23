@@ -21,6 +21,7 @@ _ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
     "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[34m",
+    "wordmark": "\x1b[33m",  # 16-color has no warm gold; plain yellow is closest
 }
 
 # A CUSTOM low-saturation ACCENT palette — not a crib of any published theme, and
@@ -45,6 +46,7 @@ _DARK_RGB: dict[str, tuple[int, int, int]] = {
     # `step` is a darker blue than `phase`'s blue — a step reads as a "mini-phase"
     # (both bold; cyan is now reserved for inline code, not structure).
     "step": (0x70, 0x90, 0xB0),
+    "wordmark": (0xFF, 0x9A, 0x3C),  # deliberately saturated warm gold brand accent
 }
 _LIGHT_RGB: dict[str, tuple[int, int, int]] = {
     "red": (0xA8, 0x3B, 0x38), "green": (0x55, 0x6F, 0x22),
@@ -52,6 +54,7 @@ _LIGHT_RGB: dict[str, tuple[int, int, int]] = {
     "magenta": (0x7A, 0x49, 0x96), "cyan": (0x2A, 0x73, 0x70),
     "gray": (0xA6, 0xAA, 0xA6), "bright_blue": (0x27, 0x5A, 0xA0),
     "step": (0x35, 0x55, 0x80),   # darker-blue step on the light surface too
+    "wordmark": (0xC2, 0x61, 0x1F),
 }
 
 
@@ -106,6 +109,11 @@ def set_theme(name: str) -> None:
 
 def active_theme() -> str:
     return _active_theme
+
+
+def theme_escapes(theme: str) -> dict[str, str]:
+    """A theme's color-name→SGR escape map (unknown → ansi); does not mutate global state."""
+    return _THEMES.get(theme, _THEMES["ansi"])
 
 
 def ansi(text: str, *codes: str, enabled: bool = True) -> str:
