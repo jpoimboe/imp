@@ -41,7 +41,7 @@ def _steps(wf):
 
 
 def test_implement_phase_is_the_per_batch_loop() -> None:
-    impl = next(p for p in _wf().phases if p.name == "implement")
+    impl = next(p for p in _wf().phases if p.name == "code")
     assert [s.name for s in impl.steps] == [
         "task-lead", "verify",
         "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
@@ -54,7 +54,7 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
 def test_no_separate_review_phase_stamp_and_finalize_tail_implement() -> None:
     wf = _wf()
     assert not any(p.name == "review" for p in wf.phases)
-    impl = next(p for p in wf.phases if p.name == "implement")
+    impl = next(p for p in wf.phases if p.name == "code")
     assert [s.name for s in impl.steps][-2:] == ["review-base-repin", "finalize"]
     names = {s.name for s in wf.flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",

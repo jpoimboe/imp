@@ -61,7 +61,7 @@ def test_reconciler_stuck_pauses_and_else_continues() -> None:
 
 def test_merge_phase_never_routes_to_planning_or_releases_the_lane() -> None:
     wf = load_workflow(WF)
-    planning = {s.name for p in wf.phases if p.name in ("spec", "plan", "implement")
+    planning = {s.name for p in wf.phases if p.name in ("spec", "plan", "code")
                 for s in p.steps}
     for step in _phase(wf, "merge").steps:
         for rule in step.rules:

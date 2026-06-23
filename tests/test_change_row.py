@@ -32,7 +32,7 @@ def test_relative_age(then_iso, expected):
 
 def _row(**kw):
     base = dict(change_id="yaitd7", title="Add version flag",
-                status="running", step="implement",
+                status="running", step="code",
                 last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
     base.update(kw)
     return base
@@ -44,7 +44,7 @@ def test_format_columns_plain():
     assert line.startswith("yaitd7")        # ID first
     assert "Add version flag" in line       # NAME
     assert "running" in line
-    assert "implement" in line
+    assert "code" in line
     assert "15m" in line                    # relative AGE
 
 
@@ -52,7 +52,7 @@ def test_name_is_final_column():
     line = format_change_line(**_row(), color=False)
     # NAME now trails every other column.
     assert line.index("Add version flag") > line.index("running")
-    assert line.index("Add version flag") > line.index("implement")
+    assert line.index("Add version flag") > line.index("code")
     assert line.index("Add version flag") > line.index("15m")
 
 

@@ -1,6 +1,6 @@
 name: feature
 description: |
-  front-door -> spec -> (plan -> implement*)* -> merge
+  front-door -> spec -> (plan -> code*)* -> merge
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
@@ -123,7 +123,7 @@ phases:
         rules:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
-  - name: implement
+  - name: code
     steps:
       - name: task-lead
         file: agents/task-lead.md

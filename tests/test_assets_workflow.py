@@ -244,7 +244,7 @@ def test_commit_tool_is_removed_from_registry() -> None:
 def test_finalize_tails_the_implement_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    impl = next(p for p in wf.phases if p.name == "implement")
+    impl = next(p for p in wf.phases if p.name == "code")
     names = [s.name for s in impl.steps]
     assert "stamp-trailers" not in names
     assert names[-1] == "finalize"
