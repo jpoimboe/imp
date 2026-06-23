@@ -402,15 +402,18 @@ def test_plan_writer_rework_authors_corrective_n_plus_1() -> None:
     assert "rework bounce" not in low
 
 
-def test_plan_writer_deviation_bounded_to_pending_tasks() -> None:
+def test_plan_writer_has_no_deviation_revise_mode() -> None:
     text = PLAN_WRITER.read_text()
     low = text.lower()
-    assert "deviation revise mode" in low
-    # A deviation revise touches only pending tasks, below the progress.md boundary.
-    assert "bounded to pending tasks" in low
-    assert "completion boundary" in low
-    # A deviation implicating an already-implemented task escalates to append-N+1.
-    assert "escalate to the append-n+1 path" in low
+    # The backward deviation-revise mode is gone entirely.
+    assert "deviation revise mode" not in low
+    assert "deviation-bounded revise" not in low
+    assert "task-lead deviation" not in low
+    # The minors-integration in-place revise survives.
+    assert "minors-integration" in low
+    # Authoring the covering N+1 consumes the NEEDS-REPLAN lifecycle handle.
+    assert "NEEDS-REPLAN" in text
+    assert "[x]" in text
 
 
 def test_spec_writer_surfaces_needs_decision_in_reader_form() -> None:
