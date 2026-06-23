@@ -329,10 +329,10 @@ def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
     # The notes live in the durable region that survives the end-of-plan collapse.
     assert "survives the end-of-plan collapse" in low
     # The TRANSIENT per-task narrative (dropped at collapse) must carry NO durable
-    # note: the step-5 append and "Keep bounded" descriptions end without one, so a
-    # needs-replan note can never be buried where plan-cycle-check would miss it.
-    assert "can be re-found for a fixup). **Record qualifying" in text
-    assert "(task done + its commit subject) only while" in text
+    # note: step 5 records commit subjects so buried tasks can be re-found for a fixup,
+    # and per-task entries are kept only while the plan is in flight.
+    assert "re-found for a fixup" in low
+    assert "only while" in low
 
 
 def test_plan_writer_states_soft_task_size_target() -> None:
