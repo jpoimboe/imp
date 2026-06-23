@@ -552,8 +552,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 def _run_header_line(change_id: str, title: str, marker: str,
                      *, color: bool) -> str:
     stripped = title.strip()
-    name = stripped if stripped else "(unnamed)"
-    tail = f" · {name} · {marker}"
+    tail = f" · {stripped} · {marker}" if stripped else f" · {marker}"
     return (ansi(change_id, *pal.NODE_COLORS["change_id"], enabled=color)
             + ansi(tail, "dim", enabled=color))
 
