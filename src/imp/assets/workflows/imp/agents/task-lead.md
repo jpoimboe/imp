@@ -5,7 +5,6 @@ description: Implement-phase controller — pick the next task, dispatch coder +
 subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
-  deviation: {type: bool}
   verify_tolerated: {type: bool}
   summary: {type: string}
 ---

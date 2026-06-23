@@ -553,8 +553,7 @@ def test_task_lead_tolerated_routes_to_cleanup() -> None:
     # cleanup-implement, skipping the verify gate; it carries no var.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
-        output={"status": "Success", "deviation": False,
-                "verify_tolerated": True, "summary": "tolerated"},
+        output={"status": "Success", "verify_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "cleanup-implement" and m.action.resume is False
@@ -565,15 +564,28 @@ def test_task_lead_normal_return_advances_to_verify() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["task-lead"].rules
-    # task-lead implements the whole plan in one entry; a normal (non-deviation,
-    # non-tolerated) return advances to the verify gate. There is no per-task
+    # task-lead implements the whole plan in one entry; a normal (non-tolerated)
+    # return advances to the verify gate. There is no per-task
     # self-loop — the implement loop lives inside the single entry.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
-        output={"status": "Success", "deviation": False,
-                "verify_tolerated": False, "summary": "plan done"},
+        output={"status": "Success", "verify_tolerated": False, "summary": "plan done"},
     )
     assert isinstance(m.action, Continue)
+
+
+def test_task_lead_forward_only_no_deviation() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    tl = wf.agents["task-lead"]
+    # The deviation escalation field is gone from the output schema.
+    assert "deviation" not in tl.output_schema.field_names()
+    # task-lead flows forward only: no rule resumes (or gotos) plan-writer.
+    rules = _steps(wf)["task-lead"].rules
+    assert not any(
+        isinstance(r.action, Goto) and r.action.target == "plan-writer"
+        for r in rules
+    )
 
 
 def test_verify_red_resumes_task_lead() -> None:
