@@ -131,6 +131,8 @@ OPENING_QUESTION_CHAT = (
     "What's on your mind? I can answer questions, look over your project, "
     "or help scope a change.")
 
+OPENING_HINT = "type a message, or /help for commands"
+
 
 def _opening_question(leave_mode: str) -> str:
     return OPENING_QUESTION_CHAT if leave_mode == "chat" else OPENING_QUESTION_NEW
@@ -803,7 +805,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(question=_opening_question(leave_mode),
-                                            width=_term_width())).strip()
+                                            width=_term_width(),
+                                            hint=OPENING_HINT)).strip()
         except (EOFError, KeyboardInterrupt):
             print("imp: cancelled", file=sys.stderr)
             return 130

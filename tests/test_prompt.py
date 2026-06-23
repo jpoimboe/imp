@@ -180,6 +180,44 @@ async def test_ask_async_caret_prefix_at_root() -> None:
     assert captured["placeholder"] == "type your reply"
 
 
+def test_placeholder_text_accepts_custom_text() -> None:
+    assert _placeholder_text(color=False, text="type a message, or /help for commands") \
+        == "type a message, or /help for commands"
+    assert _placeholder_text(color=True, text="type a message, or /help for commands") \
+        == "\x1b[2mtype a message, or /help for commands\x1b[0m"
+
+
+@pytest.mark.anyio
+async def test_ask_async_opening_hint_overrides_placeholder() -> None:
+    from prompt_toolkit.formatted_text import ANSI
+
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return ""
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    await prompt.ask_async(question="What's on your mind?",
+                           hint="type a message, or /help for commands")
+    assert captured["placeholder"] == "type a message, or /help for commands"
+
+    captured_color: dict[str, object] = {}
+
+    class _SpySessionColor:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured_color.update(kwargs)
+            return ""
+
+    prompt_color = Prompt(color=True, _session_factory=lambda: _SpySessionColor())
+    await prompt_color.ask_async(question="What's on your mind?",
+                                 hint="type a message, or /help for commands")
+    ph = captured_color["placeholder"]
+    assert isinstance(ph, ANSI)
+    assert ph.value == "\x1b[2mtype a message, or /help for commands\x1b[0m"
+
+
 @pytest.mark.anyio
 async def test_ask_async_question_path_caret_at_content_column() -> None:
     captured: dict[str, object] = {}

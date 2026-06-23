@@ -29,9 +29,9 @@ def _prompt_message_text(question: str, *, color: bool, width: int = 80,
     return body + "\n\n" + indent + pal.caret(enabled=color)
 
 
-def _placeholder_text(*, color: bool) -> str:
+def _placeholder_text(*, color: bool, text: str = "type your reply") -> str:
     from imp.cli import palette as pal
-    return pal.ansi("type your reply", "dim", enabled=color)
+    return pal.ansi(text, "dim", enabled=color)
 
 
 def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs",
@@ -145,7 +145,8 @@ class Prompt:
         return str(result) if result is not None else ""
 
     async def ask_async(self, prompt_text: str | None = None, *,
-                        question: str = "", width: int = 80, indent: str = "") -> str:
+                        question: str = "", width: int = 80, indent: str = "",
+                        hint: str | None = None) -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run()).
@@ -176,10 +177,9 @@ class Prompt:
         else:
             msg = self._message(prompt_text, indent=indent)
         cont = " " * (len(indent) + len(pal.CARET))
-        # The hint renders unconditionally in both color modes (ansi theme and NO_COLOR)
-        # — dim ANSI when color is on, the plain str when off (never None).
-        placeholder: Any = (ANSI(_placeholder_text(color=True)) if self._color
-                            else _placeholder_text(color=False))
+        ph_text = hint or "type your reply"
+        placeholder: Any = (ANSI(_placeholder_text(color=True, text=ph_text)) if self._color
+                            else _placeholder_text(color=False, text=ph_text))
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
             prompt_continuation=lambda _w, _l, _s: cont)

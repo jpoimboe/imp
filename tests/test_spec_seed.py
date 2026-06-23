@@ -391,7 +391,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, question: object = None,
-                        width: object = None, prompt_text: object = None) -> str:
+                        width: object = None, prompt_text: object = None,
+                        hint: object = None) -> str:
         return "add a feature"
 
     monkeypatch.setattr(prompt_mod.Prompt, "ask_async", _fake_ask)
@@ -429,7 +430,8 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
     async def _fake_ask(self: object, *, question: object = None,
-                        width: object = None, prompt_text: object = None) -> str:
+                        width: object = None, prompt_text: object = None,
+                        hint: object = None) -> str:
         return "   "
 
     monkeypatch.setattr(prompt_mod.Prompt, "ask_async", _fake_ask)
