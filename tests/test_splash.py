@@ -106,3 +106,35 @@ def test_left_imp_never_paints_the_accent_columns() -> None:
     g = splash._make_grid()
     splash._left_imp(g)
     assert all(g[y][x] is None for y in range(splash.H) for x in range(18, splash.W))
+
+
+def test_cell_is_a_space_when_both_halves_are_transparent() -> None:
+    assert splash._cell(None, None, color=True) == " "
+    assert splash._cell(None, None, color=False) == " "
+
+
+def test_cell_emits_top_fg_bottom_bg_upper_half_block_when_colored() -> None:
+    out = splash._cell((255, 0, 0), (0, 255, 0), color=True)
+    assert out == "\x1b[38;2;255;0;0m\x1b[48;2;0;255;0m▀\x1b[0m"
+
+
+def test_cell_color_off_uses_a_bare_half_block_with_no_escapes() -> None:
+    assert splash._cell((255, 0, 0), None, color=False) == "▀"
+    assert splash._cell(None, (0, 255, 0), color=False) == "▄"
+    assert "\x1b[" not in splash._cell((1, 2, 3), (4, 5, 6), color=False)
+
+
+def test_encode_row_pairs_top_and_bottom_and_rstrips_trailing_space() -> None:
+    g = splash._make_grid()
+    g[0][0] = (255, 0, 0)
+    g[1][0] = (0, 255, 0)
+    row = splash._encode_row(g, 0, 1, color=True)
+    assert row == "\x1b[38;2;255;0;0m\x1b[48;2;0;255;0m▀\x1b[0m"
+
+
+def test_encode_grid_yields_eight_lines_and_handles_the_odd_last_row() -> None:
+    g = splash._make_grid()
+    g[14][19] = (1, 2, 3)  # last row has no paired bottom row (index 15 is absent)
+    lines = splash._encode_grid(g, color=False)
+    assert len(lines) == 8
+    assert lines[7].endswith("▀")

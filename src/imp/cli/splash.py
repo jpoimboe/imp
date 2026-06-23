@@ -260,3 +260,28 @@ def _left_imp(g: Grid) -> None:
             color = m.get(ch)
             if color is not None:
                 _px(g, 2 + c, r, color)
+
+
+def _cell(top: "Color | None", bot: "Color | None", *, color: bool) -> str:
+    if top is None and bot is None:
+        return " "
+    if not color:
+        return "▀" if top is not None else "▄"
+    if top is not None and bot is None:
+        return _fg_open(top) + "▀" + _RESET
+    if top is None and bot is not None:
+        return _fg_open(bot) + "▄" + _RESET
+    return _fg_open(top) + _bg_open(bot) + "▀" + _RESET
+
+
+def _encode_row(g: Grid, top_idx: int, bot_idx: int, *, color: bool) -> str:
+    w = len(g[0])
+    top_row = g[top_idx] if top_idx < len(g) else [None] * w
+    bot_row = g[bot_idx] if bot_idx < len(g) else [None] * w
+    return "".join(
+        _cell(top_row[x], bot_row[x], color=color) for x in range(w)
+    ).rstrip()
+
+
+def _encode_grid(g: Grid, *, color: bool) -> list[str]:
+    return [_encode_row(g, 2 * k, 2 * k + 1, color=color) for k in range((H + 1) // 2)]
