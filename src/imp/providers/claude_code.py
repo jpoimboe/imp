@@ -1158,12 +1158,23 @@ class ClaudeCodeAgentRunner:
         is_fresh = not existing
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.change_context.project_root, aid)
-        native_resume = (not is_fresh) and bool(await store.load(skey))
-        # A SEND_TO_LLM loaded session ends on a user turn; native resume appends
-        # another user turn across the slice boundary → Anthropic's consecutive
-        # same-role 400. Downgrade to stream-json replay, which re-merges in place.
-        if native_resume and classify_resume(existing) is ResumeState.SEND_TO_LLM:
-            native_resume = False
+        # Native resume is sound ONLY when existing's final turn was actually
+        # flushed to the store. The SDK mirror batcher flushes solely at a `result`
+        # boundary, so the only resume shape whose final turn carries a result is
+        # MISSING_COMPLETE_STEP (the agent stopped on assistant prose — the ckx9f5
+        # target). Every other shape leaves its final turn UNflushed and outside
+        # the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
+        # AWAITING_USER and DANGLING_TOOL_USE (and the balance_on_resume flag's path)
+        # end on an unflushed, interrupted assistant tool_use whose id lives in neither
+        # claude-p's loaded session nor the slice — so the surgery's tool_result would be
+        # orphaned (the unmatched-tool_use 400 this change targets). Those
+        # downgrade to stream-json replay, which re-streams the whole balanced
+        # history in position.
+        native_resume = (
+            (not is_fresh)
+            and bool(await store.load(skey))
+            and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
+        )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
