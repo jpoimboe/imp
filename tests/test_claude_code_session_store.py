@@ -60,6 +60,28 @@ def test_append_empty_is_a_true_noop(tmp_path: Path) -> None:
     assert list(tmp_path.rglob("*.jsonl")) == []
 
 
+def test_append_dedups_entries_by_uuid(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    entry = {"type": "assistant", "uuid": "dup", "message": {"n": 1}}
+    anyio.run(store.append, key, [entry])
+    anyio.run(store.append, key, [entry])  # redelivered batch (idempotency key)
+
+    loaded = anyio.run(store.load, key)
+    assert loaded == [entry]
+
+
+def test_append_keeps_entries_without_uuid(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    no_uuid = {"type": "ai-title", "title": "x"}
+    anyio.run(store.append, key, [no_uuid])
+    anyio.run(store.append, key, [no_uuid])
+
+    loaded = anyio.run(store.load, key)
+    assert loaded == [no_uuid, no_uuid]
+
+
 def test_subpath_key_routes_to_separate_file(tmp_path: Path) -> None:
     store = ImpSessionStore(tmp_path)
     main = _main_key()
@@ -69,3 +91,12 @@ def test_subpath_key_routes_to_separate_file(tmp_path: Path) -> None:
 
     assert anyio.run(store.load, main) == [{"type": "user", "uuid": "m"}]
     assert anyio.run(store.load, sub) == [{"type": "user", "uuid": "a"}]
+
+
+def test_append_dedups_within_a_single_batch(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    entry = {"type": "assistant", "uuid": "dup", "message": {"n": 1}}
+    anyio.run(store.append, key, [entry, entry])
+
+    assert anyio.run(store.load, key) == [entry]

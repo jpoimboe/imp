@@ -61,9 +61,15 @@ class ImpSessionStore:
             return
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
+        seen = {e["uuid"] for e in self._read(path) if "uuid" in e}
         with path.open("a") as f:
             for entry in entries:
+                uid = entry.get("uuid")
+                if uid is not None and uid in seen:
+                    continue
                 f.write(json.dumps(entry) + "\n")
+                if uid is not None:
+                    seen.add(uid)
 
     async def load(
         self, key: Mapping[str, Any],
