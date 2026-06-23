@@ -159,11 +159,11 @@ def _no_bg_code_block_cls() -> type:
 
 # Headers match inline `code`: rich's defaults give them underlined magenta (h2)
 # / bold magenta (h3) etc.; we recolor every level to the same cyan, keeping
-# bold+underline so headers stay emphasized but in imp's accent rather than
+# bold (no underline) so headers stay emphasized but in imp's accent rather than
 # rich's magenta.
 _MD_THEME = {
     "markdown.code": "cyan",
-    **{f"markdown.h{n}": "bold underline cyan" for n in range(1, 8)},
+    **{f"markdown.h{n}": "bold cyan" for n in range(1, 8)},
 }
 
 
