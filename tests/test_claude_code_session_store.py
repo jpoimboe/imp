@@ -1,9 +1,11 @@
 # tests/test_claude_code_session_store.py
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import anyio
+from claude_agent_sdk.testing import run_session_store_conformance
 
 from imp.providers.claude_code_session_store import ImpSessionStore
 
@@ -161,3 +163,10 @@ def test_delete_subpath_removes_only_that_entry(tmp_path: Path) -> None:
 
     assert anyio.run(store.load, sub) is None
     assert anyio.run(store.load, main) == [{"type": "user", "uuid": "m"}]
+
+
+def test_passes_sdk_session_store_conformance(tmp_path: Path) -> None:
+    anyio.run(
+        run_session_store_conformance,
+        lambda: ImpSessionStore(Path(tempfile.mkdtemp(dir=tmp_path))),
+    )
