@@ -40,6 +40,8 @@ _DARK: dict[str, Color | None] = {
     "sun": (0xFF, 0xB2, 0x4A), "sunGlow": (0x5A, 0x3A, 0x1A),
     "branch": (0x5A, 0x3A, 0x1F), "peak": (0x3A, 0x3F, 0x4E), "snow": (0xD8, 0xE0, 0xEE),
     "planet": (0xC0, 0x7A, 0x3A), "planetRing": (0x9A, 0xB0, 0xD0),
+    "aurora1": (0x4A, 0xC0, 0x8A), "aurora2": (0x7A, 0x6A, 0xC0),
+    "firefly": (0xF0, 0xE0, 0x80), "fireflyGlow": (0x4A, 0x4A, 0x20),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -55,6 +57,8 @@ _LIGHT: dict[str, Color | None] = {
     "sun": (0xC2, 0x61, 0x1F), "sunGlow": (0xD8, 0xB8, 0x78),
     "branch": (0x6A, 0x4A, 0x2A), "peak": (0x8A, 0x90, 0x9E), "snow": (0xC8, 0xCE, 0xD8),
     "planet": (0x9A, 0x5A, 0x20), "planetRing": (0x6A, 0x80, 0xA0),
+    "aurora1": (0x2A, 0x8A, 0x5A), "aurora2": (0x5A, 0x4A, 0x8A),
+    "firefly": (0xB0, 0x90, 0x20), "fireflyGlow": (0xD0, 0xC8, 0x90),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -69,6 +73,8 @@ _ANSI_P: dict[str, Color | None] = {
     "sun": "bright_yellow", "sunGlow": "yellow",
     "branch": "yellow", "peak": "bright_black", "snow": "bright_white",
     "planet": "yellow", "planetRing": "cyan",
+    "aurora1": "green", "aurora2": "magenta",
+    "firefly": "bright_yellow", "fireflyGlow": "bright_black",
 }
 
 
@@ -388,6 +394,22 @@ def _galaxy(g: Grid, cx: int, cy: int) -> None:
     _spark(g, cx, cy, _P["starBright"])
 
 
+def _aurora(g: Grid) -> None:
+    for off, c in ((0, _P["aurora1"]), (1, _P["aurora2"])):
+        for x in range(19, W):
+            y = 3 + off + ((x // 2) % 2)
+            _px(g, x, y, c)
+            _px(g, x, y + 2, c)
+
+
+def _firefly(g: Grid, x: int, y: int) -> None:
+    _px(g, x, y, _P["firefly"])
+    _px(g, x - 1, y, _P["fireflyGlow"])
+    _px(g, x + 1, y, _P["fireflyGlow"])
+    _px(g, x, y - 1, _P["fireflyGlow"])
+    _px(g, x, y + 1, _P["fireflyGlow"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -485,6 +507,18 @@ def _galaxy_scene(g: Grid) -> None:
     _left_imp(g)
 
 
+def _aurora_scene(g: Grid) -> None:
+    _stars(g, 0, 12, 0.12)
+    _aurora(g)
+    _left_imp(g)
+
+
+def _fireflies(g: Grid) -> None:
+    for x, y in [(21, 4), (26, 6), (23, 9), (28, 3), (20, 11)]:
+        _firefly(g, x, y)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -499,6 +533,8 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_mountain_moon, "welcome back."),
     (_ringed_planet, "a world, from nothing."),
     (_galaxy_scene, "lost in the stack? i know the way."),
+    (_aurora_scene, "the sky's showing off — let's match it."),
+    (_fireflies, "the lights are out to play."),
 ]
 
 MIN_WIDTH = 32

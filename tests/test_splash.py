@@ -309,3 +309,30 @@ def test_planet_paints_both_a_body_disc_and_a_ring() -> None:
     body = any(cell == splash._P["planet"] for row in g for cell in row)
     ring = any(cell == splash._P["planetRing"] for row in g for cell in row)
     assert body and ring
+
+
+def test_task4_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_aurora_scene", "the sky's showing off — let's match it."),
+        ("_fireflies", "the lights are out to play."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_aurora_paints_both_band_colors_only_in_the_accent_columns() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._aurora(g)
+    painted = [(x, cell) for row in g for x, cell in enumerate(row) if cell is not None]
+    assert any(cell == splash._P["aurora1"] for _, cell in painted)
+    assert any(cell == splash._P["aurora2"] for _, cell in painted)
+    assert all(x >= 18 for x, _ in painted)
