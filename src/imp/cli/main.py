@@ -688,16 +688,23 @@ async def _run_tui_session(
     return _session_exit_code(change, coord)
 
 
-def _record_backlog(args: argparse.Namespace, control: Path) -> int:
+def _record_idea(args: argparse.Namespace, control: Path) -> int:
+    (control / ".imp" / "changes").mkdir(parents=True, exist_ok=True)
+    title = args.idea
+    if not title.strip():
+        print("imp: idea title must be non-empty", file=sys.stderr)
+        return 2
+    description = getattr(args, "description", None) or ""
+    seed = backlog.seed_opening({"title": title, "description": description})
+    base = worktree.current_branch(control)
     change_id = new_change_id()
     try:
-        backlog.write_record(
-            control, change_id=change_id,
-            title=args.backlog,
-            description=getattr(args, "description", None) or "",
+        Change.create_draft(
+            control, title=title, change_id=change_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
-            created_by="human", workflow=getattr(args, "workflow", None))
-    except ValueError as e:
+            workflow=getattr(args, "workflow", None),
+            origin="idea", seed_opening=seed)
+    except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     print(f"imp: recorded backlog Change {change_id} "
@@ -763,10 +770,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     control = _control_root()
     worktree.check_preconditions(control)
     worktree.ensure_imp_ignored(control)
+    (control / ".imp" / "changes").mkdir(parents=True, exist_ok=True)
     base = worktree.current_branch(control)
 
-    if getattr(args, "description", None) and getattr(args, "backlog", None) is None:
-        print("imp: --description requires --backlog", file=sys.stderr)
+    if getattr(args, "description", None) and getattr(args, "idea", None) is None:
+        print("imp: --description requires --idea", file=sys.stderr)
         return 2
 
     wf_arg = getattr(args, "workflow", None)
@@ -774,12 +782,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
 
-    if getattr(args, "backlog", None) is not None:
+    if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
-            print("imp: --backlog and --title cannot be combined "
-                  "(--backlog is the title)", file=sys.stderr)
+            print("imp: --idea and --title cannot be combined "
+                  "(--idea is the title)", file=sys.stderr)
             return 2
-        return _record_backlog(args, control)
+        return _record_idea(args, control)
 
     try:
         playbook_name = getattr(args, "playbook", None)
@@ -837,7 +845,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     title = seed.title if seed.title is not None else ""
     try:
         change = Change.create_draft(control, title=title, change_id=change_id,
-                                     base_branch=base, workflow=wf_arg)
+                                     base_branch=base, workflow=wf_arg,
+                                     origin="draft")
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -2255,12 +2264,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
-    p_new.add_argument("--backlog", metavar="TITLE", default=None,
-                       help="Record a backlog Change with this TITLE WITHOUT "
-                            "starting it; prints its id. Add --description for a "
+    p_new.add_argument("--idea", metavar="TITLE", default=None,
+                       help="Jot a backlog Change with this TITLE WITHOUT opening a "
+                            "conversation; prints its id. Add --description for a "
                             "longer brief. Start it later with `imp resume <id>`.")
     p_new.add_argument("--description", metavar="TEXT", default=None,
-                       help="Optional longer description for a --backlog Change "
+                       help="Optional longer description for an --idea Change "
                             "(may be empty).")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
