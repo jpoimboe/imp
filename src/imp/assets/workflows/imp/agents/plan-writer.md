@@ -61,7 +61,7 @@ non-soliciting exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Deviation revise mode (below): revise only pending tasks; escalate to a corrective N+1 if it implicates an already-implemented task. |
+| Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the coder found:" + deviation fields | Deviation revise mode (below): revise only pending tasks; escalate to a corrective N+1 if it implicates an already-implemented task. |
 | Front-door express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
@@ -115,7 +115,7 @@ nor re-reviewed.
 ## Deviation revise mode (task-lead deviation, resume)
 
 A `task-lead` **deviation** ("The plan didn't match the codebase. Here's what the
-implementer found:") is a **resume** mid-implementation: plan N is **not** yet
+coder found:") is a **resume** mid-implementation: plan N is **not** yet
 complete, so the disambiguation revises plan N in place. Your revise is **strictly
 bounded to pending tasks** — tasks below the `progress.md` **completion boundary**
 (those not yet recorded complete). Read `{{ change.home }}/progress.md` to find that

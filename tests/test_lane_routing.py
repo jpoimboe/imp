@@ -113,9 +113,9 @@ def test_rule_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     state, log = State.load(a.state_dir), InMemoryEventLog()
     state.held_lane = "main"
     state.held_acquire_step = "wait-for-head"
-    _release_held_lane("base", a, state, log, step_name="integrator")
+    _release_held_lane("base", a, state, log, step_name="reconciler")
     assert all(e["change_id"] != "aaa" for e in mq.read(tmp_path))   # self popped
     assert state.held_lane is None
     assert State.load(a.state_dir).held_lane is None
     released = [e for e in log.read() if e["type"] == "lane_released"]
-    assert released and released[-1]["payload"]["step"] == "integrator"
+    assert released and released[-1]["payload"]["step"] == "reconciler"

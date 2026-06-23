@@ -483,20 +483,20 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
     # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
     st = State.load(change.state_dir)
-    st.step = "code-reviewer"
+    st.step = "plan-code-reviewer"
     st.status = "paused"
-    st.loop_counts = {"code-reviewer": 6}
+    st.loop_counts = {"plan-code-reviewer": 6}
     st.save(change.state_dir)
 
     wf = load_workflow(change.workflow_dir,
                        configured_tiers=load_effective_config(
                            project_root=tmp_path,
                            control_root=tmp_path).config.tier_names())
-    plan = recovery.plan_rewind(wf, st, "code-reviewer")
+    plan = recovery.plan_rewind(wf, st, "plan-code-reviewer")
     recovery.apply_rewind(plan, wf, st, change.event_log())
     st.status = "running"
     st.save(change.state_dir)
-    assert "code-reviewer" not in st.loop_counts   # the load-bearing reset guard
+    assert "plan-code-reviewer" not in st.loop_counts   # the load-bearing reset guard
 
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
@@ -565,8 +565,8 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None:
-    """A clean rebase (the stubbed integrate-rebase.sh exits 0): the integrator is
+async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None:
+    """A clean rebase (the stubbed integrate-rebase.sh exits 0): the reconciler is
     SKIPPED; the merge tail is finalize → wait-for-head → integrate-rebase →
     integration-verify → integration-reviewer → merge-to-base."""
     change = _seed_default_workflow(tmp_path)
@@ -586,7 +586,7 @@ async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None
     for name in ("finalize", "wait-for-head", "integrate-rebase",
                  "integration-reviewer", "integration-verify", "merge-to-base"):
         assert name in steps, f"{name} did not run"
-    assert "integrator" not in steps, "clean rebase must not call the integrator"
+    assert "reconciler" not in steps, "clean rebase must not call the reconciler"
     assert (steps.index("finalize")
             < steps.index("wait-for-head")
             < steps.index("integrate-rebase")
@@ -596,9 +596,9 @@ async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None:
+async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None:
     """A conflict rebase (integrate-rebase.sh exits 6) routes through the
-    integrator before integration-verify → integration-reviewer → merge-to-base."""
+    reconciler before integration-verify → integration-reviewer → merge-to-base."""
     change = _seed_default_workflow(tmp_path)
     ir = (change.project_root / "imp" / "workflows" / "imp"
           / "scripts" / "integrate-rebase.sh")
@@ -617,11 +617,11 @@ async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("integrate-rebase", "integrator", "integration-verify",
+    for name in ("integrate-rebase", "reconciler", "integration-verify",
                  "integration-reviewer", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-rebase")
-            < steps.index("integrator")
+            < steps.index("reconciler")
             < steps.index("integration-verify")
             < steps.index("integration-reviewer")
             < steps.index("merge-to-base"))
@@ -749,8 +749,8 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     assert not any("[resume]" in ln for ln in body), (
         "raw [resume] annotation leaked into the transcript:\n" + "\n".join(body))
     # A loud clean forward goto is UNLABELED -> silent: spec-reviewer (label:
-    # "reviewing spec") renders only its gray completion line, with no own-line "→ …".
-    spec_rev_i = next((i for i, ln in enumerate(body) if "reviewing spec · complete" in ln), None)
+    # "spec · reviewing") renders only its gray completion line, with no own-line "→ …".
+    spec_rev_i = next((i for i, ln in enumerate(body) if "spec · reviewing · complete" in ln), None)
     assert spec_rev_i is not None, (
         "expected the spec-reviewer completion breadcrumb:\n" + "\n".join(body))
     # The line after the spec-reviewer completion must not be an own-line route label.

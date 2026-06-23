@@ -1046,7 +1046,7 @@ def test_task_result_with_matching_id_closes_fold_carrying_outcome() -> None:
            "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"})
     b.add({"type": "tool_call", "agent_id": "step:implement/task-lead",
            "payload": {"name": "task", "id": "toolu_minted",
-                       "input": {"subagent_name": "implementer", "task_description": "go"}},
+                       "input": {"subagent_name": "coder", "task_description": "go"}},
            "id": "e2"})
     # Navigate: root -> PhaseNode -> StepNode -> children (SubagentFold lives here)
     step_children = b.tree.root.children[0].children[0].children
@@ -2205,7 +2205,7 @@ def test_lane_events_render_no_fallback_breadcrumb() -> None:
     tree = nv.build_tree([
         _ev("1", "step_started", step="wait-for-head", kind="branch", phase="merge"),
         _ev("2", "lane_acquired", base="main", step="wait-for-head"),
-        _ev("3", "lane_released", base="main", step="integrator"),
+        _ev("3", "lane_released", base="main", step="reconciler"),
         _ev("4", "lane_evicted", base="main", rewind_to="wait-for-head"),
     ])
     step = tree.root.children[0].children[0]

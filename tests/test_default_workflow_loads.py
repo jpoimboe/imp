@@ -19,7 +19,7 @@ def _wf():
 def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
     assert wf.name == "feature"
-    assert [p.name for p in wf.phases] == ["front-door", "spec", "plan", "implement", "merge"]
+    assert [p.name for p in wf.phases] == ["front-door", "spec", "plan", "code", "merge"]
 
 
 def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
@@ -35,7 +35,9 @@ def test_supercycle_back_edges_present() -> None:
     # Spot-check the load-bearing loop edges survive parsing.
     steps = {s.name: s for p in _wf().phases for s in p.steps}
     # plan-cycle-check loops to plan-writer; the merged review + deferred-sweep run per plan.
-    assert "plan-cycle-check" in steps and "code-reviewer" in steps and "deferred-sweep" in steps
+    assert "plan-cycle-check" in steps
+    assert "plan-code-reviewer" in steps
+    assert "deferred-sweep" in steps
     assert "task-lead" in steps and "finalize" in steps
 
 
@@ -135,32 +137,41 @@ def test_every_nonquiet_step_has_its_label() -> None:
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
         "front-door": "chatting",
-        "spec-writer": "writing spec",
-        "spec-reviewer": "reviewing spec",
+        "spec-writer": "spec · writing",
+        "spec-reviewer": "spec · reviewing",
         "plan-writer": (
-            "writing plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+            "plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
         ),
-        "plan-reviewer": "reviewing plan",
-        "plan-finalized": "finalizing plan",
+        "plan-reviewer": (
+            "plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+        ),
+        "plan-finalized": (
+            "plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · finalizing"
+        ),
         "task-lead": (
-            "implementing · plan {{ vars.plan_index }}"
+            "code · plan {{ vars.plan_index }}"
             "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         ),
-        "verify": "testing",
-        "autosquash-resolve-implement": "resolving fixups",
-        "autosquash-resolve-merge": "resolving fixups",
-        "plan-cycle-check": "checking plan coverage",
-        "code-reviewer": "reviewing code",
-        "deferred-sweep": "resolving deferred items",
-        "sweep-verify": "testing",
-        "autosquash-resolve-sweep": "resolving fixups",
-        "finalize": "finalizing",
-        "wait-for-head": "waiting to merge",
-        "integrator": "integrating",
-        "integration-verify": "testing",
-        "integration-reviewer": "reviewing merge",
-        "merge-to-base": "merging",
+        "verify": "code · testing",
+        "autosquash-resolve-implement": "code · resolving fixups",
+        "autosquash-resolve-merge": "merge · resolving fixups",
+        "plan-cycle-check": "code · checking plan coverage",
+        "plan-code-reviewer": (
+            "code · plan {{ vars.plan_index }}"
+            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+        ),
+        "deferred-sweep": "code · cleaning up deferred tasks",
+        "sweep-verify": "code · testing",
+        "autosquash-resolve-sweep": "code · resolving fixups",
+        "finalize": "code · finalizing",
+        "wait-for-head": "merge · waiting",
+        "reconciler": "merge · reconciling",
+        "integration-verify": "merge · testing",
+        "integration-reviewer": "merge · reviewing",
+        "merge-to-base": "merge · finalizing",
     }
     for name, label in expected.items():
         assert by[name].label == label, name
@@ -183,8 +194,8 @@ def test_route_labels_assigned() -> None:
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # task-lead deviation
     assert by["task-lead"].rules[0].label == "plan/code mismatch, going back to planning"
-    # code-reviewer task_gap -> task-lead
-    assert by["code-reviewer"].rules[0].label == "addressing code review feedback"
+    # plan-code-reviewer task_gap -> task-lead
+    assert by["plan-code-reviewer"].rules[0].label == "addressing code review feedback"
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"

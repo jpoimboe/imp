@@ -13,7 +13,7 @@ spawn is built into the tree but never emitted live. `imp log` renders the whole
 tree with no live cursor, so it is unaffected.
 
 The fixture is a trimmed, real slice of the 2026-06-03-imp-new-open-by-asking
-run: the task-lead step spawns an `implementer` subagent (empty-id task call),
+run: the task-lead step spawns a `coder` subagent (empty-id task call),
 the subagent reports, the non-matching close arrives, then task-lead completes
 and a `commit-check` step runs. The subagent collapses to a single status row
 in lean/live (Part D); no internal prose is streamed. The parent step's

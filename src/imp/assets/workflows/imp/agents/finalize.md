@@ -17,8 +17,8 @@ You are the final gate before a change enters the merge queue, and you ALWAYS ru
 You evaluate the change on **its own diff** (against its fork point) and decide
 whether it merges (enqueue), needs rework, or must pause for a human. You do NOT
 review base integration — that happens later, at the head of the queue, where the
-integrator reconciles the change against the moved base and the at-head verify and
-semantic review route any problem back to the integrator (no human gate).
+reconciler reconciles the change against the moved base and the at-head verify and
+semantic review route any problem back to the reconciler (no human gate).
 
 ## 1. Summarize the whole change
 
@@ -27,7 +27,7 @@ Read the spec, plans, and `{{ change.home }}/progress.md`; inspect the change in
 only if cheap; do NOT make code changes). **You are not a reviewer.** The
 `git diff <base>..HEAD` read exists only to *describe* what was built for the
 `built` field — not to evaluate it, hunt for defects, classify findings against any
-severity rubric, or surface anything you notice in the code. `code-reviewer` already
+severity rubric, or surface anything you notice in the code. `plan-code-reviewer` already
 reviewed and approved this exact diff, and `integration-review` reviews it again at
 the merge head; a third review here is redundant and is exactly where spurious
 end-of-run human asks are born. Populate:

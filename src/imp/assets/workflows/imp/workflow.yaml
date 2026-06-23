@@ -1,12 +1,12 @@
 name: feature
 description: |
-  front-door -> spec -> (plan -> implement*)* -> merge
+  front-door -> spec -> (plan -> code*)* -> merge
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
-# reviewer judging the medium-tier implementer's work), not by vendor. Review fires
+# reviewer judging the medium-tier coder's work), not by vendor. Review fires
 # PER PLAN: plan-cycle-check, the sole coverage guard, routes each settled plan
-# through a single `code-reviewer` step over review_base..HEAD, plus once over the
+# through a single `plan-code-reviewer` step over review_base..HEAD, plus once over the
 # whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
 # is paired with each review; verify and plan-reviewer stay per-plan.
 
@@ -48,7 +48,7 @@ phases:
       - name: spec-writer
         file: agents/spec-writer.md
         tier: high
-        label: writing spec
+        label: spec · writing
         rules:
           - {else: true, continue: true}
 
@@ -62,7 +62,7 @@ phases:
       - name: spec-reviewer
         file: agents/spec-reviewer.md
         tier: high
-        label: reviewing spec
+        label: spec · reviewing
         read_only: ["."]
         # The reviewer gets the last word: the loop ends only on a clean review with
         # nothing left to integrate. spec_minors_integrated tracks whether the writer
@@ -84,7 +84,7 @@ phases:
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
-        label: "writing plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+        label: "plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
 
       - name: plan-verify-commit
         quiet: true
@@ -97,7 +97,7 @@ phases:
       - name: plan-reviewer
         file: agents/plan-reviewer.md
         tier: high
-        label: reviewing plan
+        label: "plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
         read_only: ["."]
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
@@ -118,25 +118,25 @@ phases:
       - name: plan-finalized
         file: agents/plan-finalized.md
         tier: medium
-        label: finalizing plan
+        label: "plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · finalizing"
         read_only: ["."]
         rules:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
-  - name: implement
+  - name: code
     steps:
       - name: task-lead
         file: agents/task-lead.md
         tier: high
-        label: "implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+        label: "code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         rules:
-          - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the coder found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {else: true, continue: true}
 
       - name: verify
         command: ./scripts/run-verify.sh
-        label: testing
+        label: code · testing
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
@@ -158,7 +158,7 @@ phases:
       - name: autosquash-resolve-implement
         file: agents/autosquash-resolve.md
         tier: high
-        label: resolving fixups
+        label: code · resolving fixups
         max_loops: 6
         rules:
           - {else: true, goto: cleanup-implement}
@@ -170,49 +170,49 @@ phases:
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
         tier: medium
-        label: checking plan coverage
+        label: code · checking plan coverage
         rules:
           # More scope remains -> review THIS plan (review_base..HEAD) before the next plan.
           # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
           # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
           # per-plan review as the full panel.
-          - {if: {more_plans: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: code-reviewer}
+          - {if: {more_plans: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: plan-code-reviewer}
           # coverage complete, trivial change -> no panel, straight to finalize
           # (the per-plan cleanup already folded+stamped this plan)
           - {if: {fast_path: true}, set: {plan_total: "output.plan_total"}, goto: finalize}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix plan
           # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD
           # diff (review_scope='plan'), not a fresh whole-change panel each round.
-          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: code-reviewer}
+          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: plan-code-reviewer}
           # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
           # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
-          - {else: true, set: {review_scope: "'change'", change_panel_done: true, plan_total: "output.plan_total"}, goto: code-reviewer}
+          - {else: true, set: {review_scope: "'change'", change_panel_done: true, plan_total: "output.plan_total"}, goto: plan-code-reviewer}
 
-      # The review step IS the code-reviewer (no coordinator/panel): per-plan it
+      # The review step IS the plan-code-reviewer (no coordinator/panel): per-plan it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
       # cur_base_head..HEAD. It routes — verdict is approve | task_gap only (coverage is
       # plan-cycle-check's call, never the reviewer's).
-      - name: code-reviewer
-        file: agents/code-reviewer.md
+      - name: plan-code-reviewer
+        file: agents/plan-code-reviewer.md
         tier: high
-        label: reviewing code
+        label: "code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
         max_loops: 6
         rules:
-          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
+          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The plan-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
           - {else: true, continue: true}
 
       - name: deferred-sweep
         file: agents/deferred-sweep.md
         tier: medium
-        label: resolving deferred items
+        label: code · cleaning up deferred tasks
         rules:
           - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
           - {else: true, continue: true}
 
       - name: sweep-verify
         command: ./scripts/run-verify.sh
-        label: testing
+        label: code · testing
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
@@ -233,7 +233,7 @@ phases:
       - name: autosquash-resolve-sweep
         file: agents/autosquash-resolve.md
         tier: high
-        label: resolving fixups
+        label: code · resolving fixups
         max_loops: 6
         rules:
           - {else: true, goto: cleanup-sweep}
@@ -260,7 +260,7 @@ phases:
       - name: finalize
         file: agents/finalize.md
         tier: high
-        label: finalizing
+        label: code · finalizing
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}
@@ -272,7 +272,7 @@ phases:
     steps:
       - name: wait-for-head
         acquire: base
-        label: waiting to merge
+        label: merge · waiting
         rules:
           - {else: true, continue: true}
 
@@ -281,37 +281,37 @@ phases:
         command: ./scripts/integrate-rebase.sh
         rules:
           - {if: {exit: 2}, goto: assert-stamped}                                  # base unmoved: implement-phase cleanup already stamped
-          - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip integrator
-          - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run integrator (next)
+          - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip reconciler
+          - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run reconciler (next)
           - {else: true, pause: true}
 
-      - name: integrator
-        file: agents/integrator.md
+      - name: reconciler
+        file: agents/reconciler.md
         tier: high
-        label: integrating
+        label: merge · reconciling
         rules:
           - {if: {stuck: true}, pause: true}
           - {else: true, continue: true}
 
       - name: integration-verify
         command: ./scripts/run-verify.sh
-        label: testing
+        label: merge · testing
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: integrator}
+          - {else: true, resume: reconciler}
 
       - name: integration-reviewer
         file: agents/integration-review.md
         tier: high
-        label: reviewing merge
+        label: merge · reviewing
         max_loops: 6
         rules:
-          - {if: {blocking: true}, resume: integrator,
+          - {if: {blocking: true}, resume: reconciler,
              label: "addressing integration review feedback",
              feedback: "Here's review feedback to address:"}
-          - {if: {has_minor_findings: true}, resume: integrator,
+          - {if: {has_minor_findings: true}, resume: reconciler,
              label: "integrating minor improvements",
              feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           - {if: {status: Error}, pause: true}
@@ -323,13 +323,13 @@ phases:
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
           - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: integrator}
+          - {if: {exit: 3}, resume: reconciler}
           - {else: true, pause: true}
 
       - name: autosquash-resolve-merge
         file: agents/autosquash-resolve.md
         tier: high
-        label: resolving fixups
+        label: merge · resolving fixups
         max_loops: 6
         rules:
           - {else: true, goto: cleanup-merge}
@@ -343,7 +343,7 @@ phases:
 
       - name: merge-to-base
         kind: merge_and_exit_worktree
-        label: merging
+        label: merge · finalizing
         rules:
           - {if: {merge: MERGED}, continue: true}
           - {else: true, pause: true}

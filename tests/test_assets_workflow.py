@@ -49,7 +49,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
                             "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"task"}
     subagents = {
-        "implementer", "quality-reviewer",
+        "coder", "code-reviewer",
     }
     dispatchers = {"task-lead", "deferred-sweep",
                    "plan-writer", "spec-writer", "front-door"}
@@ -90,16 +90,17 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["plan-verify-commit"].rules[-1].action.resume is True   # -> plan-writer
     assert by["verify"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
-    # phase jumps clear (plain goto)
-    assert by["code-reviewer"].rules[0].action.target == "task-lead"     # task_gap -> implementer
-    assert by["code-reviewer"].rules[0].action.resume is False           # cross-phase plain goto
+    # phase jumps clear (plain goto): task_gap -> coder (target task-lead),
+    # cross-phase plain goto (resume is False)
+    assert by["plan-code-reviewer"].rules[0].action.target == "task-lead"
+    assert by["plan-code-reviewer"].rules[0].action.resume is False
     # else: approve -> continue (deferred-sweep); plan_gap route is removed
-    assert isinstance(by["code-reviewer"].rules[-1].action, Continue)
+    assert isinstance(by["plan-code-reviewer"].rules[-1].action, Continue)
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
     assert [s.name for s in wf.phases[-1].steps] == [
-        "wait-for-head", "integrate-rebase", "integrator",
+        "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base"]
@@ -111,7 +112,7 @@ def test_review_step_has_no_differ_from():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].differ_from is None
+    assert by["plan-code-reviewer"].differ_from is None
 
 
 def test_review_step_declares_high_tier():
@@ -119,7 +120,7 @@ def test_review_step_declares_high_tier():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].tier == "high"
+    assert by["plan-code-reviewer"].tier == "high"
 
 
 def test_default_workflow_loads() -> None:
@@ -240,10 +241,10 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_finalize_tails_the_implement_phase() -> None:
+def test_finalize_tails_the_code_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    impl = next(p for p in wf.phases if p.name == "implement")
+    impl = next(p for p in wf.phases if p.name == "code")
     names = [s.name for s in impl.steps]
     assert "stamp-trailers" not in names
     assert names[-1] == "finalize"
@@ -258,10 +259,10 @@ def test_no_agent_declares_the_commit_tool() -> None:
 
 
 def test_committing_agents_declare_bash() -> None:
-    # implementer/task-lead/spec-writer/plan-writer commit with raw git via bash.
+    # coder/task-lead/spec-writer/plan-writer commit with raw git via bash.
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    for name in ("implementer", "task-lead", "spec-writer", "plan-writer"):
+    for name in ("coder", "task-lead", "spec-writer", "plan-writer"):
         assert "bash" in wf.agents[name].tools, f"{name} missing bash"
 
 
@@ -288,7 +289,7 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         timed_out = evaluate_rules(rules, vars=vars_,
                                    output={"exit": 124, "stdout": "", "stderr": ""})
         assert isinstance(timed_out.action, Pause), f"{name} must pause on exit 124"
-        # A real failure (non-zero, non-124) still routes back to the implementer.
+        # A real failure (non-zero, non-124) still routes back to the coder.
         failed = evaluate_rules(rules, vars=vars_,
                                 output={"exit": 1, "stdout": "", "stderr": ""})
         assert not isinstance(failed.action, Pause), (
@@ -601,7 +602,7 @@ def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> Non
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": False},
         output={"more_plans": False, "rationale": "done", "plan_total": 1})
-    assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
+    assert isinstance(m.action, Goto) and m.action.target == "plan-code-reviewer"
     assert m.var_mutations["review_scope"] == "change"
     assert m.var_mutations["change_panel_done"] is True
 
@@ -615,7 +616,7 @@ def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "change_panel_done": True},
         output={"more_plans": False, "rationale": "corrective", "plan_total": 1})
-    assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
+    assert isinstance(m.action, Goto) and m.action.target == "plan-code-reviewer"
     assert m.var_mutations["review_scope"] == "plan"
     assert "change_panel_done" not in m.var_mutations
 
@@ -720,8 +721,8 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.agents["explorer"].label == "exploring codebase"
     assert wf.agents["researcher"].label == "researching"
-    assert wf.agents["implementer"].label == "implementing task"
-    assert wf.agents["quality-reviewer"].label == "reviewing changes"
+    assert wf.agents["coder"].label == "writing code"
+    assert wf.agents["code-reviewer"].label == "reviewing code"
     # plan-writer's label is on the workflow step, not the agent frontmatter
     for name, a in wf.agents.items():
         if name == "plan-writer":
@@ -811,17 +812,17 @@ def test_review_steps_read_only_tightening():
     assert steps["spec-reviewer"].read_only == (".",)
     assert steps["plan-reviewer"].read_only == (".",)
     # Reviewers that run tests in-tree stay loose (cannot be confined).
-    assert steps["code-reviewer"].read_only == ()
+    assert steps["plan-code-reviewer"].read_only == ()
     assert steps["integration-reviewer"].read_only == ()
 
 
-def test_quality_reviewer_renders_canonical_severity_rubric() -> None:
+def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
     from imp.engine.state import InMemoryEventLog
     wf_dir = bundled_workflow_dir("imp")
-    body = load_workflow(wf_dir).agents["quality-reviewer"].prompt_template_source
+    body = load_workflow(wf_dir).agents["code-reviewer"].prompt_template_source
     ctx = build_context(change_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
     assert "behavioral impact, not file type" in out

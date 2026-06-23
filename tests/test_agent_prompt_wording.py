@@ -68,14 +68,14 @@ def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
         assert "imp/plans/" not in body, f"{name} still references imp/plans/"
 
 
-def test_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
-    body = _agent_prompt("code-reviewer")
+def test_plan_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
+    body = _agent_prompt("plan-code-reviewer")
     assert "..HEAD" not in body
     assert body.count("..imp/{{ change.id }}") == 2
 
 
-def test_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -> None:
-    body = _agent_prompt("code-reviewer")
+def test_plan_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -> None:
+    body = _agent_prompt("plan-code-reviewer")
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
     whole = render_prompt(body, build_context(

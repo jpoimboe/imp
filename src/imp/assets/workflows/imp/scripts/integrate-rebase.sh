@@ -11,7 +11,7 @@
 #   5  -> dirty entry tree / leftover rebase / git refused to start -> pause
 #   2  -> base unmoved (empty base-side incoming diff): merge directly, NO review, no fork SHA
 #   0  -> clean rebase (base moved, no conflict) -> integration-reviewer
-#   6  -> rebase stopped on a conflict (left in progress) -> integrator
+#   6  -> rebase stopped on a conflict (left in progress) -> reconciler
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 5
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
@@ -61,7 +61,7 @@ if git -c rerere.enabled=true -c rerere.autoupdate=true rebase --empty=drop "$BA
 fi
 if [ -d "$(git rev-parse --git-path rebase-merge)" ] \
    || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
-  echo "rebase stopped on a conflict (left in progress); handing to integrator" >&2
+  echo "rebase stopped on a conflict (left in progress); handing to reconciler" >&2
   echo "$P"
   exit 6
 fi

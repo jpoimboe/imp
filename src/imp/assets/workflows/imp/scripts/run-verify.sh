@@ -10,7 +10,7 @@
 #     timeout (exit 124) print an explicit diagnosis to stderr — truncated output
 #     otherwise reads as a hang at whatever check happened to be printing. The
 #     workflow routes exit 124 to a human pause (re-running can't beat the clock),
-#     distinct from a real non-zero failure which bounces back to the implementer.
+#     distinct from a real non-zero failure which bounces back to the coder.
 #   - IMP_VERIFY_COMMAND unset or empty → print an informational message and exit 0
 #     (no verify gate; project hasn't wired / has opted out of verify_command).
 #

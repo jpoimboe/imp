@@ -19,10 +19,16 @@ def _render_task_lead(**var_overrides) -> str:
 
 def test_task_lead_instructs_the_live_label_push() -> None:
     out = _render_task_lead()
-    # Plan prefix rendered from vars; <N> stays a placeholder for the task number.
-    assert "implementing · plan 2/4 · task <N>/6" in out
+    # Phase-first live label, with the trailing verb for each active subagent.
+    assert "code · plan 2/4 · task <N>/6 · writing" in out
+    assert "code · plan 2/4 · task <N>/6 · reviewing" in out
 
 
 def test_task_lead_bare_case_drops_plan_denominator() -> None:
     out = _render_task_lead(plan_total=0)
-    assert "implementing · plan 2 · task <N>/6" in out
+    assert "code · plan 2 · task <N>/6 · writing" in out
+
+
+def test_task_lead_bare_case_reviewing_drops_plan_denominator() -> None:
+    out = _render_task_lead(plan_total=0)
+    assert "code · plan 2 · task <N>/6 · reviewing" in out

@@ -11,11 +11,11 @@ AGENTS = Path("src/imp/assets/workflows/imp/agents")
 SCRIPTS = Path("src/imp/assets/workflows/imp/scripts")
 
 TARGETS = [
-    "spec-writer", "plan-writer", "implementer",
-    "spec-reviewer", "plan-reviewer", "code-reviewer", "quality-reviewer",
+    "spec-writer", "plan-writer", "coder",
+    "spec-reviewer", "plan-reviewer", "plan-code-reviewer", "code-reviewer",
 ]
 NON_TARGETS = [
-    "task-lead", "integrator", "deferred-sweep", "plan-cycle-check",
+    "task-lead", "reconciler", "deferred-sweep", "plan-cycle-check",
     "finalize", "autosquash-resolve", "explorer", "researcher",
 ]
 

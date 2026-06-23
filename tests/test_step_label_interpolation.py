@@ -8,8 +8,8 @@ from imp.engine.executor import _render_label
 from tests.conftest import _seed_control
 
 PLAN_LABEL = (
-    "writing plan {{ vars.plan_index }}"
-    "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+    "plan {{ vars.plan_index }}"
+    "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
 )
 
 
@@ -26,14 +26,14 @@ def test_templated_label_renders_vars(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     out = _render_label(PLAN_LABEL, ch, ch.event_log(),
                         _state(plan_index=2, plan_total=4))
-    assert out == "writing plan 2/4"
+    assert out == "plan 2/4 · writing"
 
 
 def test_zero_total_drops_denominator(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     out = _render_label(PLAN_LABEL, ch, ch.event_log(),
                         _state(plan_index=1, plan_total=0))
-    assert out == "writing plan 1"
+    assert out == "plan 1 · writing"
 
 
 def test_non_templated_label_unchanged(tmp_path: Path) -> None:
