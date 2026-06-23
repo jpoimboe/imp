@@ -50,3 +50,22 @@ def test_pick_phrase_selects_from_the_pool_via_injected_rng() -> None:
 
 def test_pick_phrase_default_rng_returns_a_pool_member() -> None:
     assert opening.pick_phrase() in opening.PHRASES
+
+
+def test_opening_beat_composes_wordmark_then_phrase_color_off() -> None:
+    out = opening.render_opening_beat(
+        theme="ansi", color=False, unicode=True, rng=_IndexRng(15))
+    assert out == "▀\n█ █▀█▀█ █▀█\n▀ ▀ ▀ ▀ █▀▀\nwhat are we building tonight?"
+
+
+def test_opening_beat_phrase_is_dim_italic_when_color_on() -> None:
+    out = opening.render_opening_beat(
+        theme="ansi", color=True, unicode=True, rng=_IndexRng(16))
+    # dim (\x1b[2m) + italic (\x1b[3m) + phrase + reset (\x1b[0m)
+    assert out.endswith("\n\x1b[2m\x1b[3mmake a wish.\x1b[0m")
+
+
+def test_opening_beat_color_off_carries_no_sgr() -> None:
+    out = opening.render_opening_beat(
+        theme="dark", color=False, unicode=True, rng=_IndexRng(0))
+    assert "\x1b[" not in out

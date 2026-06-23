@@ -6,6 +6,9 @@ from typing import Protocol
 
 from imp.cli import palette as pal
 
+# Italic is not a palette attribute; the beat emits the SGR directly when color is on.
+_ITALIC = "\x1b[3m"
+
 # 6-row source: "X"=pixel, "."=transparent; rows pair (0,1)(2,3)(4,5) into 3 half-block cells.
 _WORDMARK_BITMAP: tuple[str, ...] = (
     "X",
@@ -74,6 +77,17 @@ def _half_block_rows() -> list[str]:
         ]
         rows.append("".join(cells).rstrip())
     return rows
+
+
+def render_opening_beat(*, theme: str, color: bool, unicode: bool = True,
+                        rng: _SupportsChoice | None = None) -> str:
+    """The opening block: wordmark then one phrase (dim italic when color on)."""
+    wordmark = render_wordmark(theme=theme, color=color, unicode=unicode)
+    phrase = pick_phrase(rng)
+    if color:
+        esc = pal.theme_escapes(theme)
+        phrase = f"{esc['dim']}{_ITALIC}{phrase}{esc['reset']}"
+    return f"{wordmark}\n{phrase}"
 
 
 def render_wordmark(*, theme: str, color: bool, unicode: bool = True) -> str:
