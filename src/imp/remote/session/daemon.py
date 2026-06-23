@@ -121,7 +121,7 @@ async def serve_change_session(
             if _rewind_plan is not None:
                 from imp.engine.recovery import apply_rewind
                 # step_rewound follows workflow_resumed in the append-only log.
-                apply_rewind(_rewind_plan, _rewind_workflow, state, log)
+                apply_rewind(_rewind_plan, _rewind_workflow, state, log, change=change)
             state.save(change.state_dir)
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:

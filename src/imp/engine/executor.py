@@ -22,7 +22,7 @@ from typing import Any
 
 import anyio
 
-from imp.agents.prompts import build_context, render_prompt
+from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
     ChangeContext,
     Message,
@@ -328,7 +328,10 @@ async def run_change(
                 if nxt >= len(flat):
                     return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
-                state.step_label = flat[nxt].label or flat[nxt].name
+                state.step_label = (
+                    render_label(flat[nxt].label, change, log, state)
+                    or flat[nxt].name
+                )
                 state.resume_pending = None
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
@@ -349,7 +352,10 @@ async def run_change(
                 else:
                     state.loop_counts.pop(step.name, None)       # forward goto resets
                 state.step = flat[target_idx].name
-                state.step_label = flat[target_idx].label or flat[target_idx].name
+                state.step_label = (
+                    render_label(flat[target_idx].label, change, log, state)
+                    or flat[target_idx].name
+                )
                 if action.resume:
                     # Single-shot reset: a resumed step must not inherit a stale
                     # retry count. Done HERE (the navigation point that sets
@@ -517,26 +523,13 @@ async def _dispatch_step(
         project_facts=project_facts, guidance=guidance)
 
 
-def _render_label(
-    label: str | None, change: Change | None, log: EventLog | None, state: State,
-) -> str | None:
-    if label is None or "{{" not in label or change is None or log is None:
-        return label
-    return render_prompt(label, build_context(
-        change_title=change.title, event_log=log,
-        change_id=change.id, change_home=f".imp/changes/{change.id}",
-        cur_base_head=change.cur_base_head,
-        orig_base_head=change.orig_base_head, vars=state.vars,
-    ))
-
-
 def _step_started_payload(
     step: Step, state: State,
     change: Change | None = None, log: EventLog | None = None,
 ) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "quiet": step.quiet,
-               "label": _render_label(step.label, change, log, state)}
+               "label": render_label(step.label, change, log, state)}
     if step.kind == "script":
         payload["command"] = step.command
     if step.chrome is not None:
