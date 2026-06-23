@@ -8,9 +8,14 @@ The CLI owns the I/O (lock, load, save, run); this module is the pure decision
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from imp.agents.prompts import render_label
 from imp.engine.state import EventLog, State
 from imp.engine.types import Goto, Pause, Step, Workflow
+
+if TYPE_CHECKING:
+    from imp.engine.change import Change
 
 
 class RewindError(Exception):
@@ -101,7 +106,7 @@ def plan_rewind(workflow: Workflow, state: State, target: str) -> RewindPlan:
 
 
 def apply_rewind(plan: RewindPlan, workflow: Workflow, state: State,
-                 log: EventLog) -> None:
+                 log: EventLog, change: Change | None = None) -> None:
     """Mutate state to re-enter at the planned target, then append the marker
     events. Call ONLY after plan_rewind returned without raising."""
     flat = workflow.flat_steps()
@@ -115,8 +120,9 @@ def apply_rewind(plan: RewindPlan, workflow: Workflow, state: State,
 
     state.step = plan.to_step
     state.step_label = (
-        (flat[plan.target_idx].label or flat[plan.target_idx].name)
-        if plan.to_step is not None else None)
+        render_label(flat[plan.target_idx].label, change, log, state)
+        or flat[plan.target_idx].name
+    ) if plan.to_step is not None else None
     state.current_step = None
     state.resume_pending = None
     state.step_attempt = 0

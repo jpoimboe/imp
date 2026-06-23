@@ -172,3 +172,21 @@ def test_apply_rewind_clears_step_label_when_to_step_is_none() -> None:
 
     assert st.step is None
     assert st.step_label is None
+
+
+def test_apply_rewind_renders_templated_target_label(tmp_path) -> None:
+    from imp.engine.change import Change
+    from imp.engine.recovery import apply_rewind, plan_rewind
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="t", change_id="aaa111", base_branch="main")
+    wf = _wf()
+    st = _state("code-reviewer", vars={"plan_index": 2, "plan_total": 4})
+    log = ch.event_log()
+    plan = plan_rewind(wf, st, "plan-writer")
+    apply_rewind(plan, wf, st, log, change=ch)
+
+    assert st.step == "plan-writer"
+    assert st.step_label == "writing plan 2/4"
+    assert "{{" not in st.step_label
