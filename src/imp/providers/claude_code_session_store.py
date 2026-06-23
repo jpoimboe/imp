@@ -78,3 +78,14 @@ class ImpSessionStore:
         if not path.exists():
             return None
         return self._read(path)
+
+    async def list_subkeys(self, key: Mapping[str, Any]) -> list[str]:
+        base = self._base(key)
+        if not base.exists():
+            return []
+        out: list[str] = []
+        for p in base.rglob("*.jsonl"):
+            if p.name == "main.jsonl" and p.parent == base:
+                continue
+            out.append(p.relative_to(base).with_suffix("").as_posix())
+        return sorted(out)

@@ -100,3 +100,38 @@ def test_append_dedups_within_a_single_batch(tmp_path: Path) -> None:
     anyio.run(store.append, key, [entry, entry])
 
     assert anyio.run(store.load, key) == [entry]
+
+
+def test_list_subkeys_returns_subagent_subpaths_not_main(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    sub_a = {**main, "subpath": "subagents/agent-1"}
+    sub_b = {**main, "subpath": "subagents/agent-2"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, sub_a, [{"type": "user", "uuid": "a"}])
+    anyio.run(store.append, sub_b, [{"type": "user", "uuid": "b"}])
+
+    subkeys = anyio.run(
+        store.list_subkeys, {"project_key": main["project_key"],
+                             "session_id": main["session_id"]})
+    assert sorted(subkeys) == ["subagents/agent-1", "subagents/agent-2"]
+
+
+def test_list_subkeys_empty_for_unknown_session(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    assert anyio.run(
+        store.list_subkeys,
+        {"project_key": "/home/u/proj", "session_id": "nope"}) == []
+
+
+def test_list_subkeys_includes_nested_file_named_main(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    main = _main_key()
+    nested = {**main, "subpath": "subagents/main"}
+    anyio.run(store.append, main, [{"type": "user", "uuid": "m"}])
+    anyio.run(store.append, nested, [{"type": "user", "uuid": "n"}])
+
+    subkeys = anyio.run(
+        store.list_subkeys, {"project_key": main["project_key"],
+                             "session_id": main["session_id"]})
+    assert subkeys == ["subagents/main"]
