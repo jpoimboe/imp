@@ -42,6 +42,8 @@ STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "errored": ("bold", "red"),
     "draft": ("magenta",),
     "backlog": ("dim",),
+    "idea": ("dim",),
+    "followup": ("dim",),
 }
 
 
@@ -70,8 +72,8 @@ def header_line(*, color: bool) -> str:
 
 
 def _status_segment(status: str, step: str, step_label: str | None) -> str:
-    """Status word plus dim ` (label)` suffix; bare word for stepless/draft rows."""
-    if not step or step == "-" or status == "draft":
+    """Status word plus dim ` (label)` suffix; bare word for stepless rows."""
+    if not step or step == "-":
         return status
     label = step_label or step
     budget = STATUS_W - len(status) - 3   # one space + "(" + ")"

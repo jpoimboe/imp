@@ -1615,7 +1615,6 @@ def _read_last_line(events_path: Path) -> bytes | None:
         return _last_nonempty_line(buf)
 
 
-
 def _iso_from_line(line: str) -> str | None:
     if not line.strip():
         return None
@@ -1788,6 +1787,11 @@ def _status_rows(control: Path) -> list[_Row]:
             change_json = (cdir / "change.json").read_bytes()
         except FileNotFoundError:
             continue
+        try:
+            if json.loads(change_json).get("materialized", True) is False:
+                continue  # unmaterialized homes belong to the Backlog zone
+        except json.JSONDecodeError:
+            continue
         last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
@@ -1795,23 +1799,6 @@ def _status_rows(control: Path) -> list[_Row]:
         status = _effective_status(row[1], cdir)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
-            continue
-        rows.append(row)
-    return rows
-
-
-def _saved_rows(control: Path) -> list[_Row]:
-    rows: list[_Row] = []
-    for change_id in _list_change_homes(control):
-        cdir = _change_home(control, change_id)
-        try:
-            state_json = (cdir / "state" / "state.json").read_bytes()
-            change_json = (cdir / "change.json").read_bytes()
-        except FileNotFoundError:
-            continue
-        last = _last_event_iso(cdir / "events.jsonl") or ""
-        row = _status_row(change_id, state_json, change_json, last)
-        if row is None or row[1] != "saved":
             continue
         rows.append(row)
     return rows
@@ -1835,7 +1822,7 @@ def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
 
 def _resumable_rows(control: Path) -> list[_Row]:
     rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
-    rows += _saved_rows(control)
+    rows += _backlog_rows(control)
     return _sort_rows_newest_first(rows)
 
 
@@ -2105,10 +2092,22 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
 
 def _backlog_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
-    for rec in backlog.list_records(control):
-        created = rec.get("created_at", "")
-        rows.append((rec["id"], "backlog", "", created,
-                     rec.get("title") or "", created, None))
+    for change_id in _list_change_homes(control):
+        cdir = _change_home(control, change_id)
+        try:
+            change_json = (cdir / "change.json").read_bytes()
+            meta = json.loads(change_json)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        if meta.get("materialized", True):
+            continue  # materialized homes are Active, not Backlog
+        origin = meta.get("origin", "draft")
+        ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
+        last = _last_event_iso(cdir / "events.jsonl") or ""
+        created = meta.get("created_at", "")
+        blocked = "" if ready else "blocked"
+        rows.append((change_id, origin, blocked, last,
+                     meta.get("title") or "", created, blocked or None))
     return rows
 
 
@@ -2120,8 +2119,7 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
         return 0
     now = datetime.now(UTC)
     inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(
-        _backlog_rows(control) + _saved_rows(control))
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not backlog_rows and not past:
         print(_NO_CHANGES_MESSAGE)

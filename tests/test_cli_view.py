@@ -394,12 +394,12 @@ def test_log_picker_rows_include_backlog(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine import backlog
+    from imp.engine.change import Change
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
-    backlog.write_record(
-        tmp_path, change_id="2026-06-16-bkg111", title="Add OAuth",
-        description="d", depends_on=[], created_by="human")
+    Change.create_draft(
+        tmp_path, title="Add OAuth", change_id="2026-06-16-bkg111",
+        base_branch="main", origin="idea", seed_opening="Add OAuth")
     captured: dict = {}
 
     async def _fake_picker(*, rows, header, on_empty, selected_index):

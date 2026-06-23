@@ -5,7 +5,6 @@ from pathlib import Path
 
 import imp.cli.main as m
 from imp.cli.main import _cmd_status, _status_rows
-from imp.engine import backlog
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -57,13 +56,13 @@ def test_status_row_carries_step_label_as_seventh_element(tmp_path: Path) -> Non
     assert row[6] == row[2]    # stub step has no label → step_label == step name
 
 
-def test_backlog_rows_emit_empty_step_slot(tmp_path: Path) -> None:
+def test_backlog_rows_carry_provenance_and_empty_step_when_ready(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="bk1", title="Brief",
-                         description="d", depends_on=[], created_by="x")
+    Change.create_draft(tmp_path, title="Brief", change_id="bk1",
+                        base_branch="main", origin="idea", seed_opening="Brief")
     row = next(r for r in m._backlog_rows(tmp_path) if r[0] == "bk1")
-    assert row[1] == "backlog"
-    assert row[2] == ""          # no readiness in the step slot
+    assert row[1] == "idea"       # provenance in the status slot
+    assert row[2] == ""           # ready ⇒ empty step slot, no suffix
     assert row[6] is None
 
 
@@ -72,15 +71,15 @@ def test_cmd_status_merges_status_and_renders_bare_backlog(
 ) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
-    backlog.write_record(tmp_path, change_id="bk1", title="Brief",
-                         description="d", depends_on=[], created_by="x")
+    Change.create_draft(tmp_path, title="Brief", change_id="bk1",
+                        base_branch="main", origin="idea", seed_opening="Brief")
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "running (s)" in out                      # merged status + step label
+    assert "running (s)" in out                      # merged Active status + step label
     backlog_line = next(ln for ln in out.splitlines() if ln.startswith("bk1"))
-    assert "backlog" in backlog_line
-    assert "(" not in backlog_line                   # bare word, no readiness suffix
+    assert "idea" in backlog_line
+    assert "(" not in backlog_line                   # ready ⇒ bare word, no suffix
 
 
 def test_cmd_status_shows_intent_for_empty_title(tmp_path: Path, capsys) -> None:
@@ -121,37 +120,18 @@ def test_cmd_status_named_row_skips_events_load(
     assert rc == 0
 
 
-def test_cmd_status_lists_saved_under_backlog(tmp_path: Path, capsys) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="live1", base_branch="main")
-    ch = Change.create(tmp_path, title="Saved one", change_id="saved1",
-                       base_branch="main")
-    st = State.load(ch.state_dir)
-    st.status = "saved"
-    st.save(ch.state_dir)
 
+def test_cmd_status_renders_draft_provenance_under_backlog(
+    tmp_path: Path, capsys,
+) -> None:
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="Draftish", change_id="d1",
+                        base_branch="main")          # un-materialized, origin "draft"
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "Backlog" in out                                # headed section
-    assert "live1" in out and "saved1" in out
-    # The saved row sits under the Backlog heading, after the in-progress live row.
-    assert out.index("live1") < out.index("Backlog") < out.index("saved1")
-    # A saved change never appears in the in-progress section.
-    assert "saved1" not in out[:out.index("Backlog")]
-
-
-def test_cmd_status_shows_raw_state_not_draft_label(tmp_path: Path, capsys) -> None:
-    _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Draftish", change_id="d1",
-                             base_branch="main")     # un-materialized
-    st = State.load(ch.state_dir)
-    st.status = "paused"
-    st.save(ch.state_dir)
-
-    rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
-    out = capsys.readouterr().out
-    assert rc == 0
+    assert "Backlog" in out
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
-    assert "paused" in d1_line          # raw Status, not the old display-only label
-    assert "draft" not in d1_line
+    assert "draft" in d1_line           # Backlog shows provenance in the status cell
+    # The home sits under the Backlog heading, never in the Active section above it.
+    assert "d1" not in out[:out.index("Backlog")]

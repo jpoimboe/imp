@@ -20,15 +20,15 @@ def test_resumable_rows_drops_running_and_sorts_newest_first(
         _row("d", "merge_blocked", "2026-06-08T00:00:00+00:00"),
     ]
     monkeypatch.setattr(m, "_status_rows", lambda control: rows)
-    monkeypatch.setattr(m, "_saved_rows", lambda control: [])
+    monkeypatch.setattr(m, "_backlog_rows", lambda control: [])
     out = m._resumable_rows(tmp_path)
     assert [r[0] for r in out] == ["b", "c", "d"]                # running dropped, newest-first
 
 
-def test_resumable_rows_includes_saved_rows(monkeypatch, tmp_path: Path) -> None:
-    saved = _row("s1", "saved", "2026-06-12T00:00:00+00:00")
+def test_resumable_rows_includes_backlog_rows(monkeypatch, tmp_path: Path) -> None:
+    backlog_row = _row("s1", "idea", "2026-06-12T00:00:00+00:00")
     monkeypatch.setattr(m, "_status_rows", lambda control: [])
-    monkeypatch.setattr(m, "_saved_rows", lambda control: [saved])
+    monkeypatch.setattr(m, "_backlog_rows", lambda control: [backlog_row])
     out = m._resumable_rows(tmp_path)
     assert [r[0] for r in out] == ["s1"]
 

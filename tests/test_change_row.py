@@ -148,12 +148,18 @@ def test_status_cell_bare_when_step_empty():
     assert "(" not in line                     # no suffix in the STATUS cell
 
 
-def test_draft_status_suppresses_step_suffix():
-    # A parked draft carries a seeded step but must render the bare word.
-    line = format_change_line(**_row(status="draft", step="write_spec"),
-                              step_label="writing spec", color=False)
-    assert "draft" in line
-    assert "writing spec" not in line
+def test_draft_status_renders_step_suffix():
+    # The draft special-case is gone: a non-empty step renders a ` (label)` suffix
+    # like any other status, so a blocked Backlog draft can show its state.
+    line = format_change_line(**_row(status="draft", step="blocked"),
+                              step_label="blocked", color=False)
+    assert "draft (blocked)" in line
+
+
+def test_provenance_statuses_have_colors():
+    from imp.cli.change_row import STATUS_COLORS
+    assert "idea" in STATUS_COLORS
+    assert "followup" in STATUS_COLORS
 
 
 def test_status_word_never_truncated_only_label_is():
