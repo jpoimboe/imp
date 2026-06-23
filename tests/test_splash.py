@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from imp.cli import splash
 
 
@@ -138,3 +140,33 @@ def test_encode_grid_yields_eight_lines_and_handles_the_odd_last_row() -> None:
     lines = splash._encode_grid(g, color=False)
     assert len(lines) == 8
     assert lines[7].endswith("▀")
+
+
+@pytest.mark.parametrize("theme", ["dark", "light", "ansi"])
+def test_every_scene_paints_both_the_imp_and_an_accent_in_bounds(theme) -> None:
+    splash._use_theme(theme)
+    for builder, _tagline in splash.SCENES:
+        g = splash._make_grid()
+        builder(g)  # must not raise (all drawing is bounds-clamped)
+        assert len(g) == splash.H and all(len(r) == splash.W for r in g)
+        imp = any(g[y][x] is not None
+                  for y in range(splash.H) for x in range(2, 18))
+        accent = any(g[y][x] is not None
+                     for y in range(splash.H) for x in range(18, splash.W))
+        assert imp, f"{builder.__name__} drew no imp in {theme}"
+        assert accent, f"{builder.__name__} drew no accent in {theme}"
+
+
+def test_scenes_pairs_carry_str_or_callable_taglines() -> None:
+    assert splash.SCENES, "the pool must be non-empty"
+    for _builder, tagline in splash.SCENES:
+        assert isinstance(tagline, str) or callable(tagline)
+
+
+@pytest.mark.parametrize("hour,word", [
+    (20, "tonight"), (23, "tonight"), (4, "tonight"), (18, "tonight"),
+    (5, "today"), (12, "today"), (17, "today"),
+])
+def test_time_of_day_tagline_resolves_today_vs_tonight(monkeypatch, hour, word) -> None:
+    monkeypatch.setattr(splash, "_now_hour", lambda: hour)
+    assert splash._tonight_or_today() == f"what are we building {word}?"

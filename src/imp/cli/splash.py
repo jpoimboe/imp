@@ -285,3 +285,107 @@ def _encode_row(g: Grid, top_idx: int, bot_idx: int, *, color: bool) -> str:
 
 def _encode_grid(g: Grid, *, color: bool) -> list[str]:
     return [_encode_row(g, 2 * k, 2 * k + 1, color=color) for k in range((H + 1) // 2)]
+
+
+# --- prop builders (one accent each), all in the accent band (x >= 18) ---
+
+def _moon(g: Grid, cx: int, cy: int, r: int, *, crescent: bool) -> None:
+    _glow_ring(g, cx, cy, r, _P["moonGlow"])
+    _disc(g, cx, cy, r, r, _P["moon"])
+    if crescent:
+        _carve(g, cx + _round(r * 0.7), cy - 1, r, r)
+
+
+def _cloud(g: Grid, cx: int, cy: int) -> None:
+    _disc(g, cx, cy, 4, 1, _P["cloud"])
+    _disc(g, cx - 2, cy + 1, 2, 1, _P["cloud"])
+    _disc(g, cx + 2, cy + 1, 2, 1, _P["cloud"])
+
+
+def _meteor(g: Grid, x: int, y: int, length: int) -> None:
+    for k in range(length):
+        t = k / length
+        c = (_P["starBright"] if t < 0.34
+             else (_P["star"] if t < 0.7 else _P["starDim"]))
+        _px(g, x + k, y - k, c)
+    _spark(g, x, y, _P["starBright"])
+
+
+def _fire(g: Grid, x: int, base_y: int, h: int) -> None:
+    for j in range(h):
+        c = (_P["fire1"] if j < h // 3
+             else (_P["fire2"] if j < 2 * h // 3 else _P["fire3"]))
+        _px(g, x, base_y - j, c)
+        if j < h - 2:
+            _px(g, x - 1, base_y - j, _P["fire1"])
+            _px(g, x + 1, base_y - j, _P["fire1"])
+    _px(g, x, base_y - h, _P["fireTip"])
+    _px(g, x - 2, base_y - h + 1, _P["glowWarm"])
+    _px(g, x + 2, base_y - h + 1, _P["glowWarm"])
+
+
+def _sun(g: Grid, cx: int, cy: int, r: int) -> None:
+    _glow_ring(g, cx, cy, r, _P["sunGlow"])
+    _disc(g, cx, cy, r, r, _P["sun"])
+
+
+# --- time-of-day tagline ---
+
+def _now_hour() -> int:
+    return datetime.datetime.now().hour
+
+
+def _tonight_or_today() -> str:
+    h = _now_hour()
+    word = "tonight" if (h >= 18 or h < 5) else "today"
+    return f"what are we building {word}?"
+
+
+# --- scene builders (imp drawn last so it sits above any full-width ground) ---
+
+def _crescent_stars(g: Grid) -> None:
+    _stars(g, 0, 9, 0.30)
+    _moon(g, 24, 4, 3, crescent=True)
+    _left_imp(g)
+
+
+def _full_moon_cloud(g: Grid) -> None:
+    _stars(g, 0, 7, 0.28)
+    _moon(g, 23, 4, 4, crescent=False)
+    _cloud(g, 24, 8)
+    _left_imp(g)
+
+
+def _meteor_shower(g: Grid) -> None:
+    _stars(g, 0, 12, 0.18)
+    _meteor(g, 20, 4, 4)
+    _meteor(g, 25, 8, 5)
+    _left_imp(g)
+
+
+def _starfield(g: Grid) -> None:
+    _stars(g, 0, 14, 0.45)
+    _left_imp(g)
+
+
+def _campfire(g: Grid) -> None:
+    _stars(g, 0, 6, 0.22)
+    _ground(g, 13, glow=True)
+    _fire(g, 24, 12, 5)
+    _left_imp(g)
+
+
+def _sunrise(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _sun(g, 24, 12, 4)
+    _left_imp(g)
+
+
+SCENES: list[tuple[SceneBuilder, "str | Callable[[], str]"]] = [
+    (_crescent_stars, "the familiar awakens."),
+    (_full_moon_cloud, _tonight_or_today),
+    (_meteor_shower, "make a wish."),
+    (_starfield, "your imp is listening."),
+    (_campfire, "by emberlight, we code."),
+    (_sunrise, "what are we building today?"),
+]
