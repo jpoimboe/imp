@@ -12,7 +12,7 @@ SWEEP = AGENTS / "deferred-sweep.md"
 def test_deferred_sweep_parses_with_expected_contract() -> None:
     agent = parse_agent_file(SWEEP)
     assert agent.name == "deferred-sweep"
-    assert set(agent.subagents) == {"implementer", "quality-reviewer"}
+    assert set(agent.subagents) == {"implementer", "code-reviewer"}
     fields = agent.output_schema.field_names()
     assert "status" in fields and "summary" in fields
 
@@ -40,9 +40,9 @@ def test_deferred_sweep_prunes_and_records_fixes_durably() -> None:
     # The pinned input line the sweep parses.
     assert "- [ ] deferred" in low
     # Reviewer discipline preserved.
-    assert "no quality-reviewer" in low or "without a quality-reviewer" in low
+    assert "no code-reviewer" in low or "without a code-reviewer" in low
     pos = low.find("non-trivial")
-    assert pos >= 0 and "quality-reviewer" in low[pos : pos + 250]
+    assert pos >= 0 and "code-reviewer" in low[pos : pos + 250]
     assert "one clean commit" in low
     # #4: a FIXED item is recorded durably under ## Completed plans, then the
     # transient line is PRUNED (not left as a checked line).

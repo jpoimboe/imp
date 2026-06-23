@@ -35,7 +35,9 @@ def test_supercycle_back_edges_present() -> None:
     # Spot-check the load-bearing loop edges survive parsing.
     steps = {s.name: s for p in _wf().phases for s in p.steps}
     # plan-cycle-check loops to plan-writer; the merged review + deferred-sweep run per plan.
-    assert "plan-cycle-check" in steps and "code-reviewer" in steps and "deferred-sweep" in steps
+    assert "plan-cycle-check" in steps
+    assert "plan-code-reviewer" in steps
+    assert "deferred-sweep" in steps
     assert "task-lead" in steps and "finalize" in steps
 
 
@@ -151,7 +153,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "autosquash-resolve-implement": "resolving fixups",
         "autosquash-resolve-merge": "resolving fixups",
         "plan-cycle-check": "checking plan coverage",
-        "code-reviewer": "reviewing code",
+        "plan-code-reviewer": "reviewing code",
         "deferred-sweep": "resolving deferred items",
         "sweep-verify": "testing",
         "autosquash-resolve-sweep": "resolving fixups",
@@ -183,8 +185,8 @@ def test_route_labels_assigned() -> None:
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # task-lead deviation
     assert by["task-lead"].rules[0].label == "plan/code mismatch, going back to planning"
-    # code-reviewer task_gap -> task-lead
-    assert by["code-reviewer"].rules[0].label == "addressing code review feedback"
+    # plan-code-reviewer task_gap -> task-lead
+    assert by["plan-code-reviewer"].rules[0].label == "addressing code review feedback"
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"

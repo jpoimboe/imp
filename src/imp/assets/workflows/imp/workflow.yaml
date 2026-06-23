@@ -6,7 +6,7 @@ description: |
 # Single provider by design: review independence is by MODEL TIER (a high-tier
 # reviewer judging the medium-tier implementer's work), not by vendor. Review fires
 # PER PLAN: plan-cycle-check, the sole coverage guard, routes each settled plan
-# through a single `code-reviewer` step over review_base..HEAD, plus once over the
+# through a single `plan-code-reviewer` step over review_base..HEAD, plus once over the
 # whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
 # is paired with each review; verify and plan-reviewer stay per-plan.
 
@@ -176,29 +176,29 @@ phases:
           # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
           # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
           # per-plan review as the full panel.
-          - {if: {more_plans: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: code-reviewer}
+          - {if: {more_plans: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: plan-code-reviewer}
           # coverage complete, trivial change -> no panel, straight to finalize
           # (the per-plan cleanup already folded+stamped this plan)
           - {if: {fast_path: true}, set: {plan_total: "output.plan_total"}, goto: finalize}
           # coverage complete AND the full panel already ran once -> a corrective/gap-fix plan
           # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD
           # diff (review_scope='plan'), not a fresh whole-change panel each round.
-          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: code-reviewer}
+          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: plan-code-reviewer}
           # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
           # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
-          - {else: true, set: {review_scope: "'change'", change_panel_done: true, plan_total: "output.plan_total"}, goto: code-reviewer}
+          - {else: true, set: {review_scope: "'change'", change_panel_done: true, plan_total: "output.plan_total"}, goto: plan-code-reviewer}
 
-      # The review step IS the code-reviewer (no coordinator/panel): per-plan it
+      # The review step IS the plan-code-reviewer (no coordinator/panel): per-plan it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
       # cur_base_head..HEAD. It routes — verdict is approve | task_gap only (coverage is
       # plan-cycle-check's call, never the reviewer's).
-      - name: code-reviewer
-        file: agents/code-reviewer.md
+      - name: plan-code-reviewer
+        file: agents/plan-code-reviewer.md
         tier: high
         label: reviewing code
         max_loops: 6
         rules:
-          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The code-reviewer found an implemented task needs rework. Findings:"}
+          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The plan-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
           - {else: true, continue: true}
 

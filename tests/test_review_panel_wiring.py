@@ -1,6 +1,6 @@
 """Per-batch review cadence: cleanup-implement / autosquash-resolve-implement run
 INSIDE the per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
-single `code-reviewer` runs as the `code-reviewer` step directly, over review_base..HEAD
+single `plan-code-reviewer` runs as the `plan-code-reviewer` step directly, over review_base..HEAD
 per batch and over merge-base..HEAD once at change end (review_scope=change).
 deferred-sweep + sweep-verify + review-base-repin trail each review batch.
 review-base-repin and finalize tail the implement phase (no separate review phase)."""
@@ -45,7 +45,7 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
     assert [s.name for s in impl.steps] == [
         "task-lead", "verify",
         "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
-        "code-reviewer", "deferred-sweep", "sweep-verify",
+        "plan-code-reviewer", "deferred-sweep", "sweep-verify",
         "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
         "finalize",
     ]
@@ -69,14 +69,14 @@ def test_standalone_panel_gate_and_recheck_are_gone() -> None:
 
 
 def test_review_step_uses_code_reviewer_at_high_tier() -> None:
-    review = _steps(_wf())["code-reviewer"]
+    review = _steps(_wf())["plan-code-reviewer"]
     assert review.kind == "agent" and review.tier == "high"
-    assert review.file.name == "code-reviewer.md"
+    assert review.file.name == "plan-code-reviewer.md"
     assert review.differ_from is None
 
 
 def test_review_step_routes_two_way_no_plan_gap() -> None:
-    rules = _steps(_wf())["code-reviewer"].rules
+    rules = _steps(_wf())["plan-code-reviewer"].rules
     m_task = evaluate_rules(rules, vars=_BASE_VARS,
                             output={"status": "Success", "verdict": "task_gap", "findings": "x"})
     assert isinstance(m_task.action, Goto) and m_task.action.target == "task-lead"
@@ -91,8 +91,8 @@ def test_review_step_routes_two_way_no_plan_gap() -> None:
 
 def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
-    schema = wf.agents["code-reviewer"].output_schema
-    rules = _steps(wf)["code-reviewer"].rules
+    schema = wf.agents["plan-code-reviewer"].output_schema
+    rules = _steps(wf)["plan-code-reviewer"].rules
     for verdict in ("approve", "task_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)
@@ -100,7 +100,7 @@ def test_review_parse_contract_routes_declared_schema() -> None:
 
 
 def test_code_reviewer_verdict_enum_is_two_way() -> None:
-    schema = _wf().agents["code-reviewer"].output_schema
+    schema = _wf().agents["plan-code-reviewer"].output_schema
     verdict_field = next(f for f in schema.fields if f.name == "verdict")
     assert set(verdict_field.values) == {"approve", "task_gap"}
     assert all(f.name != "blocking" for f in schema.fields)  # blocking replaced by verdict
@@ -110,7 +110,7 @@ def test_code_reviewer_verdict_enum_is_two_way() -> None:
 
 
 def test_code_reviewer_adjudicates_and_routes() -> None:
-    text = (AGENTS / "code-reviewer.md").read_text()
+    text = (AGENTS / "plan-code-reviewer.md").read_text()
     low = text.lower()
     assert "receiving-code-review" in text
     # guardrail
@@ -132,15 +132,15 @@ def test_gap_verdicts_route_in_workflow_yaml() -> None:
 
 def test_workflow_comment_describes_single_reviewer() -> None:
     text = (AGENTS.parent / "workflow.yaml").read_text()
-    assert "agents/code-reviewer.md" in text
+    assert "agents/plan-code-reviewer.md" in text
     assert "agents/review-panel.md" not in text
     assert "opus" not in text          # the opus-panel framing is gone
     assert "4-member" not in text
 
 
 def test_code_reviewer_pins_deferred_observation_format() -> None:
-    text = (AGENTS / "code-reviewer.md").read_text()
-    assert "- [ ] DEFERRED code-reviewer:" in text
+    text = (AGENTS / "plan-code-reviewer.md").read_text()
+    assert "- [ ] DEFERRED plan-code-reviewer:" in text
     assert "[scope:" in text
     assert "deferred-sweep" in text.lower()   # names the consumer step
 
@@ -161,7 +161,7 @@ def test_plan_cycle_check_routes_coverage_per_plan() -> None:
     m_more = evaluate_rules(rules, vars=_BASE_VARS,
                             output={"status": "Success", "more_plans": True,
                                     "rationale": "x", "plan_total": 9})
-    assert isinstance(m_more.action, Goto) and m_more.action.target == "code-reviewer"
+    assert isinstance(m_more.action, Goto) and m_more.action.target == "plan-code-reviewer"
     assert m_more.var_mutations["review_scope"] == "plan"
     assert m_more.var_mutations["plan_total"] == 9
     assert "tasks_since_review" not in m_more.var_mutations
@@ -175,7 +175,7 @@ def test_plan_cycle_check_routes_coverage_per_plan() -> None:
     m_cov = evaluate_rules(rules, vars=_BASE_VARS,
                            output={"status": "Success", "more_plans": False,
                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_cov.action, Goto) and m_cov.action.target == "code-reviewer"
+    assert isinstance(m_cov.action, Goto) and m_cov.action.target == "plan-code-reviewer"
     assert m_cov.var_mutations["review_scope"] == "change"
     assert m_cov.var_mutations["change_panel_done"] is True
     assert m_cov.var_mutations["plan_total"] == 1
@@ -183,13 +183,13 @@ def test_plan_cycle_check_routes_coverage_per_plan() -> None:
     m_corr = evaluate_rules(rules, vars={**_BASE_VARS, "change_panel_done": True},
                             output={"status": "Success", "more_plans": False,
                                     "rationale": "x", "plan_total": 1})
-    assert isinstance(m_corr.action, Goto) and m_corr.action.target == "code-reviewer"
+    assert isinstance(m_corr.action, Goto) and m_corr.action.target == "plan-code-reviewer"
     assert m_corr.var_mutations["review_scope"] == "plan"
     assert m_corr.var_mutations["plan_total"] == 1
 
 
 def test_code_reviewer_reads_review_scope_not_integration_pass() -> None:
-    text = (AGENTS / "code-reviewer.md").read_text()
+    text = (AGENTS / "plan-code-reviewer.md").read_text()
     assert "integration_pass" not in text
     assert "review_scope" in text
     assert "panel_done" not in text                 # the re-verify dial is gone
@@ -211,7 +211,7 @@ def test_integrator_is_a_rebase_conflict_resolver() -> None:
 def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123",
                      cur_base_head: str = "forkSHA") -> str:
     wf = _wf()
-    body = wf.agents["code-reviewer"].prompt_template_source
+    body = wf.agents["plan-code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
                         change_id="chg",
@@ -260,7 +260,7 @@ def test_review_base_repin_routes_by_scope() -> None:
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
-    review_fb = by["code-reviewer"].rules[0].action.feedback  # task_gap -> task-lead
+    review_fb = by["plan-code-reviewer"].rules[0].action.feedback  # task_gap -> task-lead
     assert finalize_fb and review_fb
     text = (AGENTS / "plan-writer.md").read_text()
     assert finalize_fb in text
@@ -290,14 +290,14 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
     # the task_gap rework is a recognized Step-0 feedback source, matching the exact
     # preamble workflow.yaml emits for verdict: task_gap (kept verbatim — task-lead.md
     # is out of scope for this change).
-    assert "The code-reviewer found an implemented task needs rework." in text
+    assert "The plan-code-reviewer found an implemented task needs rework." in text
     assert 'gate failure (the `verify`' in text
     assert "human finalize decision" not in text
 
 
 def test_rework_path_loop_budgets_unchanged() -> None:
     steps = _steps(_wf())
-    assert steps["code-reviewer"].max_loops == 6
+    assert steps["plan-code-reviewer"].max_loops == 6
     assert steps["finalize"].max_loops == 20
 
 
@@ -308,7 +308,7 @@ def test_panel_and_slice_files_are_deleted() -> None:
 
 
 def test_code_reviewer_is_not_a_pure_advisor() -> None:
-    text = (AGENTS / "code-reviewer.md").read_text()
+    text = (AGENTS / "plan-code-reviewer.md").read_text()
     low = text.lower()
     assert "pure advisor" not in low          # it routes now, not merely advises
     assert "verdict" in low                    # owns the keep/dismiss/defer call

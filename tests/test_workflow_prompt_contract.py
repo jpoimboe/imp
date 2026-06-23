@@ -12,7 +12,7 @@ from imp.engine.state import JsonlEventLog
 AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 
 # Subagents (non-interactive, dispatched via `task`): the contract under test.
-SUBAGENT_FILES = ["implementer.md", "quality-reviewer.md"]
+SUBAGENT_FILES = ["implementer.md", "code-reviewer.md"]
 # Interactive STEPS: the executor wires their resume hooks, so a turn-ending
 # question is correct for them. Exempt from the no-bare-question rule.
 INTERACTIVE_STEP_FILES = ["spec-writer.md", "finalize.md"]
@@ -21,14 +21,14 @@ SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 
 # Falsifiability-hardening guards: each component's edit leaves a marker in a
 # specific file. These are per-(path, marker) pairs spanning skills/ and direct
-# agents/ reads (including quality-reviewer, already in SUBAGENT_FILES for the
+# agents/ reads (including code-reviewer, already in SUBAGENT_FILES for the
 # complete_step guards — reused here for a *different* marker, not re-listed for
 # the same purpose). NOT a uniform sweep over SUBAGENT_FILES. A presence guard
 # proves the marker exists somewhere in the file; section placement is left to
 # author self-review and the reviewer pass.
 FALSIFIABILITY_MARKERS = [
-    (AGENTS_DIR / "code-reviewer.md", "falsifiab"),                      # C: whole-change backstop
-    (AGENTS_DIR / "quality-reviewer.md", "falsifiab"),                   # C: per-task tripwire
+    (AGENTS_DIR / "plan-code-reviewer.md", "falsifiab"),                  # C: whole-change backstop
+    (AGENTS_DIR / "code-reviewer.md", "falsifiab"),                      # C: per-task tripwire
     (AGENTS_DIR / "plan-writer.md", "falsifiab"),                        # B: anti-transcription
     (SKILLS_DIR / "test-driven-development.md", "plan-echo"),            # A: anti-pattern 6
     (SKILLS_DIR / "test-driven-development.md", "authoritative oracle"), # D: oracle note
@@ -104,7 +104,7 @@ def test_spec_writer_infers_intent_from_pasted_context() -> None:
 
 
 TURN_TERMINAL_REVIEWERS = [
-    "code-reviewer.md", "quality-reviewer.md", "plan-reviewer.md",
+    "plan-code-reviewer.md", "code-reviewer.md", "plan-reviewer.md",
     "spec-reviewer.md", "plan-cycle-check.md",
 ]
 
@@ -164,7 +164,7 @@ def test_task_lead_nit_fix_dispatch_has_overreach_guardrail_and_batches() -> Non
 def test_task_lead_nit_only_fixup_skips_rereview_and_degraded() -> None:
     low = TASK_LEAD.read_text().lower()
     # A nit-only fixup is cheap and polish-only (AC 5).
-    assert "does not re-trigger the quality-reviewer" in low
+    assert "does not re-trigger the code-reviewer" in low
     assert "does not mark the run degraded" in low
 
 
@@ -279,7 +279,7 @@ def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
     assert "sole" in text.lower() and "completeness" in text.lower()
 
 
-CODE_REVIEWER = AGENTS_DIR / "code-reviewer.md"
+CODE_REVIEWER = AGENTS_DIR / "plan-code-reviewer.md"
 
 
 def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
@@ -422,7 +422,7 @@ def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
 
 def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
     text = SWEEP.read_text()
-    assert "code-reviewer append it" in text
+    assert "plan-code-reviewer append it" in text
     assert "review-panel" not in text
 
 
@@ -480,8 +480,8 @@ def test_integration_prompts_use_recorded_endpoints() -> None:
 
 RUBRIC_PARTIAL = Path("src/imp/assets/workflows/imp/partials/severity.md")
 RUBRIC_REVIEWERS = [
-    "spec-reviewer.md", "plan-reviewer.md", "code-reviewer.md",
-    "quality-reviewer.md", "integration-review.md",
+    "spec-reviewer.md", "plan-reviewer.md", "plan-code-reviewer.md",
+    "code-reviewer.md", "integration-review.md",
 ]
 
 

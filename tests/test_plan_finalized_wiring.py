@@ -56,8 +56,8 @@ def test_task_loop_and_rework_bypass_plan_finalized() -> None:
                           output={"status": "Success", "done": True, "deviation": False,
                                   "verify_tolerated": False, "summary": "x"})
     assert isinstance(loop.action, Continue)
-    # code-reviewer's task_gap rework re-enters task-lead directly, not plan-finalized.
-    gap = evaluate_rules(steps["code-reviewer"].rules, vars=_BASE,
+    # plan-code-reviewer's task_gap rework re-enters task-lead directly, not plan-finalized.
+    gap = evaluate_rules(steps["plan-code-reviewer"].rules, vars=_BASE,
                          output={"status": "Success", "verdict": "task_gap", "findings": "x"})
     assert gap.action.target == "task-lead"
 

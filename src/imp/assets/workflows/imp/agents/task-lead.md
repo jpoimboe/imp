@@ -2,7 +2,7 @@
 name: task-lead
 label: implementing
 description: Implement-phase controller — pick the next task, dispatch implementer + one reviewer, adjudicate, commit one clean unit, record progress.
-subagents: [implementer, quality-reviewer]
+subagents: [implementer, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   deviation: {type: bool}
@@ -34,8 +34,8 @@ re-open and fix the named task even if progress.md marks it done, then reconcile
 progress.md. Two feedback sources resume you here:
 - a gate failure (the `verify` and `cleanup` gates `resume` you with their
   stderr — e.g. failing tests or an uncommitted file);
-- the code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
-  preamble "The code-reviewer found an implemented task needs rework. Findings:"
+- the plan-code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
+  preamble "The plan-code-reviewer found an implemented task needs rework. Findings:"
   when it adjudicated a blocking finding as a bounded fix. Re-open the task its
   findings name, fix it, and let the loop carry the fix back through review.
 
@@ -92,13 +92,13 @@ unimplemented task, or the re-opened task from injected feedback):
    tests — do **not** add or modify tests; make exactly the task's edits, then
    commit. Do **not** run the project's full suite or lint/typecheck — the
    phase-level `verify` gate runs the project's combined checks after this phase."
-   **One reviewer.** Dispatch ONLY `quality-reviewer` at the **`medium` tier**:
-   `task(subagent_name="quality-reviewer", tier="medium", …)`. (Trivial diffs
+   **One reviewer.** Dispatch ONLY `code-reviewer` at the **`medium` tier**:
+   `task(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
-   end-of-run spec coverage now lives in the whole-diff code-reviewer.)
+   end-of-run spec coverage now lives in the whole-diff plan-code-reviewer.)
    {% else %}
-   Dispatch the `quality-reviewer` at the **`medium` tier**:
-   `task(subagent_name="quality-reviewer", tier="medium", …)`.
+   Dispatch the `code-reviewer` at the **`medium` tier**:
+   `task(subagent_name="code-reviewer", tier="medium", …)`.
    {% endif %}
    Give the reviewer the task text + spec. (Implementer → the `medium` tier;
    the reviewer and your own judgment → the `medium` tier. Name tiers, never
@@ -140,7 +140,7 @@ unimplemented task, or the re-opened task from injected feedback):
    behavior."
 
    A **nit-only** fixup (no blocking findings in the round)
-   does not re-trigger the quality-reviewer — the phase-level `verify` gate
+   does not re-trigger the code-reviewer — the phase-level `verify` gate
    is the safety net — and does not mark the run degraded (nit polish is not
    correctness; see step 5). When a round carries blocking findings, re-review
    until none remain. All fixes go through the implementer — you never commit,
@@ -223,7 +223,7 @@ triage is **non-converging** — an unrecognized flake or a hard regression you 
 not fix in the budget. It escalates to a human; it is not a transient to retry.
 
 Discipline: never dispatch two implementers in parallel; never skip the
-`quality-reviewer`; never move on with blocking findings open. When a subagent returns
+`code-reviewer`; never move on with blocking findings open. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
 and **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty
 context window, you must **re-pack the full context into the new

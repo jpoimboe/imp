@@ -36,7 +36,7 @@ def test_seed_global_max_across_names(tmp_path: Path) -> None:
     from imp.agents.subagents import _seed_subagent_counter
     ctx = _ctx(tmp_path)
     base = ctx.parent_transcript_dir / "subagents"
-    for name in ("implementer-1", "quality-reviewer-2", "implementer-3"):
+    for name in ("implementer-1", "code-reviewer-2", "implementer-3"):
         (base / name).mkdir(parents=True, exist_ok=True)
     _seed_subagent_counter(ctx)
     assert ctx._subagent_counter == 3

@@ -27,7 +27,7 @@ Read the spec, plans, and `{{ change.home }}/progress.md`; inspect the change in
 only if cheap; do NOT make code changes). **You are not a reviewer.** The
 `git diff <base>..HEAD` read exists only to *describe* what was built for the
 `built` field — not to evaluate it, hunt for defects, classify findings against any
-severity rubric, or surface anything you notice in the code. `code-reviewer` already
+severity rubric, or surface anything you notice in the code. `plan-code-reviewer` already
 reviewed and approved this exact diff, and `integration-review` reviews it again at
 the merge head; a third review here is redundant and is exactly where spurious
 end-of-run human asks are born. Populate:

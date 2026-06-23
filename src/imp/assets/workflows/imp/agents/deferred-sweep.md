@@ -2,7 +2,7 @@
 name: deferred-sweep
 label: resolving deferred items
 description: Drain the Deferred Followups list — re-evaluate each item on a risk gate and apply one of three dispositions (fixed / needs-decision / dismissed), trusting and logging low-risk fixes rather than surfacing them.
-subagents: [implementer, quality-reviewer]
+subagents: [implementer, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   sweep_tolerated: {type: bool}
@@ -24,7 +24,7 @@ Read first:
 ## The pinned line format
 
 Each deferred item is a Markdown task-list line under a `## Deferred Followups`
-heading, in this EXACT shape (task-lead and code-reviewer append it):
+heading, in this EXACT shape (task-lead and plan-code-reviewer append it):
 
 `- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|change>]`
 
@@ -101,11 +101,11 @@ an item you started to fix turns out high-risk once you touch it, re-classify it
 - **Trivial / mechanical fix** (a rename, an import swap, a dedup): dispatch ONLY
   the implementer (`task(subagent_name="implementer", tier="medium", …)`) with the
   over-reach guardrail: "apply ONLY this named item; it is bounded and mechanical;
-  do not refactor beyond it, touch unrelated code, or alter behavior." Run **no quality-reviewer**
+  do not refactor beyond it, touch unrelated code, or alter behavior." Run **no code-reviewer**
   — this matches the existing nit-only-fixup rule. The `verify` gate after the sweep
   is the backstop; you also self-verify the diff stays within the named item.
-- **Non-trivial fix**: dispatch the implementer **and then the quality-reviewer**
-  (`task(subagent_name="quality-reviewer", tier="medium", …)`); address every
+- **Non-trivial fix**: dispatch the implementer **and then the code-reviewer**
+  (`task(subagent_name="code-reviewer", tier="medium", …)`); address every
   blocking finding before committing.
 
 ## Work source — bounded, not an open audit
