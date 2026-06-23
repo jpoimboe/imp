@@ -1605,3 +1605,71 @@ def test_build_options_defaults_to_no_session_store(tmp_path: Path) -> None:
     opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
     assert opts.session_store is None
     assert opts.session_id is None
+
+
+@pytest.mark.anyio
+async def test_fresh_run_mirrors_session_into_store(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    assert isinstance(opts.session_store, ImpSessionStore)
+    assert opts.session_id == resume_session_id("step:p/s")
+
+
+@pytest.mark.anyio
+async def test_resume_run_passes_no_session_store(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(
+            TextBlock(text="thinking…"),
+            ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),
+        ),
+    ))
+    t.append(Message(
+        role="user", content=(ToolResultBlock(tool_use_id="t0", content="x"),),
+    ))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    assert opts.session_store is None
+    assert opts.session_id is None

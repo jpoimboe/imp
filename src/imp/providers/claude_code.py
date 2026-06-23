@@ -82,6 +82,10 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+from imp.providers.claude_code_session_store import (
+    resume_session_id,
+    session_store_for,
+)
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -1138,12 +1142,22 @@ class ClaudeCodeAgentRunner:
             impty_tools = await _make_impty_sdk_tools(self._impty_driver)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
 
+        # Mirror only the FRESH run's clean session into the store. The
+        # stream-json resume path re-emits replayed history with fresh
+        # per-message uuids, so mirroring there would bloat/corrupt the stored
+        # session, so only the fresh run mirrors.
+        is_fresh = not transcript.exists_and_nonempty()
+        session_store = (
+            session_store_for(invocation.transcript_dir) if is_fresh else None
+        )
+        session_id = resume_session_id(aid) if is_fresh else None
         # Build options only when we'll use the real SDK (mcp_server is not None).
         # When a client_factory is injected (tests), skip building options to
         # avoid constructing ClaudeAgentOptions with mcp_server=None.
         if mcp_server is not None:
             opts = self._build_options(
-                invocation, mcp_server, list(tools), impty_server=impty_server)
+                invocation, mcp_server, list(tools), impty_server=impty_server,
+                session_store=session_store, session_id=session_id)
         else:
             opts = None
 
