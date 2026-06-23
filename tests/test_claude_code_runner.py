@@ -2006,3 +2006,122 @@ async def test_resume_without_stored_session_falls_back(tmp_path: Path) -> None:
     blob = _user_text_blob(first_query)
     assert RESUME_MANIFEST_HEADER in blob
     assert "read_file — succeeded" in blob
+
+
+@pytest.mark.anyio
+async def test_native_resume_downgrades_when_paused_on_tool_result(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    store = session_store_for(inv.transcript_dir)
+    await store.append(
+        session_key(inv.change_context.project_root, "step:p/s"),
+        [{"type": "user", "uuid": "m0",
+          "message": {"role": "user", "content": "go"}}])
+
+    # Ends on a COMPLETE user tool_result (SEND_TO_LLM): the loaded session ends
+    # on a user turn, so native resume would have to append a second consecutive
+    # user turn (or an empty slice). Must downgrade to the stream-json fallback.
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=False),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    assert opts.resume is None
+    assert opts.session_store is None
+    first_query = created[0].queries[0]
+    assert len(first_query) > 1
+    assert RESUME_MANIFEST_HEADER in _user_text_blob(first_query)
+
+
+@pytest.mark.anyio
+async def test_native_resume_downgrades_on_inplace_repair(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import (
+        RESUME_DURABILITY_NOTE,
+        RESUME_MANIFEST_HEADER,
+        Transcript,
+    )
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    store = session_store_for(inv.transcript_dir)
+    await store.append(
+        session_key(inv.change_context.project_root, "step:p/s"),
+        [{"type": "user", "uuid": "m0",
+          "message": {"role": "user", "content": "go"}}])
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    # Completed read round-trip → manifest names it succeeded.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "a.txt"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
+    # Dangling read whose interrupt marker persisted as the trailing user turn:
+    # t1 has no tool_result → shape-2 in-place repair, loaded session ends on user.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                     input={"path": "b.txt"}),)))
+    t.append(Message(role="user", content=(
+        TextBlock(text="[Request interrupted by user]"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    # Loaded session ends on a user turn → downgraded to fallback.
+    assert opts.resume is None
+    assert opts.session_store is None
+    first_query = created[0].queries[0]
+    assert len(first_query) > 1
+    blob = _user_text_blob(first_query)
+    # Fallback manifest names the COMPLETED read (t0); the dangling read (t1) is
+    # excluded, so only one "succeeded" line.
+    assert RESUME_MANIFEST_HEADER in blob
+    assert blob.count("read_file — succeeded") == 1
+    # The in-place-rewritten user turn (carrying t1's synthesized result) is
+    # streamed in position — its durability note rides on that same turn.
+    assert RESUME_DURABILITY_NOTE in blob

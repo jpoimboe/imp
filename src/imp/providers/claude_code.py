@@ -1159,6 +1159,11 @@ class ClaudeCodeAgentRunner:
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.change_context.project_root, aid)
         native_resume = (not is_fresh) and bool(await store.load(skey))
+        # A SEND_TO_LLM loaded session ends on a user turn; native resume appends
+        # another user turn across the slice boundary → Anthropic's consecutive
+        # same-role 400. Downgrade to stream-json replay, which re-merges in place.
+        if native_resume and classify_resume(existing) is ResumeState.SEND_TO_LLM:
+            native_resume = False
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
