@@ -569,6 +569,12 @@ def _run_header_line(change_id: str, title: str, marker: str,
             + ansi(tail, "dim", enabled=color))
 
 
+def _print_run_header(change_id: str, title: str, marker: str,
+                      *, color: bool) -> None:
+    print(_run_header_line(change_id, title, marker, color=color))
+    print()
+
+
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -824,8 +830,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
-        print(_run_header_line(
-            change.id, change.title, "new", color=should_use_color(sys.stdout)))
+        _print_run_header(
+            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -838,14 +844,14 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             opening_intent=opening_intent)
 
     if _tui_requested(args):
-        print(_run_header_line(
-            change.id, change.title, "new", color=should_use_color(sys.stdout)))
+        _print_run_header(
+            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
         return await _run_tui_session(change, seed_opening=opening_text,
                                       opening_intent=opening_intent,
                                       leave_mode=leave_mode)
 
-    print(_run_header_line(
-        change.id, change.title, "new", color=should_use_color(sys.stdout)))
+    _print_run_header(
+        change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from imp.cli.main import _run_header_line
+from imp.cli.main import _print_run_header, _run_header_line
 
 
 def test_named_change_leads_with_id_then_title_and_marker() -> None:
@@ -30,3 +30,13 @@ def test_color_unnamed_shows_id_bold_yellow_and_dim_marker_tail() -> None:
     assert line == (
         "\x1b[1m\x1b[33myaitd7\x1b[0m"
         "\x1b[2m · resuming\x1b[0m")
+
+
+def test_print_run_header_emits_marker_then_one_blank_line(capsys) -> None:
+    _print_run_header("b1f6wi", "", "chat", color=False)
+    assert capsys.readouterr().out == "b1f6wi · chat\n\n"
+
+
+def test_print_run_header_keeps_title_when_named(capsys) -> None:
+    _print_run_header("b1f6wi", "Dark mode", "new", color=False)
+    assert capsys.readouterr().out == "b1f6wi · Dark mode · new\n\n"
