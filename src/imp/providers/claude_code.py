@@ -16,12 +16,17 @@ runners:
     tool_results, so the runner watches for the next assistant message and
     extracts the captured args from a shared state dict.
 
-`extra_args={"no-session-persistence": None}` is the documented forwarding
-path for `--no-session-persistence` (spec §6.11; verified in Spike 7 and
-SDK `_internal/transport/subprocess_cli.py`). That flag alone is insufficient:
-CC 2.x still writes an `ai-title` session stub to ~/.claude/projects/, so the
-subprocess env also sets `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` to suppress all
-CC-side history writes (imp persists its own transcripts).
+History writes are suppressed differently depending on run mode.  Fresh starts
+run against an isolated ephemeral `CLAUDE_CONFIG_DIR` created by
+`materialize_fresh_config_dir` and removed in `run()`'s finally block; with a
+private home directory the suppression flags are unnecessary.  Resume and
+stream-json-replay paths have no ephemeral config dir, so they keep
+`CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` in the subprocess env and pass
+`extra_args={"no-session-persistence": None}` (the documented forwarding path
+for `--no-session-persistence`; spec §6.11, verified in Spike 7 and SDK
+`_internal/transport/subprocess_cli.py`) to avoid writing to `~/.claude`
+(CC 2.x otherwise writes an `ai-title` session stub to ~/.claude/projects/).
+Imp persists its own transcripts.
 """
 
 from __future__ import annotations
@@ -85,6 +90,7 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
@@ -964,6 +970,8 @@ class ClaudeCodeAgentRunner:
         # _run_loop from invocation.transcript_dir; wired into the SDK via the
         # `stderr` callback so a CLI exit-1 carries its cause. None until built.
         self._stderr_sink: Any = None
+        # ephemeral CLAUDE_CONFIG_DIR for a fresh run; run()'s finally removes it
+        self._config_dir: Path | None = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None,
@@ -1095,6 +1103,9 @@ class ClaudeCodeAgentRunner:
             self._client = None
             if self._stderr_sink is not None:
                 self._stderr_sink.close()
+            if self._config_dir is not None:
+                shutil.rmtree(self._config_dir, ignore_errors=True)
+                self._config_dir = None
 
     async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         from imp.engine.state import JsonlEventLog
@@ -1200,7 +1211,10 @@ class ClaudeCodeAgentRunner:
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
+        config_dir: Path | None = None
         if is_fresh:
+            config_dir = materialize_fresh_config_dir()
+            self._config_dir = config_dir
             opt_store, opt_session_id, opt_resume = (
                 store, resume_session_id(aid), None)
         elif native_resume:
@@ -1215,7 +1229,7 @@ class ClaudeCodeAgentRunner:
             opts = self._build_options(
                 invocation, mcp_server, list(tools), impty_server=impty_server,
                 session_store=opt_store, session_id=opt_session_id,
-                resume=opt_resume)
+                resume=opt_resume, config_dir=config_dir)
         else:
             opts = None
 
@@ -1315,8 +1329,7 @@ class ClaudeCodeAgentRunner:
                 # Name-only schemas: the in-process MCP server owns the full
                 # input schemas; unlike anthropic/openai we don't pass them here.
                 tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
-                params={"no-session-persistence": None,
-                        "env.CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1"},
+                params={"env.CLAUDE_CONFIG_DIR": str(config_dir)},
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):

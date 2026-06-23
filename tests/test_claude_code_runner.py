@@ -2255,3 +2255,60 @@ async def test_native_resume_downgrades_on_awaiting_user(
     # Downgraded to the stream-json fallback despite a populated store.
     assert opts.resume is None
     assert opts.session_store is None
+
+
+@pytest.mark.anyio
+async def test_fresh_run_isolates_config_dir_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fresh run materializes an isolated CLAUDE_CONFIG_DIR (with projects/),
+    drops the suppression flag, and removes the dir after a successful turn."""
+    (tmp_path / "art").mkdir()
+    seed_src = tmp_path / "seed-home"
+    seed_src.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(seed_src))
+    captured: dict[str, Any] = {}
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        cfg = opts.env.get("CLAUDE_CONFIG_DIR")
+        captured["cfg"] = cfg
+        captured["had_projects_during_run"] = bool(cfg) and Path(cfg, "projects").is_dir()
+        captured["skip_history_present"] = "CLAUDE_CODE_SKIP_PROMPT_HISTORY" in opts.env
+        return FakeClaudeSDKClient(opts, scripted_messages=[
+            assistant(
+                text("done"),
+                tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+            ),
+            result(),
+        ])
+
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5", client_factory=factory)
+    _ = [ev async for ev in runner.run(_inv(tmp_path))]
+
+    assert captured["cfg"], "fresh run must set CLAUDE_CONFIG_DIR"
+    assert captured["had_projects_during_run"], "isolated dir needs a projects/ subdir"
+    assert captured["skip_history_present"] is False, "suppression flag must be dropped"
+    assert not Path(captured["cfg"]).exists(), "config dir must be removed after the run"
+
+
+@pytest.mark.anyio
+async def test_fresh_run_cleans_config_dir_on_interrupt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cleanup lives in run()'s finally, so an interrupt still removes the dir."""
+    (tmp_path / "art").mkdir()
+    seed_src = tmp_path / "seed-home"
+    seed_src.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(seed_src))
+    captured: dict[str, Any] = {}
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        captured["cfg"] = opts.env.get("CLAUDE_CONFIG_DIR")
+        return FakeClaudeSDKClient(opts, scripted_messages=[])
+
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5", client_factory=factory)
+    await runner.interrupt()  # the SIGINT-driven cancel that already fired
+    _ = [ev async for ev in runner.run(_inv(tmp_path))]
+
+    assert captured["cfg"]
+    assert not Path(captured["cfg"]).exists()
