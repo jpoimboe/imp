@@ -816,7 +816,7 @@ def test_review_steps_read_only_tightening():
     assert steps["integration-reviewer"].read_only == ()
 
 
-def test_quality_reviewer_renders_canonical_severity_rubric() -> None:
+def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow

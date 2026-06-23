@@ -99,7 +99,7 @@ def test_review_parse_contract_routes_declared_schema() -> None:
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
 
 
-def test_code_reviewer_verdict_enum_is_two_way() -> None:
+def test_plan_code_reviewer_verdict_enum_is_two_way() -> None:
     schema = _wf().agents["plan-code-reviewer"].output_schema
     verdict_field = next(f for f in schema.fields if f.name == "verdict")
     assert set(verdict_field.values) == {"approve", "task_gap"}
@@ -109,7 +109,7 @@ def test_code_reviewer_verdict_enum_is_two_way() -> None:
             {"status": "Success", "verdict": "plan_gap", "findings": "x"}, schema)
 
 
-def test_code_reviewer_adjudicates_and_routes() -> None:
+def test_plan_code_reviewer_adjudicates_and_routes() -> None:
     text = (AGENTS / "plan-code-reviewer.md").read_text()
     low = text.lower()
     assert "receiving-code-review" in text
@@ -138,7 +138,7 @@ def test_workflow_comment_describes_single_reviewer() -> None:
     assert "4-member" not in text
 
 
-def test_code_reviewer_pins_deferred_observation_format() -> None:
+def test_plan_code_reviewer_pins_deferred_observation_format() -> None:
     text = (AGENTS / "plan-code-reviewer.md").read_text()
     assert "- [ ] DEFERRED plan-code-reviewer:" in text
     assert "[scope:" in text
@@ -188,7 +188,7 @@ def test_plan_cycle_check_routes_coverage_per_plan() -> None:
     assert m_corr.var_mutations["plan_total"] == 1
 
 
-def test_code_reviewer_reads_review_scope_not_integration_pass() -> None:
+def test_plan_code_reviewer_reads_review_scope_not_integration_pass() -> None:
     text = (AGENTS / "plan-code-reviewer.md").read_text()
     assert "integration_pass" not in text
     assert "review_scope" in text
@@ -307,7 +307,7 @@ def test_panel_and_slice_files_are_deleted() -> None:
         assert not (AGENTS / gone).exists(), gone
 
 
-def test_code_reviewer_is_not_a_pure_advisor() -> None:
+def test_plan_code_reviewer_is_not_a_pure_advisor() -> None:
     text = (AGENTS / "plan-code-reviewer.md").read_text()
     low = text.lower()
     assert "pure advisor" not in low          # it routes now, not merely advises
@@ -338,7 +338,7 @@ def test_cleanup_sweep_routes_by_exit_code() -> None:
     assert resolver.max_loops == 6
 
 
-def test_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
+def test_plan_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
     out = _render_reviewer(tmp_path, review_scope="plan")
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
