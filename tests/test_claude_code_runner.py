@@ -1879,3 +1879,16 @@ async def test_resume_manifest_not_re_injected_on_re_resume(tmp_path: Path) -> N
     assert "replay artifact" in blob
     # …but NOT re-injected a second time.
     assert blob.count("replay artifact") == 1
+
+
+def test_build_options_carries_resume(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    opts = runner._build_options(
+        _inv(tmp_path), object(), ["complete_step"], resume="rid-123")
+    assert opts.resume == "rid-123"
+
+
+def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
+    assert opts.resume is None
