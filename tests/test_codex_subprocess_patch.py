@@ -207,3 +207,42 @@ async def test_tee_noop_when_no_active_sink() -> None:
     proc = await proxy.create_subprocess_exec("codex")
     # No sink set → stderr is the untouched real stream.
     assert await proc.stderr.read(4096) == b"warn: line one\n"
+
+
+class _FakeProcSplitChar:
+    """stderr where a multi-byte UTF-8 char ('é' = b'\\xc3\\xa9') is split across
+    two reads, to exercise the tee's decode across a read boundary."""
+
+    def __init__(self) -> None:
+        self.stderr = _FakeStream([b"caf\xc3", b"\xa9\n"])
+
+
+class _FakeAsyncioSplitChar:
+    async def create_subprocess_exec(self, *_a: Any, **_kw: Any) -> _FakeProcSplitChar:
+        return _FakeProcSplitChar()
+
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover - unused passthrough
+        return getattr(asyncio, name)
+
+
+@pytest.mark.anyio
+async def test_tee_decodes_multibyte_char_split_across_reads(tmp_path: Path) -> None:
+    sink = StderrSink(tmp_path / "stderr.log")
+    token = current_stderr_sink.set(sink)
+    try:
+        proxy = _SubprocessPatchingAsyncio(_FakeAsyncioSplitChar(), CODEX_STREAM_LIMIT)
+        proc = await proxy.create_subprocess_exec("codex")
+        out = b""
+        while True:
+            chunk = await proc.stderr.read(4096)
+            if not chunk:
+                break
+            out += chunk
+    finally:
+        current_stderr_sink.reset(token)
+    sink.close()
+
+    # Every raw byte still reaches the drainer unchanged...
+    assert out == b"caf\xc3\xa9\n"
+    # ...and the sink decodes the split 'é' correctly (no U+FFFD replacement).
+    assert sink.tail() == "café\n"

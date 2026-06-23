@@ -17,6 +17,7 @@ outside imp's group, so a group Ctrl-C reaches imp alone).
 """
 from __future__ import annotations
 
+import codecs
 from typing import Any
 
 CODEX_STREAM_LIMIT = 64 * 1024 * 1024  # 64 MiB: bounded ceiling for one JSONL line
@@ -30,14 +31,18 @@ class _TeeStderrReader:
     def __init__(self, real: Any, sink: Any) -> None:
         self._real = real
         self._sink = sink
+        # Incremental so a multi-byte char split across two reads decodes
+        # correctly instead of becoming U+FFFD on the boundary.
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._real, name)
 
     async def read(self, n: int = -1) -> bytes:
         chunk: bytes = await self._real.read(n)
-        if chunk:
-            self._sink.feed(chunk.decode("utf-8", errors="replace"))
+        text = self._decoder.decode(chunk, final=not chunk)
+        if text:
+            self._sink.feed(text)
         return chunk
 
 
