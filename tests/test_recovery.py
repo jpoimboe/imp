@@ -188,5 +188,5 @@ def test_apply_rewind_renders_templated_target_label(tmp_path) -> None:
     apply_rewind(plan, wf, st, log, change=ch)
 
     assert st.step == "plan-writer"
-    assert st.step_label == "writing plan 2/4"
+    assert st.step_label == "plan 2/4 · writing"
     assert "{{" not in st.step_label
