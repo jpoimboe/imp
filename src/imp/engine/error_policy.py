@@ -36,20 +36,23 @@ class RetryWithBackoff:
 ErrorDecision = Pause | RetryNow | RetryWithBackoff
 
 
-_POLICY: dict[Category, type[Pause] | type[RetryNow] | type[RetryWithBackoff]] = {
-    "auth":                 Pause,
-    "config":               Pause,
-    "quota":                Pause,
-    "content_filter":       Pause,
-    "context_window":       Pause,
-    "rate_limit":           RetryWithBackoff,
-    "network":              RetryWithBackoff,
-    "api":                  Pause,
-    "loop":                 Pause,
-    "agent_output_missing": RetryNow,
-    "agent_incomplete":     Pause,
-    "terminated":           Pause,
-    "unknown":              Pause,
+_POLICY: dict[
+    Category,
+    tuple[type[Pause] | type[RetryNow] | type[RetryWithBackoff], int | None],
+] = {
+    "auth":                 (RetryWithBackoff, 7),
+    "config":               (Pause, None),
+    "quota":                (Pause, None),
+    "content_filter":       (Pause, None),
+    "context_window":       (Pause, None),
+    "rate_limit":           (RetryWithBackoff, None),
+    "network":              (RetryWithBackoff, None),
+    "api":                  (Pause, None),
+    "loop":                 (Pause, None),
+    "agent_output_missing": (RetryNow, None),
+    "agent_incomplete":     (Pause, None),
+    "terminated":           (Pause, None),
+    "unknown":              (Pause, None),
 }
 
 def decide(
@@ -60,18 +63,19 @@ def decide(
 ) -> ErrorDecision:
     """Map a category + prior-attempts count to a decision.
 
-    RetryWithBackoff categories retry FOREVER (§10): delay = 1·2^n, unbounded.
-    There is no attempt ceiling here — interactive runs rely on an interruptible
-    sleep + Ctrl-C, and headless runs rely on a wall-clock ceiling in the executor.
+    Most RetryWithBackoff categories retry forever: delay = 1·2^n, unbounded.
+    `auth` is capped at 7 attempts — beyond that it Pauses for human attention.
     `hint_delay_seconds` (a server Retry-After) is honored as max(hint, our delay)
     but capped at 60s so a misbehaving upstream header can't strand us; that 60s
     cap is on the *hint only*, not on our own doubling.
     """
-    cls = _POLICY.get(category, Pause)
+    cls, cap = _POLICY.get(category, (Pause, None))
     if cls is Pause:
         return Pause()
     if cls is RetryNow:
         return RetryNow()
+    if cap is not None and prior_backoff_attempts >= cap:
+        return Pause()
     delay = 1.0 * (2 ** prior_backoff_attempts)
     if hint_delay_seconds is not None:
         delay = min(60.0, max(delay, hint_delay_seconds))
