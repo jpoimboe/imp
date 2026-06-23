@@ -95,6 +95,7 @@ from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_store_for,
+    store_has_conversation_body,
 )
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -1193,7 +1194,7 @@ class ClaudeCodeAgentRunner:
         # history in position.
         native_resume = (
             (not is_fresh)
-            and bool(await store.load(skey))
+            and store_has_conversation_body(await store.load(skey))
             and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
         )
         # TEMP DOGFOOD UNBLOCK (change wxczhw): native resume is categorically

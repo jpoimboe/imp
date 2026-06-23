@@ -14,6 +14,7 @@ from imp.providers.claude_code_session_store import (
     session_key,
     session_project_key,
     session_store_for,
+    store_has_conversation_body,
 )
 
 
@@ -224,6 +225,26 @@ def test_session_project_key_is_the_sdk_helper(tmp_path: Path) -> None:
     from claude_agent_sdk import project_key_for_directory
 
     assert session_project_key(tmp_path) == project_key_for_directory(tmp_path)
+
+
+def test_store_has_conversation_body_distinguishes_stub_from_body() -> None:
+    # Empty / missing store → no resumable body.
+    assert store_has_conversation_body(None) is False
+    assert store_has_conversation_body([]) is False
+
+    # ai-title stub only (CC 2.x writes this even under suppression) → no body.
+    assert store_has_conversation_body([{"type": "ai-title", "title": "x"}]) is False
+
+    # A real conversation entry alongside the stub → resumable body present.
+    assert store_has_conversation_body(
+        [{"type": "ai-title", "title": "x"}, {"type": "assistant", "uuid": "a"}]
+    ) is True
+
+    # Body-only with no ai-title at all → still a healthy real session.
+    assert store_has_conversation_body([{"type": "assistant", "uuid": "a"}]) is True
+
+    # Non-dict elements are tolerated by the isinstance guard; alone they yield False.
+    assert store_has_conversation_body([None, "string", 42]) is False
 
 
 def test_session_store_for_writes_under_claude_session_subdir(
