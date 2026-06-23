@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from imp.cli import splash
@@ -217,3 +219,13 @@ def test_splash_block_tagline_is_grey_blue_italic_when_rendered(monkeypatch) -> 
     monkeypatch.setattr(splash, "choose_index", lambda: 0)
     out = splash.splash_block(theme="dark", width=40, color=True)
     assert out.endswith("\x1b[38;2;154;160;168m\x1b[3mthe familiar awakens.\x1b[0m")
+
+
+def test_main_wires_the_splash_module() -> None:
+    main = importlib.import_module("imp.cli.main")
+    assert main.splash.splash_block is splash.splash_block
+
+
+def test_retired_opening_module_is_gone() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("imp.cli.opening")

@@ -26,7 +26,7 @@ _NAMED: dict[str, tuple[int, int]] = {
 
 # Dark is the anchor ember palette (spec hexes); light is re-tuned to stay legible
 # on a near-white surface; ansi uses only the 16 named SGR colors.
-_DARK: dict[str, "Color | None"] = {
+_DARK: dict[str, Color | None] = {
     "impBody": (0xFF, 0x9A, 0x3C), "impHorn": (0xC2, 0x61, 0x1F),
     "impGlint": (0xFF, 0xE9, 0xC8), "impEye": (0x2A, 0x16, 0x06),
     "tag": (0x9A, 0xA0, 0xA8),
@@ -39,7 +39,7 @@ _DARK: dict[str, "Color | None"] = {
     "ground": (0x1A, 0x16, 0x22), "groundGlow": (0x24, 0x1C, 0x30),
     "sun": (0xFF, 0xB2, 0x4A), "sunGlow": (0x5A, 0x3A, 0x1A),
 }
-_LIGHT: dict[str, "Color | None"] = {
+_LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
     "impGlint": (0x8A, 0x5A, 0x20), "impEye": (0x2A, 0x16, 0x06),
     "tag": (0x5A, 0x66, 0x78),
@@ -52,7 +52,7 @@ _LIGHT: dict[str, "Color | None"] = {
     "ground": (0xB6, 0xB6, 0xB6), "groundGlow": (0xA8, 0xA8, 0xA8),
     "sun": (0xC2, 0x61, 0x1F), "sunGlow": (0xD8, 0xB8, 0x78),
 }
-_ANSI_P: dict[str, "Color | None"] = {
+_ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
     "impGlint": "bright_white", "impEye": "black",
     "tag": "bright_black",
@@ -66,11 +66,11 @@ _ANSI_P: dict[str, "Color | None"] = {
 }
 
 
-def _build_palette(theme: str) -> dict[str, "Color | None"]:
+def _build_palette(theme: str) -> dict[str, Color | None]:
     return {"dark": _DARK, "light": _LIGHT, "ansi": _ANSI_P}.get(theme, _ANSI_P)
 
 
-def _fg_open(c: "Color | None") -> str:
+def _fg_open(c: Color | None) -> str:
     if c is None:
         return ""
     if isinstance(c, tuple):
@@ -78,7 +78,7 @@ def _fg_open(c: "Color | None") -> str:
     return f"\x1b[{_NAMED[c][0]}m"
 
 
-def _bg_open(c: "Color | None") -> str:
+def _bg_open(c: Color | None) -> str:
     if c is None:
         return ""
     if isinstance(c, tuple):
@@ -88,7 +88,7 @@ def _bg_open(c: "Color | None") -> str:
 
 # The active palette, set by _use_theme before any scene/primitive runs. Scene
 # builders are (grid) -> None, so the palette is module state.
-_P: dict[str, "Color | None"] = {}
+_P: dict[str, Color | None] = {}
 
 
 def _use_theme(theme: str) -> None:
@@ -119,14 +119,14 @@ def _hash(x: int, y: int) -> float:
     return (h & 0xFFFFFFFF) / 4294967296.0
 
 
-def _px(g: Grid, x: float, y: float, c: "Color | None") -> None:
+def _px(g: Grid, x: float, y: float, c: Color | None) -> None:
     xi = _round(x)
     yi = _round(y)
     if c is not None and 0 <= yi < len(g) and 0 <= xi < len(g[0]):
         g[yi][xi] = c
 
 
-def _rect(g: Grid, x: int, y: int, w: int, h: int, c: "Color | None") -> None:
+def _rect(g: Grid, x: int, y: int, w: int, h: int, c: Color | None) -> None:
     if c is None:
         return
     for j in range(h):
@@ -134,7 +134,7 @@ def _rect(g: Grid, x: int, y: int, w: int, h: int, c: "Color | None") -> None:
             _px(g, x + i, y + j, c)
 
 
-def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: "Color | None") -> None:
+def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: Color | None) -> None:
     if c is None:
         return
     x0i, y0i, x1i, y1i = int(x0), int(y0), int(x1), int(y1)
@@ -156,7 +156,7 @@ def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: "Color | None"
             y0i += sy
 
 
-def _disc(g: Grid, cx: float, cy: float, rx: float, ry: float, c: "Color | None") -> None:
+def _disc(g: Grid, cx: float, cy: float, rx: float, ry: float, c: Color | None) -> None:
     if c is None:
         return
     for y in range(len(g)):
@@ -177,7 +177,7 @@ def _carve(g: Grid, cx: float, cy: float, rx: float, ry: float) -> None:
 
 
 def _ring(g: Grid, cx: float, cy: float, rx: float, ry: float,
-          c: "Color | None", inn: float, out: float) -> None:
+          c: Color | None, inn: float, out: float) -> None:
     if c is None:
         return
     for y in range(len(g)):
@@ -189,7 +189,7 @@ def _ring(g: Grid, cx: float, cy: float, rx: float, ry: float,
                 _px(g, x, y, c)
 
 
-def _glow_ring(g: Grid, cx: float, cy: float, r: float, c: "Color | None") -> None:
+def _glow_ring(g: Grid, cx: float, cy: float, r: float, c: Color | None) -> None:
     if c is None:
         return
     for y in range(len(g)):
@@ -201,7 +201,7 @@ def _glow_ring(g: Grid, cx: float, cy: float, r: float, c: "Color | None") -> No
                 _px(g, x, y, c)
 
 
-def _spark(g: Grid, x: float, y: float, c: "Color | None") -> None:
+def _spark(g: Grid, x: float, y: float, c: Color | None) -> None:
     xi = _round(x)
     yi = _round(y)
     _px(g, xi, yi, c)
@@ -262,7 +262,7 @@ def _left_imp(g: Grid) -> None:
                 _px(g, 2 + c, r, color)
 
 
-def _cell(top: "Color | None", bot: "Color | None", *, color: bool) -> str:
+def _cell(top: Color | None, bot: Color | None, *, color: bool) -> str:
     if top is None and bot is None:
         return " "
     if not color:
@@ -381,7 +381,7 @@ def _sunrise(g: Grid) -> None:
     _left_imp(g)
 
 
-SCENES: list[tuple[SceneBuilder, "str | Callable[[], str]"]] = [
+SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
     (_meteor_shower, "make a wish."),
@@ -397,7 +397,7 @@ def choose_index() -> int:
     return random.randrange(len(SCENES))
 
 
-def _resolve_tagline(tagline: "str | Callable[[], str]") -> str:
+def _resolve_tagline(tagline: str | Callable[[], str]) -> str:
     return tagline() if callable(tagline) else tagline
 
 
@@ -410,7 +410,7 @@ def scene_lines(index: int, *, theme: str, color: bool) -> list[str]:
 
 
 def splash_block(*, theme: str, width: int, color: bool) -> str:
-    """The opening splash: a random scene over a grey-blue italic tagline (plain tagline in degraded modes)."""
+    """The opening splash: a random scene over a grey-blue italic tagline."""
     index = choose_index()
     tagline = _resolve_tagline(SCENES[index][1])
     if not color or width < MIN_WIDTH:

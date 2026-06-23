@@ -26,12 +26,11 @@ import anyio
 
 from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.cli import change_row, playbooks, resume_select
+from imp.cli import change_row, playbooks, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
-from imp.cli.opening import render_opening_beat
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.session_run import (
@@ -800,8 +799,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_intent = seed.opening_intent
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         color = should_use_color(sys.stdout)
-        print(render_opening_beat(theme=pal.active_theme(), color=color, unicode=True))
-        print()
+        block = splash.splash_block(
+            theme=pal.active_theme(), width=_term_width(), color=color)
+        if block:
+            print(block)
+            print()
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(question=_opening_question(leave_mode),
