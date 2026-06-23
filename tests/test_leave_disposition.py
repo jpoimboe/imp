@@ -14,14 +14,14 @@ from imp.engine.state import LockHeld, ProjectLock, State
 from tests.conftest import _seed_control
 
 
-def test_save_to_backlog_sets_saved_status_and_keeps_home(tmp_path: Path) -> None:
+def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="Draft", change_id="d1", base_branch="main")
     assert State.load(ch.state_dir).status == "running"
 
     save_to_backlog(ch)
 
-    assert State.load(ch.state_dir).status == "saved"            # resting Backlog state
+    assert State.load(ch.state_dir).status == "paused"            # resting Backlog state
     assert (tmp_path / ".imp" / "changes" / "d1").exists()       # live home KEPT
     assert record.read_record(records_root(tmp_path), "d1") is None  # NOT archived
     events = ch.event_log().read()
@@ -132,7 +132,7 @@ async def test_disposition_new_leave_saves_to_backlog(tmp_path: Path) -> None:
     ch = _draft_with_exchange(tmp_path, "n1")
     rc = await m._maybe_apply_leave_disposition(ch, "new", {})
     assert rc == 0
-    assert State.load(ch.state_dir).status == "saved"             # Backlog, home kept
+    assert State.load(ch.state_dir).status == "paused"             # Backlog, home kept
     assert (tmp_path / ".imp" / "changes" / "n1").exists()
 
 
@@ -142,7 +142,7 @@ async def test_disposition_save_intent_overrides_chat_mode(tmp_path: Path) -> No
     ch = _draft_with_exchange(tmp_path, "s1")
     rc = await m._maybe_apply_leave_disposition(ch, "chat", {"intent": "save"})
     assert rc == 0
-    assert State.load(ch.state_dir).status == "saved"             # /save → Backlog, not archive
+    assert State.load(ch.state_dir).status == "paused"             # /save → Backlog, not archive
     assert (tmp_path / ".imp" / "changes" / "s1").exists()
 
 
@@ -172,7 +172,7 @@ async def test_disposition_explicit_save_overrides_zero_exchange(
         payload={"id": "g1", "name": "wait_for_user", "input": {}})
     rc = await m._maybe_apply_leave_disposition(ch, "chat", {"intent": "save"})
     assert rc == 0
-    assert State.load(ch.state_dir).status == "saved"             # saved, NOT discarded
+    assert State.load(ch.state_dir).status == "paused"             # saved, NOT discarded
     assert (tmp_path / ".imp" / "changes" / "es1").exists()
 
 
@@ -191,7 +191,7 @@ async def test_disposition_saves_a_live_wait_for_user_conversation(
         payload={"id": "g1", "content": "add a dark mode toggle", "error": False})
     rc = await m._maybe_apply_leave_disposition(ch, "new", {})
     assert rc == 0
-    assert State.load(ch.state_dir).status == "saved"             # saved, NOT discarded
+    assert State.load(ch.state_dir).status == "paused"             # saved, NOT discarded
     assert (tmp_path / ".imp" / "changes" / "w1").exists()
 
 

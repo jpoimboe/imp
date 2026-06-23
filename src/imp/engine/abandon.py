@@ -64,10 +64,12 @@ def archive_conversation(change: Change) -> None:
 
 
 def save_to_backlog(change: Change) -> None:
-    """Save a left conversation to the Backlog (status 'saved', home kept, not archived)."""
+    """Leave a conversation in the Backlog: the un-materialized change-home is kept
+    (not archived), paused and resumable. Zone is derived from `materialized`, so a
+    paused un-materialized home is a Backlog item — no bespoke status string."""
     with ProjectLock(change.change_dir / "lock").acquire():
         state = State.load(change.state_dir)
-        state.status = "saved"
+        state.status = "paused"
         state.save(change.state_dir)
         change.event_log().append(
             agent_id=None, type="conversation_saved", payload={})

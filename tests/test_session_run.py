@@ -477,7 +477,7 @@ async def test_run_session_client_saves_unmaterialized_new_leave_to_backlog(
         solicit=lambda _p: _never(), leave_mode="new")
 
     assert rc == 0
-    assert State.load(change.state_dir).status == "saved"          # Backlog, home kept
+    assert State.load(change.state_dir).status == "paused"          # Backlog, home kept
     assert (tmp_path / ".imp" / "changes" / "d1").exists()
 
 

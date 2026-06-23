@@ -9,7 +9,7 @@ from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def test_save_change_non_resident_marks_status_saved(
+def test_save_change_non_resident_marks_status_paused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.remote.session.save as savemod
@@ -18,7 +18,7 @@ def test_save_change_non_resident_marks_status_saved(
     change = Change.create_draft(tmp_path, title="x", change_id="feat", base_branch="main")
     monkeypatch.setattr(savemod, "session_is_resident", lambda *_a: False)
     savemod.save_change(tmp_path, "feat")
-    assert State.load(change.state_dir).status == "saved"
+    assert State.load(change.state_dir).status == "paused"
 
 
 def test_save_change_non_resident_ignores_materialized_change(
