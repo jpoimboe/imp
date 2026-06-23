@@ -22,6 +22,25 @@ from typing import Any
 CODEX_STREAM_LIMIT = 64 * 1024 * 1024  # 64 MiB: bounded ceiling for one JSONL line
 
 
+class _TeeStderrReader:
+    """Wraps a subprocess StreamReader so every read is also fed to the active
+    StderrSink. A single consumer (the SDK's _read_all) drives reads; the tee
+    observes them in passing, so there is no second reader to starve the stream."""
+
+    def __init__(self, real: Any, sink: Any) -> None:
+        self._real = real
+        self._sink = sink
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+    async def read(self, n: int = -1) -> bytes:
+        chunk = await self._real.read(n)
+        if chunk:
+            self._sink.feed(chunk.decode("utf-8", errors="replace"))
+        return chunk
+
+
 class _SubprocessPatchingAsyncio:
     """Proxy over the real `asyncio` module that injects a large default
     subprocess read limit and session isolation. Every attribute except
@@ -37,7 +56,13 @@ class _SubprocessPatchingAsyncio:
     async def create_subprocess_exec(self, *args: Any, **kwargs: Any) -> Any:
         kwargs.setdefault("limit", self._limit)
         kwargs.setdefault("start_new_session", True)
-        return await self._real.create_subprocess_exec(*args, **kwargs)
+        proc = await self._real.create_subprocess_exec(*args, **kwargs)
+        from imp.providers.stderr_sink import current_stderr_sink
+
+        sink = current_stderr_sink.get()
+        if sink is not None and getattr(proc, "stderr", None) is not None:
+            proc.stderr = _TeeStderrReader(proc.stderr, sink)
+        return proc
 
 
 def install_codex_subprocess_patches() -> None:

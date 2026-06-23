@@ -145,3 +145,65 @@ async def test_proxy_spawns_child_in_its_own_process_group() -> None:
     finally:
         proc.kill()
         await proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# Tee: stderr reads feed the active sink while still returning all bytes
+# ---------------------------------------------------------------------------
+
+from imp.providers.stderr_sink import StderrSink, current_stderr_sink  # noqa: E402
+
+
+class _FakeStream:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = list(chunks)
+
+    async def read(self, _n: int = -1) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class _FakeProc:
+    def __init__(self) -> None:
+        self.stderr = _FakeStream([b"warn: line one\n", b"err: line two\n"])
+
+
+class _FakeAsyncioWithStderr:
+    """Stand-in for the real asyncio module the proxy wraps."""
+
+    async def create_subprocess_exec(self, *_a: Any, **_kw: Any) -> _FakeProc:
+        return _FakeProc()
+
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover - unused passthrough
+        return getattr(asyncio, name)
+
+
+@pytest.mark.anyio
+async def test_tee_feeds_active_sink_while_draining(tmp_path: Path) -> None:
+    sink = StderrSink(tmp_path / "stderr.log")
+    token = current_stderr_sink.set(sink)
+    try:
+        proxy = _SubprocessPatchingAsyncio(_FakeAsyncioWithStderr(), CODEX_STREAM_LIMIT)
+        proc = await proxy.create_subprocess_exec("codex")
+        # Drain exactly as the SDK's _read_all does.
+        out = b""
+        while True:
+            chunk = await proc.stderr.read(4096)
+            if not chunk:
+                break
+            out += chunk
+    finally:
+        current_stderr_sink.reset(token)
+    sink.close()
+
+    # The real reader still yielded every byte (no double-drain / starvation)...
+    assert out == b"warn: line one\nerr: line two\n"
+    # ...and the sink saw the same bytes.
+    assert sink.tail() == "warn: line one\nerr: line two\n"
+
+
+@pytest.mark.anyio
+async def test_tee_noop_when_no_active_sink() -> None:
+    proxy = _SubprocessPatchingAsyncio(_FakeAsyncioWithStderr(), CODEX_STREAM_LIMIT)
+    proc = await proxy.create_subprocess_exec("codex")
+    # No sink set → stderr is the untouched real stream.
+    assert await proc.stderr.read(4096) == b"warn: line one\n"
