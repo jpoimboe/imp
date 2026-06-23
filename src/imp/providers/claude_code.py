@@ -1166,6 +1166,8 @@ class ClaudeCodeAgentRunner:
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
+            # ids for which repair synthesized placeholders — must not be named succeeded
+            dangling_ids: set[str] = set()
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Persist a synthetic tool_result so the SEND_TO_LLM path has a
             # balanced transcript; emit `tool_result` events so `imp log`
@@ -1179,6 +1181,7 @@ class ClaudeCodeAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
+                        dangling_ids.add(rb.tool_use_id)
             inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
@@ -1224,7 +1227,8 @@ class ClaudeCodeAgentRunner:
             # ckx9f5: name prior tool calls succeeded so stream-json replay's placeholder
             # errors don't trigger redo; skip the balance path (retry feedback stays last).
             if not invocation.balance_on_resume:
-                manifest = build_resume_manifest(messages)
+                manifest = build_resume_manifest(
+                    messages, exclude_tool_use_ids=frozenset(dangling_ids))
                 if manifest is not None:
                     manifest_msg = Message(
                         role="user", content=(TextBlock(text=manifest),))

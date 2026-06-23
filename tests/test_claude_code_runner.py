@@ -1779,3 +1779,55 @@ async def test_resume_balance_path_keeps_retry_feedback_last(tmp_path: Path) -> 
     assert "write_file — succeeded" not in blob
     # The retry feedback is the LAST text the model reads on resume.
     assert blob.rstrip().endswith("REVISE: rewrite plan.md")
+
+
+@pytest.mark.anyio
+async def test_resume_manifest_skips_dangling_last_tool_use(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    # A completed write — must be named succeeded with its echoed body.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                     input={"path": "plan.md", "content": "PLANBODY"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="w1", content="ok", is_error=True),)))
+    # A genuinely-dangling read — killed between call and result, no tool_result.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="r2", name="mcp__imp__read_file",
+                     input={"path": "x.md"}),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    [ev async for ev in runner.run(inv)]
+
+    blob = _user_text_blob(created[0].queries[0])
+    # The completed write is named succeeded with its echoed deliverable…
+    assert "write_file — succeeded (wrote plan.md)" in blob
+    assert "PLANBODY" in blob
+    # …but the genuinely-dangling read is NOT claimed succeeded.
+    assert "read_file — succeeded" not in blob
+    # The dangling tool_use is still repaired: a tool_result for r2 was persisted.
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert any(
+        isinstance(b, ToolResultBlock) and b.tool_use_id == "r2"
+        for m in loaded
+        for b in m.content
+    )
