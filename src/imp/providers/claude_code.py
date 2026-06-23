@@ -949,7 +949,9 @@ class ClaudeCodeAgentRunner:
         self._impty_driver: Any = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
-                       tool_names: list[str], impty_server: Any = None) -> Any:
+                       tool_names: list[str], impty_server: Any = None,
+                       *, session_store: Any = None,
+                       session_id: str | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
@@ -1010,6 +1012,8 @@ class ClaudeCodeAgentRunner:
             setting_sources=[],
             strict_mcp_config=True,
             extra_args={"no-session-persistence": None},
+            session_store=session_store,
+            session_id=session_id,
         )
 
     def _build_client(self, opts: Any) -> Any:

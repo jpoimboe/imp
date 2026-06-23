@@ -17,6 +17,11 @@ from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.claude_code_session_store import (
+    ImpSessionStore,
+    resume_session_id,
+    session_store_for,
+)
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
@@ -1582,3 +1587,21 @@ async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> 
     assert len(calls) == 2
     assert "label" not in calls[0]["payload"]
     assert "label" not in calls[1]["payload"]
+
+
+def test_build_options_carries_session_store_and_id(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    store = session_store_for(tmp_path)
+    opts = runner._build_options(
+        _inv(tmp_path), object(), ["complete_step"],
+        session_store=store, session_id="abc",
+    )
+    assert opts.session_store is store
+    assert opts.session_id == "abc"
+
+
+def test_build_options_defaults_to_no_session_store(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
+    assert opts.session_store is None
+    assert opts.session_id is None
