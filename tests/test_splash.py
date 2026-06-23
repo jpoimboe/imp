@@ -482,3 +482,33 @@ def test_crystal_paints_a_lit_tip_above_its_body() -> None:
               for cell in row if cell == splash._P["crystalLight"]]
     assert body_ys and tip_ys
     assert min(tip_ys) < min(body_ys)
+
+
+def test_task3p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_cauldron_scene", "stir the cauldron — what's brewing?"),
+        ("_grimoire_scene", "the grimoire is open."),
+        ("_potion_shelf_scene", "every spell has a price — name yours."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_cauldron_paints_brew_bubbles_above_the_iron_body() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._cauldron(g, 24, 11)
+    iron = [(x, y) for y, row in enumerate(g)
+            for x, c in enumerate(row) if c == splash._P["iron"]]
+    brew = [(x, y) for y, row in enumerate(g)
+            for x, c in enumerate(row) if c == splash._P["brew"]]
+    assert iron and brew
+    assert min(y for _, y in brew) < min(y for _, y in iron)

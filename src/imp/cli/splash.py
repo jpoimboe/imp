@@ -50,6 +50,8 @@ _DARK: dict[str, Color | None] = {
     "glass": (0x7A, 0xA8, 0xC8), "glassCore": (0xD8, 0xEC, 0xF6),
     "lanternFrame": (0x8A, 0x6A, 0x3A),
     "crystal": (0x8A, 0xC0, 0xE0), "crystalLight": (0xD0, 0xE8, 0xF4),
+    "iron": (0x33, 0x30, 0x3A), "brew": (0x7A, 0xC8, 0x6A),
+    "bookCover": (0x8A, 0x33, 0x44), "bookPage": (0xEC, 0xE2, 0xC8),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -75,6 +77,8 @@ _LIGHT: dict[str, Color | None] = {
     "glass": (0x5A, 0x80, 0xA0), "glassCore": (0x2A, 0x5A, 0x80),
     "lanternFrame": (0x6A, 0x4A, 0x20),
     "crystal": (0x4A, 0x80, 0xA0), "crystalLight": (0x2A, 0x5A, 0x80),
+    "iron": (0x4A, 0x46, 0x52), "brew": (0x2A, 0x8A, 0x4A),
+    "bookCover": (0x9A, 0x3A, 0x4A), "bookPage": (0xC8, 0xBE, 0xA0),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -98,6 +102,8 @@ _ANSI_P: dict[str, Color | None] = {
     "glass": "cyan", "glassCore": "bright_white",
     "lanternFrame": "yellow",
     "crystal": "bright_cyan", "crystalLight": "bright_white",
+    "iron": "bright_black", "brew": "green",
+    "bookCover": "red", "bookPage": "white",
 }
 
 
@@ -499,6 +505,35 @@ def _portal_gate(g: Grid, cx: int, cy: int) -> None:
     _glow_ring(g, cx, cy, 5, _P["portal"])
 
 
+def _cauldron(g: Grid, cx: int, base_y: int) -> None:
+    _disc(g, cx, base_y - 1, 4, 2, _P["iron"])
+    _carve(g, cx, base_y - 3, 3, 1)
+    _rect(g, cx - 4, base_y - 3, 9, 1, _P["iron"])
+    _px(g, cx - 3, base_y + 1, _P["iron"])
+    _px(g, cx + 3, base_y + 1, _P["iron"])
+    _px(g, cx - 1, base_y - 4, _P["brew"])
+    _px(g, cx + 2, base_y - 5, _P["brew"])
+    _px(g, cx, base_y - 6, _P["brew"])
+
+
+def _grimoire(g: Grid, cx: int, cy: int) -> None:
+    _rect(g, cx - 5, cy, 5, 4, _P["bookPage"])
+    _rect(g, cx + 1, cy, 5, 4, _P["bookPage"])
+    for j in range(4):
+        _px(g, cx, cy + j, _P["bookCover"])
+        _px(g, cx - 5, cy + j, _P["bookCover"])
+        _px(g, cx + 5, cy + j, _P["bookCover"])
+    _px(g, cx, cy - 2, _P["brew"])
+
+
+def _potion_shelf(g: Grid, shelf_y: int) -> None:
+    _rect(g, 19, shelf_y, 11, 1, _P["iron"])
+    for x, liquid in ((21, _P["brew"]), (24, _P["bookCover"]), (27, _P["glass"])):
+        _px(g, x, shelf_y - 1, liquid)
+        _px(g, x, shelf_y - 2, liquid)
+        _px(g, x, shelf_y - 3, _P["glass"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -683,6 +718,24 @@ def _crystal_cluster(g: Grid) -> None:
     _left_imp(g)
 
 
+def _cauldron_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _cauldron(g, 24, 11)
+    _left_imp(g)
+
+
+def _grimoire_scene(g: Grid) -> None:
+    _stars(g, 0, 4, 0.08)
+    _grimoire(g, 24, 8)
+    _left_imp(g)
+
+
+def _potion_shelf_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _potion_shelf(g, 11)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -710,6 +763,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crystal_ball_scene, "gaze in — what shall we build?"),
     (_lantern_scene, "the lantern's lit. lead the way."),
     (_crystal_cluster, "small imp, big leverage."),
+    (_cauldron_scene, "stir the cauldron — what's brewing?"),
+    (_grimoire_scene, "the grimoire is open."),
+    (_potion_shelf_scene, "every spell has a price — name yours."),
 ]
 
 MIN_WIDTH = 32
