@@ -188,6 +188,10 @@ class CodexAgentRunner:
         # `_canonical_auth_path()`; declared here so the attribute the tests set
         # is part of the class contract.
         self._canonical_auth_override: Path | None = None
+        # Per-step capture of the nested `codex` CLI's stderr. Built in _run_loop
+        # and published to current_stderr_sink for the subprocess-patch tee. None
+        # until built (the stubbed-loop outer-except tests never build it).
+        self._stderr_sink: Any = None
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:
@@ -211,7 +215,15 @@ class CodexAgentRunner:
                         "category": "config", "kind": "interrupted",
                         "message": "runner cancelled by interrupt"}}
                     return
-                yield perr.make_unknown_error_event(exc)
+                tail = None
+                if self._stderr_sink is not None:
+                    # The codex SDK surfaces subprocess stderr only inside the
+                    # exception message (CodexExecError has no .stderr); store the
+                    # whole message so the tail carries the CLI's own explanation.
+                    self._stderr_sink.feed(str(exc))
+                    tail = self._stderr_sink.tail()
+                yield perr.make_unknown_error_event(
+                    exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
             if self._ctx is not None:
@@ -296,6 +308,9 @@ class CodexAgentRunner:
         # so the MCP server is ALWAYS shut down and any provisioned CODEX_HOME
         # is ALWAYS torn down — even if the ping, provision, or seed_auth step
         # raises (Task 31: close the provision/seed teardown leak window).
+        from imp.providers.stderr_sink import StderrSink, current_stderr_sink
+        self._stderr_sink = StderrSink(invocation.transcript_dir / "stderr.log")
+        _stderr_token = current_stderr_sink.set(self._stderr_sink)
         codex_home: Path | None = None
         impty_handle: ServerHandle | None = None
         impty_driver: Any = None
@@ -363,6 +378,8 @@ class CodexAgentRunner:
             #    abort, interrupt, AND a ping/provision/seed failure). The
             #    server shutdown ALWAYS runs; CODEX_HOME teardown runs only when
             #    a codex_home was actually provisioned.
+            current_stderr_sink.reset(_stderr_token)
+            self._stderr_sink.close()
             if impty_handle is not None:
                 with contextlib.suppress(Exception):
                     await impty_handle.shutdown()
