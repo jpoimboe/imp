@@ -604,3 +604,57 @@ def test_pumpkin_paints_a_carved_face_in_its_body() -> None:
     body = any(c == splash._P["pumpkin"] for row in g for c in row)
     face = any(c == splash._P["impEye"] for row in g for c in row)
     assert body and face
+
+
+def test_grimoire_paints_open_pages_with_a_cover() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._grimoire(g, 24, 8)
+    assert any(c == splash._P["bookPage"] for row in g for c in row)
+    assert any(c == splash._P["bookCover"] for row in g for c in row)
+
+
+def test_potion_shelf_paints_potions_on_an_iron_shelf() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._potion_shelf(g, 11)
+    assert any(c == splash._P["iron"] for row in g for c in row)
+    assert any(c == splash._P["brew"] for row in g for c in row)
+
+
+def test_scroll_paints_pages_with_ink_lines() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._scroll(g, 24, 7)
+    assert any(c == splash._P["bookPage"] for row in g for c in row)
+    assert any(c == splash._P["ink"] for row in g for c in row)
+
+
+def test_quill_ink_paints_a_quill_over_an_inkwell() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._quill_ink(g, 22, 11)
+    assert any(c == splash._P["quill"] for row in g for c in row)
+    assert any(c == splash._P["ink"] for row in g for c in row)
+
+
+def test_bat_paints_a_creature_silhouette() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._bat(g, 24, 7)
+    assert any(c == splash._P["creature"] for row in g for c in row)
+
+
+def test_skeleton_key_paints_a_gold_ring_and_shaft() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._skeleton_key(g, 21, 7)
+    assert any(c == splash._P["gold"] for row in g for c in row)
+
+
+def test_top_hat_paints_a_dark_hat_with_a_band() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._top_hat(g, 24, 12)
+    assert any(c == splash._P["creature"] for row in g for c in row)
+    assert any(c == splash._P["bookCover"] for row in g for c in row)
