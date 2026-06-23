@@ -168,7 +168,7 @@ phases:
       # task counter — review now fires once per plan.
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
-        tier: medium
+        tier: high
         label: code · checking plan coverage
         rules:
           # More scope remains -> review THIS plan (review_base..HEAD) before the next plan.

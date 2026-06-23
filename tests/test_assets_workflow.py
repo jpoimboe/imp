@@ -123,6 +123,13 @@ def test_review_step_declares_high_tier():
     assert by["plan-code-reviewer"].tier == "high"
 
 
+def test_plan_cycle_check_declares_high_tier() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["plan-cycle-check"].tier == "high"
+
+
 def test_default_workflow_loads() -> None:
     # Verify the default workflow loads without errors.
     from imp.assets import bundled_workflow_dir

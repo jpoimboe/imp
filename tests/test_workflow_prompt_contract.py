@@ -279,6 +279,20 @@ def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
     assert "sole" in text.lower() and "completeness" in text.lower()
 
 
+def test_plan_cycle_check_consumes_deviation_notes() -> None:
+    text = PLAN_CYCLE_CHECK.read_text()
+    low = text.lower()
+    # Both forward note types are recognized.
+    assert "needs-replan" in low
+    assert "resolved-forward" in low
+    # An open needs-replan checkbox triggers more_plans; a consumed one does not.
+    assert "[ ]" in text and "[x]" in text
+    # A needs-decision item suppresses the backstop for its scope.
+    assert "needs-decision" in low and "suppress" in low
+    # The backstop overrides only upward.
+    assert "upward" in low
+
+
 CODE_REVIEWER = AGENTS_DIR / "plan-code-reviewer.md"
 
 
