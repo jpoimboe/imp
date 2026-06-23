@@ -262,7 +262,7 @@ def test_main_swallows_broken_pipe(monkeypatch) -> None:
     monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
     monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
 
-    rc = m.main(["status"])
+    rc = m.main(["ls"])
     assert rc == 128 + signal.SIGPIPE
 
 
@@ -290,7 +290,7 @@ def test_main_swallows_broken_pipe_on_buffered_flush(monkeypatch) -> None:
     monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
     monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
 
-    rc = m.main(["status"])
+    rc = m.main(["ls"])
     assert rc == 128 + signal.SIGPIPE
 
 

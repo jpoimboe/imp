@@ -27,7 +27,7 @@ def test_ls_has_description() -> None:
 def test_ls_aliases_resolve_to_the_same_handler() -> None:
     from imp.cli.main import _build_parser, _cmd_status
     parser = _build_parser()
-    for name in ("ls", "list", "status"):
+    for name in ("ls", "list"):
         assert parser.parse_args([name]).func is _cmd_status
 
 

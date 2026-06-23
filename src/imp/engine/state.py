@@ -513,7 +513,7 @@ class LockHeld(Exception):
 class ProjectLock:
     """File-backed advisory lock for single-Change-running enforcement.
 
-    The lock file's content is the holder's PID so `imp status` can display it.
+    The lock file's content is the holder's PID so `imp ls` can display it.
     """
 
     def __init__(self, path: Path) -> None:

@@ -79,7 +79,7 @@ def _stub_provider_api_keys(
 def _reset_theme() -> Generator[None, None, None]:
     """Pin the active color theme to `ansi` around every test. `palette` keeps
     the active theme in module-global state, and any test that runs the CLI
-    in-process (e.g. `main(["status"])`) calls `_apply_theme` -> `set_theme(...)`,
+    in-process (e.g. `main(["ls"])`) calls `_apply_theme` -> `set_theme(...)`,
     which leaks the resolved theme into the next test. A test that asserts the
     ansi-named SGR codes (e.g. gray `\\x1b[90m`) then fails under random ordering
     if a prior test resolved a dark/light theme — most visibly when a non-ansi

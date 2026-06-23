@@ -37,7 +37,7 @@ def test_new_outside_project_prints_clean_error(
 def test_status_outside_project_keeps_empty_state(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    rc = main(["status"])
+    rc = main(["ls"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "No changes." in out
