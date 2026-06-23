@@ -52,6 +52,7 @@ _DARK: dict[str, Color | None] = {
     "crystal": (0x8A, 0xC0, 0xE0), "crystalLight": (0xD0, 0xE8, 0xF4),
     "iron": (0x33, 0x30, 0x3A), "brew": (0x7A, 0xC8, 0x6A),
     "bookCover": (0x8A, 0x33, 0x44), "bookPage": (0xEC, 0xE2, 0xC8),
+    "sand": (0xE0, 0xC0, 0x70), "ink": (0x2A, 0x36, 0x5A), "quill": (0xD8, 0xD0, 0xE0),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -79,6 +80,7 @@ _LIGHT: dict[str, Color | None] = {
     "crystal": (0x4A, 0x80, 0xA0), "crystalLight": (0x2A, 0x5A, 0x80),
     "iron": (0x4A, 0x46, 0x52), "brew": (0x2A, 0x8A, 0x4A),
     "bookCover": (0x9A, 0x3A, 0x4A), "bookPage": (0xC8, 0xBE, 0xA0),
+    "sand": (0xB0, 0x8A, 0x30), "ink": (0x2A, 0x36, 0x5A), "quill": (0x6A, 0x6A, 0x80),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -104,6 +106,7 @@ _ANSI_P: dict[str, Color | None] = {
     "crystal": "bright_cyan", "crystalLight": "bright_white",
     "iron": "bright_black", "brew": "green",
     "bookCover": "red", "bookPage": "white",
+    "sand": "yellow", "ink": "blue", "quill": "bright_white",
 }
 
 
@@ -534,6 +537,38 @@ def _potion_shelf(g: Grid, shelf_y: int) -> None:
         _px(g, x, shelf_y - 3, _P["glass"])
 
 
+def _hourglass(g: Grid, cx: int, top_y: int) -> None:
+    _rect(g, cx - 3, top_y, 7, 1, _P["branch"])
+    _rect(g, cx - 3, top_y + 7, 7, 1, _P["branch"])
+    walls = {1: 3, 2: 2, 3: 1, 4: 1, 5: 2, 6: 3}
+    for j, d in walls.items():
+        _px(g, cx - d, top_y + j, _P["glass"])
+        _px(g, cx + d, top_y + j, _P["glass"])
+    for dx in (-2, -1, 0, 1, 2):
+        _px(g, cx + dx, top_y + 1, _P["sand"])
+    _px(g, cx, top_y + 4, _P["sand"])
+    for dx in (-2, -1, 0, 1, 2):
+        _px(g, cx + dx, top_y + 6, _P["sand"])
+
+
+def _scroll(g: Grid, cx: int, cy: int) -> None:
+    _rect(g, cx - 4, cy, 9, 4, _P["bookPage"])
+    for j in range(4):
+        _px(g, cx - 5, cy + j, _P["branch"])
+        _px(g, cx + 5, cy + j, _P["branch"])
+    _line(g, cx - 3, cy + 1, cx + 2, cy + 1, _P["ink"])
+    _line(g, cx - 3, cy + 2, cx + 1, cy + 2, _P["ink"])
+
+
+def _quill_ink(g: Grid, base_x: int, base_y: int) -> None:
+    _rect(g, base_x - 2, base_y, 5, 2, _P["ink"])
+    _px(g, base_x, base_y - 1, _P["ink"])
+    for k in range(5):
+        _px(g, base_x + 1 + k, base_y - 1 - k, _P["quill"])
+    _px(g, base_x + 6, base_y - 6, _P["quill"])
+    _px(g, base_x + 4, base_y - 4, _P["bookPage"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -736,6 +771,24 @@ def _potion_shelf_scene(g: Grid) -> None:
     _left_imp(g)
 
 
+def _hourglass_scene(g: Grid) -> None:
+    _stars(g, 0, 3, 0.08)
+    _hourglass(g, 24, 3)
+    _left_imp(g)
+
+
+def _scroll_scene(g: Grid) -> None:
+    _stars(g, 0, 4, 0.08)
+    _scroll(g, 24, 7)
+    _left_imp(g)
+
+
+def _quill_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _quill_ink(g, 22, 11)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -766,6 +819,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_cauldron_scene, "stir the cauldron — what's brewing?"),
     (_grimoire_scene, "the grimoire is open."),
     (_potion_shelf_scene, "every spell has a price — name yours."),
+    (_hourglass_scene, "time's a construct. ship anyway."),
+    (_scroll_scene, "the ink is wet. dictate."),
+    (_quill_scene, "name your desire."),
 ]
 
 MIN_WIDTH = 32

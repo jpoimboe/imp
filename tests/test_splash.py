@@ -512,3 +512,32 @@ def test_cauldron_paints_brew_bubbles_above_the_iron_body() -> None:
             for x, c in enumerate(row) if c == splash._P["brew"]]
     assert iron and brew
     assert min(y for _, y in brew) < min(y for _, y in iron)
+
+
+def test_task4p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_hourglass_scene", "time's a construct. ship anyway."),
+        ("_scroll_scene", "the ink is wet. dictate."),
+        ("_quill_scene", "name your desire."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_hourglass_paints_sand_in_both_chambers() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    top_y = 3
+    splash._hourglass(g, 24, top_y)
+    sand_y = [y for y, row in enumerate(g)
+              for c in row if c == splash._P["sand"]]
+    assert any(y <= top_y + 1 for y in sand_y)
+    assert any(y >= top_y + 6 for y in sand_y)
