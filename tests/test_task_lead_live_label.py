@@ -27,3 +27,8 @@ def test_task_lead_instructs_the_live_label_push() -> None:
 def test_task_lead_bare_case_drops_plan_denominator() -> None:
     out = _render_task_lead(plan_total=0)
     assert "code · plan 2 · task <N>/6 · writing" in out
+
+
+def test_task_lead_bare_case_reviewing_drops_plan_denominator() -> None:
+    out = _render_task_lead(plan_total=0)
+    assert "code · plan 2 · task <N>/6 · reviewing" in out
