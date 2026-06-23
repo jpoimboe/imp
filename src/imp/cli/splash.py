@@ -987,7 +987,7 @@ def _wand_scene(g: Grid) -> None:
 
 def _tarot_scene(g: Grid) -> None:
     _ground(g, 13, glow=True)
-    _tarot(g, 25, 12)
+    _tarot(g, 24, 12)
     _left_imp(g)
 
 
