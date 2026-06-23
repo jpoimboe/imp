@@ -541,3 +541,39 @@ def test_hourglass_paints_sand_in_both_chambers() -> None:
               for c in row if c == splash._P["sand"]]
     assert any(y <= top_y + 1 for y in sand_y)
     assert any(y >= top_y + 6 for y in sand_y)
+
+
+def test_task5p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_raven_scene", "tell me what haunts your codebase."),
+        ("_black_cat_scene", "back so soon? good."),
+        ("_bats_scene", "creatures of the night, assemble."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_raven_paints_a_silhouette_with_a_glowing_eye() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._raven(g, 23, 11)
+    body = any(c == splash._P["creature"] for row in g for c in row)
+    eye = any(c == splash._P["creatureEye"] for row in g for c in row)
+    assert body and eye
+
+
+def test_black_cat_paints_a_silhouette_with_glowing_eyes() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._black_cat(g, 23, 12)
+    body = any(c == splash._P["creature"] for row in g for c in row)
+    eyes = any(c == splash._P["creatureEye"] for row in g for c in row)
+    assert body and eyes

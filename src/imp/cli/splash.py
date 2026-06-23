@@ -53,6 +53,7 @@ _DARK: dict[str, Color | None] = {
     "iron": (0x33, 0x30, 0x3A), "brew": (0x7A, 0xC8, 0x6A),
     "bookCover": (0x8A, 0x33, 0x44), "bookPage": (0xEC, 0xE2, 0xC8),
     "sand": (0xE0, 0xC0, 0x70), "ink": (0x2A, 0x36, 0x5A), "quill": (0xD8, 0xD0, 0xE0),
+    "creature": (0x1A, 0x18, 0x22), "creatureEye": (0xF0, 0x9A, 0x3C),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -81,6 +82,7 @@ _LIGHT: dict[str, Color | None] = {
     "iron": (0x4A, 0x46, 0x52), "brew": (0x2A, 0x8A, 0x4A),
     "bookCover": (0x9A, 0x3A, 0x4A), "bookPage": (0xC8, 0xBE, 0xA0),
     "sand": (0xB0, 0x8A, 0x30), "ink": (0x2A, 0x36, 0x5A), "quill": (0x6A, 0x6A, 0x80),
+    "creature": (0x2A, 0x26, 0x32), "creatureEye": (0xC2, 0x46, 0x1A),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -107,6 +109,7 @@ _ANSI_P: dict[str, Color | None] = {
     "iron": "bright_black", "brew": "green",
     "bookCover": "red", "bookPage": "white",
     "sand": "yellow", "ink": "blue", "quill": "bright_white",
+    "creature": "bright_black", "creatureEye": "bright_red",
 }
 
 
@@ -569,6 +572,33 @@ def _quill_ink(g: Grid, base_x: int, base_y: int) -> None:
     _px(g, base_x + 4, base_y - 4, _P["bookPage"])
 
 
+def _raven(g: Grid, cx: int, base_y: int) -> None:
+    _disc(g, cx, base_y - 1, 3, 2, _P["creature"])
+    _disc(g, cx + 2, base_y - 3, 1, 1, _P["creature"])
+    _px(g, cx + 4, base_y - 3, _P["fire2"])
+    _line(g, cx - 3, base_y - 1, cx - 5, base_y + 1, _P["creature"])
+    _px(g, cx + 2, base_y - 3, _P["creatureEye"])
+
+
+def _black_cat(g: Grid, cx: int, base_y: int) -> None:
+    _disc(g, cx, base_y - 1, 3, 2, _P["creature"])
+    _disc(g, cx - 2, base_y - 3, 2, 1, _P["creature"])
+    _px(g, cx - 3, base_y - 4, _P["creature"])
+    _px(g, cx - 1, base_y - 4, _P["creature"])
+    _line(g, cx + 3, base_y, cx + 5, base_y - 2, _P["creature"])
+    _px(g, cx + 5, base_y - 3, _P["creature"])
+    _px(g, cx - 3, base_y - 3, _P["creatureEye"])
+    _px(g, cx - 1, base_y - 3, _P["creatureEye"])
+
+
+def _bat(g: Grid, cx: int, cy: int) -> None:
+    _px(g, cx, cy, _P["creature"])
+    _px(g, cx - 1, cy - 1, _P["creature"])
+    _px(g, cx - 2, cy, _P["creature"])
+    _px(g, cx + 1, cy - 1, _P["creature"])
+    _px(g, cx + 2, cy, _P["creature"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -789,6 +819,29 @@ def _quill_scene(g: Grid) -> None:
     _left_imp(g)
 
 
+def _raven_scene(g: Grid) -> None:
+    _stars(g, 0, 5, 0.10)
+    _moon(g, 27, 3, 2, crescent=False)
+    _branch(g, 18, 29, 12)
+    _raven(g, 23, 11)
+    _left_imp(g)
+
+
+def _black_cat_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _moon(g, 27, 3, 2, crescent=True)
+    _black_cat(g, 23, 12)
+    _left_imp(g)
+
+
+def _bats_scene(g: Grid) -> None:
+    _stars(g, 0, 6, 0.12)
+    _moon(g, 25, 4, 3, crescent=False)
+    for x, y in ((20, 3), (24, 5), (27, 8), (22, 9)):
+        _bat(g, x, y)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -822,6 +875,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_hourglass_scene, "time's a construct. ship anyway."),
     (_scroll_scene, "the ink is wet. dictate."),
     (_quill_scene, "name your desire."),
+    (_raven_scene, "tell me what haunts your codebase."),
+    (_black_cat_scene, "back so soon? good."),
+    (_bats_scene, "creatures of the night, assemble."),
 ]
 
 MIN_WIDTH = 32
