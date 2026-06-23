@@ -684,6 +684,27 @@ def _bug(g: Grid, cx: int, cy: int) -> None:
     _px(g, cx + 1, cy - 4, _P["creature"])
 
 
+def _coffee(g: Grid, cx: int, base_y: int) -> None:
+    _rect(g, cx - 2, base_y - 3, 5, 4, _P["bookPage"])
+    _px(g, cx + 3, base_y - 2, _P["bookPage"])
+    _px(g, cx + 4, base_y - 1, _P["bookPage"])
+    _px(g, cx + 3, base_y, _P["bookPage"])
+    _rect(g, cx - 1, base_y - 3, 3, 1, _P["branch"])
+    _px(g, cx - 1, base_y - 5, _P["cloud"])
+    _px(g, cx, base_y - 6, _P["cloud"])
+    _px(g, cx + 1, base_y - 5, _P["cloud"])
+
+
+def _terminal(g: Grid, cx: int, top_y: int) -> None:
+    _rect(g, cx - 5, top_y, 11, 7, _P["iron"])
+    _rect(g, cx - 4, top_y + 1, 9, 4, _P["portalCore"])
+    _px(g, cx - 3, top_y + 2, _P["brew"])
+    _rect(g, cx - 2, top_y + 2, 3, 1, _P["brew"])
+    _px(g, cx + 3, top_y + 3, _P["fireTip"])
+    _px(g, cx, top_y + 7, _P["iron"])
+    _rect(g, cx - 2, top_y + 8, 5, 1, _P["iron"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -983,6 +1004,27 @@ def _bug_scene(g: Grid) -> None:
     _left_imp(g)
 
 
+def _coffee_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _coffee(g, 23, 12)
+    _left_imp(g)
+
+
+def _terminal_scene(g: Grid) -> None:
+    _terminal(g, 24, 3)
+    _left_imp(g)
+
+
+def _desk_book(g: Grid) -> None:
+    _rect(g, 18, 12, 12, 1, _P["branch"])
+    _rect(g, 20, 10, 3, 2, _P["bookPage"])
+    _rect(g, 24, 10, 3, 2, _P["bookPage"])
+    _px(g, 23, 10, _P["bookCover"])
+    _px(g, 23, 11, _P["bookCover"])
+    _candle(g, 28, 11, 2)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -1028,6 +1070,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_spider_web_scene, "caught in a bug? i'll cut it loose."),
     (_ouroboros_scene, "round and round the refactor goes."),
     (_bug_scene, "show me the bug. i'll deal with it."),
+    (_coffee_scene, "another night, another diff."),
+    (_terminal_scene, "mischief, compiled."),
+    (_desk_book, "light the candles. we begin."),
 ]
 
 MIN_WIDTH = 32

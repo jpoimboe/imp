@@ -714,3 +714,31 @@ def test_bug_paints_a_red_shell_over_a_dark_body_with_a_glowing_eye() -> None:
     body = any(c == splash._P["creature"] for row in g for c in row)
     eye = any(c == splash._P["creatureEye"] for row in g for c in row)
     assert shell and body and eye
+
+
+def test_task3p4_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_coffee_scene", "another night, another diff."),
+        ("_terminal_scene", "mischief, compiled."),
+        ("_desk_book", "light the candles. we begin."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_terminal_paints_a_dark_screen_in_an_iron_bezel_with_a_green_prompt() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._terminal(g, 24, 3)
+    bezel = any(c == splash._P["iron"] for row in g for c in row)
+    screen = any(c == splash._P["portalCore"] for row in g for c in row)
+    prompt = any(c == splash._P["brew"] for row in g for c in row)
+    assert bezel and screen and prompt
