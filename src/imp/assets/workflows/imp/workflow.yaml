@@ -279,7 +279,7 @@ phases:
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
-          - {if: {exit: 2}, goto: assert-stamped}                                  # base unmoved: implement-phase cleanup already stamped
+          - {if: {exit: 2}, goto: cleanup-merge}                                   # base unmoved: route through cleanup so a reconciler commit from a prior merge pass gets stamped; idempotent no-op when already stamped
           - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip reconciler
           - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run reconciler (next)
           - {else: true, pause: true}

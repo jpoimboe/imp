@@ -34,8 +34,8 @@ def test_integrate_rebase_routing_into_cleanup_gate() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integrate-rebase")
     m = evaluate_rules(rules, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "assert-stamped"
-    assert "integration_fork" not in m.var_mutations            # exit 2 emits no fork SHA
+    assert isinstance(m.action, Goto) and m.action.target == "cleanup-merge"
+    assert m.var_mutations == {}  # exit 2 routes to cleanup, no SHA churn
     m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
     assert m.var_mutations.get("review_base") == ""
