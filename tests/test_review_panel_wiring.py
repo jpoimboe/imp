@@ -40,7 +40,7 @@ def _steps(wf):
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_implement_phase_is_the_per_batch_loop() -> None:
+def test_code_phase_is_the_per_batch_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "code")
     assert [s.name for s in impl.steps] == [
         "task-lead", "verify",
@@ -51,7 +51,7 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
     ]
 
 
-def test_no_separate_review_phase_stamp_and_finalize_tail_implement() -> None:
+def test_no_separate_review_phase_stamp_and_finalize_tail_code() -> None:
     wf = _wf()
     assert not any(p.name == "review" for p in wf.phases)
     impl = next(p for p in wf.phases if p.name == "code")

@@ -241,7 +241,7 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_finalize_tails_the_implement_phase() -> None:
+def test_finalize_tails_the_code_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     impl = next(p for p in wf.phases if p.name == "code")
