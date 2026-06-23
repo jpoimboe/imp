@@ -45,6 +45,8 @@ _DARK: dict[str, Color | None] = {
     "wisp": (0x9A, 0xE0, 0xD0), "wispGlow": (0x2A, 0x4A, 0x4A),
     "mushroomStem": (0xC8, 0xC0, 0xA8), "mushroomCap": (0x6A, 0xC0, 0x9A),
     "mushroomGlow": (0x2A, 0x4A, 0x3A),
+    "sigil": (0xB0, 0x7A, 0xE0), "sigilDim": (0x5A, 0x3A, 0x7A),
+    "portal": (0x7A, 0xC8, 0xE0), "portalCore": (0x18, 0x24, 0x42),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -65,6 +67,8 @@ _LIGHT: dict[str, Color | None] = {
     "wisp": (0x2A, 0x8A, 0x8A), "wispGlow": (0xB0, 0xD0, 0xD0),
     "mushroomStem": (0x8A, 0x80, 0x68), "mushroomCap": (0x2A, 0x8A, 0x5A),
     "mushroomGlow": (0xB0, 0xD0, 0xC0),
+    "sigil": (0x6A, 0x3A, 0xB0), "sigilDim": (0x9A, 0x80, 0xC0),
+    "portal": (0x2A, 0x7A, 0xA0), "portalCore": (0x2A, 0x40, 0x60),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -83,6 +87,8 @@ _ANSI_P: dict[str, Color | None] = {
     "firefly": "bright_yellow", "fireflyGlow": "bright_black",
     "wisp": "bright_cyan", "wispGlow": "cyan",
     "mushroomStem": "white", "mushroomCap": "green", "mushroomGlow": "bright_black",
+    "sigil": "magenta", "sigilDim": "bright_black",
+    "portal": "cyan", "portalCore": "blue",
 }
 
 
@@ -442,6 +448,19 @@ def _mushroom(g: Grid, x: int, base_y: int, h: int) -> None:
     _px(g, x, cap_y + 1, _P["mushroomGlow"])
 
 
+def _summon_ring(g: Grid, cx: int, cy: int) -> None:
+    _ring(g, cx, cy, 6, 2.4, _P["sigilDim"], 0.72, 1.0)
+    for dx in (-5, -3, 0, 3, 5):
+        _px(g, cx + dx, cy, _P["sigil"])
+    _spark(g, cx, cy, _P["sigil"])
+
+
+def _portal_gate(g: Grid, cx: int, cy: int) -> None:
+    _disc(g, cx, cy, 3, 5, _P["portalCore"])
+    _ring(g, cx, cy, 4, 6, _P["portal"], 0.62, 1.0)
+    _glow_ring(g, cx, cy, 5, _P["portal"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -585,6 +604,27 @@ def _glowing_mushrooms(g: Grid) -> None:
     _left_imp(g)
 
 
+def _summoning_circle(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _summon_ring(g, 24, 11)
+    _left_imp(g)
+
+
+def _open_portal(g: Grid) -> None:
+    _portal_gate(g, 25, 7)
+    _left_imp(g)
+
+
+def _rune_sigil(g: Grid) -> None:
+    _stars(g, 0, 6, 0.10)
+    _ring(g, 24, 6, 4, 3, _P["sigilDim"], 0.78, 1.0)
+    for x, y in ((20, 5), (24, 2), (28, 5), (22, 9), (26, 9)):
+        _px(g, x, y, _P["sigil"])
+        _px(g, x, y - 1, _P["sigilDim"])
+    _spark(g, 24, 6, _P["sigil"])
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -606,6 +646,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_twin_candles, "whisper your wish."),
     (_twin_torches, "let's raise a little hell."),
     (_glowing_mushrooms, "let's make some mischief."),
+    (_summoning_circle, "the circle is drawn."),
+    (_open_portal, "the portal is open. step through."),
+    (_rune_sigil, "the runes are ready."),
 ]
 
 MIN_WIDTH = 32

@@ -398,3 +398,39 @@ def test_mushroom_paints_a_glowing_cap_above_its_stem() -> None:
             for x, cell in enumerate(row) if cell == splash._P["mushroomStem"]]
     assert cap and stem
     assert min(y for _, y in cap) < max(y for _, y in stem)
+
+
+def test_task1p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_summoning_circle", "the circle is drawn."),
+        ("_open_portal", "the portal is open. step through."),
+        ("_rune_sigil", "the runes are ready."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_portal_gate_paints_a_glowing_ring_around_a_dark_core() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._portal_gate(g, 25, 7)
+    rim = any(cell == splash._P["portal"] for row in g for cell in row)
+    core = any(cell == splash._P["portalCore"] for row in g for cell in row)
+    assert rim and core
+
+
+def test_summon_ring_paints_a_sigil_ring_and_accents() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._summon_ring(g, 24, 11)
+    ring = any(cell == splash._P["sigilDim"] for row in g for cell in row)
+    accent = any(cell == splash._P["sigil"] for row in g for cell in row)
+    assert ring and accent
