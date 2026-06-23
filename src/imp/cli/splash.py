@@ -54,6 +54,7 @@ _DARK: dict[str, Color | None] = {
     "bookCover": (0x8A, 0x33, 0x44), "bookPage": (0xEC, 0xE2, 0xC8),
     "sand": (0xE0, 0xC0, 0x70), "ink": (0x2A, 0x36, 0x5A), "quill": (0xD8, 0xD0, 0xE0),
     "creature": (0x1A, 0x18, 0x22), "creatureEye": (0xF0, 0x9A, 0x3C),
+    "pumpkin": (0xE0, 0x7A, 0x2A), "gold": (0xE0, 0xC0, 0x60),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -83,6 +84,7 @@ _LIGHT: dict[str, Color | None] = {
     "bookCover": (0x9A, 0x3A, 0x4A), "bookPage": (0xC8, 0xBE, 0xA0),
     "sand": (0xB0, 0x8A, 0x30), "ink": (0x2A, 0x36, 0x5A), "quill": (0x6A, 0x6A, 0x80),
     "creature": (0x2A, 0x26, 0x32), "creatureEye": (0xC2, 0x46, 0x1A),
+    "pumpkin": (0xB0, 0x5A, 0x1A), "gold": (0xB0, 0x90, 0x30),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -110,6 +112,7 @@ _ANSI_P: dict[str, Color | None] = {
     "bookCover": "red", "bookPage": "white",
     "sand": "yellow", "ink": "blue", "quill": "bright_white",
     "creature": "bright_black", "creatureEye": "bright_red",
+    "pumpkin": "yellow", "gold": "bright_yellow",
 }
 
 
@@ -599,6 +602,30 @@ def _bat(g: Grid, cx: int, cy: int) -> None:
     _px(g, cx + 2, cy, _P["creature"])
 
 
+def _pumpkin(g: Grid, cx: int, cy: int) -> None:
+    _disc(g, cx, cy, 4, 3, _P["pumpkin"])
+    _px(g, cx, cy - 4, _P["branch"])
+    _px(g, cx - 2, cy - 1, _P["impEye"])
+    _px(g, cx + 2, cy - 1, _P["impEye"])
+    _px(g, cx, cy, _P["impEye"])
+    _line(g, cx - 2, cy + 1, cx + 2, cy + 1, _P["impEye"])
+    _px(g, cx - 1, cy, _P["fire3"])
+    _px(g, cx + 1, cy, _P["fire3"])
+
+
+def _skeleton_key(g: Grid, cx: int, cy: int) -> None:
+    _ring(g, cx, cy, 2, 2, _P["gold"], 0.40, 1.0)
+    _line(g, cx + 2, cy, cx + 7, cy, _P["gold"])
+    _px(g, cx + 6, cy + 1, _P["gold"])
+    _px(g, cx + 7, cy + 1, _P["gold"])
+
+
+def _top_hat(g: Grid, cx: int, base_y: int) -> None:
+    _rect(g, cx - 5, base_y, 11, 1, _P["creature"])
+    _rect(g, cx - 3, base_y - 5, 7, 5, _P["creature"])
+    _rect(g, cx - 3, base_y - 1, 7, 1, _P["bookCover"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -842,6 +869,24 @@ def _bats_scene(g: Grid) -> None:
     _left_imp(g)
 
 
+def _jack_o_lantern_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _pumpkin(g, 24, 9)
+    _left_imp(g)
+
+
+def _skeleton_key_scene(g: Grid) -> None:
+    _stars(g, 0, 5, 0.08)
+    _skeleton_key(g, 21, 7)
+    _left_imp(g)
+
+
+def _top_hat_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _top_hat(g, 24, 12)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -878,6 +923,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_raven_scene, "tell me what haunts your codebase."),
     (_black_cat_scene, "back so soon? good."),
     (_bats_scene, "creatures of the night, assemble."),
+    (_jack_o_lantern_scene, "trouble? my specialty."),
+    (_skeleton_key_scene, "i know a shortcut — only slightly cursed."),
+    (_top_hat_scene, "now you see it. now you ship it."),
 ]
 
 MIN_WIDTH = 32

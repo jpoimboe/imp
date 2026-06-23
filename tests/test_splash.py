@@ -577,3 +577,30 @@ def test_black_cat_paints_a_silhouette_with_glowing_eyes() -> None:
     body = any(c == splash._P["creature"] for row in g for c in row)
     eyes = any(c == splash._P["creatureEye"] for row in g for c in row)
     assert body and eyes
+
+
+def test_task6p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_jack_o_lantern_scene", "trouble? my specialty."),
+        ("_skeleton_key_scene", "i know a shortcut — only slightly cursed."),
+        ("_top_hat_scene", "now you see it. now you ship it."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_pumpkin_paints_a_carved_face_in_its_body() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._pumpkin(g, 24, 9)
+    body = any(c == splash._P["pumpkin"] for row in g for c in row)
+    face = any(c == splash._P["impEye"] for row in g for c in row)
+    assert body and face
