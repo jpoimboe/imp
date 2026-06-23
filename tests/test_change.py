@@ -430,3 +430,33 @@ def test_create_unknown_workflow_rolls_back(tmp_path: Path) -> None:
         Change.create(tmp_path, title="X", change_id="crt002",
                       base_branch="main", workflow="bogus")
     assert not (tmp_path / ".imp" / "changes" / "crt002").exists()
+
+
+def test_create_draft_records_origin_and_seed_opening(tmp_path: Path) -> None:
+    import json
+    _seed_control(tmp_path)
+    ch = Change.create_draft(
+        tmp_path, title="Add OAuth", change_id="drforg1", base_branch="main",
+        origin="idea", seed_opening="Add OAuth\n\nwire login")
+    assert ch.origin == "idea"
+    assert ch.seed_opening == "Add OAuth\n\nwire login"
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["origin"] == "idea"
+    assert meta["seed_opening"] == "Add OAuth\n\nwire login"
+
+
+def test_create_draft_defaults_origin_draft_and_seed_none(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="X", change_id="drforg2", base_branch="main")
+    assert ch.origin == "draft"
+    assert ch.seed_opening is None
+
+
+def test_load_reads_origin_and_seed_opening(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create_draft(
+        tmp_path, title="X", change_id="drforg3", base_branch="main",
+        origin="followup", seed_opening="X\n\nbody")
+    loaded = Change.load(tmp_path, "drforg3")
+    assert loaded.origin == "followup"
+    assert loaded.seed_opening == "X\n\nbody"

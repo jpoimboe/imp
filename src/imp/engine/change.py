@@ -97,6 +97,8 @@ class Change:
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
     workflow: str | None = None  # per-Change workflow name; None = project default
+    origin: str = "draft"        # provenance: idea | draft | followup (Backlog only)
+    seed_opening: str | None = None  # title+description seed for a fresh resume open
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite change.json under the
@@ -245,6 +247,7 @@ class Change:
     def create_draft(
         cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
+        origin: str = "draft", seed_opening: str | None = None,
     ) -> Change:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -271,6 +274,8 @@ class Change:
             "layout_version": LAYOUT_VERSION,
             "imp_commit": _imp_commit(control_root),
             "workflow": workflow,
+            "origin": origin,
+            "seed_opening": seed_opening,
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
@@ -305,7 +310,7 @@ class Change:
             id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
             change_dir=change_dir, materialized=False, orig_base_head=orig_base_head,
-            workflow=workflow,
+            workflow=workflow, origin=origin, seed_opening=seed_opening,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
@@ -335,4 +340,6 @@ class Change:
             orig_base_head=meta.get("orig_base_head", ""),
             cur_base_head=meta.get("cur_base_head", ""),
             workflow=meta.get("workflow"),
+            origin=meta.get("origin", "draft"),
+            seed_opening=meta.get("seed_opening"),
         )
