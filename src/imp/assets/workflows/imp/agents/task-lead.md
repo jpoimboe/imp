@@ -104,7 +104,7 @@ unimplemented task, or the re-opened task from injected feedback):
    Dispatch the `code-reviewer` at the **`medium` tier**:
    `task(subagent_name="code-reviewer", tier="medium", …)`.
    {% endif %}
-   Give the reviewer the task text + spec. (Implementer → the `medium` tier;
+   Give the reviewer the task text + spec. (coder → the `medium` tier;
    the reviewer and your own judgment → the `medium` tier. Name tiers, never
    specific model names — the configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
