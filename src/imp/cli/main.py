@@ -31,6 +31,7 @@ from imp.cli import palette as pal
 from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver, compute_start_phase
 from imp.cli.live_status import LiveStatus
+from imp.cli.opening import render_opening_beat
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.session_run import (
@@ -121,10 +122,6 @@ class ReplyInterjectRouter:
 
 
 SPEC_SEED_MARKER = "Implement this spec"
-
-OPENING_QUESTION = (
-    "What change would you like to make? Describe what you have in mind, "
-    "and I'll help shape it into a spec.")
 
 
 def _should_prompt_opening(
@@ -783,12 +780,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
-        prompt = Prompt(
-            editing_mode=_editing_mode(control),
-            color=should_use_color(sys.stdout))
+        color = should_use_color(sys.stdout)
+        print(render_opening_beat(theme=pal.active_theme(), color=color, unicode=True))
+        print()
+        prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
-            reply = (await prompt.ask_async(question=OPENING_QUESTION,
-                                            width=_term_width())).strip()
+            reply = (await prompt.ask_async()).strip()
         except (EOFError, KeyboardInterrupt):
             print("imp: cancelled", file=sys.stderr)
             return 130

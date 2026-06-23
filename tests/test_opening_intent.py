@@ -1,7 +1,6 @@
 import argparse
 
 from imp.cli.main import (
-    OPENING_QUESTION,
     SeedResolution,
     _normalize_opening_reply,
     _should_prompt_opening,
@@ -53,10 +52,9 @@ def test_no_prompt_when_seeded_from_spec_file() -> None:
         seed_text="Implement this spec\n...", interactive=True) is False
 
 
-def test_opening_question_is_a_plain_question() -> None:
-    assert "?" in OPENING_QUESTION
-    assert "load" not in OPENING_QUESTION.lower()
-    assert "tool" not in OPENING_QUESTION.lower()
+def test_opening_question_constant_is_removed() -> None:
+    import imp.cli.main as main_mod
+    assert not hasattr(main_mod, "OPENING_QUESTION")
 
 
 def test_empty_reply_falls_back_to_unseeded() -> None:
