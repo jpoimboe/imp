@@ -626,6 +626,27 @@ def _top_hat(g: Grid, cx: int, base_y: int) -> None:
     _rect(g, cx - 3, base_y - 1, 7, 1, _P["bookCover"])
 
 
+def _wand(g: Grid, base_x: int, base_y: int) -> None:
+    _line(g, base_x, base_y, base_x + 5, base_y - 5, _P["branch"])
+    tip_x, tip_y = base_x + 6, base_y - 6
+    _spark(g, tip_x, tip_y, _P["gold"])
+    _px(g, tip_x, tip_y, _P["glassCore"])
+    _px(g, base_x + 2, base_y - 4, _P["gold"])
+    _px(g, base_x - 1, base_y - 2, _P["gold"])
+
+
+def _tarot(g: Grid, cx: int, base_y: int) -> None:
+    for dx, lift in ((-4, 0), (0, 1), (4, 0)):
+        x = cx + dx
+        top = base_y - 5 - lift
+        _rect(g, x - 1, top, 3, 6, _P["bookPage"])
+        for j in range(6):
+            _px(g, x - 1, top + j, _P["bookCover"])
+            _px(g, x + 1, top + j, _P["bookCover"])
+    _px(g, cx, base_y - 3, _P["sigil"])
+    _spark(g, cx, base_y - 3, _P["sigil"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -887,6 +908,26 @@ def _top_hat_scene(g: Grid) -> None:
     _left_imp(g)
 
 
+def _wand_scene(g: Grid) -> None:
+    _stars(g, 0, 6, 0.08)
+    _wand(g, 20, 12)
+    _left_imp(g)
+
+
+def _tarot_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _tarot(g, 25, 12)
+    _left_imp(g)
+
+
+def _fairy_ring(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _ring(g, 24, 12, 6, 2, _P["mushroomGlow"], 0.6, 1.0)
+    for x in (20, 24, 28):
+        _mushroom(g, x, 12, 2)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -926,6 +967,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_jack_o_lantern_scene, "trouble? my specialty."),
     (_skeleton_key_scene, "i know a shortcut — only slightly cursed."),
     (_top_hat_scene, "now you see it. now you ship it."),
+    (_wand_scene, "speak, and it shall be built."),
+    (_tarot_scene, "pick a card. any card."),
+    (_fairy_ring, "step inside the ring."),
 ]
 
 MIN_WIDTH = 32
