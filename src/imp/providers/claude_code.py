@@ -959,6 +959,10 @@ class ClaudeCodeAgentRunner:
         # receive_response()). None outside an active `async with client_ctx`.
         self._client: Any = None
         self._impty_driver: Any = None
+        # Per-step capture of the nested `claude` CLI's stderr. Built in
+        # _run_loop from invocation.transcript_dir; wired into the SDK via the
+        # `stderr` callback so a CLI exit-1 carries its cause. None until built.
+        self._stderr_sink: Any = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None,
@@ -984,6 +988,7 @@ class ClaudeCodeAgentRunner:
             mcp_servers["impty"] = impty_server
         return ClaudeAgentOptions(
             model=self.model,
+            stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
             # The claude_code provider drives the `claude` CLI, which
             # authenticates via its OWN backend (OAuth/subscription, Vertex, or
             # Bedrock). ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are the
@@ -1068,7 +1073,9 @@ class ClaudeCodeAgentRunner:
                         "message": "runner cancelled by interrupt",
                     }}
                     return
-                yield perr.make_unknown_error_event(exc)
+                tail = self._stderr_sink.tail() if self._stderr_sink else None
+                yield perr.make_unknown_error_event(
+                    exc, detail={"stderr_tail": tail} if tail else None)
                 return
         finally:
             if self._ctx is not None:
@@ -1092,11 +1099,15 @@ class ClaudeCodeAgentRunner:
             if self._client is not None:
                 await _reap_transport_group(self._client)
             self._client = None
+            if self._stderr_sink is not None:
+                self._stderr_sink.close()
 
     async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         from imp.engine.state import JsonlEventLog
         elog = invocation.event_log or JsonlEventLog(invocation.events_path)
         aid = invocation.agent_id or "step:unnamed"
+        from imp.providers.stderr_sink import StderrSink
+        self._stderr_sink = StderrSink(invocation.transcript_dir / "stderr.log")
 
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
@@ -1598,7 +1609,9 @@ class ClaudeCodeAgentRunner:
                         # every structured field — before the substring fallback
                         # and never through the nudge path.
                         term = _termination_from_result(
-                            sdk_msg, last_text, _subprocess_diag(client))
+                            sdk_msg, last_text,
+                            {**_subprocess_diag(client),
+                             "stderr_tail": self._stderr_sink.tail()})
                         if term is not None:
                             yield perr.make_error_event(
                                 term, kind=getattr(term, "kind", ""))
@@ -1700,7 +1713,9 @@ class ClaudeCodeAgentRunner:
                 # today's SDK SubprocessCLITransport does not expose
                 # returncode/stderr_tail, so this returns {}; the capture is
                 # forward-compatible for when the SDK adds those attributes.
-                self._last_no_result_diag = _subprocess_diag(client)
+                self._last_no_result_diag = {
+                    **_subprocess_diag(client),
+                    "stderr_tail": self._stderr_sink.tail()}
                 break
 
         # Fell out of the async-with block without yielding a ResultMessage.
