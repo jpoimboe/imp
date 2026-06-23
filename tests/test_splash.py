@@ -742,3 +742,37 @@ def test_terminal_paints_a_dark_screen_in_an_iron_bezel_with_a_green_prompt() ->
     screen = any(c == splash._P["portalCore"] for row in g for c in row)
     prompt = any(c == splash._P["brew"] for row in g for c in row)
     assert bezel and screen and prompt
+
+
+def test_task4p4_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_clockwork", "let's build the machine."),
+        ("_stacked_tomes", "i've read everything. ask."),
+        ("_loaded_dice", "the dice are loaded in your favor."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_gear_paints_a_gold_ring_around_an_iron_hub() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._gear(g, 23, 6, 3)
+    assert g[6][23] == splash._P["iron"]
+    assert any(c == splash._P["gold"] for row in g for c in row)
+
+
+def test_die_paints_a_page_face_with_pips_in_the_given_color() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._die(g, 19, 9, [(1, 1)], splash._P["impEye"])
+    assert g[9][19] == splash._P["bookPage"]
+    assert g[10][20] == splash._P["impEye"]

@@ -705,6 +705,19 @@ def _terminal(g: Grid, cx: int, top_y: int) -> None:
     _rect(g, cx - 2, top_y + 8, 5, 1, _P["iron"])
 
 
+def _gear(g: Grid, cx: int, cy: int, r: int) -> None:
+    _ring(g, cx, cy, r, r, _P["gold"], 0.45, 1.0)
+    for dx, dy in ((0, -r - 1), (0, r + 1), (-r - 1, 0), (r + 1, 0)):
+        _px(g, cx + dx, cy + dy, _P["gold"])
+    _px(g, cx, cy, _P["iron"])
+
+
+def _die(g: Grid, x: int, y: int, pips: list[tuple[int, int]], pip_color: Color | None) -> None:
+    _rect(g, x, y, 4, 4, _P["bookPage"])
+    for px_, py_ in pips:
+        _px(g, x + px_, y + py_, pip_color)
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -1025,6 +1038,33 @@ def _desk_book(g: Grid) -> None:
     _left_imp(g)
 
 
+def _clockwork(g: Grid) -> None:
+    _stars(g, 0, 5, 0.06)
+    _gear(g, 23, 6, 3)
+    _gear(g, 28, 10, 2)
+    _left_imp(g)
+
+
+def _stacked_tomes(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    for x, y, w, cover in (
+        (19, 12, 9, _P["bookCover"]),
+        (20, 11, 8, _P["sigil"]),
+        (19, 10, 9, _P["brew"]),
+        (21, 9, 6, _P["iron"]),
+    ):
+        _rect(g, x, y, w, 1, cover)
+        _px(g, x + w - 1, y, _P["bookPage"])
+    _left_imp(g)
+
+
+def _loaded_dice(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _die(g, 19, 9, [(1, 1), (2, 2)], _P["impEye"])
+    _die(g, 24, 9, [(0, 0), (3, 0), (0, 3), (3, 3), (1, 1), (2, 2)], _P["creatureEye"])
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -1073,6 +1113,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_coffee_scene, "another night, another diff."),
     (_terminal_scene, "mischief, compiled."),
     (_desk_book, "light the candles. we begin."),
+    (_clockwork, "let's build the machine."),
+    (_stacked_tomes, "i've read everything. ask."),
+    (_loaded_dice, "the dice are loaded in your favor."),
 ]
 
 MIN_WIDTH = 32
