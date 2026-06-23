@@ -134,7 +134,7 @@ def _resume_replays_transcript(transcript_dir: Any) -> bool:
     the provider injects a synthetic `continue` user turn so it resumes as the
     ordinary SEND_TO_LLM case. Only an empty/absent transcript starts fresh: a
     `resume:` edge can target a step that never ran (e.g. a clean reintegration
-    rebase skips the integrator, then integrate-verify fails and resumes it), and
+    rebase skips the reconciler, then integrate-verify fails and resumes it), and
     passively replaying nothing builds an empty query that hangs
     receive_response() forever."""
     from imp.agents.transcript import Transcript

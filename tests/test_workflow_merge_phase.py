@@ -15,11 +15,11 @@ def _rules(wf, name):
     return next(s for s in wf.flat_steps() if s.name == name).rules
 
 
-def test_merge_phase_layers_integrator_loop_on_cleanup_gate() -> None:
+def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
     wf = load_workflow(WF)
     names = [s.name for s in _phase(wf, "merge").steps]
     assert names == [
-        "wait-for-head", "integrate-rebase", "integrator",
+        "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
@@ -48,9 +48,9 @@ def test_integrate_rebase_routing_into_cleanup_gate() -> None:
     assert isinstance(m.action, Pause)
 
 
-def test_integrator_stuck_pauses_and_else_continues() -> None:
+def test_reconciler_stuck_pauses_and_else_continues() -> None:
     wf = load_workflow(WF)
-    rules = _rules(wf, "integrator")
+    rules = _rules(wf, "reconciler")
     m = evaluate_rules(rules, vars={},
                        output={"status": "Success", "stuck": True, "summary": ""})
     assert isinstance(m.action, Pause)
@@ -70,7 +70,7 @@ def test_merge_phase_never_routes_to_planning_or_releases_the_lane() -> None:
             assert getattr(a, "release", None) is None, (step.name, a)
 
 
-def test_integration_verify_routes_failure_to_integrator() -> None:
+def test_integration_verify_routes_failure_to_reconciler() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-verify")
     m = evaluate_rules(rules, vars={}, output={"exit": 0})
@@ -78,22 +78,22 @@ def test_integration_verify_routes_failure_to_integrator() -> None:
     m = evaluate_rules(rules, vars={}, output={"exit": 124})
     assert isinstance(m.action, Pause)
     m = evaluate_rules(rules, vars={}, output={"exit": 1})
-    assert isinstance(m.action, Goto) and m.action.target == "integrator"
+    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.resume is True
     assert m.action.release is None
 
 
-def test_integration_review_routes_blocking_and_minor_to_integrator() -> None:
+def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-reviewer")
     base = {"status": "Success", "findings": ""}
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": True, "has_minor_findings": False})
-    assert isinstance(m.action, Goto) and m.action.target == "integrator"
+    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": False, "has_minor_findings": True})
-    assert isinstance(m.action, Goto) and m.action.target == "integrator"
+    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
     assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": False, "has_minor_findings": False})
@@ -115,7 +115,7 @@ def test_cleanup_merge_routes_by_exit_code() -> None:
     m2 = evaluate_rules(r, vars={}, output={"exit": 2})
     assert isinstance(m2.action, Continue)
     m3 = evaluate_rules(r, vars={}, output={"exit": 3})
-    assert isinstance(m3.action, Goto) and m3.action.target == "integrator"
+    assert isinstance(m3.action, Goto) and m3.action.target == "reconciler"
     assert m3.action.resume is True
     m1 = evaluate_rules(r, vars={}, output={"exit": 1})
     assert isinstance(m1.action, Pause)

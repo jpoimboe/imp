@@ -159,7 +159,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "autosquash-resolve-sweep": "resolving fixups",
         "finalize": "finalizing",
         "wait-for-head": "waiting to merge",
-        "integrator": "integrating",
+        "reconciler": "integrating",
         "integration-verify": "testing",
         "integration-reviewer": "reviewing merge",
         "merge-to-base": "merging",

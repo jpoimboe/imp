@@ -2205,7 +2205,7 @@ def test_lane_events_render_no_fallback_breadcrumb() -> None:
     tree = nv.build_tree([
         _ev("1", "step_started", step="wait-for-head", kind="branch", phase="merge"),
         _ev("2", "lane_acquired", base="main", step="wait-for-head"),
-        _ev("3", "lane_released", base="main", step="integrator"),
+        _ev("3", "lane_released", base="main", step="reconciler"),
         _ev("4", "lane_evicted", base="main", rewind_to="wait-for-head"),
     ])
     step = tree.root.children[0].children[0]

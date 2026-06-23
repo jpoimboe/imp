@@ -196,8 +196,8 @@ def test_code_reviewer_reads_review_scope_not_integration_pass() -> None:
     assert "review_base" in text                     # per-batch diff base is pinned
 
 
-def test_integrator_is_a_rebase_conflict_resolver() -> None:
-    text = (AGENTS / "integrator.md").read_text()
+def test_reconciler_is_a_rebase_conflict_resolver() -> None:
+    text = (AGENTS / "reconciler.md").read_text()
     assert "MERGE_HEAD" not in text
     assert "--amend" not in text
     assert "git rebase --continue" in text

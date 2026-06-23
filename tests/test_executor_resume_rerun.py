@@ -147,8 +147,8 @@ async def test_resume_truncated_autonomous_replays_and_advances(
 async def test_resume_empty_transcript_seeds_fresh_and_advances(
         tmp_path: Path, provider_registry) -> None:
     # A `resume:` edge into a step that never ran (empty transcript). This is the
-    # reintegration path: a clean rebase skips the integrator, integrate-verify
-    # then fails, and its `resume: integrator` rule resumes a step with no
+    # reintegration path: a clean rebase skips the reconciler, integrate-verify
+    # then fails, and its `resume: reconciler` rule resumes a step with no
     # transcript. The buggy path kept the (empty) transcript and passed
     # initial_messages=(), so the provider built an empty query and hung. The fix
     # runs the step fresh: a non-empty seed reaches the runner and it advances.

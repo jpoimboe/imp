@@ -15,7 +15,7 @@ TARGETS = [
     "spec-reviewer", "plan-reviewer", "plan-code-reviewer", "code-reviewer",
 ]
 NON_TARGETS = [
-    "task-lead", "integrator", "deferred-sweep", "plan-cycle-check",
+    "task-lead", "reconciler", "deferred-sweep", "plan-cycle-check",
     "finalize", "autosquash-resolve", "explorer", "researcher",
 ]
 

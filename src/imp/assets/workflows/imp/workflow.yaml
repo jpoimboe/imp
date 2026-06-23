@@ -281,12 +281,12 @@ phases:
         command: ./scripts/integrate-rebase.sh
         rules:
           - {if: {exit: 2}, goto: assert-stamped}                                  # base unmoved: implement-phase cleanup already stamped
-          - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip integrator
-          - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run integrator (next)
+          - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip reconciler
+          - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run reconciler (next)
           - {else: true, pause: true}
 
-      - name: integrator
-        file: agents/integrator.md
+      - name: reconciler
+        file: agents/reconciler.md
         tier: high
         label: integrating
         rules:
@@ -300,7 +300,7 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: integrator}
+          - {else: true, resume: reconciler}
 
       - name: integration-reviewer
         file: agents/integration-review.md
@@ -308,10 +308,10 @@ phases:
         label: reviewing merge
         max_loops: 6
         rules:
-          - {if: {blocking: true}, resume: integrator,
+          - {if: {blocking: true}, resume: reconciler,
              label: "addressing integration review feedback",
              feedback: "Here's review feedback to address:"}
-          - {if: {has_minor_findings: true}, resume: integrator,
+          - {if: {has_minor_findings: true}, resume: reconciler,
              label: "integrating minor improvements",
              feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           - {if: {status: Error}, pause: true}
@@ -323,7 +323,7 @@ phases:
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
           - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: integrator}
+          - {if: {exit: 3}, resume: reconciler}
           - {else: true, pause: true}
 
       - name: autosquash-resolve-merge

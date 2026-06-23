@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cleanup.sh — the ONE clean-tree -> fold -> stamp ritual, run at every
 # production->consumption boundary (after task-lead, after deferred-sweep, after
-# integrator). It enforces the invariant that no commit reaches a consumer
+# reconciler). It enforces the invariant that no commit reaches a consumer
 # (reviewer, stamp, merge) without a clean tree, folded fixups, and a stamped
 # `Change: <id>` trailer, all over the SAME range (arg or fork)..HEAD.
 #

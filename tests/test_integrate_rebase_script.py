@@ -104,11 +104,11 @@ def test_base_moved_conflict_exits_6(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=True)
     r = _run(pr)
-    assert r.returncode == 6                                  # conflict -> integrator
-    # Rebase must be left in-progress for the integrator to resolve
+    assert r.returncode == 6                                  # conflict -> reconciler
+    # Rebase must be left in-progress for the reconciler to resolve
     rebase_active = (pr / ".git" / "rebase-merge").exists() or \
                     (pr / ".git" / "rebase-apply").exists()
-    assert rebase_active, "rebase must be left in-progress for the integrator"
+    assert rebase_active, "rebase must be left in-progress for the reconciler"
 
 
 def test_clean_rebase_prints_fork_sha_and_replants_cur_base_head(tmp_path: Path) -> None:

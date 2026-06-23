@@ -100,7 +100,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
     assert [s.name for s in wf.phases[-1].steps] == [
-        "wait-for-head", "integrate-rebase", "integrator",
+        "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base"]

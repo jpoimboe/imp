@@ -236,7 +236,7 @@ def merge_to_base(
 ) -> MergeResult:
     """Integrate imp/<id> into <base> (spec §4). B1: git decides on base dirt.
     B3: re-assert UNDER THE LOCK (the race-proof point) that the change worktree
-    is clean (DIRTY) when `project_root` is given: the integrator is the last
+    is clean (DIRTY) when `project_root` is given: the reconciler is the last
     committer, so a dirty tree would silently drop its work then be destroyed by
     remove_worktree (H1 net, R5)."""
     branch = f"imp/{change_id}"

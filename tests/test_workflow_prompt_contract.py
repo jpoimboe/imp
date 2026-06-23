@@ -466,7 +466,7 @@ def test_task_lead_and_deferred_sweep_marked_synced_pair() -> None:
 
 def test_integration_prompts_use_recorded_endpoints() -> None:
     review = (AGENTS_DIR / "integration-review.md").read_text()
-    integ = (AGENTS_DIR / "integrator.md").read_text()
+    integ = (AGENTS_DIR / "reconciler.md").read_text()
     # Both consumers read the fork from the integration_fork var, not a labeled-line file.
     assert "vars.integration_fork" in review
     assert "Integration-fork:" not in review

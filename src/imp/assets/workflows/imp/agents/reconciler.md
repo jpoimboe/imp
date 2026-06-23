@@ -1,6 +1,6 @@
 ---
-name: integrator
-label: integrating
+name: reconciler
+label: reconciling
 description: Reconcile the change branch against a moved base — resolve rebase conflicts, fix what the base silently broke, address integration-review findings, drive to a clean linear branch; pause only for an irreducibly ambiguous reconciliation or a change the base has invalidated.
 output:
   status: {type: enum, values: [Success, Error]}
@@ -73,7 +73,7 @@ reconciled. For a reconciliation you resolved defensively but a human should sti
 ratify, append a line to the `## Deferred Followups` section in reader form (create the
 heading if absent):
 
-`- [ ] DEFERRED integrator: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
+`- [ ] DEFERRED reconciler: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
 
 These are a durable record for asynchronous human triage and for integration-review's
 synchronous read — not input to any automated sweep. Never mutate the spec or plan

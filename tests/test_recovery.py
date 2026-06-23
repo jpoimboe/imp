@@ -23,7 +23,7 @@ def test_gate_steps_in_span_merge_phase() -> None:
     # assertion is stable across the implement-phase step shuffle.
     lo, hi = _idx(wf, "integrate-rebase"), _idx(wf, "merge-to-base")
     assert gate_steps_in_span(wf, lo, hi) == (
-        "integrate-rebase", "integrator", "integration-verify",
+        "integrate-rebase", "reconciler", "integration-verify",
         "integration-reviewer", "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
     )
@@ -60,10 +60,10 @@ def test_plan_rewind_unknown_target_lists_names() -> None:
     from imp.engine.recovery import RewindError, plan_rewind
 
     with pytest.raises(RewindError) as exc:
-        plan_rewind(_wf(), _state("code-reviewer"), "no-such-step")
+        plan_rewind(_wf(), _state("plan-code-reviewer"), "no-such-step")
     msg = str(exc.value)
     assert "no-such-step" in msg
-    assert "code-reviewer" in msg           # a valid step is listed
+    assert "plan-code-reviewer" in msg      # a valid step is listed
     assert "merge" in msg                   # a valid phase is listed
 
 
@@ -71,10 +71,10 @@ def test_plan_rewind_backward_to_step() -> None:
     from imp.engine.recovery import plan_rewind
 
     wf = _wf()
-    plan = plan_rewind(wf, _state("code-reviewer"), "code-reviewer")
-    assert plan.to_step == "code-reviewer"
-    assert plan.target_idx == _idx(wf, "code-reviewer")   # name-resolved, shift-stable
-    assert plan.from_step == "code-reviewer"
+    plan = plan_rewind(wf, _state("plan-code-reviewer"), "plan-code-reviewer")
+    assert plan.to_step == "plan-code-reviewer"
+    assert plan.target_idx == _idx(wf, "plan-code-reviewer")   # name-resolved, shift-stable
+    assert plan.from_step == "plan-code-reviewer"
 
 
 def test_plan_rewind_forward_to_merge_is_rejected() -> None:
@@ -83,7 +83,7 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("wait-for-head"), "merge-to-base")
     assert exc.value.gate_steps == (
-        "integrate-rebase", "integrator", "integration-verify",
+        "integrate-rebase", "reconciler", "integration-verify",
         "integration-reviewer", "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped",
     )
@@ -107,14 +107,14 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # code-reviewer maxed; task-lead upstream; finalize downstream.
-    st = _state("code-reviewer",
-                loop_counts={"task-lead": 2, "code-reviewer": 6, "finalize": 1})
+    # plan-code-reviewer maxed; task-lead upstream; finalize downstream.
+    st = _state("plan-code-reviewer",
+                loop_counts={"task-lead": 2, "plan-code-reviewer": 6, "finalize": 1})
     log = InMemoryEventLog()
-    plan = plan_rewind(wf, st, "code-reviewer")
+    plan = plan_rewind(wf, st, "plan-code-reviewer")
     apply_rewind(plan, wf, st, log)
 
-    assert st.step == "code-reviewer"
+    assert st.step == "plan-code-reviewer"
     assert st.step_attempt == 0
     assert st.resume_pending is None
     assert st.current_step is None
@@ -124,8 +124,8 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     assert "step_rewound" in types
     assert "gates_bypassed" not in types
     rewound = next(e for e in log.read() if e["type"] == "step_rewound")
-    assert rewound["payload"]["from_step"] == "code-reviewer"
-    assert rewound["payload"]["to_target"] == "code-reviewer"
+    assert rewound["payload"]["from_step"] == "plan-code-reviewer"
+    assert rewound["payload"]["to_target"] == "plan-code-reviewer"
 
 
 def test_plan_rewind_forward_no_gate_allowed() -> None:
@@ -141,14 +141,14 @@ def test_apply_rewind_sets_step_label_from_target_step() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    st = _state("code-reviewer")
+    st = _state("plan-code-reviewer")
     log = InMemoryEventLog()
-    plan = plan_rewind(wf, st, "code-reviewer")
+    plan = plan_rewind(wf, st, "plan-code-reviewer")
     apply_rewind(plan, wf, st, log)
 
     # step_label is the target step's resolved label (label or name), NOT None
     # and NOT a stale value from before the reroute.
-    assert st.step == "code-reviewer"
+    assert st.step == "plan-code-reviewer"
     assert st.step_label == "reviewing code"
 
 
