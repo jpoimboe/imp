@@ -235,74 +235,64 @@ def test_tear_down_change_destroys_worktree_branch_and_archives(
 
 
 def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
-    from imp.engine import backlog
-
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         description="do a thing", depends_on=[], created_by="human")
+    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
+                        base_branch="main", origin="followup",
+                        seed_opening="Backlog brief\n\ndo a thing")
     rc = _abandon(tmp_path, "bk1", assume_yes=True)
     assert rc == 0
-    assert backlog.read_record(tmp_path, "bk1") is None
+    assert not (tmp_path / ".imp" / "changes" / "bk1").exists()
 
 
 def test_abandon_backlog_reports_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from imp.engine import backlog
-
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         description="do a thing", depends_on=[], created_by="human")
+    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
+                        base_branch="main", origin="followup",
+                        seed_opening="Backlog brief")
     _abandon(tmp_path, "bk1", assume_yes=True)
-    assert "abandoned backlog item bk1" in capsys.readouterr().out
+    assert "Abandoned bk1." in capsys.readouterr().out
 
 
-def test_abandon_backlog_decline_leaves_record_intact(tmp_path: Path) -> None:
-    from imp.engine import backlog
-
+def test_abandon_backlog_decline_leaves_home_intact(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         description="do a thing", depends_on=[], created_by="human")
+    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
+                        base_branch="main", origin="followup",
+                        seed_opening="Backlog brief")
     rc = _abandon(tmp_path, "bk1", interactive=True, input_fn=lambda _p: "n")
     assert rc == 1
-    assert backlog.read_record(tmp_path, "bk1") is not None
+    assert (tmp_path / ".imp" / "changes" / "bk1").exists()
 
 
 def test_abandon_backlog_non_interactive_skips_prompt(tmp_path: Path) -> None:
-    from imp.engine import backlog
-
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         description="do a thing", depends_on=[], created_by="human")
+    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
+                        base_branch="main", origin="followup",
+                        seed_opening="Backlog brief")
     rc = _abandon(
         tmp_path, "bk1", interactive=False,
         input_fn=lambda _p: (_ for _ in ()).throw(AssertionError("should not prompt")))
     assert rc == 0
-    assert backlog.read_record(tmp_path, "bk1") is None
+    assert not (tmp_path / ".imp" / "changes" / "bk1").exists()
 
 
-def test_abandon_live_change_wins_over_same_id_backlog_record(tmp_path: Path) -> None:
-    from imp.engine import backlog
-
+def test_abandon_unknown_id_reaps_branch_and_exits_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    backlog.write_record(tmp_path, change_id="feat", title="brief",
-                         description="b", depends_on=[], created_by="human")
-    rc = _abandon(tmp_path, "feat", assume_yes=True)
+    rc = _abandon(tmp_path, "ghost", assume_yes=True)
     assert rc == 0
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()   # live torn down
-    # The backlog record was not retired (Change.load succeeded, live path ran), so it survives.
-    assert backlog.read_record(tmp_path, "feat") is not None
+    assert "already gone" in capsys.readouterr().out
 
 
 def test_abandon_backlog_eoferror_at_confirm_cancels(tmp_path: Path) -> None:
-    from imp.engine import backlog
-
     _seed_control(tmp_path)
-    backlog.write_record(tmp_path, change_id="bk1", title="Backlog brief",
-                         description="do a thing", depends_on=[], created_by="human")
+    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
+                        base_branch="main", origin="followup",
+                        seed_opening="Backlog brief")
     rc = _abandon(
         tmp_path, "bk1", interactive=True,
         input_fn=lambda _p: (_ for _ in ()).throw(EOFError()))
     assert rc == 1
-    assert backlog.read_record(tmp_path, "bk1") is not None
+    assert (tmp_path / ".imp" / "changes" / "bk1").exists()

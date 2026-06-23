@@ -1977,29 +1977,9 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
     try:
         change = Change.load(control, change_id)
     except (LoadError, LoadErrors):
-        # No live Change (live always wins — we only reach here because Change.load
-        # failed). Fall back to a backlog brief: retire it honoring the same
-        # confirmation contract.
-        rec = backlog.read_record(control, change_id)
-        if rec is not None:
-            do_prompt = not assume_yes and (
-                _interactive() if interactive is None else interactive)
-            if do_prompt:
-                print(f"Abandon backlog item {change_id}: {rec['title']!r}?")
-                try:
-                    ans = input_fn(
-                        "Type 'y' to confirm, anything else to cancel: ").strip().lower()
-                except EOFError:
-                    ans = ""
-                if ans not in ("y", "yes"):
-                    print(f"Abandon cancelled; backlog item {change_id} left intact.")
-                    return 1
-            backlog.remove_record(control, change_id)
-            print(f"abandoned backlog item {change_id}")
-            return 0
-        # Worktree fully gone (e.g. a crash between worktree removal and branch
-        # deletion). Idempotent teardown: reap a possibly-orphaned branch (the
-        # name needs only the id) and exit 0 — NOT the rc=2 LoadError path.
+        # No live or un-materialized change-home: Change.load failed because the
+        # home directory is absent (already fully torn down, or never existed).
+        # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, change_id)
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
