@@ -94,3 +94,149 @@ _P: dict[str, "Color | None"] = {}
 def _use_theme(theme: str) -> None:
     global _P
     _P = _build_palette(theme)
+
+
+def _make_grid() -> Grid:
+    return [[None] * W for _ in range(H)]
+
+
+def _round(v: float) -> int:
+    """Round half toward +infinity (stable across the engine)."""
+    import math
+    return math.floor(v + 0.5)
+
+
+def _imul(a: int, b: int) -> int:
+    return ((a & 0xFFFFFFFF) * (b & 0xFFFFFFFF)) & 0xFFFFFFFF
+
+
+def _hash(x: int, y: int) -> float:
+    """Multiply-xor-shift hash returning a float in [0, 1); no RNG, so a chosen
+    scene renders identically every time."""
+    h = (_imul(int(x), 374761393) + _imul(int(y), 668265263)) & 0xFFFFFFFF
+    h = _imul(h ^ (h >> 13), 1274126177)
+    h ^= h >> 16
+    return (h & 0xFFFFFFFF) / 4294967296.0
+
+
+def _px(g: Grid, x: float, y: float, c: "Color | None") -> None:
+    xi = _round(x)
+    yi = _round(y)
+    if c is not None and 0 <= yi < len(g) and 0 <= xi < len(g[0]):
+        g[yi][xi] = c
+
+
+def _rect(g: Grid, x: int, y: int, w: int, h: int, c: "Color | None") -> None:
+    if c is None:
+        return
+    for j in range(h):
+        for i in range(w):
+            _px(g, x + i, y + j, c)
+
+
+def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: "Color | None") -> None:
+    if c is None:
+        return
+    x0i, y0i, x1i, y1i = int(x0), int(y0), int(x1), int(y1)
+    dx = abs(x1i - x0i)
+    dy = abs(y1i - y0i)
+    sx = 1 if x0i < x1i else -1
+    sy = 1 if y0i < y1i else -1
+    e = dx - dy
+    while True:
+        _px(g, x0i, y0i, c)
+        if x0i == x1i and y0i == y1i:
+            break
+        e2 = 2 * e
+        if e2 > -dy:
+            e -= dy
+            x0i += sx
+        if e2 < dx:
+            e += dx
+            y0i += sy
+
+
+def _disc(g: Grid, cx: float, cy: float, rx: float, ry: float, c: "Color | None") -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy <= 1:
+                g[y][x] = c
+
+
+def _carve(g: Grid, cx: float, cy: float, rx: float, ry: float) -> None:
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy <= 1:
+                g[y][x] = None
+
+
+def _ring(g: Grid, cx: float, cy: float, rx: float, ry: float,
+          c: "Color | None", inn: float, out: float) -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            d = dx * dx + dy * dy
+            if inn <= d <= out:
+                _px(g, x, y, c)
+
+
+def _glow_ring(g: Grid, cx: float, cy: float, r: float, c: "Color | None") -> None:
+    if c is None:
+        return
+    for y in range(len(g)):
+        for x in range(len(g[0])):
+            dx = (x - cx) / (r + 2.0)
+            dy = (y - cy) / (r + 2.0)
+            d = dx * dx + dy * dy
+            if 0.62 <= d <= 1.0 and (x + y) & 1 and g[y][x] is None:
+                _px(g, x, y, c)
+
+
+def _spark(g: Grid, x: float, y: float, c: "Color | None") -> None:
+    xi = _round(x)
+    yi = _round(y)
+    _px(g, xi, yi, c)
+    _px(g, xi - 1, yi, c)
+    _px(g, xi + 1, yi, c)
+    _px(g, xi, yi - 1, c)
+    _px(g, xi, yi + 1, c)
+
+
+def _stars(g: Grid, y0: int, y1: int, dens: float) -> None:
+    """Hash-placed stars confined to the accent columns (x >= 19) so they never
+    collide with the imp and a chosen scene renders identically every time."""
+    s = 3
+    gy = 0
+    while gy * s < y1:
+        gx = 0
+        while gx * s < W:
+            if _hash(gx, gy) >= dens:
+                gx += 1
+                continue
+            jx = gx * s + int(_hash(gx + 101, gy) * s)
+            jy = gy * s + int(_hash(gx, gy + 57) * s)
+            if jx < 19 or jy < y0 or jy >= y1:
+                gx += 1
+                continue
+            br = _hash(gx + 7, gy + 13)
+            color = (_P["starBright"] if br < 0.12
+                     else (_P["star"] if br < 0.55 else _P["starDim"]))
+            _px(g, jx, jy, color)
+            gx += 1
+        gy += 1
+
+
+def _ground(g: Grid, y: int, *, glow: bool = False) -> None:
+    for x in range(W):
+        _px(g, x, y, _P["ground"])
+        if glow and x & 1:
+            _px(g, x, y - 1, _P["groundGlow"])

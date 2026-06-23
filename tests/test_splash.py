@@ -36,3 +36,47 @@ def test_bg_open_emits_truecolor_and_named_background_codes() -> None:
     assert splash._bg_open((0, 255, 0)) == "\x1b[48;2;0;255;0m"
     assert splash._bg_open("red") == "\x1b[41m"
     assert splash._bg_open(None) == ""
+
+
+def test_px_out_of_bounds_is_a_silent_no_op() -> None:
+    g = splash._make_grid()
+    splash._px(g, -1, 0, (1, 1, 1))
+    splash._px(g, splash.W + 5, 0, (1, 1, 1))
+    splash._px(g, 0, splash.H + 5, (1, 1, 1))
+    assert all(cell is None for row in g for cell in row)
+
+
+def test_px_in_bounds_sets_the_cell() -> None:
+    g = splash._make_grid()
+    splash._px(g, 5, 6, (1, 2, 3))
+    assert g[6][5] == (1, 2, 3)
+
+
+def test_make_grid_is_exactly_thirty_by_fifteen() -> None:
+    g = splash._make_grid()
+    assert len(g) == splash.H == 15
+    assert all(len(row) == splash.W == 30 for row in g)
+
+
+def test_hash_is_deterministic_in_range_and_varies_by_input() -> None:
+    assert splash._hash(3, 7) == splash._hash(3, 7)
+    assert 0.0 <= splash._hash(3, 7) < 1.0
+    assert splash._hash(3, 7) != splash._hash(4, 7)
+
+
+def test_stars_are_confined_to_the_accent_columns() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._stars(g, 0, splash.H, 0.95)
+    placed = [(x, y) for y, row in enumerate(g)
+              for x, cell in enumerate(row) if cell is not None]
+    assert placed, "expected the dense starfield to place at least one star"
+    assert all(x >= 19 for x, _ in placed)
+
+
+def test_ground_fills_a_row_and_leaves_a_glow_above() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._ground(g, 13, glow=True)
+    assert all(g[13][x] == splash._P["ground"] for x in range(splash.W))
+    assert any(g[12][x] == splash._P["groundGlow"] for x in range(splash.W))
