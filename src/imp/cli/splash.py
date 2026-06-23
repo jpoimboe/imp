@@ -647,6 +647,43 @@ def _tarot(g: Grid, cx: int, base_y: int) -> None:
     _spark(g, cx, base_y - 3, _P["sigil"])
 
 
+def _web(g: Grid, cx: int, cy: int) -> None:
+    for ex, ey in ((cx - 10, cy + 3), (cx - 8, cy + 9), (cx - 3, cy + 10), (cx, cy + 10)):
+        _line(g, cx, cy, ex, ey, _P["starDim"])
+    _ring(g, cx, cy, 9, 9, _P["starDim"], 0.18, 0.28)
+    _ring(g, cx, cy, 9, 9, _P["starDim"], 0.62, 0.74)
+
+
+def _spider(g: Grid, x: int, y: int) -> None:
+    _line(g, x, 0, x, y - 2, _P["starDim"])
+    _disc(g, x, y, 2, 1, _P["creature"])
+    for dx in (-3, -2, 2, 3):
+        _px(g, x + dx, y - 1, _P["creature"])
+        _px(g, x + dx, y + 1, _P["creature"])
+    _px(g, x - 1, y, _P["creatureEye"])
+    _px(g, x + 1, y, _P["creatureEye"])
+
+
+def _ouroboros(g: Grid, cx: int, cy: int, r: int) -> None:
+    _ring(g, cx, cy, r, r, _P["brew"], 0.55, 1.0)
+    _disc(g, cx + r, cy, 1, 1, _P["brew"])
+    _px(g, cx + r, cy - 1, _P["gold"])
+
+
+def _bug(g: Grid, cx: int, cy: int) -> None:
+    _disc(g, cx, cy, 3, 2, _P["bookCover"])
+    _line(g, cx, cy - 2, cx, cy + 2, _P["creature"])
+    _disc(g, cx, cy - 3, 1, 1, _P["creature"])
+    _px(g, cx, cy - 3, _P["creatureEye"])
+    _px(g, cx - 1, cy, _P["impEye"])
+    _px(g, cx + 1, cy + 1, _P["impEye"])
+    for dx in (-3, 3):
+        _px(g, cx + dx, cy, _P["creature"])
+        _px(g, cx + dx, cy + 1, _P["creature"])
+    _px(g, cx - 1, cy - 4, _P["creature"])
+    _px(g, cx + 1, cy - 4, _P["creature"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -928,6 +965,24 @@ def _fairy_ring(g: Grid) -> None:
     _left_imp(g)
 
 
+def _spider_web_scene(g: Grid) -> None:
+    _web(g, 29, 1)
+    _spider(g, 24, 7)
+    _left_imp(g)
+
+
+def _ouroboros_scene(g: Grid) -> None:
+    _stars(g, 0, 6, 0.08)
+    _ouroboros(g, 24, 7, 4)
+    _left_imp(g)
+
+
+def _bug_scene(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _bug(g, 24, 9)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -970,6 +1025,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_wand_scene, "speak, and it shall be built."),
     (_tarot_scene, "pick a card. any card."),
     (_fairy_ring, "step inside the ring."),
+    (_spider_web_scene, "caught in a bug? i'll cut it loose."),
+    (_ouroboros_scene, "round and round the refactor goes."),
+    (_bug_scene, "show me the bug. i'll deal with it."),
 ]
 
 MIN_WIDTH = 32

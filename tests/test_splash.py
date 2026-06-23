@@ -686,3 +686,31 @@ def test_tarot_raises_the_center_card_and_marks_it_with_a_sigil() -> None:
     faces = any(c == splash._P["bookPage"] for row in g for c in row)
     borders = any(c == splash._P["bookCover"] for row in g for c in row)
     assert faces and borders
+
+
+def test_task2p4_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_spider_web_scene", "caught in a bug? i'll cut it loose."),
+        ("_ouroboros_scene", "round and round the refactor goes."),
+        ("_bug_scene", "show me the bug. i'll deal with it."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_bug_paints_a_red_shell_over_a_dark_body_with_a_glowing_eye() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._bug(g, 24, 9)
+    shell = any(c == splash._P["bookCover"] for row in g for c in row)
+    body = any(c == splash._P["creature"] for row in g for c in row)
+    eye = any(c == splash._P["creatureEye"] for row in g for c in row)
+    assert shell and body and eye
