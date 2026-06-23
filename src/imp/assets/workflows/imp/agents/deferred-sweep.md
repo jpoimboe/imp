@@ -2,7 +2,7 @@
 name: deferred-sweep
 label: resolving deferred items
 description: Drain the Deferred Followups list — re-evaluate each item on a risk gate and apply one of three dispositions (fixed / needs-decision / dismissed), trusting and logging low-risk fixes rather than surfacing them.
-subagents: [implementer, code-reviewer]
+subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   sweep_tolerated: {type: bool}
@@ -99,12 +99,12 @@ an item you started to fix turns out high-risk once you touch it, re-classify it
 ## Dispatch — preserve the reviewer discipline
 
 - **Trivial / mechanical fix** (a rename, an import swap, a dedup): dispatch ONLY
-  the implementer (`task(subagent_name="implementer", tier="medium", …)`) with the
+  the coder (`task(subagent_name="coder", tier="medium", …)`) with the
   over-reach guardrail: "apply ONLY this named item; it is bounded and mechanical;
   do not refactor beyond it, touch unrelated code, or alter behavior." Run **no code-reviewer**
   — this matches the existing nit-only-fixup rule. The `verify` gate after the sweep
   is the backstop; you also self-verify the diff stays within the named item.
-- **Non-trivial fix**: dispatch the implementer **and then the code-reviewer**
+- **Non-trivial fix**: dispatch the coder **and then the code-reviewer**
   (`task(subagent_name="code-reviewer", tier="medium", …)`); address every
   blocking finding before committing.
 
@@ -119,8 +119,8 @@ cost finite.
 
 **One clean commit per item** (or per tightly-related group). Unrelated items
 **never** share a commit, matching the one-commit-per-task aesthetic. All commits go
-through the implementer; you never commit, amend, or rebase yourself. Tell the
-implementer to make a NEW commit per item:
+through the coder; you never commit, amend, or rebase yourself. Tell the
+coder to make a NEW commit per item:
 `git add <files> && git commit -m "<type>: <item summary>"` — no `Change:` trailer
 (the workflow stamps it later).
 
@@ -134,7 +134,7 @@ processing an item, update the file so the transient list shrinks as it drains:
   heading if absent) recording the improvement and its commit sha:
   `- opportunistic (<source>): <desc> — fixed <commit-sha>`
   Then **prune** (delete) the transient `- [ ] DEFERRED …` line. Resolve `<commit-sha>`
-  with `git rev-parse --short HEAD` after the implementer's commit. The durable line
+  with `git rev-parse --short HEAD` after the coder's commit. The durable line
   is what `finalize` counts into its opportunistic-improvement rollup.
 - **dismissed** → **remove the transient line** with **no durable record** —
   `finalize` never surfaces dismissed items, so they leave no trace.
@@ -189,8 +189,8 @@ The `sweep-verify` source is the discriminator the convergence check greps for.
   inert to the list drain via the pass-through rule above. A toleration is
   **visibility, not reproduction**: it changes nothing about the merge — `finalize`
   surfaces it to a human before merge (`sweep-verify` runs before `finalize`).
-- **A failure attributable to the diff** → fix it via the implementer and return
-  `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the implementer to make
+- **A failure attributable to the diff** → fix it via the coder and return
+  `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the coder to make
   a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
   `git commit --fixup=HEAD`: a sweep fix resolves its own deferred item and lands as its
   own commit in the batch (which `cleanup-sweep` then stamps), not an amendment to the

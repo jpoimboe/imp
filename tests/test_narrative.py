@@ -1046,7 +1046,7 @@ def test_task_result_with_matching_id_closes_fold_carrying_outcome() -> None:
            "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"})
     b.add({"type": "tool_call", "agent_id": "step:implement/task-lead",
            "payload": {"name": "task", "id": "toolu_minted",
-                       "input": {"subagent_name": "implementer", "task_description": "go"}},
+                       "input": {"subagent_name": "coder", "task_description": "go"}},
            "id": "e2"})
     # Navigate: root -> PhaseNode -> StepNode -> children (SubagentFold lives here)
     step_children = b.tree.root.children[0].children[0].children

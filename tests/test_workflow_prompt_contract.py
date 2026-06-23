@@ -12,7 +12,7 @@ from imp.engine.state import JsonlEventLog
 AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 
 # Subagents (non-interactive, dispatched via `task`): the contract under test.
-SUBAGENT_FILES = ["implementer.md", "code-reviewer.md"]
+SUBAGENT_FILES = ["coder.md", "code-reviewer.md"]
 # Interactive STEPS: the executor wires their resume hooks, so a turn-ending
 # question is correct for them. Exempt from the no-bare-question rule.
 INTERACTIVE_STEP_FILES = ["spec-writer.md", "finalize.md"]

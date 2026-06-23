@@ -8,7 +8,7 @@ Code review requires technical evaluation, not emotional performance.
 
 ## Role in imp
 
-In imp's workflow, the `task-lead` agent acts as the adjudicator: it evaluates which reviewer findings are technically valid for this codebase and decides what to apply. The implementer only applies findings that the task-lead has accepted. This skill governs that evaluation process — not rubber-stamping review feedback, but subjecting it to technical rigor.
+In imp's workflow, the `task-lead` agent acts as the adjudicator: it evaluates which reviewer findings are technically valid for this codebase and decides what to apply. The coder only applies findings that the task-lead has accepted. This skill governs that evaluation process — not rubber-stamping review feedback, but subjecting it to technical rigor.
 
 ## The Response Pattern
 

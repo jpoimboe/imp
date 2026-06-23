@@ -4,7 +4,7 @@ description: |
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
-# reviewer judging the medium-tier implementer's work), not by vendor. Review fires
+# reviewer judging the medium-tier coder's work), not by vendor. Review fires
 # PER PLAN: plan-cycle-check, the sole coverage guard, routes each settled plan
 # through a single `plan-code-reviewer` step over review_base..HEAD, plus once over the
 # whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
@@ -130,7 +130,7 @@ phases:
         tier: high
         label: "implementing · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         rules:
-          - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the coder found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {else: true, continue: true}
 

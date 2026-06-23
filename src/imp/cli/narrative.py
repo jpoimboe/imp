@@ -1498,7 +1498,7 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     NOTE: routing is SINGLE-LEVEL. A grandchild's `sub:<id2>` events are not
     delegated into this fold's nested builder (the top builder only knows its
     own registered child ids). This is currently safe because only `task-lead`
-    declares `task` in its tools; its subagents (implementer, reviewers) declare
+    declares `task` in its tools; its subagents (coder, reviewers) declare
     no subagents of their own, so `child_subagent_defs` in `dispatch_task` is
     empty for them, and the dispatch guard rejects any undeclared name. The
     depth ceiling (`MAX_SUBAGENT_DEPTH`) provides a hard backstop. If the engine

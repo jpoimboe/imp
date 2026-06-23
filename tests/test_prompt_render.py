@@ -86,15 +86,15 @@ def test_vars_default_empty_when_omitted(tmp_path: Path) -> None:
         render_prompt("{{ vars.anything }}", ctx)
 
 
-def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
-    """The shipped implementer template must render two branches: fast_path
+def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
+    """The shipped coder template must render two branches: fast_path
     waives tests; else loads TDD. StrictUndefined means both renders pass
     fast_path explicitly (there is no undefined->else fallback)."""
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
 
     wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["implementer"].prompt_template_source
+    body = wf.agents["coder"].prompt_template_source
     log = _log(tmp_path / "events.jsonl", [])
 
     fast = render_prompt(
@@ -107,7 +107,7 @@ def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
         build_context(change_title="t", event_log=log,
                       vars={"fast_path": False}),
     )
-    # fast-path: no new tests, TDD skill NOT loaded; the implementer does NOT run
+    # fast-path: no new tests, TDD skill NOT loaded; the coder does NOT run
     # the suite or a lint gate itself — the phase-level verify gate owns that.
     assert "do **not** create or modify tests" in fast
     assert "IMP_LINT_COMMAND" not in fast

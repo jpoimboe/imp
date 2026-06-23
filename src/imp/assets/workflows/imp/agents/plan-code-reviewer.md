@@ -120,7 +120,7 @@ both blind agreement and convenient dismissal. Then judge each finding on two ax
 
 For each finding you keep (after dismissing noise):
 - **Block** ⇔ correctness is genuinely at stake **AND** the fix must be re-reviewed
-  and gated before merge (not punt-able). → `verdict: task_gap`: the implementer fixes
+  and gated before merge (not punt-able). → `verdict: task_gap`: the coder fixes
   it via task-lead, and the fix rides the loop back through review. A blocking finding
   is always bounded to a code fix; coverage gaps are NOT your call —
   `plan-cycle-check` decides whether more plans are needed.

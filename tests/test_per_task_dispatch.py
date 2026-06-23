@@ -1,4 +1,4 @@
-"""Layer 1 (review-architecture spec): task-lead dispatches a sonnet implementer
+"""Layer 1 (review-architecture spec): task-lead dispatches a sonnet coder
 plus a single sonnet code-reviewer on BOTH paths; spec-task-reviewer is gone."""
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _task_lead():
 
 def test_task_lead_subagents_drop_spec_task_reviewer() -> None:
     subs = set(_task_lead().subagents)
-    assert subs == {"implementer", "code-reviewer"}, subs
+    assert subs == {"coder", "code-reviewer"}, subs
     assert "spec-task-reviewer" not in subs
 
 
@@ -24,11 +24,11 @@ def test_spec_task_reviewer_file_removed() -> None:
     assert not (AGENTS / "spec-task-reviewer.md").exists()
 
 
-def test_task_lead_dispatches_implementer_at_medium_tier() -> None:
+def test_task_lead_dispatches_coder_at_medium_tier() -> None:
     body = _task_lead().prompt_template_source
-    # The implementer moved haiku(low)->sonnet(medium); the old low-tier dispatch is gone.
-    assert 'subagent_name="implementer", tier="medium"' in body
-    assert 'subagent_name="implementer", tier="low"' not in body
+    # The coder moved haiku(low)->sonnet(medium); the old low-tier dispatch is gone.
+    assert 'subagent_name="coder", tier="medium"' in body
+    assert 'subagent_name="coder", tier="low"' not in body
 
 
 def test_task_lead_dispatches_quality_reviewer_both_paths() -> None:

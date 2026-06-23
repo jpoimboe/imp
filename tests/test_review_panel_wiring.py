@@ -281,7 +281,7 @@ def test_finalize_rework_routes_to_plan_writer() -> None:
 def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
     text = (AGENTS / "finalize.md").read_text()
     assert "send the change back to implement" not in text
-    assert "carried to the implementer" not in text
+    assert "carried to the coder" not in text
     assert "clarify the desired outcome and scope before returning a rework decision" in text
 
 

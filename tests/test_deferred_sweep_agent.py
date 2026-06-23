@@ -12,7 +12,7 @@ SWEEP = AGENTS / "deferred-sweep.md"
 def test_deferred_sweep_parses_with_expected_contract() -> None:
     agent = parse_agent_file(SWEEP)
     assert agent.name == "deferred-sweep"
-    assert set(agent.subagents) == {"implementer", "code-reviewer"}
+    assert set(agent.subagents) == {"coder", "code-reviewer"}
     fields = agent.output_schema.field_names()
     assert "status" in fields and "summary" in fields
 

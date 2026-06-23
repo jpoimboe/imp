@@ -19,13 +19,13 @@ def _ctx(tmp_path: Path, agent_id: str = "step:plan/coder") -> ToolContext:
 # --- C1: disk-seeding the subagent counter ----------------------------------
 
 def test_seed_past_existing_dirs(tmp_path: Path) -> None:
-    """With implementer-1 and implementer-2 present, the next allocated id is >= 3
-    — a fresh dispatch never re-targets implementer-1."""
+    """With coder-1 and coder-2 present, the next allocated id is >= 3
+    — a fresh dispatch never re-targets coder-1."""
     from imp.agents.subagents import _seed_subagent_counter
     ctx = _ctx(tmp_path)
     base = ctx.parent_transcript_dir / "subagents"
-    (base / "implementer-1").mkdir(parents=True)
-    (base / "implementer-2").mkdir()
+    (base / "coder-1").mkdir(parents=True)
+    (base / "coder-2").mkdir()
     _seed_subagent_counter(ctx)
     assert ctx.next_subagent_invocation_id() == 3
 
@@ -36,7 +36,7 @@ def test_seed_global_max_across_names(tmp_path: Path) -> None:
     from imp.agents.subagents import _seed_subagent_counter
     ctx = _ctx(tmp_path)
     base = ctx.parent_transcript_dir / "subagents"
-    for name in ("implementer-1", "code-reviewer-2", "implementer-3"):
+    for name in ("coder-1", "code-reviewer-2", "coder-3"):
         (base / name).mkdir(parents=True, exist_ok=True)
     _seed_subagent_counter(ctx)
     assert ctx._subagent_counter == 3
@@ -51,7 +51,7 @@ def test_seed_noop_without_dir_or_with_advanced_counter(tmp_path: Path) -> None:
     _seed_subagent_counter(ctx)                 # subagents/ dir absent -> no-op
     assert ctx.next_subagent_invocation_id() == 1
     base = ctx.parent_transcript_dir / "subagents"
-    (base / "implementer-9").mkdir(parents=True)  # appears AFTER counter advanced
+    (base / "coder-9").mkdir(parents=True)  # appears AFTER counter advanced
     _seed_subagent_counter(ctx)                 # counter != 0 -> no re-seed
     assert ctx.next_subagent_invocation_id() == 2
 
@@ -60,20 +60,20 @@ def test_allocate_fresh_run_numbering_unchanged(tmp_path: Path) -> None:
     """With no subagents/ dir the allocator numbers from 1, unchanged from today."""
     from imp.agents.subagents import _allocate_subagent_dir
     ctx = _ctx(tmp_path)
-    inv_id, target = _allocate_subagent_dir(ctx, "implementer")
+    inv_id, target = _allocate_subagent_dir(ctx, "coder")
     assert inv_id == 1
-    assert target == ctx.parent_transcript_dir / "subagents" / "implementer-1"
+    assert target == ctx.parent_transcript_dir / "subagents" / "coder-1"
 
 
 def test_allocate_returns_seeded_fresh_dir(tmp_path: Path) -> None:
-    """The allocator seeds first, so with implementer-1 present it returns id 2."""
+    """The allocator seeds first, so with coder-1 present it returns id 2."""
     from imp.agents.subagents import _allocate_subagent_dir
     ctx = _ctx(tmp_path)
     base = ctx.parent_transcript_dir / "subagents"
-    (base / "implementer-1").mkdir(parents=True)
-    inv_id, target = _allocate_subagent_dir(ctx, "implementer")
+    (base / "coder-1").mkdir(parents=True)
+    inv_id, target = _allocate_subagent_dir(ctx, "coder")
     assert inv_id == 2
-    assert target == base / "implementer-2"
+    assert target == base / "coder-2"
 
 
 class _RecLog:
@@ -107,12 +107,12 @@ def test_collision_reallocates_and_warns(tmp_path: Path) -> None:
     ctx.event_log = _RecLog()
     ctx._subagent_counter = 1   # seed guard skips; next id (2) will collide
     base = ctx.parent_transcript_dir / "subagents"
-    _write_stale_transcript(base / "implementer-2")
+    _write_stale_transcript(base / "coder-2")
 
-    inv_id, target = _allocate_subagent_dir(ctx, "implementer")
+    inv_id, target = _allocate_subagent_dir(ctx, "coder")
 
     assert inv_id == 3
-    assert target == base / "implementer-3"
+    assert target == base / "coder-3"
     assert Transcript(target / "transcript.jsonl").load() == []   # fresh/empty
 
     warns = [e for e in ctx.event_log.events if e["type"] == "runner_warning"]
@@ -120,7 +120,7 @@ def test_collision_reallocates_and_warns(tmp_path: Path) -> None:
     payload = warns[0]["payload"]
     assert payload["attempted_id"] == 2
     assert payload["reallocated_id"] == 3
-    assert payload["colliding_path"] == str(base / "implementer-2")
+    assert payload["colliding_path"] == str(base / "coder-2")
     assert "message" in payload
 
 
@@ -131,10 +131,10 @@ def test_no_warning_when_no_collision(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     ctx.event_log = _RecLog()
     base = ctx.parent_transcript_dir / "subagents"
-    (base / "implementer-1").mkdir(parents=True)   # empty dir, no transcript.jsonl
+    (base / "coder-1").mkdir(parents=True)   # empty dir, no transcript.jsonl
 
-    inv_id, target = _allocate_subagent_dir(ctx, "implementer")
+    inv_id, target = _allocate_subagent_dir(ctx, "coder")
 
     assert inv_id == 2
-    assert target == base / "implementer-2"
+    assert target == base / "coder-2"
     assert ctx.event_log.events == []

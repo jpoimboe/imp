@@ -1,6 +1,6 @@
 ---
-name: implementer
-label: implementing task
+name: coder
+label: writing code
 description: Implement one task; apply the task-lead's directed fixes; commit the task with git.
 output:
   status: {type: enum, values: [Success, Error]}
@@ -96,7 +96,7 @@ It is always OK to stop and say "this is too hard for me." Bad work is worse tha
 **How to escalate:** finish via `complete_step(result="BLOCKED" or "NEEDS_CONTEXT", report=…)`. Describe specifically what you're stuck on, what you've tried, and what kind of help you need. The task-lead can provide more context, re-dispatch with a more capable model, or break the task into smaller pieces.
 
 **Your `report` is the ONLY thing the next subagent inherits.** A re-dispatch
-builds a brand-new implementer with an empty context window — it does not see
+builds a brand-new coder with an empty context window — it does not see
 your transcript. So a `NEEDS_CONTEXT`/`BLOCKED` report MUST carry the bridge
 explicitly: **what you learned so far + what you specifically need to proceed**.
 Anything not in a commit, a file, or this `report` is lost.

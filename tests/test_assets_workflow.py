@@ -49,7 +49,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
                             "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"task"}
     subagents = {
-        "implementer", "code-reviewer",
+        "coder", "code-reviewer",
     }
     dispatchers = {"task-lead", "deferred-sweep",
                    "plan-writer", "spec-writer", "front-door"}
@@ -259,10 +259,10 @@ def test_no_agent_declares_the_commit_tool() -> None:
 
 
 def test_committing_agents_declare_bash() -> None:
-    # implementer/task-lead/spec-writer/plan-writer commit with raw git via bash.
+    # coder/task-lead/spec-writer/plan-writer commit with raw git via bash.
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    for name in ("implementer", "task-lead", "spec-writer", "plan-writer"):
+    for name in ("coder", "task-lead", "spec-writer", "plan-writer"):
         assert "bash" in wf.agents[name].tools, f"{name} missing bash"
 
 
@@ -289,7 +289,7 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
         timed_out = evaluate_rules(rules, vars=vars_,
                                    output={"exit": 124, "stdout": "", "stderr": ""})
         assert isinstance(timed_out.action, Pause), f"{name} must pause on exit 124"
-        # A real failure (non-zero, non-124) still routes back to the implementer.
+        # A real failure (non-zero, non-124) still routes back to the coder.
         failed = evaluate_rules(rules, vars=vars_,
                                 output={"exit": 1, "stdout": "", "stderr": ""})
         assert not isinstance(failed.action, Pause), (
@@ -721,7 +721,7 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.agents["explorer"].label == "exploring codebase"
     assert wf.agents["researcher"].label == "researching"
-    assert wf.agents["implementer"].label == "implementing task"
+    assert wf.agents["coder"].label == "writing code"
     assert wf.agents["code-reviewer"].label == "reviewing code"
     # plan-writer's label is on the workflow step, not the agent frontmatter
     for name, a in wf.agents.items():

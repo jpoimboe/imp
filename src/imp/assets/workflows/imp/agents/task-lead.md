@@ -1,8 +1,8 @@
 ---
 name: task-lead
 label: implementing
-description: Implement-phase controller — pick the next task, dispatch implementer + one reviewer, adjudicate, commit one clean unit, record progress.
-subagents: [implementer, code-reviewer]
+description: Implement-phase controller — pick the next task, dispatch coder + one reviewer, adjudicate, commit one clean unit, record progress.
+subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   deviation: {type: bool}
@@ -50,10 +50,10 @@ unimplemented task, or the re-opened task from injected feedback):
    replacing `<N>` with this task's own number from its `## Task <N>` heading. This
    updates only the live status bar; it introduces no task counter and changes
    nothing about how you pick work.
-2. Dispatch the implementer with the **full task text + scene-setting context**
+2. Dispatch the coder with the **full task text + scene-setting context**
    (it does not read the plan), at the **`medium` tier**
-   (`task(subagent_name="implementer", tier="medium", task_description=…)`):
-   - **New task:** tell the implementer "INITIAL dispatch — make a NEW commit:
+   (`task(subagent_name="coder", tier="medium", task_description=…)`):
+   - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
      trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
      the task's commit **subject** in `progress.md` so you can re-find it if it is
@@ -64,7 +64,7 @@ unimplemented task, or the re-opened task from injected feedback):
      recorded commit subject **exactly**, skipping any `fixup!`-prefixed line (a
      prior within-loop fixup repeats the subject after a `fixup! ` prefix; the
      original task commit is the one whose subject equals the recorded subject with
-     no `fixup! ` prefix) — then tell the implementer: "fixup the buried task
+     no `fixup! ` prefix) — then tell the coder: "fixup the buried task
      commit `<SHA>`" → it runs `git commit --fixup=<SHA>`. Resolve the SHA **now**,
      against current history (no fold has run since your last commit, so SHAs are
      stable within the loop). The `cleanup` gate folds the fixup into its target at
@@ -75,19 +75,19 @@ unimplemented task, or the re-opened task from injected feedback):
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
    a change the spec calls a single atomic commit — that is a **deviation**, not a
    puzzle for the reviewer. Record why in `progress.md`, set `deviation: true`, and
-   return so the engine resumes the plan-writer to fix the plan. If the implementer
+   return so the engine resumes the plan-writer to fix the plan. If the coder
    already committed this task, record its commit subject in `progress.md`
    too, so the revised plan accounts for the existing commit rather than orphaning
    it. Never hand a reviewer contradictory framing.
 
    **State what was already verified.** In the reviewer's dispatch message, state
-   what the implementer verified for this change — the focused tests it ran. Do
+   what the coder verified for this change — the focused tests it ran. Do
    **not** run the project's full suite, lint, or typecheck yourself: the phase-level
    `verify` gate is the authoritative combined check and runs once after the
    implement phase, so a run here only duplicates it. State only what was actually run.
 
    {% if vars.fast_path %}
-   **Fast-path: the spec waived tests.** When you dispatch the implementer for a
+   **Fast-path: the spec waived tests.** When you dispatch the coder for a
    fast-path task, state plainly in the dispatch message: "the spec waived **new**
    tests — do **not** add or modify tests; make exactly the task's edits, then
    commit. Do **not** run the project's full suite or lint/typecheck — the
@@ -125,7 +125,7 @@ unimplemented task, or the re-opened task from injected feedback):
      the human never needs to see. You defer to that sweep, not to the human.
 
    For every agreed fix — blocking fixes **and** qualifying nits together —
-   **re-dispatch the implementer telling it to fix the tree to its final state and
+   **re-dispatch the coder telling it to fix the tree to its final state and
    `git commit --fixup=HEAD`** (the task commit, or its pending fixups, sits at the
    loop tip). Batch qualifying nits into the **same fixup round** as any blocking
    fixes; the fixup is transient, and `cleanup` folds the whole chain back into
@@ -134,7 +134,7 @@ unimplemented task, or the re-opened task from injected feedback):
    **no extra work** — do not invent a fixup.
 
    **Over-reach guardrail for the nit-fix dispatch.** When you re-dispatch for
-   nits, name them explicitly and constrain the implementer:
+   nits, name them explicitly and constrain the coder:
    "apply ONLY these named nits; each is bounded and mechanical;
    do not refactor beyond the named change, touch unrelated code, or alter
    behavior."
@@ -143,7 +143,7 @@ unimplemented task, or the re-opened task from injected feedback):
    does not re-trigger the code-reviewer — the phase-level `verify` gate
    is the safety net — and does not mark the run degraded (nit polish is not
    correctness; see step 5). When a round carries blocking findings, re-review
-   until none remain. All fixes go through the implementer — you never commit,
+   until none remain. All fixes go through the coder — you never commit,
    amend, or rebase yourself.
 5. Append to `{{ change.home }}/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
@@ -211,7 +211,7 @@ The `verify` source is the discriminator the convergence check greps for.
   nothing about the merge — `finalize` surfaces it to a human through the existing
   needs-decision walk before merge.
 - **A failure attributable to the diff** → fix it as usual (dispatch the
-  implementer, `git commit --fixup=HEAD`) and return `verify_tolerated: false`. The
+  coder, `git commit --fixup=HEAD`) and return `verify_tolerated: false`. The
   engine re-runs `verify`.
 
 Emit `verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other
@@ -222,7 +222,7 @@ A **`max_loops` pause at `verify`** (the gate is capped at 5 fix laps) means the
 triage is **non-converging** — an unrecognized flake or a hard regression you could
 not fix in the budget. It escalates to a human; it is not a transient to retry.
 
-Discipline: never dispatch two implementers in parallel; never skip the
+Discipline: never dispatch two coders in parallel; never skip the
 `code-reviewer`; never move on with blocking findings open. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
 and **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty

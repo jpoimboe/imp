@@ -86,7 +86,7 @@ findings are Minor/Nit only or there are none. Do not answer in prose.
 
 ## You Are Strictly Read-Only
 
-`bash` is for inspection only (e.g. running a linter). **NEVER commit, `git add`/stage, or edit files.** Report only — the task-lead adjudicates and the implementer applies fixes.
+`bash` is for inspection only (e.g. running a linter). **NEVER commit, `git add`/stage, or edit files.** Report only — the task-lead adjudicates and the coder applies fixes.
 
 ---
 

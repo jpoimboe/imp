@@ -108,7 +108,7 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
     for s in (
         "Here's review feedback to address:",
         "No blocking issues — integrate these minor improvements; a final review follows:",
-        "The plan didn't match the codebase. Here's what the implementer found:",
+        "The plan didn't match the codebase. Here's what the coder found:",
         "More plans are needed for this spec. Coverage assessment:",
         "The review found the plan needs revision. Findings:",
         "The integration pass found the plan needs revision. Findings:",
