@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from imp.agents.prompts import render_label
 from imp.engine import worktree
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
@@ -225,7 +226,10 @@ class Change:
         flat = loaded_workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,
-            step_label=(flat[0].label or flat[0].name) if flat else None,
+            step_label=(
+                render_label(flat[0].label, change=None, log=None, state=None)
+                or flat[0].name
+            ) if flat else None,
             status="running",
             vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},
@@ -300,7 +304,10 @@ class Change:
         flat = loaded_workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,
-            step_label=(flat[0].label or flat[0].name) if flat else None,
+            step_label=(
+                render_label(flat[0].label, change=None, log=None, state=None)
+                or flat[0].name
+            ) if flat else None,
             status="running",
             vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},

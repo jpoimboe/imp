@@ -120,6 +120,21 @@ def test_cmd_status_named_row_skips_events_load(
     assert rc == 0
 
 
+def test_create_draft_seeds_raw_templated_label(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf.write_text(
+        "name: t\ndescription: \"\"\n"
+        "vars:\n  k: {type: int, default: 7}\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/stub.md, label: \"seeding {{ vars.k }}\"}\n"
+    )
+    ch = Change.create_draft(tmp_path, title="A", change_id="draft1", base_branch="main")
+    st = State.load(ch.state_dir)
+    # No render at create time (change/log unavailable): the raw template is seeded,
+    # NOT "seeding 7".
+    assert st.step_label == "seeding {{ vars.k }}"
+
 
 def test_cmd_status_renders_draft_provenance_under_backlog(
     tmp_path: Path, capsys,
