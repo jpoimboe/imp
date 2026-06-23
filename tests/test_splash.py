@@ -254,3 +254,32 @@ def test_every_scene_renders_under_all_three_themes_without_error() -> None:
         for theme in ("dark", "light", "ansi"):
             lines = splash.scene_lines(index, theme=theme, color=True)
             assert len(lines) == 8
+
+
+def test_task2_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_crescent_perch", "perched and ready."),
+        ("_mountain_moon", "welcome back."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_mountains_paint_a_snow_cap_above_the_peak_fill() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._mountains(g, 13)
+    snow = [(x, y) for y, row in enumerate(g)
+            for x, cell in enumerate(row) if cell == splash._P["snow"]]
+    peak = [(x, y) for y, row in enumerate(g)
+            for x, cell in enumerate(row) if cell == splash._P["peak"]]
+    assert snow and peak
+    assert min(y for _, y in snow) < min(y for _, y in peak)

@@ -38,6 +38,7 @@ _DARK: dict[str, Color | None] = {
     "fireTip": (0xFF, 0xF0, 0xC0), "glowWarm": (0x5A, 0x4A, 0x2A),
     "ground": (0x1A, 0x16, 0x22), "groundGlow": (0x24, 0x1C, 0x30),
     "sun": (0xFF, 0xB2, 0x4A), "sunGlow": (0x5A, 0x3A, 0x1A),
+    "branch": (0x5A, 0x3A, 0x1F), "peak": (0x3A, 0x3F, 0x4E), "snow": (0xD8, 0xE0, 0xEE),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -51,6 +52,7 @@ _LIGHT: dict[str, Color | None] = {
     "fireTip": (0x5E, 0x4A, 0x0C), "glowWarm": (0xC2, 0xA0, 0x60),
     "ground": (0xB6, 0xB6, 0xB6), "groundGlow": (0xA8, 0xA8, 0xA8),
     "sun": (0xC2, 0x61, 0x1F), "sunGlow": (0xD8, 0xB8, 0x78),
+    "branch": (0x6A, 0x4A, 0x2A), "peak": (0x8A, 0x90, 0x9E), "snow": (0xC8, 0xCE, 0xD8),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -63,6 +65,7 @@ _ANSI_P: dict[str, Color | None] = {
     "fireTip": "bright_yellow", "glowWarm": "bright_black",
     "ground": "bright_black", "groundGlow": "bright_black",
     "sun": "bright_yellow", "sunGlow": "yellow",
+    "branch": "yellow", "peak": "bright_black", "snow": "bright_white",
 }
 
 
@@ -351,6 +354,22 @@ def _comet(g: Grid, x: int, y: int, length: int) -> None:
     _spark(g, x, y, _P["starBright"])
 
 
+def _branch(g: Grid, x0: int, x1: int, y: int) -> None:
+    _line(g, x0, y, x1, y, _P["branch"])
+    _px(g, x1, y - 1, _P["branch"])
+
+
+def _mountains(g: Grid, base_y: int) -> None:
+    for cx, h in ((23, 6), (27, 7)):
+        for j in range(h):
+            for dx in range(-j, j + 1):
+                _px(g, cx + dx, base_y - h + j + 1, _P["peak"])
+        cap_y = base_y - h + 1
+        _px(g, cx, cap_y, _P["snow"])
+        _px(g, cx - 1, cap_y + 1, _P["snow"])
+        _px(g, cx + 1, cap_y + 1, _P["snow"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -422,6 +441,20 @@ def _the_void(g: Grid) -> None:
     _left_imp(g)
 
 
+def _crescent_perch(g: Grid) -> None:
+    _stars(g, 0, 6, 0.18)
+    _moon(g, 25, 4, 3, crescent=True)
+    _branch(g, 14, 28, 13)
+    _left_imp(g)
+
+
+def _mountain_moon(g: Grid) -> None:
+    _stars(g, 0, 5, 0.16)
+    _moon(g, 24, 3, 3, crescent=False)
+    _mountains(g, 13)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -432,6 +465,8 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_constellation_scene, "drawn in the stars."),
     (_comet_scene, "something wicked this way ships."),
     (_the_void, "conjured from the void."),
+    (_crescent_perch, "perched and ready."),
+    (_mountain_moon, "welcome back."),
 ]
 
 MIN_WIDTH = 32
