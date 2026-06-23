@@ -1896,6 +1896,11 @@ def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
     assert opts.resume is None
 
 
+@pytest.mark.skip(
+    reason="TEMP (change wxczhw): native resume is forced off in claude_code.py "
+    "until the CLAUDE_CONFIG_DIR-isolation fix lands; this asserts the disabled "
+    "native-resume routing. Un-skip alongside removing the `native_resume = False` "
+    "override.")
 @pytest.mark.anyio
 async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
