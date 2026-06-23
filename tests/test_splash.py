@@ -336,3 +336,35 @@ def test_aurora_paints_both_band_colors_only_in_the_accent_columns() -> None:
     assert any(cell == splash._P["aurora1"] for _, cell in painted)
     assert any(cell == splash._P["aurora2"] for _, cell in painted)
     assert all(x >= 18 for x, _ in painted)
+
+
+def test_task5_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_will_o_wisp", "follow the light."),
+        ("_floating_wisps", "the void is listening."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_wisp_paints_a_bright_core_inside_a_dim_glow() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._wisp(g, 25, 7, 4)
+    core = any(cell == splash._P["wisp"] for row in g for cell in row)
+    glow = any(cell == splash._P["wispGlow"] for row in g for cell in row)
+    assert core and glow
+
+    g2 = splash._make_grid()
+    splash._wisp(g2, 25, 7, 2)
+    core2 = any(cell == splash._P["wisp"] for row in g2 for cell in row)
+    glow2 = any(cell == splash._P["wispGlow"] for row in g2 for cell in row)
+    assert core2 and glow2

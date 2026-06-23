@@ -42,6 +42,7 @@ _DARK: dict[str, Color | None] = {
     "planet": (0xC0, 0x7A, 0x3A), "planetRing": (0x9A, 0xB0, 0xD0),
     "aurora1": (0x4A, 0xC0, 0x8A), "aurora2": (0x7A, 0x6A, 0xC0),
     "firefly": (0xF0, 0xE0, 0x80), "fireflyGlow": (0x4A, 0x4A, 0x20),
+    "wisp": (0x9A, 0xE0, 0xD0), "wispGlow": (0x2A, 0x4A, 0x4A),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -59,6 +60,7 @@ _LIGHT: dict[str, Color | None] = {
     "planet": (0x9A, 0x5A, 0x20), "planetRing": (0x6A, 0x80, 0xA0),
     "aurora1": (0x2A, 0x8A, 0x5A), "aurora2": (0x5A, 0x4A, 0x8A),
     "firefly": (0xB0, 0x90, 0x20), "fireflyGlow": (0xD0, 0xC8, 0x90),
+    "wisp": (0x2A, 0x8A, 0x8A), "wispGlow": (0xB0, 0xD0, 0xD0),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -75,6 +77,7 @@ _ANSI_P: dict[str, Color | None] = {
     "planet": "yellow", "planetRing": "cyan",
     "aurora1": "green", "aurora2": "magenta",
     "firefly": "bright_yellow", "fireflyGlow": "bright_black",
+    "wisp": "bright_cyan", "wispGlow": "cyan",
 }
 
 
@@ -410,6 +413,12 @@ def _firefly(g: Grid, x: int, y: int) -> None:
     _px(g, x, y + 1, _P["fireflyGlow"])
 
 
+def _wisp(g: Grid, cx: int, cy: int, r: int) -> None:
+    _glow_ring(g, cx, cy, r, _P["wispGlow"])
+    inner = max(1, r - 2)
+    _disc(g, cx, cy, inner, inner, _P["wisp"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -519,6 +528,19 @@ def _fireflies(g: Grid) -> None:
     _left_imp(g)
 
 
+def _will_o_wisp(g: Grid) -> None:
+    _stars(g, 0, 6, 0.10)
+    _wisp(g, 25, 7, 4)
+    _spark(g, 21, 4, _P["wisp"])
+    _left_imp(g)
+
+
+def _floating_wisps(g: Grid) -> None:
+    for x, y in [(22, 3), (27, 6), (24, 10)]:
+        _wisp(g, x, y, 2)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -535,6 +557,8 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_galaxy_scene, "lost in the stack? i know the way."),
     (_aurora_scene, "the sky's showing off — let's match it."),
     (_fireflies, "the lights are out to play."),
+    (_will_o_wisp, "follow the light."),
+    (_floating_wisps, "the void is listening."),
 ]
 
 MIN_WIDTH = 32
