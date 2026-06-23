@@ -1104,8 +1104,7 @@ def _change_home(control: Path, change_id: str) -> Path:
 
 
 def _iter_change_ids(control: Path) -> list[str]:
-    """All known Change ids: permanent homes first, then archived ids not live,
-    then backlog ids not yet seen."""
+    """All known Change ids: permanent homes first, then archived ids not live."""
     live = _list_change_homes(control)
     seen = set(live)
     out = list(live)
@@ -1113,15 +1112,11 @@ def _iter_change_ids(control: Path) -> list[str]:
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
-    for cid in backlog.list_ids(control):
-        if cid not in seen:
-            out.append(cid)
-            seen.add(cid)
     return out
 
 
 def _title_for_id(control: Path, change_id: str) -> str | None:
-    """Read a Change's current title (worktree first, backlog second, archive third)."""
+    """Read a Change's current title (worktree home first, archive second)."""
     cdir = _change_home(control, change_id)
     cj = cdir / "change.json"
     if cj.exists():
@@ -1129,9 +1124,6 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
             return str(json.loads(cj.read_bytes())["title"])
         except (json.JSONDecodeError, KeyError):
             return None
-    rec = backlog.read_record(control, change_id)
-    if rec is not None:
-        return str(rec["title"])
     raw = archive_read.read_change_json(control, change_id)
     if raw is None:
         return None
