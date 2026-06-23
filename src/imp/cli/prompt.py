@@ -26,7 +26,7 @@ def _prompt_message_text(question: str, *, color: bool, width: int = 80,
         return indent + pal.caret(enabled=color)
     lines = render_question_block(q, width, 0, color)
     body = "\n".join(indent + ln for ln in lines)
-    return body + "\n" + indent + pal.caret(enabled=color)
+    return body + "\n\n" + indent + pal.caret(enabled=color)
 
 
 def _placeholder_text(*, color: bool) -> str:

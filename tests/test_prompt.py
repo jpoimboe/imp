@@ -105,11 +105,11 @@ def test_message_is_bare_caret_without_a_question_plain() -> None:
 
 
 def test_message_puts_the_question_above_the_caret_plain() -> None:
-    assert _prompt_message_text("Pick A or B?", color=False) == "Pick A or B?\n> "
+    assert _prompt_message_text("Pick A or B?", color=False) == "Pick A or B?\n\n> "
 
 
 def test_message_strips_question_whitespace_plain() -> None:
-    assert _prompt_message_text("  Pick A or B?  ", color=False) == "Pick A or B?\n> "
+    assert _prompt_message_text("  Pick A or B?  ", color=False) == "Pick A or B?\n\n> "
 
 
 def test_message_renders_markdown_question_above_the_caret() -> None:
@@ -129,7 +129,7 @@ def test_message_no_color_renders_markdown_without_ansi() -> None:
 
 def test_message_plain_question_still_sits_above_the_caret() -> None:
     assert _prompt_message_text("Pick A or B?", color=False, width=80) \
-        == "Pick A or B?\n> "
+        == "Pick A or B?\n\n> "
 
 
 def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
@@ -193,5 +193,5 @@ async def test_ask_async_question_path_caret_at_content_column() -> None:
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     await prompt.ask_async(question="Merge it?", indent="  ")
     # The question block and the `> ` caret line are both prefixed with the indent.
-    assert captured["msg"] == "  Merge it?\n  > "
+    assert captured["msg"] == "  Merge it?\n\n  > "
     assert captured["prompt_continuation"](80, 1, False) == "    "
