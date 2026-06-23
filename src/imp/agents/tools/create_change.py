@@ -4,6 +4,7 @@ from typing import Any
 
 from imp.agents.tools import imp_tool
 from imp.engine import backlog
+from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
 from imp.engine.state import JsonlEventLog
 
@@ -22,12 +23,14 @@ def create_change(
 ) -> str:
     if ctx.change_state is None:
         raise RuntimeError("create_change is only available to top-level Change steps")
-    control_root = ctx.change.control_root
+    parent = ctx.change
     new_id = new_change_id()
     deps = list(depends_on or [])
-    backlog.write_record(
-        control_root, change_id=new_id, title=title, description=description,
-        depends_on=deps, created_by=ctx.agent_id or "agent")
+    seed = backlog.seed_opening({"title": title, "description": description})
+    Change.create_draft(
+        parent.control_root, title=title, change_id=new_id,
+        base_branch=parent.base_branch, depends_on=deps,
+        origin="followup", seed_opening=seed)
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     log.append(
         agent_id=ctx.agent_id, type="change_created",
