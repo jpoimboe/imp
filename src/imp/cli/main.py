@@ -689,7 +689,6 @@ async def _run_tui_session(
 
 
 def _record_idea(args: argparse.Namespace, control: Path) -> int:
-    (control / ".imp" / "changes").mkdir(parents=True, exist_ok=True)
     title = args.idea
     if not title.strip():
         print("imp: idea title must be non-empty", file=sys.stderr)
@@ -770,7 +769,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     control = _control_root()
     worktree.check_preconditions(control)
     worktree.ensure_imp_ignored(control)
-    (control / ".imp" / "changes").mkdir(parents=True, exist_ok=True)
     base = worktree.current_branch(control)
 
     if getattr(args, "description", None) and getattr(args, "idea", None) is None:

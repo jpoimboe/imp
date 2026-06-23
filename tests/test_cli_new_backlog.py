@@ -61,7 +61,7 @@ def test_new_idea_blank_title_errors_without_creating(
     monkeypatch.chdir(tmp_path)
     rc = main._record_idea(_args(idea="   "), tmp_path)
     assert rc == 2
-    assert list((tmp_path / ".imp" / "changes").iterdir()) == []
+    assert not (tmp_path / ".imp" / "changes").exists()
     assert "imp:" in capsys.readouterr().err
 
 
@@ -77,7 +77,7 @@ def test_new_idea_with_title_flag_is_error(
                            opening=None, spec_file=None, playbook=None,
                            findings_only=False, workflow=None)))
     assert rc == 2
-    assert list((tmp_path / ".imp" / "changes").iterdir()) == []
+    assert not (tmp_path / ".imp" / "changes").exists()
     assert "imp:" in capsys.readouterr().err
 
 
