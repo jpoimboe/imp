@@ -35,7 +35,7 @@ class _TeeStderrReader:
         return getattr(self._real, name)
 
     async def read(self, n: int = -1) -> bytes:
-        chunk = await self._real.read(n)
+        chunk: bytes = await self._real.read(n)
         if chunk:
             self._sink.feed(chunk.decode("utf-8", errors="replace"))
         return chunk
