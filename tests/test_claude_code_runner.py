@@ -1831,3 +1831,51 @@ async def test_resume_manifest_skips_dangling_last_tool_use(tmp_path: Path) -> N
         for m in loaded
         for b in m.content
     )
+
+
+@pytest.mark.anyio
+async def test_resume_manifest_not_re_injected_on_re_resume(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        TextBlock(text="reading…"),
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),
+    )))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
+    # Simulate a prior resume that already injected the nudge + manifest.
+    t.append(Message(role="user", content=(TextBlock(
+        text="You stopped before calling complete_step. Continue exactly where you "
+             "left off and finish the step — call complete_step when the work is done."),)))
+    t.append(Message(role="user", content=(TextBlock(
+        text=RESUME_MANIFEST_HEADER + "\n\n- read_file — succeeded"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    [ev async for ev in runner.run(inv)]
+
+    blob = _user_text_blob(created[0].queries[0])
+    # The prior manifest is present (merged into the replay query)…
+    assert "replay artifact" in blob
+    # …but NOT re-injected a second time.
+    assert blob.count("replay artifact") == 1

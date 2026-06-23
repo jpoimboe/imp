@@ -70,6 +70,7 @@ from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
 from imp.agents.transcript import (
+    RESUME_MANIFEST_HEADER,
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
@@ -1227,14 +1228,21 @@ class ClaudeCodeAgentRunner:
             # ckx9f5: name prior tool calls succeeded so stream-json replay's placeholder
             # errors don't trigger redo; skip the balance path (retry feedback stays last).
             if not invocation.balance_on_resume:
-                manifest = build_resume_manifest(
-                    messages, exclude_tool_use_ids=frozenset(dangling_ids))
-                if manifest is not None:
-                    manifest_msg = Message(
-                        role="user", content=(TextBlock(text=manifest),))
-                    messages.append(manifest_msg)
-                    transcript.append(manifest_msg)
-                    elog.append_user_message(agent_id=aid, message=manifest_msg)
+                _last_user = next(
+                    (m for m in reversed(messages) if m.role == "user"), None)
+                _already_manifested = _last_user is not None and any(
+                    isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
+                    for b in _last_user.content
+                )
+                if not _already_manifested:
+                    manifest = build_resume_manifest(
+                        messages, exclude_tool_use_ids=frozenset(dangling_ids))
+                    if manifest is not None:
+                        manifest_msg = Message(
+                            role="user", content=(TextBlock(text=manifest),))
+                        messages.append(manifest_msg)
+                        transcript.append(manifest_msg)
+                        elog.append_user_message(agent_id=aid, message=manifest_msg)
         else:
             messages = []
             for m in invocation.initial_messages:
