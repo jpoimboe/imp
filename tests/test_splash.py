@@ -151,7 +151,7 @@ def test_every_scene_paints_both_the_imp_and_an_accent_in_bounds(theme) -> None:
         g = splash._make_grid()
         builder(g)  # must not raise (all drawing is bounds-clamped)
         assert len(g) == splash.H and all(len(r) == splash.W for r in g)
-        imp = any(g[y][x] is not None
+        imp = any(g[y][x] == splash._P["impBody"]
                   for y in range(splash.H) for x in range(2, 18))
         accent = any(g[y][x] is not None
                      for y in range(splash.H) for x in range(18, splash.W))
@@ -245,7 +245,7 @@ def test_task1_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -269,7 +269,7 @@ def test_task2_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -298,7 +298,7 @@ def test_task3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -324,7 +324,7 @@ def test_task4_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -351,7 +351,7 @@ def test_task5_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -384,7 +384,7 @@ def test_task6_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -414,7 +414,7 @@ def test_task1p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -450,7 +450,7 @@ def test_task2p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -498,7 +498,7 @@ def test_task3p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -528,7 +528,7 @@ def test_task4p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -557,7 +557,7 @@ def test_task5p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
@@ -593,7 +593,7 @@ def test_task6p3_scenes_are_wired_and_paint_imp_and_accent() -> None:
         builder(g)
         assert any(g[y][x] is not None
                    for y in range(splash.H) for x in range(18, splash.W)), name
-        assert any(g[y][x] is not None
+        assert any(g[y][x] == splash._P["impBody"]
                    for y in range(splash.H) for x in range(2, 18)), name
 
 
