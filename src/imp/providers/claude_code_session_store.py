@@ -123,3 +123,7 @@ def session_key(project_root: Path, agent_id: str) -> dict[str, str]:
         "project_key": session_project_key(project_root),
         "session_id": resume_session_id(agent_id),
     }
+
+
+def session_store_for(transcript_dir: Path) -> ImpSessionStore:
+    return ImpSessionStore(transcript_dir / "claude_session")

@@ -13,6 +13,7 @@ from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_project_key,
+    session_store_for,
 )
 
 
@@ -223,3 +224,17 @@ def test_session_project_key_is_the_sdk_helper(tmp_path: Path) -> None:
     from claude_agent_sdk import project_key_for_directory
 
     assert session_project_key(tmp_path) == project_key_for_directory(tmp_path)
+
+
+def test_session_store_for_writes_under_claude_session_subdir(
+    tmp_path: Path,
+) -> None:
+    store = session_store_for(tmp_path)
+    assert isinstance(store, ImpSessionStore)
+    anyio.run(
+        store.append,
+        session_key(tmp_path, "step:plan/plan-writer"),
+        [{"type": "user", "uuid": "x"}],
+    )
+    written = list((tmp_path / "claude_session").rglob("*.jsonl"))
+    assert written, "append must land under <transcript_dir>/claude_session/"
