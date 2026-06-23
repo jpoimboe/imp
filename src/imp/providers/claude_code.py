@@ -86,6 +86,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_session_store import (
     resume_session_id,
+    session_key,
     session_store_for,
 )
 from imp.providers.resolve import spawn_subagent_via_registry
@@ -1146,26 +1147,40 @@ class ClaudeCodeAgentRunner:
             impty_tools = await _make_impty_sdk_tools(self._impty_driver)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)
 
-        # Mirror only the FRESH run's clean session into the store. The
-        # stream-json resume path re-emits replayed history with fresh
-        # per-message uuids, so mirroring there would bloat/corrupt the stored
-        # session, so only the fresh run mirrors.
-        is_fresh = not transcript.exists_and_nonempty()
-        session_store = (
-            session_store_for(invocation.transcript_dir) if is_fresh else None
-        )
-        session_id = resume_session_id(aid) if is_fresh else None
+        # Session-store routing. A FRESH run mirrors its clean session into the
+        # store (session_id pins the key). A resume drives claude-p's NATIVE
+        # session resume when that store holds bytes (resume= materializes from
+        # imp's own bytes — faithful, no stream-json placeholder corruption);
+        # absent a stored session it falls back to stream-json replay + manifest.
+        # resume= and session_id are mutually exclusive in the SDK: native resume
+        # passes resume= and leaves session_id unset.
+        existing = transcript.load()
+        is_fresh = not existing
+        store = session_store_for(invocation.transcript_dir)
+        skey = session_key(invocation.change_context.project_root, aid)
+        native_resume = (not is_fresh) and bool(await store.load(skey))
+        # Native resume sends only messages[resume_base:] — the turns appended on
+        # THIS entry; claude-p already holds the rest in its loaded session.
+        resume_base = len(existing)
+        if is_fresh:
+            opt_store, opt_session_id, opt_resume = (
+                store, resume_session_id(aid), None)
+        elif native_resume:
+            opt_store, opt_session_id, opt_resume = (
+                store, None, resume_session_id(aid))
+        else:
+            opt_store, opt_session_id, opt_resume = (None, None, None)
         # Build options only when we'll use the real SDK (mcp_server is not None).
         # When a client_factory is injected (tests), skip building options to
         # avoid constructing ClaudeAgentOptions with mcp_server=None.
         if mcp_server is not None:
             opts = self._build_options(
                 invocation, mcp_server, list(tools), impty_server=impty_server,
-                session_store=session_store, session_id=session_id)
+                session_store=opt_store, session_id=opt_session_id,
+                resume=opt_resume)
         else:
             opts = None
 
-        existing = transcript.load()
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
@@ -1229,7 +1244,7 @@ class ClaudeCodeAgentRunner:
                     invocation.coordinator, messages, transcript, elog, aid)
             # ckx9f5: name prior tool calls succeeded so stream-json replay's placeholder
             # errors don't trigger redo; skip the balance path (retry feedback stays last).
-            if not invocation.balance_on_resume:
+            if not invocation.balance_on_resume and not native_resume:
                 _last_user = next(
                     (m for m in reversed(messages) if m.role == "user"), None)
                 _already_manifested = _last_user is not None and any(
@@ -1307,7 +1322,8 @@ class ClaudeCodeAgentRunner:
             # code). Each outer iteration runs its OWN receive_response() so a
             # follow-up turn is consumed from a fresh generator (issue 7:
             # receive_response() terminates after the first ResultMessage).
-            next_query: Any = _stream_history(messages)
+            next_query: Any = _stream_history(
+                messages[resume_base:] if native_resume else messages)
             while True:
                 await client.query(next_query)
                 requery = False
