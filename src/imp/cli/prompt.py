@@ -64,29 +64,10 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             run_in_terminal(lambda: print("press ctrl-d to exit"))
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
-    # The live solicit field paints a slate fill across the remaining line width
-    # via prompt_toolkit's default ("") style selector — it fills the input
-    # window's trailing cells with this background. Only under color + a truecolor
-    # theme (user_bg_style is "" on ansi / color off, so no fill). TRUE_COLOR so the
-    # 24-bit slate matches render_text's reprinted band, not a 256-color downgrade.
-    # On submit, erase_when_done wipes prompt_toolkit's whole rendered region; the
-    # live driver then reprints the turn as a UserMessageNode (render_text), giving
-    # one shared user-turn rendering in live and `imp log`.
-    style = None
-    color_depth = None
-    if color:
-        from prompt_toolkit.output import ColorDepth
-        from prompt_toolkit.styles import Style
-
-        from imp.cli import palette as pal
-
-        bg = pal.user_bg_style(enabled=True)
-        if bg:
-            style = Style.from_dict({"": bg})
-            color_depth = ColorDepth.TRUE_COLOR
+    # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
     return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
                          editing_mode=mode, erase_when_done=True,
-                         style=style, color_depth=color_depth)
+                         reserve_space_for_menu=0)
 
 
 class SlashCompleter:

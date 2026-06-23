@@ -41,36 +41,23 @@ def test_build_session_vi_mode() -> None:
     assert session.editing_mode == EditingMode.VI
 
 
-def test_build_session_applies_no_style_override() -> None:
-    """With color off (the default), the input region keeps the terminal default —
-    no PromptSession bg fill. The live slate is opt-in: it paints only under
-    color + a truecolor theme (see the two tests below)."""
-    from imp.cli.prompt import _build_session
-    assert _build_session(None).style is None
-
-
-def test_build_session_paints_slate_field_under_truecolor() -> None:
-    from prompt_toolkit.output import ColorDepth
-
+def test_build_session_has_no_app_background_and_reserves_no_menu_space() -> None:
+    """AC1: the prompt region keeps the terminal default (no app bg fill) and
+    prompt_toolkit holds no blank rows under the prompt — even under color + a
+    truecolor theme, where the old slate fill used to paint."""
     from imp.cli import palette as pal
     from imp.cli.prompt import _build_session
+
+    assert _build_session(None).style is None
+    assert _build_session(None).reserve_space_for_menu == 0
 
     pal.set_theme("dark")
     try:
         s = _build_session(None, color=True)
     finally:
         pal.set_theme("ansi")
-    assert s.style.style_rules == [("", "bg:#2b2f3a")]   # default selector fills line
-    assert s.color_depth == ColorDepth.TRUE_COLOR
-
-
-def test_build_session_no_slate_under_ansi_theme() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.prompt import _build_session
-
-    pal.set_theme("ansi")
-    s = _build_session(None, color=True)
-    assert s.style is None and s.color_depth is None
+    assert s.style is None
+    assert s.reserve_space_for_menu == 0
 
 
 def test_default_caret_is_the_blue_arrow() -> None:
