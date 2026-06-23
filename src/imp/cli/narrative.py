@@ -1469,9 +1469,25 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         message=f"[{cat}] retry {attempt} ({secs}s)", category=cat, is_warning=True))
 
 
+def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    step = str(p.get("step", "?"))
+    code = p.get("exit")
+    suffix = f" (exit {code})" if isinstance(code, int) else ""
+    stderr = str(p.get("stderr", "")).strip()
+    stdout = str(p.get("stdout", "")).strip()
+    detail = stderr
+    if stdout:
+        detail = f"{detail}\n{stdout}" if detail else stdout
+    self._append(ErrorNode(
+        message=f"{step} blocked{suffix}", category="script",
+        is_warning=False, detail=detail))
+
+
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
+NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 
 
 def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
