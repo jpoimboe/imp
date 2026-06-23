@@ -1477,6 +1477,45 @@ def test_termination_codeless_phrase_null_status_is_network() -> None:
     assert term.category == "network"
 
 
+def test_termination_api_error_status_401_is_auth() -> None:
+    """A 401 status with code-less text classifies as AuthError (not Terminated),
+    carrying kind=http_401 so the eventual pause reads as a credential issue."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=401), "the request failed", {})
+    assert isinstance(term, perr.AuthError)
+    assert term.category == "auth"
+    assert getattr(term, "kind", "") == "http_401"
+    assert term.detail["api_error_status"] == 401
+
+
+def test_termination_api_error_status_403_is_auth() -> None:
+    """A 403 status with code-less text classifies as AuthError (not Terminated),
+    carrying kind=http_403."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=403), "the request failed", {})
+    assert isinstance(term, perr.AuthError)
+    assert term.category == "auth"
+    assert getattr(term, "kind", "") == "http_403"
+    assert term.detail["api_error_status"] == 403
+
+
+def test_termination_api_error_status_400_stays_terminated() -> None:
+    """A 4xx-bug status (400) with code-less text is NOT rescued by the auth
+    fallback — it stays TerminatedError (immediate pause), as before."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=400), "the request failed", {})
+    assert isinstance(term, perr.TerminatedError)
+
+
 def test_build_client_installs_session_isolation_on_real_arm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
