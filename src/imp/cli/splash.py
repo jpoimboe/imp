@@ -240,3 +240,23 @@ def _ground(g: Grid, y: int, *, glow: bool = False) -> None:
         _px(g, x, y, _P["ground"])
         if glow and x & 1:
             _px(g, x, y - 1, _P["groundGlow"])
+
+
+# Locked mascot sprite (15 rows x 16 cols). Legend: o=body, O=horn/dark-edge,
+# W=eye glint, b=eye, space=transparent. Top-left pixel lands at grid column 2.
+IMP: tuple[str, ...] = (
+    "   O        O   ", "  O          O  ", "  O          O  ", "   O        O   ",
+    "    OO    OO    ",
+    "    oooooooo    ", "   oooooooooo   ", "  oooWbooWbooo  ", "  ooobboobbooo  ",
+    "  oooooooooooo  ", "  oooooooooooo  ", "   oooooooooo   ", "    oooooooo    ",
+    "    oo    oo    ", "   oo      oo   ",
+)
+
+
+def _left_imp(g: Grid) -> None:
+    m = {"o": _P["impBody"], "O": _P["impHorn"], "W": _P["impGlint"], "b": _P["impEye"]}
+    for r, row in enumerate(IMP):
+        for c, ch in enumerate(row):
+            color = m.get(ch)
+            if color is not None:
+                _px(g, 2 + c, r, color)

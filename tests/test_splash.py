@@ -80,3 +80,29 @@ def test_ground_fills_a_row_and_leaves_a_glow_above() -> None:
     splash._ground(g, 13, glow=True)
     assert all(g[13][x] == splash._P["ground"] for x in range(splash.W))
     assert any(g[12][x] == splash._P["groundGlow"] for x in range(splash.W))
+
+
+def test_imp_sprite_is_sixteen_wide_and_fifteen_tall() -> None:
+    assert len(splash.IMP) == 15
+    assert all(len(row) == 16 for row in splash.IMP)
+
+
+def test_left_imp_anchors_at_column_two_with_themed_colors() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._left_imp(g)
+    # Horn 'O' at sprite (row 0, col 3) -> grid column 2 + 3 = 5.
+    assert g[0][5] == splash._P["impHorn"]
+    # Eye glint 'W' at sprite (row 7, col 5) -> grid column 2 + 5 = 7.
+    assert g[7][7] == splash._P["impGlint"]
+    # Eye 'b' at sprite (row 7, col 6) -> grid column 2 + 6 = 8.
+    assert g[7][8] == splash._P["impEye"]
+    # Body 'o' present somewhere in the imp's column band (2..17).
+    assert any(g[5][x] == splash._P["impBody"] for x in range(2, 18))
+
+
+def test_left_imp_never_paints_the_accent_columns() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._left_imp(g)
+    assert all(g[y][x] is None for y in range(splash.H) for x in range(18, splash.W))
