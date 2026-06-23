@@ -8,6 +8,7 @@ in-memory tail survives a disk-write failure so the error detail is never lost.
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars
 from pathlib import Path
 from typing import IO
@@ -42,7 +43,7 @@ class StderrSink:
         try:
             if self._fh is None:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                self._fh = open(self._path, "ab", buffering=0)
+                self._fh = open(self._path, "ab", buffering=0)  # noqa: SIM115
             remaining = _FILE_CAP_BYTES - self._bytes_written
             if remaining <= 0:
                 self._mark_truncated()
@@ -73,10 +74,8 @@ class StderrSink:
     def close(self) -> None:
         self._closed = True  # a later feed() updates the tail but won't reopen
         if self._fh is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._fh.close()
-            except OSError:
-                pass
             self._fh = None
 
 
