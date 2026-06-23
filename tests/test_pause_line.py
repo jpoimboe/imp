@@ -32,13 +32,6 @@ def test_pause_lines_color_lifecycle_yellow_with_reason() -> None:
     assert lines[0] == "\x1b[33m⏸ Paused  add-version-flag  at implement  (ctrl-c)\x1b[0m"
 
 
-def test_pause_lines_recover_hint_is_yellow_without_glyph() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=True,
-                         recover_phase="design")
-    assert lines[-1] == "\x1b[33m   recover: imp resume yaitd7 --from design\x1b[0m"
-    assert "⏸" not in lines[-1]
-
-
 def test_phase_from_events_takes_the_last_step_started_phase() -> None:
     phase = _phase_from_events([
         ev("1", "step_started", step="spec-writer", kind="agent", phase="spec"),
@@ -56,7 +49,6 @@ def test_pause_lines_include_reason_when_given() -> None:
     lines = _pause_lines("add-version-flag", "implement", "yaitd7",
                          reason="ctrl-c", color=False)
     assert lines[0] == "Paused  add-version-flag  at implement  (ctrl-c)"
-
 
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:

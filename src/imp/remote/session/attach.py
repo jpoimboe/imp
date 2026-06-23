@@ -19,7 +19,7 @@ SpawnFn = Callable[[Change], None]
 
 def spawn_session_daemon(
     change: Change, *, seed_opening: str | None = None, resume: bool = False,
-    from_target: str | None = None, opening_intent: str | None = None,
+    opening_intent: str | None = None,
 ) -> None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
@@ -32,8 +32,6 @@ def spawn_session_daemon(
         argv += [f"--opening-intent={opening_intent}"]
     if resume:
         argv.append("--resume")
-    if from_target is not None:
-        argv.append(f"--from={from_target}")
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     subprocess.Popen(
@@ -76,7 +74,6 @@ def build_session_attach(
     *,
     seed_opening: str | None = None,
     resume: bool = False,
-    from_target: str | None = None,
     opening_intent: str | None = None,
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
@@ -85,7 +82,7 @@ def build_session_attach(
             on_event=on_event,
             spawn_fn=lambda ch: spawn_session_daemon(
                 ch, seed_opening=seed_opening, resume=resume,
-                from_target=from_target, opening_intent=opening_intent),
+                opening_intent=opening_intent),
         )
 
     return attach

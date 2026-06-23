@@ -42,7 +42,7 @@ from imp.cli.session_run import (
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
-from imp.engine import backlog, recovery, worktree
+from imp.engine import backlog, worktree
 from imp.engine.abandon import (
     archive_conversation,
     discard_conversation,
@@ -255,43 +255,17 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
 
 def _pause_lines(
     name: str, phase: str | None, token: str,
-    *, reason: str | None = None, color: bool, recover_phase: str | None = None,
+    *, reason: str | None = None, color: bool,
 ) -> list[str]:
     at = f"  at {phase}" if phase else ""
     why = f"  ({reason})" if reason else ""
     glyph = "⏸ " if color else ""
-    lines = [
+    return [
         ansi(f"{glyph}Paused  {name}{at}{why}", *pal.NODE_COLORS["lifecycle"],
              enabled=color),
         ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
              enabled=color),
     ]
-    if recover_phase is not None:
-        lines.append(ansi(
-            f"   recover: imp resume {token} --from {recover_phase}",
-            *pal.NODE_COLORS["lifecycle"], enabled=color))
-    return lines
-
-
-def _recover_phase(change: Change) -> str | None:
-    try:
-        state = State.load(change.state_dir)
-    except FileNotFoundError:
-        return None
-    if state.step is None or state.resume_pending != state.step:
-        return None
-    phase = _phase_from_events(list(change.event_log().read()))
-    if phase is None:
-        return None
-    transcript_dir = change.change_dir / "steps" / phase / state.step
-    from imp.agents.transcript import Transcript
-    # A plain `imp resume` now replays-and-continues any kept transcript.
-    # Offer `--from <phase>` as the force-a-fresh-re-run escape hatch whenever
-    # such a transcript exists; a never-ran step (empty/absent transcript) still
-    # re-runs fresh on a plain resume, so it needs no hint.
-    if not Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
-        return None
-    return phase
 
 
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
@@ -304,8 +278,7 @@ def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
-    for ln in _pause_lines(name, phase, token, color=color,
-                            recover_phase=_recover_phase(change)):
+    for ln in _pause_lines(name, phase, token, color=color):
         print(ln)
 
 
@@ -588,11 +561,6 @@ def _run_header_line(change_id: str, title: str, marker: str,
             + ansi(tail, "dim", enabled=color))
 
 
-def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
-    origin = from_step or "start"
-    return ansi(f"rewound from {origin} to {target}", "dim", enabled=color)
-
-
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -642,7 +610,7 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 
 async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
-        resume: bool = False, from_target: str | None = None,
+        resume: bool = False,
         opening_intent: str | None = None,
         leave_mode: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
@@ -650,7 +618,7 @@ async def _run_tui_session(
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
     attach = build_session_attach(
-        change, seed_opening=seed_opening, resume=resume, from_target=from_target,
+        change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent)
     leave_state: dict[str, str] = {}
 
@@ -943,29 +911,6 @@ def _warn_if_blocked(change: Change) -> None:
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
-def _validate_from_target(
-    change: Change, state: State, from_target: str,
-) -> int | None:
-    """Validates --from without mutating state; returns rc 2 on a bad target, else None."""
-    from imp.engine.loader import load_workflow
-    from imp.providers.effective import load_effective_config
-    try:
-        cfg = load_effective_config(
-            project_root=change.project_root,
-            control_root=change.control_root).config
-        workflow = load_workflow(
-            change.workflow_dir, configured_tiers=cfg.tier_names())
-    except (LoadError, LoadErrors) as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
-    try:
-        recovery.plan_rewind(workflow, state, from_target)
-    except (recovery.RewindError, recovery.GateBypassRequired) as e:
-        print(str(e), file=sys.stderr)
-        return 2
-    return None
-
-
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1001,14 +946,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         )
         return 2
 
-    from_target = getattr(args, "from_target", None)
     headless, auto_headless = _select_headless(args)
     if headless:
-        # Headless: validate --from locally so rc 2 returns before the daemon spawns.
-        if from_target is not None:
-            rc = _validate_from_target(change, state, from_target)
-            if rc is not None:
-                return rc
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
@@ -1023,23 +962,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            resume=True, from_target=from_target, status=status)
+            resume=True, status=status)
     if _tui_requested(args):
-        if from_target is not None:
-            rc = _validate_from_target(change, state, from_target)
-            if rc is not None:
-                return rc
         print(_run_header_line(
             change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
-        return await _run_tui_session(change, resume=True, from_target=from_target)
+        return await _run_tui_session(change, resume=True)
 
-    # Interactive resume: a thin session-client. Validate --from client-side
-    # (non-mutating) so a bad target returns rc 2 before the daemon spawns; the
-    # daemon owns the worktree + lock and runs resume prep + the agent loop.
-    if from_target is not None:
-        rc = _validate_from_target(change, state, from_target)
-        if rc is not None:
-            return rc
+    # Interactive resume: a thin session-client; the daemon owns the worktree +
+    # lock and runs resume prep + the agent loop.
     _warn_if_tui_unavailable(args, sys.stdout)
     print(_run_header_line(
         change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
@@ -1053,7 +983,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         change, status=status, driver=driver, coord=coord)
     return await run_session_client(
         change, driver=driver, coord=coord, solicit=solicit,
-        resume=True, from_target=from_target, status=status)
+        resume=True, status=status)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
@@ -2326,10 +2256,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument("--tui", action="store_true",
                           help="Render the run in a full-screen, scrollable viewer "
                                "(expanded steps); falls back to streaming on a non-tty.")
-    p_resume.add_argument(
-        "--from", dest="from_target", metavar="TARGET",
-        help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
-             "re-run forward, appending new events (never rewriting history).")
 
     p_resume.set_defaults(func=_cmd_resume)
 

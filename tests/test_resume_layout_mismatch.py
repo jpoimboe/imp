@@ -29,7 +29,7 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
     monkeypatch.setattr(m, "run_session_client", _fail_client)
 
     rc = anyio.run(m._async_cmd_resume,
-                   argparse.Namespace(token="feat", from_target=None))
+                   argparse.Namespace(token="feat"))
 
     err = capsys.readouterr().err
     assert rc == 2

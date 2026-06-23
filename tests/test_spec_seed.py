@@ -289,7 +289,7 @@ def test_new_tui_delivers_seed(
     captured: dict[str, object] = {}
 
     async def _fake_tui(change: object, *, seed_opening: str | None = None,
-                        resume: bool = False, from_target: str | None = None,
+                        resume: bool = False,
                         opening_intent: str | None = None,
                         leave_mode: str | None = None) -> int:
         captured["seed_opening"] = seed_opening

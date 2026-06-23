@@ -621,127 +621,6 @@ def test_main_forwards_both_seed_and_resume_via_partial(
     assert fn.keywords == {"seed_opening": "hello seed", "resume": True}
 
 
-def test_main_forwards_from_target_via_partial(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import functools
-
-    import imp.remote.session.daemon as daemon
-
-    loaded = object()
-    captured: dict[str, Any] = {}
-
-    def fake_load(control_root: Path, change_id: str) -> object:
-        return loaded
-
-    def fake_run(fn: Any) -> None:
-        captured["fn"] = fn
-
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
-    monkeypatch.setattr(daemon.anyio, "run", fake_run)
-
-    rc = daemon.main([
-        "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
-        "--resume",
-        "--from=review",
-    ])
-
-    assert rc == 0
-    fn = captured["fn"]
-    assert isinstance(fn, functools.partial)
-    assert fn.func is daemon.serve_change_session
-    assert fn.args == (loaded,)
-    assert fn.keywords == {"resume": True, "from_target": "review"}
-
-
-def test_main_forwards_from_target_without_resume(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import functools
-
-    import imp.remote.session.daemon as daemon
-
-    loaded = object()
-    captured: dict[str, Any] = {}
-
-    def fake_load(control_root: Path, change_id: str) -> object:
-        return loaded
-
-    def fake_run(fn: Any) -> None:
-        captured["fn"] = fn
-
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
-    monkeypatch.setattr(daemon.anyio, "run", fake_run)
-
-    rc = daemon.main([
-        "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
-        "--from=review",
-    ])
-
-    assert rc == 0
-    fn = captured["fn"]
-    assert isinstance(fn, functools.partial)
-    assert fn.keywords == {"from_target": "review"}
-
-
-def _seed_control_default(root: Path) -> None:
-    import shutil
-
-    from imp.assets import bundled_workflow_dir
-    from tests.conftest import _git, _init_repo
-
-    _init_repo(root)
-    shutil.copytree(bundled_workflow_dir("imp"), root / "imp" / "workflows" / "imp")
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
-    (root / ".imp").mkdir(exist_ok=True)
-    (root / ".imp" / "config.yaml").write_text(
-        "providers: [anthropic]\n"
-        "tiers:\n  low: {anthropic: m}\n  medium: {anthropic: m}\n  high: {anthropic: m}\n"
-    )
-    _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "imp setup (default workflow)")
-
-
-@pytest.mark.anyio
-async def test_resume_from_applies_rewind_under_the_daemon_lock(
-    tmp_path: Path,
-) -> None:
-    from imp.engine.state import State
-
-    _seed_control_default(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    st = State.load(change.state_dir)
-    st.step = "plan-code-reviewer"
-    st.status = "paused"
-    st.loop_counts = {"task-lead": 2, "plan-code-reviewer": 6}
-    st.save(change.state_dir)
-
-    async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
-        coordinator: Any,
-        wait_for_turn_fn: Any = None,
-    ) -> RunResult:
-        return RunResult.COMPLETED
-
-    with anyio.fail_after(5):
-        result = await serve_change_session(
-            change, run_fn=fake_run, hibernate=False,
-            resume=True, from_target="plan-code-reviewer")
-
-    assert result is RunResult.COMPLETED
-
-    types = [e["type"] for e in change.event_log().read()]
-    assert "workflow_resumed" in types and "step_rewound" in types
-    assert types.index("workflow_resumed") < types.index("step_rewound")
-    assert "gates_bypassed" not in types
-
-    final = State.load(change.state_dir)
-
-    assert final.loop_counts == {"task-lead": 2}   # review reset, upstream kept
-
-
 def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> None:
     import imp.remote.session.daemon as daemon
     from tests.conftest import _seed_control
@@ -811,35 +690,6 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
         tg.cancel_scope.cancel()
 
 
-@pytest.mark.anyio
-async def test_invalid_from_target_is_rejected_before_any_log_mutation(
-    tmp_path: Path,
-) -> None:
-    from imp.engine import recovery
-    from imp.engine.state import State
-
-    _seed_control_default(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    st = State.load(change.state_dir)
-    st.step = "review"
-    st.status = "paused"
-    st.save(change.state_dir)
-
-    async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
-        coordinator: Any,
-        wait_for_turn_fn: Any = None,
-    ) -> RunResult:
-        raise AssertionError("run must not start when from_target is invalid")
-
-    with pytest.raises(recovery.RewindError):
-        await serve_change_session(
-            change, run_fn=fake_run, hibernate=False, resume=True,
-            from_target="definitely-not-a-step")
-
-    types = [e["type"] for e in change.event_log().read()]
-    assert "workflow_resumed" not in types
-
 
 def test_main_unknown_change_id_prints_clean_error_and_exits_nonzero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
@@ -879,21 +729,6 @@ def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
     rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat", "--resume"])
     assert rc == 1
 
-
-def test_append_workflow_resumed_idempotent_across_rewind_window(
-    tmp_path: Path,
-) -> None:
-    import imp.remote.session.daemon as daemon
-    from tests.conftest import _seed_control
-
-    _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    log = change.event_log()
-    daemon._append_workflow_resumed(log)
-    # apply_rewind appends exactly one step_rewound AFTER workflow_resumed.
-    log.append(agent_id=None, type="step_rewound", payload={})
-    daemon._append_workflow_resumed(log)   # trailing step_rewound → still idempotent
-    assert [e["type"] for e in log.read()].count("workflow_resumed") == 1
 
 
 def test_append_workflow_resumed_appends_after_a_real_event(tmp_path: Path) -> None:

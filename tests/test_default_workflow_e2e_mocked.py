@@ -468,56 +468,6 @@ async def test_fast_path_skips_reviewers_and_review(
 
 
 @pytest.mark.anyio
-async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
-    from imp.engine import recovery
-    from imp.engine.loader import load_workflow
-    from imp.providers.effective import load_effective_config
-
-    change = _seed_default_workflow(tmp_path)
-
-    # Position the Change as if paused at a maxed-out review: its loop
-    # budget (max_loops 6) is exhausted at 7. apply_rewind must clear that count
-    # so a re-entry that loops back (a reject verdict) gets a fresh budget rather
-    # than tripping the max_loops re-pause again. (On the approve path below the
-    # gate advances via Continue, which pops the count regardless — so the reset
-    # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
-    # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
-    st = State.load(change.state_dir)
-    st.step = "plan-code-reviewer"
-    st.status = "paused"
-    st.loop_counts = {"plan-code-reviewer": 6}
-    st.save(change.state_dir)
-
-    wf = load_workflow(change.workflow_dir,
-                       configured_tiers=load_effective_config(
-                           project_root=tmp_path,
-                           control_root=tmp_path).config.tier_names())
-    plan = recovery.plan_rewind(wf, st, "plan-code-reviewer")
-    recovery.apply_rewind(plan, wf, st, change.event_log())
-    st.status = "running"
-    st.save(change.state_dir)
-    assert "plan-code-reviewer" not in st.loop_counts   # the load-bearing reset guard
-
-    fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
-    resolve.reset_providers_for_tests()
-    resolve.register_provider(
-        "anthropic", env_check=lambda: True,
-        factory=lambda model: AnthropicProvider(
-            model_name=model, client_factory=lambda: fake),
-    )
-
-    result = await run_change(
-        change, on_event=lambda _e: None,
-    )
-
-    assert result is RunResult.COMPLETED
-    events = list(change.event_log().read())
-    assert any(e["type"] == "step_rewound" for e in events)
-    # Merged: worktree removed by the terminal merge gate.
-    assert not (tmp_path / ".imp" / "worktrees" / "test-change").exists()
-
-
-@pytest.mark.anyio
 async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None:
     """finalize solicits the human via wait_for_user, receives the reply as the
     tool result, then completes with decision=merge. Positioned directly at
