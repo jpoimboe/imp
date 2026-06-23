@@ -296,6 +296,31 @@ def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
     assert "commit subject" in low
 
 
+def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
+    text = TASK_LEAD.read_text()
+    low = text.lower()
+    # The backward deviation jump is gone from the body entirely.
+    assert "deviation" not in low
+    # Forward dispositions are documented.
+    assert "resolved-forward" in low
+    assert "- resolved-forward task-lead:" in text
+    assert "needs-replan" in low
+    # The needs-replan note is a durable checkbox in the pinned reader shape.
+    assert "- [ ] NEEDS-REPLAN task-lead:" in text
+    # task-lead never escalates to the human mid-implementation.
+    assert "never** call `wait_for_user`" in low
+    # It always returns a green tree, reverting forward through the coder.
+    assert "revert it forward" in low
+    assert "green tree" in low
+    # The notes live in the durable region that survives the end-of-plan collapse.
+    assert "survives the end-of-plan collapse" in low
+    # The TRANSIENT per-task narrative (dropped at collapse) must carry NO durable
+    # note: the step-5 append and "Keep bounded" descriptions end without one, so a
+    # needs-replan note can never be buried where plan-cycle-check would miss it.
+    assert "can be re-found for a fixup). **Record qualifying" in text
+    assert "(task done + its commit subject) only while" in text
+
+
 def test_plan_writer_states_soft_task_size_target() -> None:
     text = (AGENTS_DIR / "plan-writer.md").read_text()
     low = text.lower()
