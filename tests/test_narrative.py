@@ -804,6 +804,48 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
     assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
 
 
+def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
+    # Regression (ecui5x): a backgrounded claude_code `task` dispatch is stamped
+    # id_ns="block" on the CALL (matching its result), so awaits_result=True and
+    # the fold is shielded from resume-close. The parent then runs its OWN
+    # non-task tool_call (a web_search) while the subagent is still in flight —
+    # that event is not a task call, not a matching result, and not a mid-turn
+    # llm_response, so the resume-close fallback WOULD fire and freeze a bogus
+    # near-instant end_ts. The block-tracked guard must keep the fold open until
+    # its real result lands, so the rendered duration is the true runtime, not
+    # the gap to the parent's next action.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="claude_code"))
+    b.add({**_ev("tk1", "tool_call", agent_id="step:p/s", id="blk", name="task",
+                 input={"subagent_name": "reviewer", "task_description": "go"},
+                 id_ns="block"),
+           "timestamp": "2026-06-23T16:14:14+00:00"})
+    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
+              model="m", system_prompt="SYS", tools_schema=[], params={},
+              max_tool_calls=50))
+    step = b._step_stack[-1]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is True
+    assert sub.awaits_result is True
+    # Parent runs its OWN tool while the subagent is backgrounded: this is the
+    # exact event that used to resume-close the unstamped fold. It must NOT now.
+    b.add({**_ev("ws", "tool_call", agent_id="step:p/s", id="ws1",
+                 name="web_search", input={"query": "prior art"}),
+           "timestamp": "2026-06-23T16:14:23+00:00"})
+    b.add(_ev("wsr", "tool_result", agent_id="step:p/s", id="ws1",
+              content="hits", error=False))
+    assert sub.running is True            # survived the parent's own tool call
+    # The real block-keyed result lands minutes later and closes the fold with
+    # the TRUE end_ts — not the 16:14:23 web_search gap.
+    b.add({**_ev("tkr", "tool_result", agent_id="step:p/s", id="blk",
+                 content='{"status":"Success"}', error=False, id_ns="block"),
+           "timestamp": "2026-06-23T16:17:52+00:00"})
+    assert sub.running is False
+    assert sub.end_ts == "2026-06-23T16:17:52+00:00"
+    assert nv.elapsed_seconds(sub.start_ts, sub.end_ts) == pytest.approx(218.0)
+
+
 def test_openai_non_terminal_status_does_not_salvage_close() -> None:
     # A non-terminal Responses status ("in_progress") is NOT a turn-end; it must
     # leave the fold open (later closed by the canonical result or step_completed).

@@ -514,10 +514,15 @@ def _wrap_one(
                     # link (agent_id="sub:" + this event id) depends on it.
                     sub_def = ctx.subagent_defs.get(args["subagent_name"])
                     label = sub_def.label if sub_def is not None else None
+                    # Stamp the call block-tracked (id_ns="block"), matching the
+                    # outcome-carrying result below and dispatch.py: the narrative
+                    # reads awaits_result from the CALL, so an unstamped call leaves
+                    # a backgrounded fold open to early resume-close (frozen end_ts).
                     tc_ev = ctx.event_log.append_tool_call(
                         agent_id=state.agent_id,
                         block=ToolUseBlock(id=minted, name="task", input=task_input),
-                        label=label)
+                        label=label,
+                        id_ns="block")
                     tc_event_id = tc_ev["id"]
                 try:
                     result = await dispatch_task(
