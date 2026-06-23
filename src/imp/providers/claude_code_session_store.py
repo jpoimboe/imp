@@ -28,6 +28,10 @@ def _sanitize(value: str) -> str:
     return out
 
 
+def _sanitize_subpath(value: str) -> str:
+    return "/".join(_sanitize(seg) for seg in value.split("/") if seg)
+
+
 class ImpSessionStore:
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -42,7 +46,7 @@ class ImpSessionStore:
     def _path(self, key: Mapping[str, Any]) -> Path:
         subpath = key.get("subpath")
         if subpath:
-            return self._base(key) / f"{subpath}.jsonl"
+            return self._base(key) / f"{_sanitize_subpath(subpath)}.jsonl"
         return self._base(key) / "main.jsonl"
 
     def _read(self, path: Path) -> list[dict[str, Any]]:

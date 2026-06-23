@@ -165,6 +165,26 @@ def test_delete_subpath_removes_only_that_entry(tmp_path: Path) -> None:
     assert anyio.run(store.load, main) == [{"type": "user", "uuid": "m"}]
 
 
+def test_subpath_traversal_stays_under_root(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = {**_main_key(), "subpath": "../../escape"}
+    anyio.run(store.append, key, [{"type": "user", "uuid": "t"}])
+    written = list(tmp_path.rglob("*.jsonl"))
+    assert written, "expected a JSONL file to be written"
+    for p in written:
+        assert tmp_path in p.parents
+
+
+def test_subpath_leading_slash_stays_under_root(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = {**_main_key(), "subpath": "/escape"}
+    anyio.run(store.append, key, [{"type": "user", "uuid": "t"}])
+    written = list(tmp_path.rglob("*.jsonl"))
+    assert written, "expected a JSONL file to be written"
+    for p in written:
+        assert tmp_path in p.parents
+
+
 def test_passes_sdk_session_store_conformance(tmp_path: Path) -> None:
     anyio.run(
         run_session_store_conformance,
