@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 
 import anyio
 from claude_agent_sdk.testing import run_session_store_conformance
 
-from imp.providers.claude_code_session_store import ImpSessionStore
+from imp.providers.claude_code_session_store import (
+    ImpSessionStore,
+    resume_session_id,
+)
 
 
 def _main_key(session_id: str = "s1", project_key: str = "/home/u/proj") -> dict:
@@ -190,3 +194,15 @@ def test_passes_sdk_session_store_conformance(tmp_path: Path) -> None:
         run_session_store_conformance,
         lambda: ImpSessionStore(Path(tempfile.mkdtemp(dir=tmp_path))),
     )
+
+
+def test_resume_session_id_is_stable_and_a_valid_uuid() -> None:
+    first = resume_session_id("step:plan/plan-writer")
+    second = resume_session_id("step:plan/plan-writer")
+    assert first == second
+    # Parses as a UUID (SDK rejects a non-UUID resume id), so validity is load-bearing.
+    assert str(uuid.UUID(first)) == first
+
+
+def test_resume_session_id_distinct_per_agent() -> None:
+    assert resume_session_id("step:plan/a") != resume_session_id("step:plan/b")

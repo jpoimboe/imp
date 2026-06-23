@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -100,3 +101,11 @@ class ImpSessionStore:
                 continue
             out.append(p.relative_to(base).with_suffix("").as_posix())
         return sorted(out)
+
+
+_SESSION_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session")
+
+
+def resume_session_id(agent_id: str) -> str:
+    """Deterministic valid-UUID session id, stable across runs (SDK needs a valid UUID)."""
+    return str(uuid.uuid5(_SESSION_ID_NAMESPACE, agent_id))
