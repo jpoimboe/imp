@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from imp.providers.stderr_sink import StderrSink, current_stderr_sink
 
 
