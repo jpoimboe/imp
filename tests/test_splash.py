@@ -170,3 +170,50 @@ def test_scenes_pairs_carry_str_or_callable_taglines() -> None:
 def test_time_of_day_tagline_resolves_today_vs_tonight(monkeypatch, hour, word) -> None:
     monkeypatch.setattr(splash, "_now_hour", lambda: hour)
     assert splash._tonight_or_today() == f"what are we building {word}?"
+
+
+def test_choose_index_stays_within_the_pool() -> None:
+    for _ in range(200):
+        assert 0 <= splash.choose_index() < len(splash.SCENES)
+
+
+def test_scene_lines_renders_the_same_chosen_scene_identically() -> None:
+    a = splash.scene_lines(0, theme="dark", color=True)
+    b = splash.scene_lines(0, theme="dark", color=True)
+    assert a == b
+
+
+def test_ansi_render_emits_only_named_codes_never_truecolor() -> None:
+    out = "\n".join(splash.scene_lines(4, theme="ansi", color=True))
+    assert "38;2" not in out
+    assert "48;2" not in out
+
+
+def test_splash_block_is_a_nonempty_multiline_scene_per_theme() -> None:
+    for theme in ("dark", "light", "ansi"):
+        out = splash.splash_block(theme=theme, width=40, color=True)
+        assert out
+        assert "\n" in out
+        assert "▀" in out
+
+
+def test_splash_block_no_color_returns_plain_tagline_only(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 0)
+    out = splash.splash_block(theme="dark", width=40, color=False)
+    assert out == "the familiar awakens."
+    assert "▀" not in out
+    assert "\x1b[" not in out
+
+
+def test_splash_block_narrow_width_returns_plain_tagline_only(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 2)
+    out = splash.splash_block(theme="dark", width=31, color=True)
+    assert out == "make a wish."
+    assert "▀" not in out
+    assert "\x1b[" not in out
+
+
+def test_splash_block_tagline_is_grey_blue_italic_when_rendered(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 0)
+    out = splash.splash_block(theme="dark", width=40, color=True)
+    assert out.endswith("\x1b[38;2;154;160;168m\x1b[3mthe familiar awakens.\x1b[0m")

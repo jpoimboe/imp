@@ -389,3 +389,32 @@ SCENES: list[tuple[SceneBuilder, "str | Callable[[], str]"]] = [
     (_campfire, "by emberlight, we code."),
     (_sunrise, "what are we building today?"),
 ]
+
+MIN_WIDTH = 32
+
+
+def choose_index() -> int:
+    return random.randrange(len(SCENES))
+
+
+def _resolve_tagline(tagline: "str | Callable[[], str]") -> str:
+    return tagline() if callable(tagline) else tagline
+
+
+def scene_lines(index: int, *, theme: str, color: bool) -> list[str]:
+    """Deterministically render scene `index` to half-block lines."""
+    _use_theme(theme)
+    g = _make_grid()
+    SCENES[index][0](g)
+    return _encode_grid(g, color=color)
+
+
+def splash_block(*, theme: str, width: int, color: bool) -> str:
+    """The opening splash: a random scene over a grey-blue italic tagline (plain tagline in degraded modes)."""
+    index = choose_index()
+    tagline = _resolve_tagline(SCENES[index][1])
+    if not color or width < MIN_WIDTH:
+        return tagline
+    lines = scene_lines(index, theme=theme, color=color)
+    tag = _fg_open(_build_palette(theme)["tag"]) + _ITALIC + tagline + _RESET
+    return "\n".join(lines) + "\n" + tag
