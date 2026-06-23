@@ -43,6 +43,8 @@ _DARK: dict[str, Color | None] = {
     "aurora1": (0x4A, 0xC0, 0x8A), "aurora2": (0x7A, 0x6A, 0xC0),
     "firefly": (0xF0, 0xE0, 0x80), "fireflyGlow": (0x4A, 0x4A, 0x20),
     "wisp": (0x9A, 0xE0, 0xD0), "wispGlow": (0x2A, 0x4A, 0x4A),
+    "mushroomStem": (0xC8, 0xC0, 0xA8), "mushroomCap": (0x6A, 0xC0, 0x9A),
+    "mushroomGlow": (0x2A, 0x4A, 0x3A),
 }
 _LIGHT: dict[str, Color | None] = {
     "impBody": (0xC2, 0x61, 0x1F), "impHorn": (0x7A, 0x3A, 0x0E),
@@ -61,6 +63,8 @@ _LIGHT: dict[str, Color | None] = {
     "aurora1": (0x2A, 0x8A, 0x5A), "aurora2": (0x5A, 0x4A, 0x8A),
     "firefly": (0xB0, 0x90, 0x20), "fireflyGlow": (0xD0, 0xC8, 0x90),
     "wisp": (0x2A, 0x8A, 0x8A), "wispGlow": (0xB0, 0xD0, 0xD0),
+    "mushroomStem": (0x8A, 0x80, 0x68), "mushroomCap": (0x2A, 0x8A, 0x5A),
+    "mushroomGlow": (0xB0, 0xD0, 0xC0),
 }
 _ANSI_P: dict[str, Color | None] = {
     "impBody": "bright_yellow", "impHorn": "yellow",
@@ -78,6 +82,7 @@ _ANSI_P: dict[str, Color | None] = {
     "aurora1": "green", "aurora2": "magenta",
     "firefly": "bright_yellow", "fireflyGlow": "bright_black",
     "wisp": "bright_cyan", "wispGlow": "cyan",
+    "mushroomStem": "white", "mushroomCap": "green", "mushroomGlow": "bright_black",
 }
 
 
@@ -419,6 +424,24 @@ def _wisp(g: Grid, cx: int, cy: int, r: int) -> None:
     _disc(g, cx, cy, inner, inner, _P["wisp"])
 
 
+def _candle(g: Grid, x: int, base_y: int, h: int) -> None:
+    for j in range(h):
+        _px(g, x, base_y - j, _P["glowWarm"])
+    _px(g, x, base_y - h, _P["fire3"])
+    _px(g, x, base_y - h - 1, _P["fireTip"])
+
+
+def _mushroom(g: Grid, x: int, base_y: int, h: int) -> None:
+    for j in range(h):
+        _px(g, x, base_y - j, _P["mushroomStem"])
+    cap_y = base_y - h
+    for dx in (-2, -1, 0, 1, 2):
+        _px(g, x + dx, cap_y, _P["mushroomCap"])
+    for dx in (-1, 0, 1):
+        _px(g, x + dx, cap_y - 1, _P["mushroomCap"])
+    _px(g, x, cap_y + 1, _P["mushroomGlow"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -541,6 +564,27 @@ def _floating_wisps(g: Grid) -> None:
     _left_imp(g)
 
 
+def _twin_candles(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _candle(g, 22, 12, 3)
+    _candle(g, 26, 12, 3)
+    _left_imp(g)
+
+
+def _twin_torches(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _fire(g, 21, 12, 4)
+    _fire(g, 27, 12, 4)
+    _left_imp(g)
+
+
+def _glowing_mushrooms(g: Grid) -> None:
+    _ground(g, 13, glow=True)
+    _mushroom(g, 22, 12, 2)
+    _mushroom(g, 27, 12, 3)
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -559,6 +603,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_fireflies, "the lights are out to play."),
     (_will_o_wisp, "follow the light."),
     (_floating_wisps, "the void is listening."),
+    (_twin_candles, "whisper your wish."),
+    (_twin_torches, "let's raise a little hell."),
+    (_glowing_mushrooms, "let's make some mischief."),
 ]
 
 MIN_WIDTH = 32

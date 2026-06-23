@@ -368,3 +368,33 @@ def test_wisp_paints_a_bright_core_inside_a_dim_glow() -> None:
     core2 = any(cell == splash._P["wisp"] for row in g2 for cell in row)
     glow2 = any(cell == splash._P["wispGlow"] for row in g2 for cell in row)
     assert core2 and glow2
+
+
+def test_task6_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_twin_candles", "whisper your wish."),
+        ("_twin_torches", "let's raise a little hell."),
+        ("_glowing_mushrooms", "let's make some mischief."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_mushroom_paints_a_glowing_cap_above_its_stem() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._mushroom(g, 27, 12, 3)
+    cap = [(x, y) for y, row in enumerate(g)
+           for x, cell in enumerate(row) if cell == splash._P["mushroomCap"]]
+    stem = [(x, y) for y, row in enumerate(g)
+            for x, cell in enumerate(row) if cell == splash._P["mushroomStem"]]
+    assert cap and stem
+    assert min(y for _, y in cap) < max(y for _, y in stem)
