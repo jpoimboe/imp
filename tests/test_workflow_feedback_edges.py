@@ -1,5 +1,5 @@
-"""§6 edge-coverage test: 7 unique findings-carrying (source, target) pairs
-(9 rule entries total) must each have a non-empty feedback preamble in the
+"""§6 edge-coverage test: 6 unique findings-carrying (source, target) pairs
+(8 rule entries total) must each have a non-empty feedback preamble in the
 default workflow."""
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from imp.engine.types import Goto
 FINDINGS_TARGETS = {
     ("spec-reviewer", "spec-writer"),
     ("plan-reviewer", "plan-writer"),
-    ("task-lead", "plan-writer"),
     ("finalize", "plan-writer"),
 }
 

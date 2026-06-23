@@ -53,7 +53,7 @@ def test_task_loop_and_rework_bypass_plan_finalized() -> None:
     steps = _steps()
     # task-lead's normal completion continues to verify, never back through plan-finalized.
     loop = evaluate_rules(steps["task-lead"].rules, vars=_BASE,
-                          output={"status": "Success", "done": True, "deviation": False,
+                          output={"status": "Success", "done": True,
                                   "verify_tolerated": False, "summary": "x"})
     assert isinstance(loop.action, Continue)
     # plan-code-reviewer's task_gap rework re-enters task-lead directly, not plan-finalized.
