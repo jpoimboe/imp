@@ -332,6 +332,25 @@ def _sun(g: Grid, cx: int, cy: int, r: int) -> None:
     _disc(g, cx, cy, r, r, _P["sun"])
 
 
+def _constellation(g: Grid) -> None:
+    nodes = [(20, 2), (24, 4), (27, 3), (23, 8), (26, 10)]
+    for i in range(len(nodes) - 1):
+        x0, y0 = nodes[i]
+        x1, y1 = nodes[i + 1]
+        _line(g, x0, y0, x1, y1, _P["starDim"])
+    for x, y in nodes:
+        _spark(g, x, y, _P["starBright"])
+
+
+def _comet(g: Grid, x: int, y: int, length: int) -> None:
+    for k in range(length):
+        t = k / length
+        c = (_P["starBright"] if t < 0.3
+             else (_P["star"] if t < 0.6 else _P["starDim"]))
+        _px(g, x - k, y + k, c)
+    _spark(g, x, y, _P["starBright"])
+
+
 # --- time-of-day tagline ---
 
 def _now_hour() -> int:
@@ -384,6 +403,25 @@ def _sunrise(g: Grid) -> None:
     _left_imp(g)
 
 
+def _constellation_scene(g: Grid) -> None:
+    _stars(g, 0, 13, 0.20)
+    _constellation(g)
+    _left_imp(g)
+
+
+def _comet_scene(g: Grid) -> None:
+    _stars(g, 0, 12, 0.15)
+    _comet(g, 28, 2, 6)
+    _left_imp(g)
+
+
+def _the_void(g: Grid) -> None:
+    _stars(g, 0, 14, 0.10)
+    _glow_ring(g, 24, 7, 5, _P["starDim"])
+    _spark(g, 24, 7, _P["star"])
+    _left_imp(g)
+
+
 SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_crescent_stars, "the familiar awakens."),
     (_full_moon_cloud, _tonight_or_today),
@@ -391,6 +429,9 @@ SCENES: list[tuple[SceneBuilder, str | Callable[[], str]]] = [
     (_starfield, "your imp is listening."),
     (_campfire, "by emberlight, we code."),
     (_sunrise, "what are we building today?"),
+    (_constellation_scene, "drawn in the stars."),
+    (_comet_scene, "something wicked this way ships."),
+    (_the_void, "conjured from the void."),
 ]
 
 MIN_WIDTH = 32

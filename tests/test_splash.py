@@ -229,3 +229,28 @@ def test_main_wires_the_splash_module() -> None:
 def test_retired_opening_module_is_gone() -> None:
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("imp.cli.opening")
+
+
+def test_task1_scenes_are_wired_and_paint_imp_and_accent() -> None:
+    cases = [
+        ("_constellation_scene", "drawn in the stars."),
+        ("_comet_scene", "something wicked this way ships."),
+        ("_the_void", "conjured from the void."),
+    ]
+    for name, tagline in cases:
+        builder = getattr(splash, name)
+        assert (builder, tagline) in splash.SCENES, name
+        splash._use_theme("dark")
+        g = splash._make_grid()
+        builder(g)
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(18, splash.W)), name
+        assert any(g[y][x] is not None
+                   for y in range(splash.H) for x in range(2, 18)), name
+
+
+def test_every_scene_renders_under_all_three_themes_without_error() -> None:
+    for index in range(len(splash.SCENES)):
+        for theme in ("dark", "light", "ansi"):
+            lines = splash.scene_lines(index, theme=theme, color=True)
+            assert len(lines) == 8
