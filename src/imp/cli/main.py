@@ -1714,7 +1714,7 @@ def _effective_status(status: str, change_dir: Path) -> str:
     `change_dir/lock` (pid inside) for its whole life; a hard kill / crash has the
     OS drop the flock but leaves the stale pid file and a `running` state.json. So
     a `running` Change whose lock pid is dead has CRASHED — surface it as
-    `errored` (in RESUMABLE) so `imp status` shows it and `imp resume` offers it.
+    `errored` (in RESUMABLE) so `imp ls` shows it and `imp resume` offers it.
 
     Only `running` is re-derived; every other status is authoritative. A MISSING
     lock file is left as `running` (the microsecond between Change.create_draft and the
@@ -1742,7 +1742,7 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
     change.json are schema-identical to the in-flight ones (both written by
     State.save / Change.create), so the two sections can't silently drift.
     Returns None on malformed/incomplete JSON so a single corrupt entry can't
-    crash the whole `imp status` listing (callers skip None)."""
+    crash the whole `imp ls` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)
@@ -2377,7 +2377,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.set_defaults(func=_cmd_show)
 
     p_ls = sub.add_parser(
-        "ls", aliases=["list", "status"],
+        "ls", aliases=["list"],
         help="List your changes (use -a for completed and abandoned).",
         description=(
             "List your in-progress changes and the Backlog (saved-for-later "

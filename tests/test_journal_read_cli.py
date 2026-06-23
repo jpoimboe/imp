@@ -1,4 +1,4 @@
-"""imp log / imp status / imp show against an ARCHIVED (merged,
+"""imp log / imp ls / imp show against an ARCHIVED (merged,
 worktree-removed) Change.
 
 Seeds the per-Change archive directly (the sole read source for completed
@@ -206,7 +206,7 @@ def test_status_precondition_error_prints_no_changes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """When _control_root() raises PreconditionError (outside a git repo),
-    `imp status` still prints the single-line empty message and exits 0."""
+    `imp ls` still prints the single-line empty message and exits 0."""
     import imp.cli.main as m
     from imp.engine import worktree as _wt
 
@@ -567,7 +567,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
     with redirect_stdout(buf):
-        assert m.main(["status", "--all"]) == 0
+        assert m.main(["ls", "--all"]) == 0
     out = buf.getvalue()
     assert "arch01" in out
     assert "Archived One" in out

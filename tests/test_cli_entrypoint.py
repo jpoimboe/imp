@@ -90,7 +90,7 @@ def test_known_command_still_dispatches(tmp_path, monkeypatch) -> None:
     # A real command is not swallowed by the unknown-command guard.
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".imp").mkdir()
-    rc = main(["status"])
+    rc = main(["ls"])
     assert rc == 0
 
 
