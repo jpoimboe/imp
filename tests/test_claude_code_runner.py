@@ -291,7 +291,7 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     assert events[-1]["type"] == "agent_output"
     # Initial messages were NOT re-appended.
     loaded = t.load()
-    assert len(loaded) == 4  # 3 original + 1 new assistant turn
+    assert len(loaded) == 5  # 3 original + 1 manifest user turn + 1 new assistant turn
 
 
 @pytest.mark.anyio
@@ -1673,3 +1673,109 @@ async def test_resume_run_passes_no_session_store(tmp_path: Path) -> None:
     opts = created[0].opts
     assert opts.session_store is None
     assert opts.session_id is None
+
+
+def _user_text_blob(replayed: list[Any]) -> str:
+    # Consecutive user turns merge before stream-json replay, so collect text from
+    # both plain-string and block-list user turns.
+    out: list[str] = []
+    for d in replayed:
+        if d.get("type") != "user":
+            continue
+        content = d["message"]["content"]
+        if isinstance(content, str):
+            out.append(content)
+        else:
+            out.extend(b["text"] for b in content if b.get("type") == "text")
+    return "\n".join(out)
+
+
+@pytest.mark.anyio
+async def test_resume_injects_succeeded_manifest_into_replay(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        TextBlock(text="reading…"),
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),
+    )))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
+    # Ends on assistant prose, no complete_step → MISSING_COMPLETE_STEP (ckx9f5).
+    t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    [ev async for ev in runner.run(inv)]
+
+    blob = _user_text_blob(created[0].queries[0])
+    assert "read_file — succeeded" in blob
+    assert "replay artifact" in blob
+
+
+@pytest.mark.anyio
+async def test_resume_balance_path_keeps_retry_feedback_last(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    # A previously-completed step re-invoked with reviewer/gate retry feedback.
+    inv = replace(
+        inv, balance_on_resume=True, retry_feedback="REVISE: rewrite plan.md")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    # A durable write the model must now REVISE, not preserve.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                     input={"path": "plan.md", "content": "OLDBODY"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="w1", content="ok", is_error=True),)))
+    # Ends on a SUCCESSFUL complete_step (no result) → the balance path.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="c0", name="complete_step",
+                     input={"status": "Success"}),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    [ev async for ev in runner.run(inv)]
+
+    blob = _user_text_blob(created[0].queries[0])
+    # The retry feedback IS present and the "do not redo" manifest is NOT —
+    # so nothing displaces the revision instruction.
+    assert "REVISE: rewrite plan.md" in blob
+    assert "replay artifact" not in blob
+    assert "write_file — succeeded" not in blob
+    # The retry feedback is the LAST text the model reads on resume.
+    assert blob.rstrip().endswith("REVISE: rewrite plan.md")

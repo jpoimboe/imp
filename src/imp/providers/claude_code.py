@@ -72,6 +72,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    build_resume_manifest,
     inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
@@ -1220,6 +1221,16 @@ class ClaudeCodeAgentRunner:
             if resume_state is not ResumeState.AWAITING_USER:
                 drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
+            # ckx9f5: name prior tool calls succeeded so stream-json replay's placeholder
+            # errors don't trigger redo; skip the balance path (retry feedback stays last).
+            if not invocation.balance_on_resume:
+                manifest = build_resume_manifest(messages)
+                if manifest is not None:
+                    manifest_msg = Message(
+                        role="user", content=(TextBlock(text=manifest),))
+                    messages.append(manifest_msg)
+                    transcript.append(manifest_msg)
+                    elog.append_user_message(agent_id=aid, message=manifest_msg)
         else:
             messages = []
             for m in invocation.initial_messages:
