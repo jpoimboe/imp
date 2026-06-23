@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import random
+from collections.abc import Sequence
+from typing import Protocol
+
 from imp.cli import palette as pal
 
 # 6-row source: "X"=pixel, "."=transparent; rows pair (0,1)(2,3)(4,5) into 3 half-block cells.
@@ -11,6 +15,40 @@ _WORDMARK_BITMAP: tuple[str, ...] = (
     "X.X.X.X.XXX",
     "........X..",
 )
+
+
+class _SupportsChoice(Protocol):
+    def choice(self, seq: Sequence[str]) -> str: ...
+
+
+# This is the one place imp's voice leans whimsical.
+PHRASES: tuple[str, ...] = (
+    "a familiar, summoned to help you ship.",
+    "the familiar awakens.",
+    "two horns, perched and ready.",
+    "whisper your wish.",
+    "stir the cauldron — what's brewing?",
+    "the portal is open. step through.",
+    "by emberlight, we code.",
+    "drawn in the stars.",
+    "let's make some mischief.",
+    "small imp, big leverage.",
+    "conjured from the void.",
+    "gaze in — what shall we build?",
+    "ready to raise some hell in the diff.",
+    "every great hack needs a familiar.",
+    "mischief, compiled.",
+    "what are we building tonight?",
+    "make a wish.",
+    "point me at the problem.",
+    "welcome back.",
+    "your imp is listening.",
+)
+
+
+def pick_phrase(rng: _SupportsChoice | None = None) -> str:
+    return (rng if rng is not None else random.Random()).choice(PHRASES)
+
 
 # (top_pixel, bottom_pixel) → cell glyph. Never paints a background cell.
 _HALF_BLOCKS: dict[tuple[bool, bool], str] = {
