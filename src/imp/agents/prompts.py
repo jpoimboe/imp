@@ -17,11 +17,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jinja2
 
-from imp.engine.state import EventLog
+from imp.engine.state import EventLog, State
+
+if TYPE_CHECKING:
+    from imp.engine.change import Change
 
 
 class PromptRenderError(Exception):
@@ -137,6 +140,24 @@ def build_context(
         project=_ProjectNamespace(facts),
         run=_RunNamespace(non_interactive=non_interactive),
     )
+
+
+def render_label(
+    label: str | None, change: Change | None, log: EventLog | None,
+    state: State | None = None,
+) -> str | None:
+    if label is None or "{{" not in label or change is None or log is None:
+        return label
+    try:
+        return render_prompt(label, build_context(
+            change_title=change.title, event_log=log,
+            change_id=change.id, change_home=f".imp/changes/{change.id}",
+            cur_base_head=change.cur_base_head,
+            orig_base_head=change.orig_base_head,
+            vars=state.vars if state is not None else {},
+        ))
+    except PromptRenderError:
+        return label
 
 
 _ENV_KWARGS: dict[str, Any] = dict(

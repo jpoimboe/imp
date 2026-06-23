@@ -22,7 +22,7 @@ from typing import Any
 
 import anyio
 
-from imp.agents.prompts import build_context, render_prompt
+from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
     ChangeContext,
     Message,
@@ -517,26 +517,13 @@ async def _dispatch_step(
         project_facts=project_facts, guidance=guidance)
 
 
-def _render_label(
-    label: str | None, change: Change | None, log: EventLog | None, state: State,
-) -> str | None:
-    if label is None or "{{" not in label or change is None or log is None:
-        return label
-    return render_prompt(label, build_context(
-        change_title=change.title, event_log=log,
-        change_id=change.id, change_home=f".imp/changes/{change.id}",
-        cur_base_head=change.cur_base_head,
-        orig_base_head=change.orig_base_head, vars=state.vars,
-    ))
-
-
 def _step_started_payload(
     step: Step, state: State,
     change: Change | None = None, log: EventLog | None = None,
 ) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "quiet": step.quiet,
-               "label": _render_label(step.label, change, log, state)}
+               "label": render_label(step.label, change, log, state)}
     if step.kind == "script":
         payload["command"] = step.command
     if step.chrome is not None:
