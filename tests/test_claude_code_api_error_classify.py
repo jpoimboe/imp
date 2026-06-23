@@ -120,3 +120,32 @@ def test_failed_to_authenticate_phrase_is_auth() -> None:
 def test_lowercase_failed_to_authenticate_prose_is_not_auth() -> None:
     assert _classify_agent_text(
         "the script failed to authenticate against the mock server") is None
+
+
+def test_401_code_classified_as_auth_with_http_kind() -> None:
+    exc = _classify_agent_text("API Error: 401 rejected by gateway")
+    assert isinstance(exc, perr.AuthError)
+    assert getattr(exc, "kind", "") == "http_401"
+
+
+def test_403_code_classified_as_auth_with_http_kind() -> None:
+    exc = _classify_agent_text("API Error: 403 forbidden")
+    assert isinstance(exc, perr.AuthError)
+    assert getattr(exc, "kind", "") == "http_403"
+
+
+def test_408_code_classified_as_network() -> None:
+    exc = _classify_agent_text("API Error: 408 request timeout")
+    assert isinstance(exc, perr.NetworkError)
+
+
+def test_422_code_still_api_error() -> None:
+    exc = _classify_agent_text("API Error: 422 unprocessable")
+    assert isinstance(exc, perr.ApiError)
+    assert getattr(exc, "kind", "") == "http_422"
+
+
+def test_observed_401_credential_string_is_auth() -> None:
+    exc = _classify_agent_text(
+        "Failed to authenticate. API Error: 401 Invalid authentication credentials")
+    assert isinstance(exc, perr.AuthError)
