@@ -123,6 +123,18 @@ class ReplyInterjectRouter:
 
 SPEC_SEED_MARKER = "Implement this spec"
 
+OPENING_QUESTION_NEW = (
+    "What change would you like to make? Describe what you have in mind, "
+    "and I'll help shape it into a spec.")
+
+OPENING_QUESTION_CHAT = (
+    "What's on your mind? I can answer questions, look over your project, "
+    "or help scope a change.")
+
+
+def _opening_question(leave_mode: str) -> str:
+    return OPENING_QUESTION_CHAT if leave_mode == "chat" else OPENING_QUESTION_NEW
+
 
 def _should_prompt_opening(
     *, seed_text: str | None, interactive: bool,
@@ -784,7 +796,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print()
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
-            reply = (await prompt.ask_async()).strip()
+            reply = (await prompt.ask_async(question=_opening_question(leave_mode),
+                                            width=_term_width())).strip()
         except (EOFError, KeyboardInterrupt):
             print("imp: cancelled", file=sys.stderr)
             return 130
