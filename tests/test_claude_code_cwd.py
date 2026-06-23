@@ -95,6 +95,27 @@ def test_build_options_blanks_external_anthropic_keys(tmp_path: Path) -> None:
     )
 
 
+def test_build_options_isolates_config_dir_for_fresh(tmp_path: Path) -> None:
+    """A fresh start passes config_dir: _build_options must point CLAUDE_CONFIG_DIR
+    at it and DROP the history-suppression flags (the isolated home makes them
+    pointless, and they starve session_store of the conversation body)."""
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    cfg = tmp_path / "iso-home"
+    opts = runner._build_options(
+        _invocation(tmp_path), mcp_server=object(), tool_names=["bash"],
+        config_dir=cfg,
+    )
+    assert opts.env.get("CLAUDE_CONFIG_DIR") == str(cfg)
+    assert opts.env.get("ANTHROPIC_API_KEY") == ""
+    assert "CLAUDE_CODE_SKIP_PROMPT_HISTORY" not in opts.env
+    assert opts.extra_args == {}
+
+    # The SDK mirror batcher resolves projects_dir from options.env; it MUST
+    # land under the isolated dir, or mirroring silently stops and resume breaks.
+    from claude_agent_sdk._internal.sessions import _get_projects_dir
+    assert _get_projects_dir(opts.env) == cfg / "projects"
+
+
 def test_build_options_skips_cc_prompt_history(tmp_path: Path) -> None:
     """imp persists its own transcripts; the nested `claude` must write NOTHING
     to ~/.claude/projects/. --no-session-persistence suppresses the conversation
@@ -113,3 +134,4 @@ def test_build_options_skips_cc_prompt_history(tmp_path: Path) -> None:
         f"nested claude writes no session/ai-title files to ~/.claude/projects/, "
         f"got {opts.env.get('CLAUDE_CODE_SKIP_PROMPT_HISTORY')!r}"
     )
+    assert opts.extra_args == {"no-session-persistence": None}

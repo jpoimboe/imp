@@ -36,6 +36,7 @@ import signal
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
@@ -968,7 +969,8 @@ class ClaudeCodeAgentRunner:
                        tool_names: list[str], impty_server: Any = None,
                        *, session_store: Any = None,
                        session_id: str | None = None,
-                       resume: str | None = None) -> Any:
+                       resume: str | None = None,
+                       config_dir: Path | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
@@ -986,33 +988,25 @@ class ClaudeCodeAgentRunner:
         mcp_servers: dict[str, Any] = {"imp": mcp_server}
         if impty_server is not None:
             mcp_servers["impty"] = impty_server
+        # blank external keys so a parent ANTHROPIC_* can't hijack the nested claude's backend auth
+        env: dict[str, str] = {
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_AUTH_TOKEN": "",
+        }
+        extra_args: dict[str, Any]
+        if config_dir is not None:
+            # isolated home → suppression flags pointless and they starve session_store;
+            # the batcher resolves projects_dir from this env
+            env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+            extra_args = {}
+        else:
+            # resume/replay keep the flags so they don't write ~/.claude
+            env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
+            extra_args = {"no-session-persistence": None}
         return ClaudeAgentOptions(
             model=self.model,
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
-            # The claude_code provider drives the `claude` CLI, which
-            # authenticates via its OWN backend (OAuth/subscription, Vertex, or
-            # Bedrock). ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are the
-            # *external-key* auth path used by the direct-SDK `anthropic`
-            # provider — never by claude_code. If either is present in the
-            # parent env, claude switches to it as an external key; a bogus or
-            # mismatched value then fails with "Invalid API key · Fix external
-            # API key" (exit 0, surfaced as assistant text → AuthError → empty
-            # review). The SDK merges options.env OVER the inherited env, and an
-            # empty string makes claude fall back to its backend auth (verified
-            # live), so blank both here to make the nested claude immune to
-            # whatever ANTHROPIC_* the parent process happens to export.
-            env={
-                "ANTHROPIC_API_KEY": "",
-                "ANTHROPIC_AUTH_TOKEN": "",
-                # imp persists its own transcripts; the nested claude must write
-                # NOTHING to ~/.claude/projects/. --no-session-persistence (below)
-                # suppresses the conversation body but NOT the ai-title stub: CC
-                # 2.x writes a single-record {"type":"ai-title",...} session file
-                # even under that flag, polluting `claude --resume`. There is no
-                # title-only knob; this var suppresses ALL CC-side history writes,
-                # killing the stub at source.
-                "CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1",
-            },
+            env=env,
             # Pin the `claude` subprocess to the change's project_root. Without
             # this the SDK launches claude with cwd=None and leaves $PWD as
             # inherited, so claude keys off a stale $PWD and edits/commits the
@@ -1029,7 +1023,7 @@ class ClaudeCodeAgentRunner:
             disallowed_tools=disallowed,
             setting_sources=[],
             strict_mcp_config=True,
-            extra_args={"no-session-persistence": None},
+            extra_args=extra_args,
             session_store=session_store,
             session_id=session_id,
             resume=resume,
