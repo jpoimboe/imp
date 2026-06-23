@@ -43,7 +43,7 @@ def _canned_anthropic(**overrides):
         "phase": "written", "spec_path": "stub-spec.md",
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
-        "done": True, "deviation": False, "verify_tolerated": False,
+        "done": True, "verify_tolerated": False,
         "stuck": False, "sweep_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
@@ -85,7 +85,7 @@ def _openai_step_aware(**kwargs):
         "phase": "written", "spec_path": "stub-spec.md",
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
-        "done": True, "deviation": False, "verify_tolerated": False,
+        "done": True, "verify_tolerated": False,
         "stuck": False, "sweep_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
@@ -226,7 +226,6 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     #   decision:merge     finalize  → goto merge
     #   phase:written      spec-writer   → not drafting, advances
     #   done:true          task-lead     → plan fully implemented
-    #   deviation:false    task-lead     → no supercycle back to plan-writer
     #   more_plans:false   plan-cycle-check → no supercycle, continue
     #   blocking:false     spec/plan reviewers → no rework loop
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
@@ -325,7 +324,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "phase": "written", "spec_path": "stub-spec.md",
                     "complexity": "standard",
                     "plan_path": "stub-plan.md", "plan_number": 1,
-                    "done": True, "deviation": False, "verify_tolerated": False,
+                    "done": True, "verify_tolerated": False,
                     "stuck": False, "sweep_tolerated": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
                     "blocking": False, "has_minor_findings": False,

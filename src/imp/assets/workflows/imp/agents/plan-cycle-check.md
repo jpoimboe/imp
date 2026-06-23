@@ -33,6 +33,37 @@ plan-writer for the next plan (`more_plans: true`) or runs the end-of-change pan
 once coverage is complete (`more_plans: false`). The workflow's first-match-wins
 rules decide.
 
+## Forward notes — the two `more_plans: true` triggers
+
+`task-lead` now flows forward and logs what it could not fix as durable notes in
+`{{ change.home }}/progress.md`. Read those notes (they live in the durable region
+alongside `## Deferred Followups`, surviving the end-of-plan collapse) and emit
+`more_plans: true` in exactly two cases:
+
+1. **Open needs-replan note.** A `- [ ] NEEDS-REPLAN task-lead: …` checkbox that is
+   still **open** (`[ ]`). Once `plan-writer` authors the covering `N+1` it marks the
+   box `[x]`, so a consumed note never re-fires and cannot drive an unbounded
+   supercycle — only an open box triggers a plan.
+2. **Independent coverage backstop.** Re-derive coverage from the spec + committed
+   code and find real *code* scope still uncovered that is **not** already accounted
+   for — i.e. not parked under a `— needs-decision:` item and not closed by a
+   `resolved-forward` note.
+
+Subtleties:
+
+- A **`— needs-decision:` item suppresses the backstop for its scope.** A gap that
+  exists only because a human must still rule on it must not trigger a plan; it rides
+  to the `finalize` gate. If the human says "build it," that becomes a finalize-rework
+  that authors the plan then.
+- A `resolved-forward` note is informational only — `task-lead` already fixed it and
+  the tree is green, so it never drives coverage.
+- The backstop can only override **upward** (force a plan when `task-lead` mis-marked
+  something resolved-forward), never downward: it never suppresses a plan that an open
+  needs-replan note demands.
+
+You still never call `wait_for_user` and never author a `— needs-decision:` item;
+your sole lever is `more_plans`.
+
 ## Anticipated plan total — `plan_total`
 
 You are the **sole emitter** of `plan_total` (no other step sets it). Emit your

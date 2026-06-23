@@ -61,7 +61,6 @@ non-soliciting exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the coder found:" + deviation fields | Deviation revise mode (below): revise only pending tasks; escalate to a corrective N+1 if it implicates an already-implemented task. |
 | Front-door express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
@@ -112,24 +111,11 @@ corrective takes `fast_path` and skips `plan-reviewer`). Code review of the corr
 is scoped to its own `review_base..HEAD` diff; the settled work is neither re-planned
 nor re-reviewed.
 
-## Deviation revise mode (task-lead deviation, resume)
-
-A `task-lead` **deviation** ("The plan didn't match the codebase. Here's what the
-coder found:") is a **resume** mid-implementation: plan N is **not** yet
-complete, so the disambiguation revises plan N in place. Your revise is **strictly
-bounded to pending tasks** — tasks below the `progress.md` **completion boundary**
-(those not yet recorded complete). Read `{{ change.home }}/progress.md` to find that
-boundary and **preserve every completed task entry verbatim**; edit only the pending
-tasks the deviation actually touches.
-
-If the deviation implicates a task that is **already implemented** (at or above the
-completion boundary), do **not** edit that settled task. **Escalate to the append-N+1 path** instead: leave plan N's completed tasks untouched and author a new
-corrective plan `…-plan-(N+1).md` (exactly as in Rework mode above) that addresses
-the already-shipped work as a forward correction. Settled, committed work is
-immutable; it is corrected by a new plan, never by rewriting the plan that produced
-it.
-
-Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
+**Consume the lifecycle handle.** When this `N+1` covers an open `NEEDS-REPLAN
+task-lead:` note in `{{ change.home }}/progress.md` (a `task-lead` needs-replan that
+the coverage guard surfaced), mark that checkbox addressed (`[ ]` → `[x]`) as part of
+authoring the plan. This consumes the handle so the next `plan-cycle-check` lap does
+not re-fire on an already-covered note.
 
 ## Your Role
 
@@ -139,7 +125,7 @@ Write a complete, zero-ambiguity implementation plan that a skilled developer wi
 
 The policy is **turn-agnostic** — it governs fresh authoring (plan 1,
 supercycle N+1) exactly as it governs reviewer rework, the review-phase plan
-gaps, and the task-lead deviation resume. The default is **decide and
+gaps. The default is **decide and
 record**: make the reasonable call and record it in the `## Decisions` section
 (below) with "*(decided during planning)*".
 
@@ -437,7 +423,7 @@ imp artifact-commit plan
 
 This is identical for a fresh plan (plan N, or a corrective `…-plan-(N+1).md`
 authored on a post-settlement rework) and an in-place revision of an existing plan N
-(a deviation-bounded revise or a minors-integration pass): re-write the relevant plan
+(a minors-integration pass): re-write the relevant plan
 file under `{{ change.home }}/artifacts/plans/`, then run the command.
 
 ## Minors-integration pass (a review follows)

@@ -130,7 +130,6 @@ phases:
         tier: high
         label: "code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
         rules:
-          - {if: {deviation: true}, resume: plan-writer, label: "plan/code mismatch, going back to planning", feedback: "The plan didn't match the codebase. Here's what the coder found:"}
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {else: true, continue: true}
 
@@ -169,7 +168,7 @@ phases:
       # task counter — review now fires once per plan.
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
-        tier: medium
+        tier: high
         label: code · checking plan coverage
         rules:
           # More scope remains -> review THIS plan (review_base..HEAD) before the next plan.

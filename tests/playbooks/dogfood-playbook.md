@@ -120,7 +120,7 @@ verdicts are comparable across runs:
 4. **Clean merge** — the change merged to the base branch (a `--no-ff` merge commit is present), the
    working tree is clean, and `imp ls --all` reads it back as completed.
 5. **Rework / replanning noted as findings** — if the run looped (a failing run-tests resume, a
-   reviewer goto, a task-lead deviation, re-planning), **note it as a finding** with what triggered
+   reviewer goto, a task-lead needs-replan that triggers a supercycle, re-planning), **note it as a finding** with what triggered
    it. It is *not* an automatic FAIL — only a finding that informs the verdict.
 
 The verdict is **critical**: a single binary `DOGFOOD: PASS` / `DOGFOOD: FAIL` for the run, plus the

@@ -279,6 +279,20 @@ def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
     assert "sole" in text.lower() and "completeness" in text.lower()
 
 
+def test_plan_cycle_check_consumes_deviation_notes() -> None:
+    text = PLAN_CYCLE_CHECK.read_text()
+    low = text.lower()
+    # Both forward note types are recognized.
+    assert "needs-replan" in low
+    assert "resolved-forward" in low
+    # An open needs-replan checkbox triggers more_plans; a consumed one does not.
+    assert "[ ]" in text and "[x]" in text
+    # A needs-decision item suppresses the backstop for its scope.
+    assert "needs-decision" in low and "suppress" in low
+    # The backstop overrides only upward.
+    assert "upward" in low
+
+
 CODE_REVIEWER = AGENTS_DIR / "plan-code-reviewer.md"
 
 
@@ -294,6 +308,31 @@ def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
     # The current plan's per-task commit subjects are still kept WHILE implementing
     # (needed to re-find a buried task for a fixup).
     assert "commit subject" in low
+
+
+def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
+    text = TASK_LEAD.read_text()
+    low = text.lower()
+    # The backward deviation jump is gone from the body entirely.
+    assert "deviation" not in low
+    # Forward dispositions are documented.
+    assert "resolved-forward" in low
+    assert "- resolved-forward task-lead:" in text
+    assert "needs-replan" in low
+    # The needs-replan note is a durable checkbox in the pinned reader shape.
+    assert "- [ ] NEEDS-REPLAN task-lead:" in text
+    # task-lead never escalates to the human mid-implementation.
+    assert "never** call `wait_for_user`" in low
+    # It always returns a green tree, reverting forward through the coder.
+    assert "revert it forward" in low
+    assert "green tree" in low
+    # The notes live in the durable region that survives the end-of-plan collapse.
+    assert "survives the end-of-plan collapse" in low
+    # The TRANSIENT per-task narrative (dropped at collapse) must carry NO durable
+    # note: step 5 records commit subjects so buried tasks can be re-found for a fixup,
+    # and per-task entries are kept only while the plan is in flight.
+    assert "re-found for a fixup" in low
+    assert "only while" in low
 
 
 def test_plan_writer_states_soft_task_size_target() -> None:
@@ -377,15 +416,18 @@ def test_plan_writer_rework_authors_corrective_n_plus_1() -> None:
     assert "rework bounce" not in low
 
 
-def test_plan_writer_deviation_bounded_to_pending_tasks() -> None:
+def test_plan_writer_has_no_deviation_revise_mode() -> None:
     text = PLAN_WRITER.read_text()
     low = text.lower()
-    assert "deviation revise mode" in low
-    # A deviation revise touches only pending tasks, below the progress.md boundary.
-    assert "bounded to pending tasks" in low
-    assert "completion boundary" in low
-    # A deviation implicating an already-implemented task escalates to append-N+1.
-    assert "escalate to the append-n+1 path" in low
+    # The backward deviation-revise mode is gone entirely.
+    assert "deviation revise mode" not in low
+    assert "deviation-bounded revise" not in low
+    assert "task-lead deviation" not in low
+    # The minors-integration in-place revise survives.
+    assert "minors-integration" in low
+    # Authoring the covering N+1 consumes the NEEDS-REPLAN lifecycle handle.
+    assert "NEEDS-REPLAN" in text
+    assert "[x]" in text
 
 
 def test_spec_writer_surfaces_needs_decision_in_reader_form() -> None:

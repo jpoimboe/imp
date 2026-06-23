@@ -71,8 +71,4 @@ def test_resume_reworks_do_not_touch_plan_index() -> None:
                               output={"blocking": False, "has_minor_findings": True})
     assert pr_minor.action.target == "plan-writer" and pr_minor.action.resume is True
     assert "plan_index" not in pr_minor.var_mutations
-    tl = evaluate_rules(steps["task-lead"].rules, vars=_BASE,
-                        output={"status": "Success", "done": False, "deviation": True,
-                                "verify_tolerated": False, "summary": "x"})
-    assert tl.action.target == "plan-writer" and tl.action.resume is True
-    assert "plan_index" not in tl.var_mutations
+

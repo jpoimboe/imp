@@ -192,8 +192,6 @@ def test_route_labels_assigned() -> None:
     # plan-reviewer: blocking; minors (has_minor_findings rule)
     assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
-    # task-lead deviation
-    assert by["task-lead"].rules[0].label == "plan/code mismatch, going back to planning"
     # plan-code-reviewer task_gap -> task-lead
     assert by["plan-code-reviewer"].rules[0].label == "addressing code review feedback"
     # finalize: merge label + rework label

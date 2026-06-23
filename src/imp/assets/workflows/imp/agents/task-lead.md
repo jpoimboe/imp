@@ -5,7 +5,6 @@ description: Implement-phase controller — pick the next task, dispatch coder +
 subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
-  deviation: {type: bool}
   verify_tolerated: {type: bool}
   summary: {type: string}
 ---
@@ -73,12 +72,9 @@ unimplemented task, or the re-opened task from injected feedback):
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
-   a change the spec calls a single atomic commit — that is a **deviation**, not a
-   puzzle for the reviewer. Record why in `progress.md`, set `deviation: true`, and
-   return so the engine resumes the plan-writer to fix the plan. If the coder
-   already committed this task, record its commit subject in `progress.md`
-   too, so the revised plan accounts for the existing commit rather than orphaning
-   it. Never hand a reviewer contradictory framing.
+   a change the spec calls a single atomic commit — that is **plan trouble**, not a
+   puzzle for the reviewer: fix it forward or log it per step 6. Never hand a
+   reviewer contradictory framing.
 
    **State what was already verified.** In the reviewer's dispatch message, state
    what the coder verified for this change — the focused tests it ran. Do
@@ -110,8 +106,7 @@ unimplemented task, or the re-opened task from injected feedback):
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are
    valid. **Critical/Major are mandatory** — address them before you move on; a
-   Major that needs judgment or design escalates (a deviation, or a re-dispatch
-   with guidance), it is **never** silently deferred.
+   Major that needs judgment or design escalates: fix it forward or log it per step 6, or re-dispatch with guidance. It is **never** silently deferred.
 
    **Minor/Nit: gate on fixability, not severity.** Do not defer a finding just
    because it is a Minor or a Nit. Decide fix-now vs. defer against the
@@ -151,7 +146,7 @@ unimplemented task, or the re-opened task from injected feedback):
    amend, or rebase yourself.
 5. Append to `{{ change.home }}/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
-   task can be re-found for a fixup), and any deviation note. **Record qualifying
+   task can be re-found for a fixup). **Record qualifying
    nits you fixed inline as fixed-inline** — they rode the task's fixup and need no
    follow-up. The **Deferred Followups** list is reserved for the judgment-call /
    out-of-scope findings the fixability bar deferred.
@@ -163,7 +158,7 @@ unimplemented task, or the re-opened task from injected feedback):
    `- [ ] DEFERRED task-lead: <one-line description> [scope: task]`
 
    **Keep `progress.md` bounded.** Record the current plan's per-task entries
-   (task done + its commit subject + any deviation note) only while that plan is in
+   (task done + its commit subject) only while that plan is in
    flight. When the plan is fully implemented and you return, **collapse** it into a single
    `## Completed plans` line — `- Plan <N>: <what landed> (<commit-sha>)` — and
    **drop the verbose per-task narrative** for that completed plan. One line per plan
@@ -177,10 +172,47 @@ unimplemented task, or the re-opened task from injected feedback):
    renaming a variable for clarity, or a nit that cleared the fixability bar, =
    polish (no `open_items` note); fixing a wrong return value or a lint error =
    correctness (record it).
-6. **Deviation escape hatch.** If implementing this task reveals the plan is
-   wrong (a task can't be done as written, an assumption is false), set
-   `deviation: true` and return — the engine resumes plan-writer to revise this
-   plan. Record why in progress.md first.
+6. **Fix forward or log — never jump back.** If implementing this task reveals the
+   plan is wrong (a task can't be done as written, an assumption is false, or your
+   framing contradicts the spec), you do **not** return to plan-writer — that
+   backward jump no longer exists. You always flow forward and always return a
+   **green tree**. Decide against the same fixability bar as step 4 and assign one of
+   three note types:
+
+   | Note type | Meaning | Downstream consumer |
+   |---|---|---|
+   | **resolved-forward** | You fixed it (dispatch the coder); tree green. Informational, plus an optional `— needs-decision:` if it crossed a spec/AC boundary and wants ratification. | `finalize` ratifies the needs-decision, if any; `plan-cycle-check` ignores it for coverage. |
+   | **needs-decision** | A genuine human call, no code action taken; recorded as a `— needs-decision:` Deferred Followup. | `finalize` gate's needs-decision walk; suppresses the `plan-cycle-check` backstop for its scope. |
+   | **needs-replan** | You couldn't fix forward; a corrective plan is required. | `plan-cycle-check` → `more_plans: true` → `plan-writer` authors `N+1`. |
+
+   - **Local + bounded + tree-stays-green** → make the forward fix (dispatch the
+     coder), record a **resolved-forward** note, continue. If the fix crosses a spec
+     scope/AC boundary, add a `— needs-decision:` line so the human ratifies it at the
+     merge gate.
+   - **Needs real redesign / spans tasks / can't get green** → record a
+     **needs-replan** note and continue. If a *committed* task is wrong and can't be
+     fixed forward in place, **revert it forward**: dispatch the coder to make a revert
+     commit (still append-only) so the tree stays green, and the needs-replan note
+     carries the redo.
+
+   You **never** call `wait_for_user` — a genuine intent-fork is deferred to the
+   `plan-writer` invocation that `plan-cycle-check` triggers. All commits go through
+   the coder; you never commit, amend, or rebase yourself.
+
+   Record both new note types in the **durable** region of `progress.md` — the same
+   region as the `## Deferred Followups` / `— needs-decision:` lines.
+   That region **survives the end-of-plan collapse** — so never use the transient
+   per-task narrative (a note buried there is dropped before `plan-cycle-check` ever
+   reads it). The EXACT shapes:
+
+   - resolved-forward: `- resolved-forward task-lead: <one-line description of what you fixed>`
+   - needs-replan (a checkbox, so its open/addressed state is explicit):
+
+     `- [ ] NEEDS-REPLAN task-lead: <one-line description of the uncovered/redo scope> [scope: change]`
+
+   The `NEEDS-REPLAN` checkbox is the lifecycle handle: it is born open (`[ ]`); the
+   `plan-writer` invocation that authors the covering `N+1` marks it `[x]`, so the
+   next `plan-cycle-check` lap does not re-fire on a consumed note.
 7. Loop back to step 1 for the next task. Return only when the plan is fully
    implemented — every task committed — at which point the engine advances to the
    `verify` gate.
@@ -219,8 +251,7 @@ The `verify` source is the discriminator the convergence check greps for.
   engine re-runs `verify`.
 
 Emit `verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other
-return — a normal task entry, a real-regression fix, a deviation — emit
-`verify_tolerated: false`.
+return — a normal task entry or a real-regression fix — emit `verify_tolerated: false`.
 
 A **`max_loops` pause at `verify`** (the gate is capped at 5 fix laps) means the
 triage is **non-converging** — an unrecognized flake or a hard regression you could

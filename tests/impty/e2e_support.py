@@ -128,7 +128,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             ]}],
             "task-lead": [{"text": "implement", "tools": [
                 bash(lead_cmd),
-                done(done=True, deviation=False, verify_tolerated=False, summary="done"),
+                done(done=True, verify_tolerated=False, summary="done"),
             ]}],
             "code-reviewer": [{"text": "review", "tools": [
                 done(verdict="approve", findings=""),
