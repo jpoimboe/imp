@@ -709,8 +709,8 @@ async def _run_fresh_session(
     from imp.cli.signals import InterruptCoordinator
 
     _warn_if_tui_unavailable(args, sys.stdout)
-    print(_run_header_line(
-        change.id, change.title, "new", color=should_use_color(sys.stdout)))
+    _print_run_header(
+        change.id, change.title, "new", color=should_use_color(sys.stdout))
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
