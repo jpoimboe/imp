@@ -109,3 +109,17 @@ _SESSION_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session"
 def resume_session_id(agent_id: str) -> str:
     """Deterministic valid-UUID session id, stable across runs (SDK needs a valid UUID)."""
     return str(uuid.uuid5(_SESSION_ID_NAMESPACE, agent_id))
+
+
+def session_project_key(project_root: Path) -> str:
+    """The SDK's project_key for a directory — matches what the SDK mirrors/resumes under."""
+    from claude_agent_sdk import project_key_for_directory
+
+    return project_key_for_directory(project_root)
+
+
+def session_key(project_root: Path, agent_id: str) -> dict[str, str]:
+    return {
+        "project_key": session_project_key(project_root),
+        "session_id": resume_session_id(agent_id),
+    }

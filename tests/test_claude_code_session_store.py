@@ -11,6 +11,8 @@ from claude_agent_sdk.testing import run_session_store_conformance
 from imp.providers.claude_code_session_store import (
     ImpSessionStore,
     resume_session_id,
+    session_key,
+    session_project_key,
 )
 
 
@@ -206,3 +208,18 @@ def test_resume_session_id_is_stable_and_a_valid_uuid() -> None:
 
 def test_resume_session_id_distinct_per_agent() -> None:
     assert resume_session_id("step:plan/a") != resume_session_id("step:plan/b")
+
+
+def test_session_key_uses_sdk_project_key_and_derived_id(tmp_path: Path) -> None:
+    from claude_agent_sdk import project_key_for_directory
+
+    key = session_key(tmp_path, "step:plan/plan-writer")
+    # project_key MUST equal the SDK's own derivation, or native resume never finds it.
+    assert key["project_key"] == project_key_for_directory(tmp_path)
+    assert key["session_id"] == resume_session_id("step:plan/plan-writer")
+
+
+def test_session_project_key_is_the_sdk_helper(tmp_path: Path) -> None:
+    from claude_agent_sdk import project_key_for_directory
+
+    assert session_project_key(tmp_path) == project_key_for_directory(tmp_path)
