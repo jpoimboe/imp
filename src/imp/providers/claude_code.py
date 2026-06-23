@@ -1197,18 +1197,6 @@ class ClaudeCodeAgentRunner:
             and store_has_conversation_body(await store.load(skey))
             and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
         )
-        # TEMP DOGFOOD UNBLOCK (change wxczhw): native resume is categorically
-        # broken while CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 + no-session-persistence
-        # starve session_store down to a lone ai-title stub — `--resume` then
-        # always hits "No conversation found", and every paused step deadlocks on
-        # resume. Force the working stream-json replay path until wxczhw lands the
-        # CLAUDE_CONFIG_DIR-isolation fix (docs/superpowers/specs/
-        # 2026-06-23-claude-config-dir-isolation-and-stderr-surfacing-design.md),
-        # which isolates an ephemeral home, drops those flags, and repairs native
-        # resume. wxczhw edits this exact block, so its merge-conflict resolution
-        # should recognize this override as the thing to replace — delete this
-        # line and keep wxczhw's native_resume logic.
-        native_resume = False
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
