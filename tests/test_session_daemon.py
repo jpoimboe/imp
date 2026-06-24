@@ -1005,3 +1005,72 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
         assert torn == []
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def test_last_pause_was_script_blocked_true_for_script_blocked(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "script_blocked"})
+    assert daemon._last_pause_was_script_blocked(change.event_log()) is True
+
+
+def test_last_pause_was_script_blocked_false_for_awaiting_turn(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
+    assert daemon._last_pause_was_script_blocked(change.event_log()) is False
+
+
+def test_last_pause_was_script_blocked_false_after_resume(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    log.append(agent_id=None, type="workflow_paused", payload={"reason": "script_blocked"})
+    log.append(agent_id=None, type="workflow_resumed", payload={})
+    assert daemon._last_pause_was_script_blocked(log) is False
+
+
+def test_last_pause_was_script_blocked_false_with_no_events(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    assert daemon._last_pause_was_script_blocked(change.event_log()) is False
+
+
+def test_last_script_blocked_stderr_returns_latest(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    log.append(agent_id=None, type="script_blocked",
+               payload={"step": "integrate", "exit": 3, "stdout": "", "stderr": "first block"})
+    log.append(agent_id=None, type="workflow_resumed", payload={})
+    log.append(agent_id=None, type="script_blocked",
+               payload={"step": "integrate", "exit": 3, "stdout": "", "stderr": "second block"})
+    assert daemon._last_script_blocked_stderr(log) == "second block"
+
+
+def test_last_script_blocked_stderr_empty_when_absent(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "script_blocked"})
+    assert daemon._last_script_blocked_stderr(change.event_log()) == ""

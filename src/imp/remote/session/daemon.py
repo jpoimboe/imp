@@ -48,6 +48,23 @@ def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
     return False
 
 
+def _last_pause_was_script_blocked(log: EventLog) -> bool:
+    for event in reversed(list(log.read())):
+        etype = event.get("type")
+        if etype == "workflow_paused":
+            return (event.get("payload") or {}).get("reason") == "script_blocked"
+        if etype == "workflow_resumed":
+            return False
+    return False
+
+
+def _last_script_blocked_stderr(log: EventLog) -> str:
+    for event in reversed(list(log.read())):
+        if event.get("type") == "script_blocked":
+            return (event.get("payload") or {}).get("stderr") or ""
+    return ""
+
+
 async def serve_change_session(
     change: Change,
     *,
