@@ -6,6 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
   plan_number: {type: int}
+  plan_total: {type: int}
 ---
 
 {% if project.guidance %}
@@ -255,6 +256,17 @@ to you for the next plan. Size in **tasks**, not lines of code. A generous hard
 ceiling (~12 **task headings**) is enforced by `plan-commit-verify.sh` and sits well
 above this target, so treat ~5–8 as the working aim, not the limit.
 
+## First-run plan_total estimate
+
+Always emit `plan_total` in your output contract — an integer `>= 1` (it is a required
+field). On the **first plan** of a change (`plan_index == 1`) make it your honest best
+estimate of how many plans the whole spec will take (use `1` when a single plan covers
+everything); the workflow captures that first-plan value into `vars.plan_total`, seeding
+the `plan N/total` denominator the user sees from the very first plan label, so it is never
+blank and never `1/0`. On every later plan (`plan_index > 1`) `plan-cycle-check` owns the
+authoritative total — it refines and clamps it each lap — and the workflow ignores your
+emission, so just echo the current `{{ vars.plan_total }}` to satisfy the contract.
+
 ## Plan Document Format
 
 Every plan MUST start with this header:
@@ -451,26 +463,34 @@ complete, so you revise N in place). On this pass:
 
    ```
    imp artifact-commit plan
-   complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N)
+   complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N)`.
+   `complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)`.
    Do NOT run `imp artifact-commit plan` when nothing changed. The verification
    review still runs on the unchanged plan and will pass it through.
 
 End the turn tool-terminal with the `complete_step` call. Do not re-solicit the
 user and do not reopen planning — this pass exists only to incorporate the
-reviewer's advice. (Substitute the actual integer for N.)
+reviewer's advice. (Substitute the actual integers for N and T.)
+
+Include `plan_total` in the `complete_step` call as on any completion (see
+*First-run plan_total estimate*); on a first-plan minors pass this preserves the seed
+across the re-emit.
 
 ## Finish
 
 ```
-complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N)
+complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)
 ```
 
-(Substitute the actual integer for N.)
+(Substitute the actual integers for N and T.)
+
+Always pass `plan_total=T` to this call (a required output field): on the first plan
+(`plan_index == 1`) it is your estimate and seeds the denominator; on later plans echo the
+current `{{ vars.plan_total }}` (see *First-run plan_total estimate*).
 
 (On a **minors-integration pass** — `blocking: false` — the `complete_step` call
 is already specified in the *Minors-integration pass* section above; follow that

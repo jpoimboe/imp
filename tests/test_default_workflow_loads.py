@@ -136,42 +136,27 @@ def test_every_nonquiet_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "front-door": "chatting",
-        "spec-finalizer": "spec · finalizing",
-        "spec-reviewer": "spec · reviewing",
-        "plan-writer": (
-            "plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
-        ),
-        "plan-reviewer": (
-            "plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
-        ),
-        "plan-finalized": (
-            "plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · finalizing"
-        ),
-        "task-lead": (
-            "code · plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
-        ),
-        "verify": "code · testing",
-        "autosquash-resolve-implement": "code · resolving fixups",
-        "autosquash-resolve-merge": "merge · resolving fixups",
-        "plan-cycle-check": "code · checking plan coverage",
-        "plan-code-reviewer": (
-            "code · plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
-        ),
-        "deferred-sweep": "code · cleaning up deferred tasks",
-        "sweep-verify": "code · testing",
-        "autosquash-resolve-sweep": "code · resolving fixups",
-        "finalize": "code · finalizing",
-        "wait-for-head": "merge · waiting",
-        "reconciler": "merge · reconciling",
-        "integration-verify": "merge · testing",
-        "integration-reviewer": "merge · reviewing",
-        "merge-to-base": "merge · finalizing",
+        "front-door": "ideating",
+        "spec-finalizer": "finalizing spec",
+        "spec-reviewer": "reviewing spec",
+        "plan-writer": "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
+        "plan-reviewer": "reviewing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
+        "plan-finalized": "finalizing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
+        "task-lead": "task 1/{{ vars.task_total }} · thinking",
+        "verify": "running tests",
+        "autosquash-resolve-implement": "resolving task fixups",
+        "autosquash-resolve-merge": "resolving merge fixups",
+        "plan-cycle-check": "checking plan coverage",
+        "plan-code-reviewer": "batch code review",
+        "deferred-sweep": "sweeping deferred tasks",
+        "sweep-verify": "running tests",
+        "autosquash-resolve-sweep": "resolving sweep fixups",
+        "finalize": "finalizing",
+        "wait-for-head": "waiting in merge queue",
+        "reconciler": "resolving merge conflicts",
+        "integration-verify": "running tests",
+        "integration-reviewer": "reviewing merge conflicts",
+        "merge-to-base": "merging",
     }
     for name, label in expected.items():
         assert by[name].label == label, name
@@ -197,3 +182,14 @@ def test_route_labels_assigned() -> None:
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"
+
+
+def test_phase_labels_assigned() -> None:
+    by = {p.name: p for p in _wf().phases}
+    assert by["front-door"].label is None
+    assert by["spec"].label == "spec phase"
+    assert by["plan"].label == "planning phase"
+    assert by["code"].label == (
+        "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+    )
+    assert by["merge"].label == "integration phase"

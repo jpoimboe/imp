@@ -23,7 +23,7 @@ tests — this step only announces and counts.
    the header:
 
    ```
-   ✓ plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · <count> tasks
+   ✓ plan {{ vars.plan_index }}/{{ vars.plan_total }} · <count> tasks
       1. <task 1 title>
       2. <task 2 title>
       …

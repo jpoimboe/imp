@@ -17,18 +17,15 @@ def _render_task_lead(**var_overrides) -> str:
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 
 
-def test_task_lead_instructs_the_live_label_push() -> None:
+def test_task_lead_instructs_the_three_live_label_verbs() -> None:
     out = _render_task_lead()
-    # Phase-first live label, with the trailing verb for each active subagent.
-    assert "code · plan 2/4 · task <N>/6 · writing" in out
-    assert "code · plan 2/4 · task <N>/6 · reviewing" in out
+    assert "task <N>/6 · thinking" in out      # at task pick
+    assert "task <N>/6 · coding" in out         # at coder dispatch
+    assert "task <N>/6 · reviewing" in out      # before the reviewer
 
 
-def test_task_lead_bare_case_drops_plan_denominator() -> None:
-    out = _render_task_lead(plan_total=0)
-    assert "code · plan 2 · task <N>/6 · writing" in out
-
-
-def test_task_lead_bare_case_reviewing_drops_plan_denominator() -> None:
-    out = _render_task_lead(plan_total=0)
-    assert "code · plan 2 · task <N>/6 · reviewing" in out
+def test_task_lead_live_label_drops_the_phase_prefix() -> None:
+    # The code-phase label now supplies `implementation phase · plan i/N`; the pushed
+    # live label carries only the trailing `task …` segments.
+    out = _render_task_lead()
+    assert "code · plan" not in out
