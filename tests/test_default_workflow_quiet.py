@@ -26,7 +26,7 @@ def test_substantive_steps_stay_loud() -> None:
     wf = load_workflow(Path("src/imp/assets/workflows/imp"))
     by_name = {s.name: s for s in wf.flat_steps()}
     # agents and the consequential merge step carry real narrative — never quiet.
-    for name in ("spec-writer", "plan-writer", "task-lead", "spec-reviewer",
+    for name in ("spec-finalizer", "plan-writer", "task-lead", "spec-reviewer",
                  "verify", "plan-code-reviewer", "deferred-sweep",
                  "autosquash-resolve-implement", "autosquash-resolve-sweep",
                  "autosquash-resolve-merge",

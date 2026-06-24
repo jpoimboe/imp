@@ -14,7 +14,7 @@ AGENTS = Path("src/imp/assets/workflows/imp/agents")
 
 def test_spec_writer_schema_drops_unseen_changes() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
-    schema = wf.agents["spec-writer"].output_schema
+    schema = wf.agents["spec-finalizer"].output_schema
     phase = next(f for f in schema.fields if f.name == "phase")
     assert phase.type == "enum"
     assert set(phase.values) == {"written"}
@@ -22,7 +22,7 @@ def test_spec_writer_schema_drops_unseen_changes() -> None:
 
 
 def _spec_writer() -> str:
-    return (AGENTS / "spec-writer.md").read_text()
+    return (AGENTS / "spec-finalizer.md").read_text()
 
 
 def test_spec_writer_drops_rework_solicitation_bans() -> None:
@@ -55,7 +55,7 @@ def test_spec_writer_uses_artifact_commit_not_amend() -> None:
 
 
 def test_spec_writer_recognition_is_preamble_primary() -> None:
-    text = (AGENTS / "spec-writer.md").read_text()
+    text = (AGENTS / "spec-finalizer.md").read_text()
     # The reviewer-rework recognition no longer keys on the wrapper text.
     # The wrapper phrase survives ONLY on the script-gate row, so it appears
     # at most as a script-gate cue — assert the *old* mis-keyed sentence is gone.
@@ -118,7 +118,7 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
 
 
 _WRITER_FILES = {
-    "spec-writer": AGENTS / "spec-writer.md",
+    "spec-finalizer": AGENTS / "spec-finalizer.md",
     "plan-writer": AGENTS / "plan-writer.md",
 }
 
@@ -177,7 +177,7 @@ def test_spec_phase_steps_have_no_confirm_or_exit_gate() -> None:
     names = [s.name for s in spec.steps]
     assert "spec-exit-gate" not in names
     assert "spec-confirm" not in names
-    assert names == ["spec-writer", "spec-verify-commit", "spec-reviewer"]
+    assert names == ["spec-finalizer", "spec-verify-commit", "spec-reviewer"]
 
 
 

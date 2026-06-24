@@ -43,12 +43,12 @@ def test_front_door_express_routes_to_plan_writer_and_sets_fast_path() -> None:
     assert m.var_mutations["fast_path"] is True
 
 
-def test_front_door_full_routes_to_spec_writer_and_clears_fast_path() -> None:
+def test_front_door_full_routes_to_spec_finalizer_and_clears_fast_path() -> None:
     rules = _steps(_wf())["front-door"].rules
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "ceremony": "full"})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-writer"
+    assert m.action.target == "spec-finalizer"
     assert m.action.resume is False
     assert m.var_mutations["fast_path"] is False
 
@@ -61,10 +61,10 @@ def test_front_door_declares_ceremony_output() -> None:
     assert field.required is True
 
 
-def test_spec_writer_no_longer_sets_fast_path() -> None:
-    # Ownership of fast_path moved to front-door; spec-writer's terminal rule
+def test_spec_finalizer_no_longer_sets_fast_path() -> None:
+    # Ownership of fast_path moved to front-door; spec-finalizer's terminal rule
     # only continues to the verify gate now.
-    rules = _steps(_wf())["spec-writer"].rules
+    rules = _steps(_wf())["spec-finalizer"].rules
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"phase": "written", "complexity": "trivial",
                                "status": "Success"})
@@ -177,9 +177,9 @@ def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
     express = evaluate_rules(steps["front-door"].rules, vars=_BASE_VARS,
                              output={"status": "Success", "ceremony": "express"})
     assert isinstance(express.action, Goto) and express.action.target == "plan-writer"
-    # full: front-door enters spec-writer, the first chromed beat.
+    # full: front-door enters spec-finalizer, the first chromed beat.
     full = evaluate_rules(steps["front-door"].rules, vars=_BASE_VARS,
                           output={"status": "Success", "ceremony": "full"})
-    assert isinstance(full.action, Goto) and full.action.target == "spec-writer"
+    assert isinstance(full.action, Goto) and full.action.target == "spec-finalizer"
     # The spec phase is still the second phase, entered only on the full path.
     assert [p.name for p in wf.phases][:2] == ["front-door", "spec"]

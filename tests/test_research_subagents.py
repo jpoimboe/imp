@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
+from imp.engine.state import JsonlEventLog
 
 
 def _wf():
@@ -45,23 +47,33 @@ def test_plan_writer_declares_research_subagents() -> None:
 
 
 def test_spec_writer_declares_research_subagents() -> None:
-    a = _wf().agents["spec-writer"]
+    a = _wf().agents["spec-finalizer"]
     assert "task" in a.tools
     assert set(a.subagents) == {"explorer", "researcher"}
 
 
-def test_spec_writer_prose_relaxes_throttle_and_adds_research() -> None:
-    body = _wf().agents["spec-writer"].prompt_template_source
-    assert "no more than 3 question rounds" not in body
-    assert "Do not over-research a clear request" not in body
-    assert "Research before you converge" in body
-    assert 'task(subagent_name="explorer"' in body
-    assert "researcher" in body
-    assert "no cost gating" in body
+def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "no more than 3 question rounds" not in out
+    assert "Do not over-research a clear request" not in out
+    assert "Research before you converge" in out
+    assert 'task(subagent_name="explorer"' in out
+    assert "researcher" in out
+    assert "no cost gating" in out
 
 
-def test_spec_writer_design_quality_and_coverage_guidance() -> None:
-    body = _wf().agents["spec-writer"].prompt_template_source
-    assert "present it in sections" in body
-    assert "do not propose unrelated refactoring" in body
-    assert "architecture, components, data flow, error handling, and testing" in body
+def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "present it in sections" in out
+    assert "do not propose unrelated refactoring" in out
+    assert "architecture, components, data flow, error handling, and testing" in out

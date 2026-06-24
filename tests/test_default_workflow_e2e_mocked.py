@@ -224,7 +224,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     # Fields that drive workflow routing (must produce a single-pass run):
     #   verdict:approve    review (code-reviewer) → continue (not task_gap)
     #   decision:merge     finalize  → goto merge
-    #   phase:written      spec-writer   → not drafting, advances
+    #   phase:written      spec-finalizer   → not drafting, advances
     #   done:true          task-lead     → plan fully implemented
     #   more_plans:false   plan-cycle-check → no supercycle, continue
     #   blocking:false     spec/plan reviewers → no rework loop
@@ -403,7 +403,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     assert started.count("spec-reviewer") == 2, started
     assert started.count("plan-reviewer") == 2, started
     # The writer ran twice per phase: the initial write + the one minors pass.
-    assert started.count("spec-writer") == 2, started
+    assert started.count("spec-finalizer") == 2, started
     assert started.count("plan-writer") == 2, started
 
     # Termination is the REVIEWER's goto on the verification pass (minors-integrated
@@ -427,7 +427,7 @@ async def test_fast_path_skips_reviewers_and_review(
 ) -> None:
     change = _seed_default_workflow(tmp_path)
     # ceremony:express -> front-door sets fast_path=true and routes straight to
-    # plan-writer, skipping the spec beat (spec-writer + spec-reviewer), plan-review
+    # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer), plan-review
     # (plan-verify-commit fast-path rule), and the whole review -> deferred-sweep ->
     # sweep-verify block (plan-cycle-check fast-path -> finalize). The run still
     # reaches planning, implementation, and merge.
@@ -455,7 +455,7 @@ async def test_fast_path_skips_reviewers_and_review(
 
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
-    assert "spec-writer" not in started, started      # express skips the spec beat
+    assert "spec-finalizer" not in started, started      # express skips the spec beat
     assert "spec-reviewer" not in started, started     # spec beat skipped on express
     assert "plan-reviewer" not in started, started     # plan-verify-commit fast-path rule
     assert "code-reviewer" not in started, started

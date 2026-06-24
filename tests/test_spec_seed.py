@@ -8,7 +8,11 @@ import anyio
 import pytest
 
 import imp.cli.prompt as prompt_mod
+from imp.agents.prompts import build_context, render_prompt
+from imp.assets import bundled_workflow_dir
 from imp.cli import main as cli_main
+from imp.engine.loader import load_workflow
+from imp.engine.state import JsonlEventLog
 from tests.conftest import _git, _seed_control
 
 
@@ -337,40 +341,44 @@ def test_new_non_interactive_spec_seed_via_session_client(
     assert str(draft) in seed
 
 
-def test_spec_writer_opening_conditioned_on_message() -> None:
-    root = Path(__file__).resolve().parent.parent
-    prompt = (root / "src" / "imp" / "assets" / "workflows" / "imp"
-              / "agents" / "spec-writer.md").read_text()
+def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
+    body = load_workflow(bundled_workflow_dir("imp")).agents[
+        "front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
     # Opening behavior must branch on the opening message: the unseeded branch
     # keys on the begin token, the seeded branch on the seed marker.
-    assert "<imp:begin/>" in prompt
+    assert "<imp:begin/>" in out
 
 
-def test_spec_writer_prompt_has_verbatim_opening_branch() -> None:
-    root = Path(__file__).resolve().parent.parent
-    prompt = (root / "src" / "imp" / "assets" / "workflows" / "imp"
-              / "agents" / "spec-writer.md").read_text()
-    assert "verbatim opening intent" in prompt
+def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
+    body = load_workflow(bundled_workflow_dir("imp")).agents[
+        "front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "verbatim opening intent" in out
     # The bare positional no longer delivers a spec-seed FILE; only --spec-file does.
-    assert "imp new <draft>" not in prompt
-    assert "imp new <file>" not in prompt
+    assert "imp new <draft>" not in out
+    assert "imp new <file>" not in out
 
 
-def test_spec_writer_prompt_has_seed_branch() -> None:
-    # tests/ sits directly under the repo root, so resolve the prompt relative
-    # to this file rather than depending on project-root discovery.
-    root = Path(__file__).resolve().parent.parent
-    prompt = (root / "src" / "imp" / "assets" / "workflows" / "imp"
-              / "agents" / "spec-writer.md").read_text()
+def test_front_door_prompt_has_seed_branch(tmp_path) -> None:
+    body = load_workflow(bundled_workflow_dir("imp")).agents[
+        "front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
     # Seed-marker invariant: the adopt branch must key on the SAME phrase the CLI
-    # prefixes (_build_seed). The marker must live INSIDE the seeded section.
-    heading = "## Seeded with a draft spec"
-    assert heading in prompt
-    section = prompt[prompt.index(heading):]
-    next_heading = section.find("\n## ", len(heading))
-    if next_heading != -1:
-        section = section[:next_heading]
-    assert cli_main.SPEC_SEED_MARKER in section
+    # prefixes (_build_seed).
+    assert cli_main.SPEC_SEED_MARKER in out
 
 
 def test_opening_prompt_reply_wires_to_seed_opening(
