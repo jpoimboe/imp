@@ -450,3 +450,93 @@ def test_clean_run_resets_bounce_counter(tmp_path: Path) -> None:
     res = _run(pr)
     assert res.returncode == 0, res.stderr
     assert not (state / "directive-bounce-attempts").exists()
+
+
+def test_squash_directive_bounces_exit_3(tmp_path: Path) -> None:
+    """A squash! whose target is at or below the lower bound bounces (exit 3) like fixup!."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("below\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "below the bound")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "h.txt").write_text("in range\n")
+    _git(pr, "add", "h.txt")
+    _git(pr, "commit", "-m", "in range")
+    (pr / "g.txt").write_text("below (fixed)\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", f"--squash={target}")
+
+    res = _run(pr, lower=target)
+    assert res.returncode == 3, res.stderr
+    low = res.stderr.lower()
+    assert "squash! below the bound" in res.stderr
+    assert "below the change fork" in low
+    assert "forward commit" in low
+
+
+def test_amend_directive_bounces_exit_3(tmp_path: Path) -> None:
+    """An amend! whose subject matches no commit bounces (exit 3) like fixup!."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("work\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "branch work")
+    (pr / "h.txt").write_text("more\n")
+    _git(pr, "add", "h.txt")
+    _git(pr, "commit", "-m", "amend! no such target subject")
+
+    res = _run(pr)
+    assert res.returncode == 3, res.stderr
+    low = res.stderr.lower()
+    assert "typo" in low
+    assert "no commit" in low
+
+
+def test_directive_bounce_second_bounce_still_exits_3(tmp_path: Path) -> None:
+    """With counter pre-seeded to 1 (one prior bounce), a second surviving directive
+    still exits 3 (COUNT=2 == MAX_BOUNCES, which is within the cap)."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("below\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "below the bound")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "h.txt").write_text("in range\n")
+    _git(pr, "add", "h.txt")
+    _git(pr, "commit", "-m", "in range")
+    (pr / "g.txt").write_text("below (fixed)\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    state = _state(pr)
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "directive-bounce-attempts").write_text("1")
+
+    res = _run(pr, lower=target)
+    assert res.returncode == 3, res.stderr
+    assert (_state(pr) / "directive-bounce-attempts").read_text().strip() == "2"
+
+
+def test_dirty_tree_exit_3_leaves_bounce_counter_untouched(tmp_path: Path) -> None:
+    """A dirty-tree exit 3 does not touch an existing directive-bounce-attempts counter."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("work\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "branch work")
+    (pr / "g.txt").write_text("uncommitted edit\n")
+    state = _state(pr)
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "directive-bounce-attempts").write_text("1")
+
+    res = _run(pr)
+    assert res.returncode == 3, res.stderr
+    assert (_state(pr) / "directive-bounce-attempts").read_text().strip() == "1"
