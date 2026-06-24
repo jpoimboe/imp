@@ -42,3 +42,26 @@ def test_mental_model_covers_home_zones_materialize_and_vocabulary() -> None:
     assert "materialize" in body
     for term in ("spec", "plan", "phase", "step", "lane"):
         assert term in body, term
+
+
+def test_introspect_skill_is_loadable_profile_b() -> None:
+    assert "imp-introspect" in list_skill_names(_skills_dir())
+    body = load_skill_body(_skills_dir(), "imp-introspect")
+    assert body.strip(), "imp-introspect is empty"
+    assert not body.lstrip().startswith("---"), "imp-introspect has frontmatter"
+    assert "superpowers" not in body.lower()
+
+
+def test_introspect_names_ground_truth_files() -> None:
+    body = load_skill_body(_skills_dir(), "imp-introspect")
+    assert "workflow/workflow.yaml" in body
+    assert "state/state.json" in body
+
+
+def test_introspect_names_the_read_commands() -> None:
+    body = load_skill_body(_skills_dir(), "imp-introspect")
+    assert "imp help" in body
+    assert "imp list" in body
+    assert "imp list --all" in body
+    assert "imp search" in body
+    assert "imp show <id> [spec|plan|events|status|review]" in body
