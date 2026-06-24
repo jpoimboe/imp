@@ -379,3 +379,74 @@ def test_verify_exhaustion_restores_pristine(tmp_path: Path) -> None:
     assert not (_state(pr) / "autosquash-before-head").exists()
     assert not (_state(pr) / "autosquash-resolve-attempts").exists()
     assert "rebase -i --autosquash" in res.stderr        # manual-recovery hint
+
+
+def test_directive_bounce_increments_counter(tmp_path: Path) -> None:
+    """The first bounce writes the directive-bounce-attempts counter as 1."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("below\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "below the bound")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "h.txt").write_text("in range\n")
+    _git(pr, "add", "h.txt")
+    _git(pr, "commit", "-m", "in range")
+    (pr / "g.txt").write_text("below (fixed)\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", f"--fixup={target}")
+
+    res = _run(pr, lower=target)
+    assert res.returncode == 3, res.stderr
+    assert (_state(pr) / "directive-bounce-attempts").read_text().strip() == "1"
+
+
+def test_directive_bounce_cap_exhausted_pauses(tmp_path: Path) -> None:
+    """After 2 consecutive bounces (counter pre-seeded to 2), a third surviving
+    directive falls back to exit 1 and clears the counter."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("below\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "below the bound")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "h.txt").write_text("in range\n")
+    _git(pr, "add", "h.txt")
+    _git(pr, "commit", "-m", "in range")
+    (pr / "g.txt").write_text("below (fixed)\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    state = _state(pr)
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "directive-bounce-attempts").write_text("2")
+
+    res = _run(pr, lower=target)
+    assert res.returncode == 1, res.stderr
+    assert "could not clear" in res.stderr.lower()
+    assert not (state / "directive-bounce-attempts").exists()
+
+
+def test_clean_run_resets_bounce_counter(tmp_path: Path) -> None:
+    """A clean run (a foldable in-range fixup -> exit 0) clears a stale counter."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "g.txt").write_text("work\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", "-m", "branch work")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "g.txt").write_text("work (fixed)\n")
+    _git(pr, "add", "g.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    state = _state(pr)
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "directive-bounce-attempts").write_text("1")
+
+    res = _run(pr)
+    assert res.returncode == 0, res.stderr
+    assert not (state / "directive-bounce-attempts").exists()

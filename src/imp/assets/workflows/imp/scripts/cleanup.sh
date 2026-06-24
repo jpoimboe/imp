@@ -19,16 +19,19 @@
 # commit or replacing it with a new forward commit. Cleanup never silently rewrites a
 # commit at or below the lower bound, so the review pin stays stable and reviewed
 # history is never clawed back.
+# After 2 consecutive bounces with the directive still surviving, cleanup falls back
+# to exit 1 so a human steps in; any clean run (exit 0) resets the bounce counter.
 #
 #   0 -> clean tree, fixups folded, trailers stamped (or already-clean no-op) -> continue
 #   2 -> resolvable fold conflict (rebase left in progress) -> autosquash-resolve
 #   3 -> dirty working tree, OR a surviving fixup directive bounced -> resume the site's agent
-#   1 -> hard failure (rebase/stamp failure, empty bound) -> pause
+#   1 -> hard failure (rebase/stamp failure, empty bound), or surviving-directive bounce cap exhausted -> pause
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
 ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
 STATE="$CHANGE_DIR/state"
+MAX_BOUNCES=2
 
 # Lower bound: the review_base SHA passed as $1, else the recorded fork point.
 LOWER="${1:-}"
@@ -149,6 +152,7 @@ fi
 # Fast path: nothing to fold AND every commit already stamped -> a true no-op
 # (no rebase, no SHA churn). An empty range stamps vacuously and lands here too.
 if ! _has_directives && _all_stamped; then
+  rm -f "$STATE/directive-bounce-attempts"
   echo "ok: clean tree, no fixups, already stamped over $LOWER..HEAD"
   exit 0
 fi
@@ -163,6 +167,16 @@ if _has_directives; then
   if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$LOWER"; then
     if _has_directives; then
       _diagnose_surviving_directives
+      BOUNCE_FILE="$STATE/directive-bounce-attempts"
+      PREV=$(cat "$BOUNCE_FILE" 2>/dev/null || echo 0)
+      COUNT=$((PREV + 1))
+      if [ "$COUNT" -gt "$MAX_BOUNCES" ]; then
+        rm -f "$BOUNCE_FILE"
+        echo "the committing agent could not clear the surviving directive after $MAX_BOUNCES bounces; pausing for a human." >&2
+        exit 1
+      fi
+      mkdir -p "$STATE"
+      printf '%s\n' "$COUNT" > "$BOUNCE_FILE"
       exit 3
     fi
   else
@@ -197,4 +211,5 @@ while read -r h; do
     || { echo "stamp failed: $h missing Change: $ID" >&2; exit 1; }
 done < <(git rev-list --no-merges "$LOWER"..HEAD)
 
+rm -f "$STATE/directive-bounce-attempts"
 echo "ok: clean tree, fixups folded, Change: $ID stamped over $LOWER..HEAD"
