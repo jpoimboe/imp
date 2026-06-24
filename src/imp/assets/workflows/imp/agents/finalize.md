@@ -68,49 +68,18 @@ triage did **not converge** — an unrecognized flake or a hard regression that 
 neither fixed nor tolerated. Read it as a non-converging triage that needs a human,
 not a transient.
 
-## Before/after UX capture — only when this change touched a UI surface
-
-This runs for ANY change (no playbook required) — the trigger is what the change
-touched, not how the run started. Run `git diff --name-only <base>..HEAD` (the
-name-only form of the `git diff <base>..HEAD` already in §1) and decide whether
-the change touched a **UI-relevant surface**:
-any path under `src/imp/cli/` (the streaming CLI and the `--tui` viewer) or
-`src/impty/` (the terminal renderer). If it touched none of those, skip this
-section silently — no note, no error.
-
-If it did AND you hold the impty driver (the `mcp__impty__*` tools are
-available), capture a rendered before/after so the human can SEE the change at
-the merge gate. The driver is already pointed at the worktree build, so:
-
-- **after** — drive the worktree's imp through impty
-  (`mcp__impty__start(argv=["imp", …])`), reach the affected screen, and
-  `mcp__impty__snapshot()` it.
-- **before** — clone the base into a throwaway dir under `/tmp`, check out the
-  base branch there, and drive that copy with the base's own `src/` on
-  PYTHONPATH. `mcp__impty__start(env=…)` REPLACES the child's environment rather
-  than extending it, so build the env by merging the `PYTHONPATH` override onto a
-  copy of the parent env (keep `PATH`/`HOME`/API-key vars) and pass that whole
-  map; then reach the same screen and `mcp__impty__snapshot()` it.
-
-Drive read-only: do NOT change code, write files in the worktree, or commit.
-Name both PNG paths in your merge-gate prose (below), labelled
-**before** and **after**, so the reviewer can open them before deciding. If the
-driver is unavailable or a capture fails, say so in one line and proceed — a
-missing capture never blocks the merge.
-
 ## 2. Present in prose, then walk the open items one at a time
 
 This is the final **merge gate**, and a human reads it. Speak in **prose**, never
 a labelled **field-dump**.
 
 Open with a concise human-readable summary of what changed: what was built (by
-plan/task), the verification state in plain terms, the one-line rollup of
-opportunistic improvements carried in `built`, and any **before/after** captures
-from the section above. Name genuinely controversial decisions **only when there
-were any** — do not manufacture controversy. The structured fields are the audit
-record (§1); your prose is what the human reads. When you recap the reader's own
-choice at the gate, address them directly — "you chose to ignore it," not "the
-human chose ignore."
+plan/task), the verification state in plain terms, and the one-line rollup of
+opportunistic improvements carried in `built`. Name genuinely controversial
+decisions **only when there were any** — do not manufacture controversy. The
+structured fields are the audit record (§1); your prose is what the human reads.
+When you recap the reader's own choice at the gate, address them directly — "you
+chose to ignore it," not "the human chose ignore."
 
 Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed set**
 of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`
