@@ -503,3 +503,31 @@ def test_ritual_vessel_scenes_are_wired_and_props_paint() -> None:
     idx = [names.index(b.__name__) for b, _p, _w in expect]
     assert idx == sorted(idx)
     assert names.index("_s_summoning_circle") < idx[0]
+
+
+def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._lantern(g, 21, 13)
+    assert g[12][21] == splash._P["lanMetal"]  # rect(x,by-1,4,1) base at (21,12)
+    g = splash._make_grid()
+    splash._candle(g, 21, 13)
+    assert g[7][21] == splash._P["W"]          # px(x,by-6) wick glint at (21,7)
+    g = splash._make_grid()
+    splash._torch(g, 20, 13)
+    assert g[4][20] == splash._P["W"]          # px(x,by-9) flame tip at (20,4)
+    g = splash._make_grid()
+    splash._rune_sigil(g, 24, 7)
+    assert g[7][24] == splash._P["rune"]        # px(cx,cy) centre rune
+    expect = [
+        (splash._s_lantern, "the lantern's lit. lead the way.", splash.ANY),
+        (splash._s_twin_candles, "whisper your wish.", splash.ANY),
+        (splash._s_twin_torches, "let's raise a little hell.", splash.ANY),
+        (splash._s_rune_sigil, "the runes are ready.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_grimoire") < idx[0]

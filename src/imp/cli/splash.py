@@ -515,6 +515,48 @@ def _spellbook(g: Grid, cx: int, by: int) -> None:
     _spark(g, cx, by - 5, _P["rune"])
 
 
+def _lantern(g: Grid, x: int, by: int) -> None:
+    _px(g, x + 1, by - 9, _P["lanMetal"])
+    _rect(g, x, by - 8, 4, 1, _P["lanMetal"])
+    _rect(g, x, by - 7, 1, 6, _P["lanMetal"])
+    _rect(g, x + 3, by - 7, 1, 6, _P["lanMetal"])
+    for y in range(by - 6, by - 1):
+        for xx in range(x + 1, x + 3):
+            _px(g, xx, y, _P["lanCore"] if (xx + y) & 1 else _P["lanGlow"])
+    _rect(g, x, by - 1, 4, 1, _P["lanMetal"])
+    _glow_ring(g, x + 1.5, by - 4, 3, _P["lanGlow"])
+
+
+def _candle(g: Grid, x: int, by: int) -> None:
+    for j in range(4):
+        _px(g, x, by - j, _P["wax"])
+        _px(g, x + 1, by - j, _P["waxD"])
+    _px(g, x, by - 4, _P["flame"])
+    _px(g, x, by - 5, _P["flame2"])
+    _px(g, x, by - 6, _P["W"])
+
+
+def _torch(g: Grid, x: int, by: int) -> None:
+    for j in range(6):
+        _px(g, x, by - j, _P["torchPole"])
+    _disc(g, x, by - 7, 2, 3, _P["flame"])
+    _disc(g, x, by - 7, 1, 2, _P["flame2"])
+    _px(g, x, by - 9, _P["W"])
+
+
+def _rune_sigil(g: Grid, cx: int, cy: int) -> None:
+    r = 5
+    _line(g, cx, cy - r, cx + r, cy, _P["rune"])
+    _line(g, cx + r, cy, cx, cy + r, _P["rune"])
+    _line(g, cx, cy + r, cx - r, cy, _P["rune"])
+    _line(g, cx - r, cy, cx, cy - r, _P["rune"])
+    _ring(g, cx, cy, r - 1, r - 1, _P["portG"], 0.8, 1.05)
+    for a in range(0, 360, 90):
+        t = (a + 45) * math.pi / 180
+        _px(g, cx + math.cos(t) * (r - 1), cy + math.sin(t) * (r - 1), _P["portI"])
+    _px(g, cx, cy, _P["rune"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -638,6 +680,32 @@ def _s_grimoire(g: Grid) -> None:
     _L(g)
 
 
+def _s_lantern(g: Grid) -> None:
+    _stars(g, 7, 0.3)
+    _lantern(g, 21, 13)
+    _L(g)
+
+
+def _s_twin_candles(g: Grid) -> None:
+    _stars(g, 8, 0.3)
+    _candle(g, 21, 13)
+    _candle(g, 27, 13)
+    _L(g)
+
+
+def _s_twin_torches(g: Grid) -> None:
+    _stars(g, 8, 0.34)
+    _torch(g, 20, 13)
+    _torch(g, 27, 13)
+    _L(g)
+
+
+def _s_rune_sigil(g: Grid) -> None:
+    _stars(g, 7, 0.26)
+    _rune_sigil(g, 24, 7)
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -662,6 +730,10 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_crystal_ball, "gaze in — what shall we build?", ANY),
     (_s_cauldron, "stir the cauldron — what's brewing?", ANY),
     (_s_grimoire, "the grimoire is open.", ANY),
+    (_s_lantern, "the lantern's lit. lead the way.", ANY),
+    (_s_twin_candles, "whisper your wish.", ANY),
+    (_s_twin_torches, "let's raise a little hell.", ANY),
+    (_s_rune_sigil, "the runes are ready.", ANY),
 ]
 
 MIN_WIDTH = 32
