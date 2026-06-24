@@ -87,6 +87,11 @@ phases:
         file: agents/plan-writer.md
         tier: high
         label: "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+        rules:
+          # First plan only: seed the running total from plan-writer's estimate. On later
+          # plans plan-cycle-check owns plan_total, so this capture must not re-fire.
+          - {if: {plan_index: 1}, set: {plan_total: output.plan_total}, continue: true}
+          - {else: true, continue: true}
 
       - name: plan-verify-commit
         quiet: true
