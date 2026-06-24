@@ -712,6 +712,44 @@ async def _run_tui_session(
     return _session_exit_code(change, coord)
 
 
+async def _run_cleared_session(
+    control: Path, base: str, *, tui: bool, leave_state: dict[str, str],
+) -> int:
+    """Open a fresh imp new-style draft in place after /clear."""
+    from imp.cli.signals import InterruptCoordinator
+
+    color = should_use_color(sys.stdout)
+    banner_shown = _print_splash_banner(interactive=True)
+    if banner_shown:
+        print()
+    prompt = Prompt(editing_mode=_editing_mode(control), color=color)
+    try:
+        reply = (await prompt.ask_async(
+            width=_term_width(), hint=OPENING_HINT)).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("imp: cancelled", file=sys.stderr)
+        return 130
+    opening_text = _normalize_opening_reply(reply)
+    change = Change.create_draft(
+        control, title="", change_id=new_change_id(),
+        base_branch=base, origin="draft")
+    _print_run_header(change.id, change.title, "new", color=color)
+    if tui:
+        return await _run_tui_session(
+            change, seed_opening=opening_text, opening_intent=opening_text,
+            leave_mode="new", leave_state=leave_state)
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(
+        stream=sys.stdout, color=color, width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        seed_opening=opening_text, status=status,
+        opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
+
+
 def _record_idea(args: argparse.Namespace, control: Path) -> int:
     title = args.idea
     if not title.strip():
