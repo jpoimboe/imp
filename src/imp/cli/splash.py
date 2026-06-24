@@ -383,6 +383,46 @@ def _meteor(g: Grid, x: int, y: int, length: int) -> None:
     _spark(g, x, y, _P["bright"])
 
 
+def _planet(g: Grid, cx: int, cy: int, r: int) -> None:
+    _disc(g, cx, cy, r, r, _P["planetA"])
+    for y in range(cy - r, cy + r + 1):
+        if ((y - cy + 99) & 3) == 0:
+            for x in range(cx - r, cx + r + 1):
+                if 0 <= y < H and 0 <= x < W and g[y][x] is not None:
+                    _px(g, x, y, _P["planetB"])
+    for y in range(cy - r, cy + r + 1):
+        for x in range(cx, cx + r + 1):
+            dx = (x - cx) / r
+            dy = (y - cy) / r
+            if dx * dx + dy * dy <= 1 and dx > 0.38:
+                _px(g, x, y, _P["planetC"])
+    _ring(g, cx, cy, r + 2.5, r * 0.45, _P["ring"], 0.84, 1.12)
+
+
+def _mountains(g: Grid, by: int, x0: int = 0) -> None:
+    for x in range(x0, W):
+        h = _round(4 + 2.5 * math.sin(x * 0.16) + 1.5 * math.sin(x * 0.07 + 1))
+        for y in range(by - h, by + 1):
+            _px(g, x, y, _P["mtnMid"])
+        if h >= 7:
+            _px(g, x, by - h, _P["snow"])
+    for x in range(x0, W):
+        h = _round(2 + 1.5 * math.sin(x * 0.13 + 4))
+        for y in range(by - h, by + 1):
+            _px(g, x, y, _P["mtnNear"])
+
+
+def _aurora(g: Grid) -> None:
+    cols = [_P["green"], _P["teal"], _P["violet"]]
+    for x in range(18, W):
+        for b in range(3):
+            y = 2 + b * 2 + _round(1.5 * math.sin(x * 0.5 + b))
+            if (x + b) & 1:
+                _px(g, x, y, cols[b])
+    _px(g, 22, 8, _P["star"])
+    _px(g, 27, 9, _P["bright"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -423,6 +463,35 @@ def _s_constellation(g: Grid) -> None:
     _L(g)
 
 
+def _s_ringed_planet(g: Grid) -> None:
+    _stars(g, H, 0.18)
+    _planet(g, 24, 7, 3)
+    _L(g)
+
+
+def _s_mountain_moon(g: Grid) -> None:
+    _stars(g, 9, 0.4)
+    _crescent(g, 25, 4)
+    _mountains(g, 14, 15)
+    _ground(g, 14, _P["mtnNear"])
+    _L(g)
+
+
+def _s_comet(g: Grid) -> None:
+    _stars(g, H, 0.26)
+    for k in range(10):
+        c = _P["bright"] if k < 2 else (_P["star"] if k < 5 else _P["starD"])
+        _px(g, 28 - k, 2 + k, c)
+    _disc(g, 28, 2, 1.4, 1.4, _P["bright"])
+    _L(g)
+
+
+def _s_aurora(g: Grid) -> None:
+    _stars(g, 6, 0.2)
+    _aurora(g)
+    _L(g)
+
+
 def _s_starfield(g: Grid) -> None:
     _stars(g, H, 0.5)
     _spark(g, 24, 4, _P["bright"])
@@ -442,6 +511,10 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_full_moon_cloud, "what are we building tonight?", NIGHT),
     (_s_meteor_shower, "make a wish.", ANY),
     (_s_constellation, "drawn in the stars.", ANY),
+    (_s_ringed_planet, "a world, from nothing.", ANY),
+    (_s_mountain_moon, "welcome back.", ANY),
+    (_s_comet, "something wicked this way ships.", ANY),
+    (_s_aurora, "the sky's showing off — let's match it.", ANY),
     (_s_starfield, "your imp is listening.", ANY),
 ]
 

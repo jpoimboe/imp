@@ -383,3 +383,54 @@ def test_full_moon_scene_is_eligible_only_at_night(monkeypatch) -> None:
     assert idx in splash._eligible()
     monkeypatch.setattr(splash, "_now_hour", lambda: 12)
     assert idx not in splash._eligible()
+
+
+def test_planet_paints_a_body_and_a_ring() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._planet(g, 24, 7, 3)
+    assert any(c == splash._P["planetA"] for row in g for c in row)
+    assert any(c == splash._P["ring"] for row in g for c in row)
+
+
+def test_mountains_cap_snow_above_the_mid_fill() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._mountains(g, 14, 15)
+    snow = [y for y, row in enumerate(g) for c in row if c == splash._P["snow"]]
+    mid = [y for y, row in enumerate(g) for c in row if c == splash._P["mtnMid"]]
+    assert snow and mid
+    assert min(snow) <= min(mid)
+
+
+def test_aurora_uses_three_hues_confined_to_the_accent_columns() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._aurora(g)
+    painted = [(x, c) for _y, row in enumerate(g) for x, c in enumerate(row) if c is not None]
+    hues = {c for _x, c in painted}
+    assert splash._P["green"] in hues
+    assert splash._P["teal"] in hues
+    assert splash._P["violet"] in hues
+    assert all(x >= 18 for x, _c in painted)
+
+
+def test_comet_scene_paints_a_bright_head() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._s_comet(g)
+    assert g[2][28] == splash._P["bright"]  # head disc centred at (28,2)
+
+
+def test_cosmic_batch_b_scenes_are_wired_in_gallery_order() -> None:
+    expect = [
+        (splash._s_ringed_planet, "a world, from nothing.", splash.ANY),
+        (splash._s_mountain_moon, "welcome back.", splash.ANY),
+        (splash._s_comet, "something wicked this way ships.", splash.ANY),
+        (splash._s_aurora, "the sky's showing off — let's match it.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    assert names.index("_s_constellation") < names.index("_s_ringed_planet")
+    assert names.index("_s_ringed_planet") < names.index("_s_starfield")
