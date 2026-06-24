@@ -230,6 +230,37 @@ def test_had_exchange_true_for_user_interjected() -> None:
 
 
 @pytest.mark.anyio
+async def test_disposition_abandon_prints_prebuild_recover_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(
+        tmp_path, title="Dark mode", change_id="ab1", base_branch="main")
+    rc = await m._maybe_apply_leave_disposition(ch, None, {"intent": "abandon"})
+    assert rc is None
+    out = capsys.readouterr().out
+    assert "'Dark mode' abandoned" in out
+    assert "imp resume ab1" in out
+    assert "torn down" not in out
+
+
+@pytest.mark.anyio
+async def test_disposition_abandon_prints_materialized_torndown_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(
+        tmp_path, title="Big feature", change_id="ab2", base_branch="main")
+    rc = await m._maybe_apply_leave_disposition(
+        ch, None, {"intent": "abandon", "materialized": "1"})
+    assert rc is None
+    out = capsys.readouterr().out
+    assert "'Big feature' abandoned" in out
+    assert "torn down" in out
+    assert "imp search" in out
+
+
+@pytest.mark.anyio
 async def test_disposition_new_leave_zero_exchange_discards(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(
@@ -297,3 +328,15 @@ async def test_disposition_returns_none_when_reload_raises_load_errors(
     monkeypatch.setattr(m.Change, "load", _raise)
     rc = await m._maybe_apply_leave_disposition(ch, "chat", {})
     assert rc is None
+
+
+@pytest.mark.anyio
+async def test_disposition_save_intent_honored_when_leave_mode_none(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _draft_with_exchange(tmp_path, "rs1")
+    rc = await m._maybe_apply_leave_disposition(ch, None, {"intent": "save"})
+    assert rc == 0
+    assert State.load(ch.state_dir).status == "paused"          # saved to Backlog
+    assert (tmp_path / ".imp" / "changes" / "rs1").exists()     # home kept

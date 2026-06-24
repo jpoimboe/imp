@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import signal
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -23,6 +24,8 @@ import anyio
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
+from imp.engine.change import Change
+from imp.engine.errors import LoadError, LoadErrors
 from imp.remote.session.client import SessionClient
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
@@ -35,6 +38,7 @@ async def run_terminal_client(
     coord: InterruptCoordinator,
     solicit: Callable[[str], Awaitable[str]],
     change_id: str = "",
+    control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,
     title: TerminalTitle | None = None,
 ) -> None:
@@ -79,17 +83,27 @@ async def run_terminal_client(
                             while True:
                                 reply = await solicit(prompt)
                                 if reply.strip() == "/abandon":
-                                    confirm = await solicit(
-                                        f"abandon `{change_id}`? [y/N]")
-                                    if confirm.strip().lower() in ("y", "yes"):
-                                        if leave_state is not None:
-                                            leave_state["intent"] = "abandon"
-                                        await controls.abandon()
-                                        return
-                                    continue
+                                    if leave_state is not None:
+                                        leave_state["intent"] = "abandon"
+                                        if control_root is not None:
+                                            try:
+                                                reloaded = Change.load(
+                                                    control_root, change_id)
+                                                leave_state["materialized"] = (
+                                                    "1" if reloaded.materialized
+                                                    else "")
+                                            except (LoadError, LoadErrors):
+                                                leave_state["materialized"] = ""
+                                    await controls.abandon()
+                                    return
                                 if reply.strip() == "/save":
                                     if leave_state is not None:
                                         leave_state["intent"] = "save"
+                                    coord.escalation_event.set()
+                                    return
+                                if reply.strip() == "/clear":
+                                    if leave_state is not None:
+                                        leave_state["intent"] = "clear"
                                     coord.escalation_event.set()
                                     return
                                 await client.send_input(reply)

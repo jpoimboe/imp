@@ -441,7 +441,18 @@ async def _maybe_apply_leave_disposition(
     change: Change, leave_mode: str | None, leave_state: dict[str, str],
 ) -> int | None:
     """Finalize a left phase-0 conversation. Returns 0 when applied, None to defer."""
-    if leave_mode is None or leave_state.get("intent") == "abandon":
+    intent = leave_state.get("intent")
+    if intent == "abandon":
+        label = change.title or change.id
+        if leave_state.get("materialized") == "1":
+            print(f"imp: '{label}' abandoned — torn down; "
+                  f"find it later with `imp search`")
+        else:
+            print(f"imp: '{label}' abandoned — "
+                  f"recover with `imp resume {change.id}`")
+        return None
+    explicit_save = intent == "save"
+    if leave_mode is None and not explicit_save:
         return None
     try:
         change = Change.load(change.control_root, change.id)
@@ -449,7 +460,6 @@ async def _maybe_apply_leave_disposition(
         return None  # home gone — defer to the normal path
     if change.materialized:
         return None  # a real in-flight change, not a phase-0 leave
-    explicit_save = leave_state.get("intent") == "save"
     try:
         if not explicit_save and not _had_exchange(change.event_log()):
             await _apply_disposition_locked(discard_conversation, change)
@@ -663,7 +673,8 @@ async def _run_tui_session(
         resume: bool = False,
         opening_intent: str | None = None,
         leave_mode: str | None = None,
-        scope_only: bool = False) -> int:
+        scope_only: bool = False,
+        leave_state: dict[str, str] | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
@@ -671,7 +682,7 @@ async def _run_tui_session(
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only)
-    leave_state: dict[str, str] = {}
+    leave_state = {} if leave_state is None else leave_state
 
     async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)
@@ -685,7 +696,8 @@ async def _run_tui_session(
                     with contextlib.suppress(TimeoutError):
                         await run_terminal_client(
                             attach=attach, driver=app, coord=coord, solicit=_solicit,
-                            change_id=change.id, leave_state=leave_state)
+                            change_id=change.id, control_root=change.control_root,
+                            leave_state=leave_state)
                 finally:
                     app.exit()
 
@@ -698,6 +710,61 @@ async def _run_tui_session(
     if disposition_rc is not None:
         return disposition_rc
     return _session_exit_code(change, coord)
+
+
+async def _run_cleared_session(
+    control: Path, base: str, *, tui: bool, leave_state: dict[str, str],
+) -> int:
+    """Open a fresh imp new-style draft in place after /clear."""
+    from imp.cli.signals import InterruptCoordinator
+
+    color = should_use_color(sys.stdout)
+    banner_shown = _print_splash_banner(interactive=True)
+    if banner_shown:
+        print()
+    prompt = Prompt(editing_mode=_editing_mode(control), color=color)
+    try:
+        reply = (await prompt.ask_async(
+            width=_term_width(), hint=OPENING_HINT)).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("imp: cancelled", file=sys.stderr)
+        return 130
+    opening_text = _normalize_opening_reply(reply)
+    change = Change.create_draft(
+        control, title="", change_id=new_change_id(),
+        base_branch=base, origin="draft")
+    _print_run_header(change.id, change.title, "new", color=color)
+    if tui:
+        return await _run_tui_session(
+            change, seed_opening=opening_text, opening_intent=opening_text,
+            leave_mode="new", leave_state=leave_state)
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(
+        stream=sys.stdout, color=color, width=_term_width(), status=status)
+    coord = InterruptCoordinator()
+    solicit = make_interactive_solicit(
+        change, status=status, driver=driver, coord=coord)
+    return await run_session_client(
+        change, driver=driver, coord=coord, solicit=solicit,
+        seed_opening=opening_text, status=status,
+        opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
+
+
+async def _clear_loop(
+    control: Path,
+    *,
+    tui: bool,
+    first: Callable[[dict[str, str]], Awaitable[int]],
+) -> int:
+    """Run first, then loop only while /clear: open a fresh new-style chat."""
+    leave_state: dict[str, str] = {}
+    rc = await first(leave_state)
+    while leave_state.get("intent") == "clear":
+        leave_state = {}
+        base = worktree.current_branch(control)
+        rc = await _run_cleared_session(
+            control, base, tui=tui, leave_state=leave_state)
+    return rc
 
 
 def _record_idea(args: argparse.Namespace, control: Path) -> int:
@@ -761,17 +828,25 @@ async def _run_fresh_session(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=seed_opening, status=status)
     if _tui_requested(args):
-        return await _run_tui_session(change, seed_opening=seed_opening)
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(stream=sys.stdout,
-                        color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        seed_opening=seed_opening, status=status)
+        async def _first_tui(leave_state: dict[str, str]) -> int:
+            return await _run_tui_session(
+                change, seed_opening=seed_opening, leave_state=leave_state)
+
+        return await _clear_loop(change.control_root, tui=True, first=_first_tui)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=seed_opening, status=status, leave_state=leave_state)
+
+    return await _clear_loop(change.control_root, tui=False, first=_first)
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
@@ -904,24 +979,34 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if not header_printed:
             _print_run_header(
                 change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
-        return await _run_tui_session(change, seed_opening=opening_text,
-                                      opening_intent=opening_intent,
-                                      leave_mode=leave_mode, **_scope_kw)
+
+        async def _first_tui(leave_state: dict[str, str]) -> int:
+            return await _run_tui_session(
+                change, seed_opening=opening_text,
+                opening_intent=opening_intent, leave_mode=leave_mode,
+                leave_state=leave_state, **_scope_kw)
+
+        return await _clear_loop(control, tui=True, first=_first_tui)
 
     if not header_printed:
         _print_run_header(
             change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(stream=sys.stdout,
-                        color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        seed_opening=opening_text, status=status,
-        opening_intent=opening_intent, leave_mode=leave_mode, **_scope_kw)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=opening_text, status=status,
+            opening_intent=opening_intent, leave_mode=leave_mode,
+            leave_state=leave_state, **_scope_kw)
+
+    return await _clear_loop(control, tui=False, first=_first)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -1040,7 +1125,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if _tui_requested(args):
         print(_run_header_line(
             change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
-        return await _run_tui_session(change, resume=True)
+
+        async def _first_tui(leave_state: dict[str, str]) -> int:
+            return await _run_tui_session(
+                change, resume=True, leave_state=leave_state)
+
+        return await _clear_loop(change.control_root, tui=True, first=_first_tui)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
@@ -1049,17 +1139,21 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         non_interactive=bool(getattr(args, "non_interactive", False))))
     print(_run_header_line(
         change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(stream=sys.stdout,
-                        color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status,
-                        suppress_replay=True)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        resume=True, status=status)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status,
+                            suppress_replay=True)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            resume=True, status=status, leave_state=leave_state)
+
+    return await _clear_loop(change.control_root, tui=False, first=_first)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:

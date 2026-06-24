@@ -224,3 +224,20 @@ def test_save_is_in_the_help_text() -> None:
     lines: list[str] = []
     _help(lines.append)
     assert any("/save" in line for line in lines)
+
+
+def test_clear_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /clear is a built-in (NOT a skill): it returns the literal so the session
+    # gate loop records the clear intent and detaches like Ctrl-D.
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/clear", change=change, output_fn=out.append)
+    assert result == "/clear"
+    assert not any("no such skill" in line for line in out)
+
+
+def test_clear_is_in_the_help_text() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append)
+    assert any("/clear" in line for line in lines)

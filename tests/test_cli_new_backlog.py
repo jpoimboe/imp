@@ -116,7 +116,7 @@ def test_interactive_backlog_seeds_session_and_sets_origin(
 
     async def _fake_run_session_client(
         change, *, driver, coord, solicit, seed_opening=None, status=None,
-        opening_intent=None, leave_mode=None, scope_only=False,
+        opening_intent=None, leave_mode=None, scope_only=False, leave_state=None,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening
@@ -204,7 +204,7 @@ def test_tui_backlog_sets_scope_only(
 
     async def _fake_run_tui_session(
         change, *, seed_opening=None, resume=False, opening_intent=None,
-        leave_mode=None, scope_only=False,
+        leave_mode=None, scope_only=False, leave_state=None,
     ) -> int:
         captured["scope_only"] = scope_only
         return 0

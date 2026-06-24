@@ -37,9 +37,10 @@ async def run_session_client(
     opening_intent: str | None = None,
     leave_mode: str | None = None,
     scope_only: bool = False,
+    leave_state: dict[str, str] | None = None,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
-    leave_state: dict[str, str] = {}
+    leave_state = {} if leave_state is None else leave_state
     title = TerminalTitle(sys.stdout, change.title)
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
@@ -52,7 +53,8 @@ async def run_session_client(
         try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
-                change_id=change.id, leave_state=leave_state, title=title)
+                change_id=change.id, control_root=change.control_root,
+                leave_state=leave_state, title=title)
         except TimeoutError:
             startup_failed = True
             # attach raised before run_terminal_client's teardown finally runs.
