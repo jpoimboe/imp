@@ -126,18 +126,19 @@ phases:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
   - name: code
+    label: "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     steps:
       - name: task-lead
         file: agents/task-lead.md
         tier: high
-        label: "code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
+        label: "task 1/{{ vars.task_total }} · thinking"
         rules:
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {else: true, continue: true}
 
       - name: verify
         command: ./scripts/run-verify.sh
-        label: code · testing
+        label: running tests
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
@@ -159,7 +160,7 @@ phases:
       - name: autosquash-resolve-implement
         file: agents/autosquash-resolve.md
         tier: high
-        label: code · resolving fixups
+        label: resolving task fixups
         max_loops: 6
         rules:
           - {else: true, goto: cleanup-implement}
@@ -171,7 +172,7 @@ phases:
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
         tier: high
-        label: code · checking plan coverage
+        label: checking plan coverage
         rules:
           # More scope remains -> review THIS plan (review_base..HEAD) before the next plan.
           # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
@@ -196,7 +197,7 @@ phases:
       - name: plan-code-reviewer
         file: agents/plan-code-reviewer.md
         tier: high
-        label: "code · plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+        label: batch code review
         max_loops: 6
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The plan-code-reviewer found an implemented task needs rework. Findings:"}
@@ -206,14 +207,14 @@ phases:
       - name: deferred-sweep
         file: agents/deferred-sweep.md
         tier: medium
-        label: code · cleaning up deferred tasks
+        label: sweeping deferred tasks
         rules:
           - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
           - {else: true, continue: true}
 
       - name: sweep-verify
         command: ./scripts/run-verify.sh
-        label: code · testing
+        label: running tests
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
@@ -234,7 +235,7 @@ phases:
       - name: autosquash-resolve-sweep
         file: agents/autosquash-resolve.md
         tier: high
-        label: code · resolving fixups
+        label: resolving sweep fixups
         max_loops: 6
         rules:
           - {else: true, goto: cleanup-sweep}
@@ -261,7 +262,7 @@ phases:
       - name: finalize
         file: agents/finalize.md
         tier: high
-        label: code · finalizing
+        label: finalizing
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}

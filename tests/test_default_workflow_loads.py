@@ -142,22 +142,16 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "plan-writer": "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
         "plan-reviewer": "reviewing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
         "plan-finalized": "finalizing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
-        "task-lead": (
-            "code · plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %}"
-        ),
-        "verify": "code · testing",
-        "autosquash-resolve-implement": "code · resolving fixups",
+        "task-lead": "task 1/{{ vars.task_total }} · thinking",
+        "verify": "running tests",
+        "autosquash-resolve-implement": "resolving task fixups",
         "autosquash-resolve-merge": "merge · resolving fixups",
-        "plan-cycle-check": "code · checking plan coverage",
-        "plan-code-reviewer": (
-            "code · plan {{ vars.plan_index }}"
-            "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
-        ),
-        "deferred-sweep": "code · cleaning up deferred tasks",
-        "sweep-verify": "code · testing",
-        "autosquash-resolve-sweep": "code · resolving fixups",
-        "finalize": "code · finalizing",
+        "plan-cycle-check": "checking plan coverage",
+        "plan-code-reviewer": "batch code review",
+        "deferred-sweep": "sweeping deferred tasks",
+        "sweep-verify": "running tests",
+        "autosquash-resolve-sweep": "resolving sweep fixups",
+        "finalize": "finalizing",
         "wait-for-head": "merge · waiting",
         "reconciler": "merge · reconciling",
         "integration-verify": "merge · testing",
@@ -195,3 +189,7 @@ def test_phase_labels_assigned() -> None:
     assert by["front-door"].label is None
     assert by["spec"].label == "spec phase"
     assert by["plan"].label == "planning phase"
+    assert by["code"].label == (
+        "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+    )
+    assert by["merge"].label == "integration phase"

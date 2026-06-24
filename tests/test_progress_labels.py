@@ -58,14 +58,12 @@ def test_plan_finalized_label_renders_position(tmp_path: Path) -> None:
     assert single == "finalizing plan 1/1"
 
 
-def test_task_lead_label_renders_plan_position(tmp_path: Path) -> None:
+def test_task_lead_label_is_static_task_fallback(tmp_path: Path) -> None:
     ch = _change(tmp_path)
-    out = render_label(_label("task-lead"), ch, ch.event_log(),
-                       _state(plan_index=2, plan_total=4))
-    assert out == "code · plan 2/4"
-    bare = render_label(_label("task-lead"), ch, ch.event_log(),
-                        _state(plan_index=1, plan_total=0))
-    assert bare == "code · plan 1"
+    out = render_label(_label("task-lead"), ch, ch.event_log(), _state(task_total=6))
+    assert out == "task 1/6 · thinking"
+    single = render_label(_label("task-lead"), ch, ch.event_log(), _state(task_total=1))
+    assert single == "task 1/1 · thinking"
 
 
 def test_plan_writer_frontmatter_label_removed() -> None:
