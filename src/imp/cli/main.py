@@ -1761,15 +1761,16 @@ def _status_rows(control: Path) -> list[_Row]:
         except FileNotFoundError:
             continue
         try:
-            if json.loads(change_json).get("materialized", True) is False:
-                continue  # unmaterialized homes belong to the Backlog zone
+            meta = json.loads(change_json)
         except json.JSONDecodeError:
             continue
+        if meta.get("materialized", True) is False and meta.get("origin", "draft") != "draft":
+            continue  # un-materialized ideas/follow-ups belong to the Backlog zone
         last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
             continue
-        status = _effective_status(row[1], cdir)
+        status = _draft_label(_effective_status(row[1], cdir), change_json)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue
@@ -2055,6 +2056,8 @@ def _backlog_rows(control: Path) -> list[_Row]:
         if meta.get("materialized", True):
             continue  # materialized homes are Active, not Backlog
         origin = meta.get("origin", "draft")
+        if origin == "draft":
+            continue  # un-materialized drafts are Active, not Backlog
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
         last = _last_event_iso(cdir / "events.jsonl") or ""
         created = meta.get("created_at", "")
