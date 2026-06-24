@@ -69,6 +69,14 @@ unimplemented task, or the re-opened task from injected feedback):
      stable within the loop). The `cleanup` gate folds the fixup into its target at
      review entry, so the final branch stays one clean commit per task.
      Do **not** make a second new commit for a re-opened task.
+
+   **Never `--fixup`/`--squash` a commit your change does not own.** A
+   `fixup!`/`squash!` may only target a commit your change created (above its fork);
+   never one at or below the fork — a base commit or already-reviewed history. A
+   failure that traces to a base commit is fixed **forward** as a new commit, never
+   folded into base. If the `cleanup` gate bounces back a **surviving directive**,
+   convert that directive into a standalone commit (drop the `fixup! ` prefix) or
+   replace it with a new forward commit — never rewrite reviewed history.
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for

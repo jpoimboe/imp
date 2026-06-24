@@ -559,6 +559,20 @@ def test_spec_writer_recognizes_front_door_handoff() -> None:
     assert "change.orig_base_head" in body
 
 
+NO_FIXUP_RULE_AGENTS = ["task-lead.md", "deferred-sweep.md", "reconciler.md"]
+
+
+@pytest.mark.parametrize("name", NO_FIXUP_RULE_AGENTS)
+def test_committing_agents_carry_no_fixup_outside_change_rule(name: str) -> None:
+    # The standing rule: never --fixup/--squash a commit the change does not own; a
+    # base-traced failure is fixed forward; a bounced surviving directive becomes a
+    # standalone or new forward commit.
+    low = _read(name).lower()
+    assert "does not own" in low
+    assert "surviving directive" in low
+    assert "forward" in low
+
+
 def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> None:
     body = _read("spec-writer.md")
     log = JsonlEventLog(tmp_path / "events.jsonl")

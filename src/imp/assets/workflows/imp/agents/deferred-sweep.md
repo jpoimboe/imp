@@ -124,6 +124,14 @@ coder to make a NEW commit per item:
 `git add <files> && git commit -m "<type>: <item summary>"` — no `Change:` trailer
 (the workflow stamps it later).
 
+**Never `--fixup`/`--squash` a commit your change does not own.** A
+`fixup!`/`squash!` may only target a commit your change created (above its fork);
+never one at or below the fork — a base commit or already-reviewed history. A
+failure that traces to a base commit is fixed **forward** as a new commit, never
+folded into base. If the `cleanup-sweep` gate bounces back a **surviving directive**,
+convert that directive into a standalone commit (drop the `fixup! ` prefix) or
+replace it with a new forward commit — never rewrite reviewed history.
+
 ## Record each disposition — keep `progress.md` bounded
 
 `progress.md` has a durable `## Completed plans` section (one line per plan, plus
