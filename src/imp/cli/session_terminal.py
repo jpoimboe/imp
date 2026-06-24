@@ -22,6 +22,7 @@ import anyio
 
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.terminal_title import TerminalTitle
 from imp.remote.session.client import SessionClient
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
@@ -35,15 +36,21 @@ async def run_terminal_client(
     solicit: Callable[[str], Awaitable[str]],
     change_id: str = "",
     leave_state: dict[str, str] | None = None,
+    title: TerminalTitle | None = None,
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=1)
 
     def _on_event(event: dict[str, Any]) -> None:
         driver.on_event(event)
-        if event.get("type") == "awaiting_user_input" and not event.get("_replay"):
+        replay = bool(event.get("_replay"))
+        if event.get("type") == "awaiting_user_input" and not replay:
             prompt = (event.get("payload") or {}).get("prompt") or ""
             gate_send.send_nowait(prompt)
+            if title is not None:
+                title.waiting()
+        elif title is not None and not replay:
+            title.working()
 
     coord.escalation_event = anyio.Event()
     coord.set_escalation_hook(coord.escalation_event.set)
@@ -127,4 +134,6 @@ async def run_terminal_client(
             await gate_send.aclose()
             gate_recv.close()
             driver.finish()
+            if title is not None:
+                title.reset()
             await client.aclose()
