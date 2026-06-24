@@ -348,7 +348,7 @@ def test_arcane_item_scenes_are_wired_and_props_paint() -> None:
     splash._scroll(g, 24, 7)
     assert g[12][24] == splash._P["O"]          # disc(cx,cy+5) seal at (24,12)
     expect = [
-        (splash._s_floating_wisps, "the void is listening.", splash.ANY),
+        (splash._s_floating_wisps, "the wisps know the way. follow them in.", splash.ANY),
         (splash._s_potion_shelf, "every spell has a price — name yours.", splash.ANY),
         (splash._s_magic_wand, "speak, and it shall be built.", splash.ANY),
         (splash._s_hourglass, "time's a construct. ship anyway.", splash.ANY),
@@ -531,7 +531,7 @@ def test_ritual_vessel_scenes_are_wired_and_props_paint() -> None:
         (splash._s_portal, "the portal is open. step through.", splash.ANY),
         (splash._s_crystal_ball, "gaze in — what shall we build?", splash.ANY),
         (splash._s_cauldron, "stir the cauldron — what's brewing?", splash.ANY),
-        (splash._s_grimoire, "the grimoire is open.", splash.ANY),
+        (splash._s_grimoire, "the grimoire's open. pick a spell.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -557,9 +557,9 @@ def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
     assert g[7][24] == splash._P["rune"]        # px(cx,cy) centre rune
     expect = [
         (splash._s_lantern, "the lantern's lit. lead the way.", splash.ANY),
-        (splash._s_twin_candles, "whisper your wish.", splash.ANY),
+        (splash._s_twin_candles, "lean in. whisper it to the flame.", splash.ANY),
         (splash._s_twin_torches, "let's raise a little hell.", splash.ANY),
-        (splash._s_rune_sigil, "the runes are ready.", splash.ANY),
+        (splash._s_rune_sigil, "the runes are carved. speak the word.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
