@@ -656,3 +656,39 @@ def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
     idx = [names.index(b.__name__) for b, _p, _w in expect]
     assert idx == sorted(idx)
     assert names.index("_s_bats") < idx[0]
+
+
+def test_workshop_scenes_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._coffee(g, 22, 12)
+    assert g[4][24] == splash._P["steam"]        # px(x+2,by-8) top steam at (24,4)
+    g = splash._make_grid()
+    splash._terminal_win(g, 19, 3)
+    assert g[8][23] == splash._P["bright"]        # px(x+4,y+5) cursor blink at (23,8)
+    g = splash._make_grid()
+    splash._books(g, 21, 12)
+    assert g[4][23] == splash._P["W"]             # px(x+2,by-8) candle glint at (23,4)
+    g = splash._make_grid()
+    splash._gears(g, 23, 6)
+    assert g[6][27] == splash._P["metal"]         # a=0 tooth of the big gear at (27,6)
+    g = splash._make_grid()
+    splash._beetle(g, 24, 7)
+    assert g[3][24] == splash._P["O"]             # px(cx,cy-4) head at (24,3)
+    g = splash._make_grid()
+    splash._s_stacked_tomes(g)
+    assert g[3][29] == splash._P["flame2"]        # px(29,3) shelf spark
+    expect = [
+        (splash._s_coffee, "another night, another diff.", splash.ANY),
+        (splash._s_terminal, "mischief, compiled.", splash.ANY),
+        (splash._s_desk_book, "light the candles. we begin.", splash.ANY),
+        (splash._s_clockwork, "let's build the machine.", splash.ANY),
+        (splash._s_the_bug, "show me the bug. i'll deal with it.", splash.ANY),
+        (splash._s_stacked_tomes, "i've read everything. ask.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_fairy_ring") < idx[0]

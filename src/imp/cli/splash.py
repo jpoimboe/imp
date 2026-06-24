@@ -753,6 +753,61 @@ def _fairy_ring(g: Grid) -> None:
         _disc(g, x, y - 1, 1.3, 1, _P["cap1"] if (a // 60) % 2 else _P["cap2"])
 
 
+def _coffee(g: Grid, x: int, by: int) -> None:
+    _rect(g, x, by - 4, 5, 4, _P["metal"])
+    _rect(g, x + 1, by - 3, 3, 1, _P["wood"])
+    _px(g, x + 5, by - 3, _P["metalD"])
+    _px(g, x + 6, by - 3, _P["metalD"])
+    _px(g, x + 6, by - 2, _P["metalD"])
+    _px(g, x + 5, by - 1, _P["metalD"])
+    _px(g, x + 1, by - 6, _P["steam"])
+    _px(g, x + 3, by - 7, _P["steam"])
+    _px(g, x + 2, by - 8, _P["steam"])
+
+
+def _terminal_win(g: Grid, x: int, y: int) -> None:
+    _rect(g, x, y, 12, 8, _P["bookSpine"])
+    _rect(g, x + 1, y + 1, 10, 6, _P["ground"])
+    _rect(g, x + 1, y + 1, 10, 1, _P["metalD"])
+    _px(g, x + 2, y + 3, _P["green"])
+    _px(g, x + 3, y + 3, _P["green"])
+    _px(g, x + 5, y + 3, _P["bookPageD"])
+    _px(g, x + 2, y + 5, _P["o"])
+    _px(g, x + 4, y + 5, _P["bright"])
+
+
+def _books(g: Grid, x: int, by: int) -> None:
+    _rect(g, x, by - 1, 9, 2, _P["crysShade"])
+    _rect(g, x + 1, by - 3, 8, 2, _P["O"])
+    _rect(g, x, by - 5, 7, 2, _P["rune"])
+    _px(g, x + 2, by - 9, _P["flame"])
+    _px(g, x + 2, by - 8, _P["W"])
+    for j in range(3):
+        _px(g, x + 2, by - 7 + j, _P["wax"])
+
+
+def _gears(g: Grid, cx: int, cy: int) -> None:
+    def gear(gcx: int, gcy: int, r: int, c: Color | None) -> None:
+        _ring(g, gcx, gcy, r, r, c, 0.45, 1.0)
+        for a in range(0, 360, 45):
+            t = a * math.pi / 180
+            _px(g, gcx + math.cos(t) * (r + 1), gcy + math.sin(t) * (r + 1), c)
+    gear(cx, cy, 3, _P["metal"])
+    gear(cx + 5, cy + 3, 2, _P["metalD"])
+
+
+def _beetle(g: Grid, cx: int, cy: int) -> None:
+    _disc(g, cx, cy, 3, 2, _P["ravenC"])
+    _px(g, cx, cy - 3, _P["ravenC"])
+    _line(g, cx, cy - 2, cx, cy + 2, _P["O"])
+    for dy in (-1, 0, 1):
+        _px(g, cx - 4, cy + dy * 2, _P["ravenC"])
+        _px(g, cx + 4, cy + dy * 2, _P["ravenC"])
+        _line(g, cx - 3, cy + dy, cx - 4, cy + dy * 2, _P["ravenC"])
+        _line(g, cx + 3, cy + dy, cx + 4, cy + dy * 2, _P["ravenC"])
+    _px(g, cx, cy - 4, _P["O"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -1024,6 +1079,45 @@ def _s_fairy_ring(g: Grid) -> None:
     _L(g)
 
 
+def _s_coffee(g: Grid) -> None:
+    _stars(g, 6, 0.2)
+    _coffee(g, 22, 12)
+    _L(g)
+
+
+def _s_terminal(g: Grid) -> None:
+    _stars(g, 5, 0.18)
+    _terminal_win(g, 19, 3)
+    _L(g)
+
+
+def _s_desk_book(g: Grid) -> None:
+    _stars(g, 6, 0.2)
+    _books(g, 21, 12)
+    _L(g)
+
+
+def _s_clockwork(g: Grid) -> None:
+    _stars(g, 6, 0.2)
+    _gears(g, 23, 6)
+    _L(g)
+
+
+def _s_the_bug(g: Grid) -> None:
+    _stars(g, 6, 0.18)
+    _beetle(g, 24, 7)
+    _L(g)
+
+
+def _s_stacked_tomes(g: Grid) -> None:
+    _ground(g, 13, _P["bookSpine"])
+    _rect(g, 18, 10, 11, 3, _P["O"])
+    _rect(g, 19, 7, 9, 3, _P["rune"])
+    _rect(g, 18, 4, 10, 3, _P["crysShade"])
+    _px(g, 29, 3, _P["flame2"])
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -1071,6 +1165,12 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_jack_o_lantern, "trouble? my specialty.", ANY),
     (_s_black_cat, "back so soon? good.", ANY),
     (_s_fairy_ring, "step inside the ring.", ANY),
+    (_s_coffee, "another night, another diff.", ANY),
+    (_s_terminal, "mischief, compiled.", ANY),
+    (_s_desk_book, "light the candles. we begin.", ANY),
+    (_s_clockwork, "let's build the machine.", ANY),
+    (_s_the_bug, "show me the bug. i'll deal with it.", ANY),
+    (_s_stacked_tomes, "i've read everything. ask.", ANY),
 ]
 
 MIN_WIDTH = 32
