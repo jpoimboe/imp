@@ -348,7 +348,7 @@ def test_arcane_item_scenes_are_wired_and_props_paint() -> None:
     splash._scroll(g, 24, 7)
     assert g[12][24] == splash._P["O"]          # disc(cx,cy+5) seal at (24,12)
     expect = [
-        (splash._s_floating_wisps, "the void is listening.", splash.ANY),
+        (splash._s_floating_wisps, "the wisps know the way. follow them in.", splash.ANY),
         (splash._s_potion_shelf, "every spell has a price — name yours.", splash.ANY),
         (splash._s_magic_wand, "speak, and it shall be built.", splash.ANY),
         (splash._s_hourglass, "time's a construct. ship anyway.", splash.ANY),
@@ -400,9 +400,9 @@ def test_meteor_head_is_bright_and_tail_trends_to_star() -> None:
 def test_cosmic_batch_a_scenes_are_wired_in_gallery_order() -> None:
     expect = [
         (splash._s_crescent_stars, "the familiar awakens.", splash.ANY),
-        (splash._s_crescent_perch, "perched and ready.", splash.ANY),
+        (splash._s_crescent_perch, "perched. where to?", splash.ANY),
         (splash._s_full_moon_cloud, "what are we building tonight?", splash.NIGHT),
-        (splash._s_meteor_shower, "make a wish.", splash.ANY),
+        (splash._s_meteor_shower, "make a wish — i'll bend it your way.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -460,8 +460,8 @@ def test_comet_scene_paints_a_bright_head() -> None:
 
 def test_cosmic_batch_b_scenes_are_wired_in_gallery_order() -> None:
     expect = [
-        (splash._s_ringed_planet, "a world, from nothing.", splash.ANY),
-        (splash._s_mountain_moon, "welcome back.", splash.ANY),
+        (splash._s_ringed_planet, "a world — from nothing.", splash.ANY),
+        (splash._s_mountain_moon, "the mountains waited. so did i.", splash.ANY),
         (splash._s_comet, "something wicked this way ships.", splash.ANY),
         (splash._s_aurora, "the sky's showing off — let's match it.", splash.ANY),
     ]
@@ -498,9 +498,9 @@ def test_summoning_circle_scene_paints_a_portal_ring_and_runes() -> None:
 
 def test_cosmic_batch_c_scenes_complete_the_thirteen_scene_pool() -> None:
     expect = [
-        (splash._s_galaxy, "lost in the stack? i know the way.", splash.ANY),
+        (splash._s_galaxy, "lost in the spiral? i know the way out.", splash.ANY),
         (splash._s_void, "conjured from the void.", splash.ANY),
-        (splash._s_summoning_circle, "the circle is drawn.", splash.ANY),
+        (splash._s_summoning_circle, "the circle's drawn. name what we summon.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -531,7 +531,7 @@ def test_ritual_vessel_scenes_are_wired_and_props_paint() -> None:
         (splash._s_portal, "the portal is open. step through.", splash.ANY),
         (splash._s_crystal_ball, "gaze in — what shall we build?", splash.ANY),
         (splash._s_cauldron, "stir the cauldron — what's brewing?", splash.ANY),
-        (splash._s_grimoire, "the grimoire is open.", splash.ANY),
+        (splash._s_grimoire, "the grimoire's open. pick a spell.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -557,9 +557,9 @@ def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
     assert g[7][24] == splash._P["rune"]        # px(cx,cy) centre rune
     expect = [
         (splash._s_lantern, "the lantern's lit. lead the way.", splash.ANY),
-        (splash._s_twin_candles, "whisper your wish.", splash.ANY),
+        (splash._s_twin_candles, "lean in. whisper it to the flame.", splash.ANY),
         (splash._s_twin_torches, "let's raise a little hell.", splash.ANY),
-        (splash._s_rune_sigil, "the runes are ready.", splash.ANY),
+        (splash._s_rune_sigil, "the runes are carved. speak the word.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -588,11 +588,11 @@ def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
     splash._s_will_o_wisp(g)
     assert g[4][22] == splash._P["wisp"]         # spark at (22,4) survives the scene
     expect = [
-        (splash._s_crystal_cluster, "small imp, big leverage.", splash.ANY),
-        (splash._s_will_o_wisp, "follow the light.", splash.ANY),
+        (splash._s_crystal_cluster, "small imp. sharp edges.", splash.ANY),
+        (splash._s_will_o_wisp, "one light in the dark. stay close.", splash.ANY),
         (splash._s_tarot, "pick a card. any card.", splash.ANY),
-        (splash._s_quill_ink, "name your desire.", splash.ANY),
-        (splash._s_glowing_mushrooms, "let's make some mischief.", splash.ANY),
+        (splash._s_quill_ink, "name it. i'll put it to ink.", splash.ANY),
+        (splash._s_glowing_mushrooms, "toadstool glow's up. trouble's brewing.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -652,7 +652,7 @@ def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
         (splash._s_ouroboros, "round and round the refactor goes.", splash.ANY),
         (splash._s_jack_o_lantern, "trouble? my specialty.", splash.ANY),
         (splash._s_black_cat, "back so soon? good.", splash.ANY),
-        (splash._s_fairy_ring, "step inside the ring.", splash.ANY),
+        (splash._s_fairy_ring, "step inside the ring. rules optional.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -739,7 +739,7 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
         (splash._s_coffee, "another night, another diff.", splash.ANY),
         (splash._s_terminal, "mischief, compiled.", splash.ANY),
         (splash._s_desk_book, "light the candles. we begin.", splash.ANY),
-        (splash._s_clockwork, "let's build the machine.", splash.ANY),
+        (splash._s_clockwork, "gears are turning. let's make it tick.", splash.ANY),
         (splash._s_the_bug, "show me the bug. i'll deal with it.", splash.ANY),
         (splash._s_stacked_tomes, "i've read everything. ask.", splash.ANY),
     ]
