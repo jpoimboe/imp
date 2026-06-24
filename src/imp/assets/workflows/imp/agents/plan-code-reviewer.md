@@ -80,9 +80,12 @@ Read all of these and the diff before forming your assessment.
   or lesser instances are **Minor** observations.
 - Edge cases covered?
 - Integration tests where they matter?
-- The `verify` gate has already confirmed the project's checks pass — you may re-run
-  tests or a linter via `bash` to spot-check, but do not rely on that gate as a
-  substitute for reading the tests themselves.
+- When the project runs a verification gate, it has already passed at the current tree
+  immediately before this review, and you cannot have changed that tree (you do not
+  commit) — so re-running the full suite tells you nothing new; don't. Your job here is
+  to read the tests, not re-run them: judge whether they verify real behavior
+  (falsifiability, above). If you form a specific hypothesis that a runtime behavior
+  broke, run only the single narrowest check that tests it.
 
 **Production readiness:**
 - No obvious bugs or regressions?
