@@ -773,3 +773,55 @@ async def test_abandon_records_materialized_true_for_materialized_change(
     assert server.abandoned
     assert leave_state["intent"] == "abandon"
     assert leave_state["materialized"] == "1"
+
+
+@pytest.mark.anyio
+async def test_clear_slash_command_at_gate_records_intent_and_detaches(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    survived: list[bool] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        # /clear detaches the client; the run pauses (survives) — no abandon.
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await server.wait_for_attach_change()
+        survived.append(True)
+        return "done"
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "/clear"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(15):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c1", leave_state=leave_state)
+
+            tg.start_soon(_client)
+
+    assert survived == [True]
+    assert leave_state == {"intent": "clear"}
+    assert not server.abandoned

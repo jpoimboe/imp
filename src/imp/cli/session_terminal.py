@@ -101,6 +101,11 @@ async def run_terminal_client(
                                         leave_state["intent"] = "save"
                                     coord.escalation_event.set()
                                     return
+                                if reply.strip() == "/clear":
+                                    if leave_state is not None:
+                                        leave_state["intent"] = "clear"
+                                    coord.escalation_event.set()
+                                    return
                                 await client.send_input(reply)
                                 break
                     except EOFError:
