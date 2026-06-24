@@ -696,6 +696,63 @@ def _bat(g: Grid, cx: int, cy: int) -> None:
     _line(g, cx + 4, cy - 1, cx + 5, cy + 1, _P["ravenC"])
 
 
+def _raven(g: Grid, x: int, by: int) -> None:
+    _ground(g, by + 1, _P["bookSpine"])
+    _disc(g, x, by - 2, 2.4, 2, _P["ravenC"])
+    _disc(g, x + 2, by - 4, 1.4, 1.4, _P["ravenC"])
+    _px(g, x + 4, by - 4, _P["beak"])
+    _px(g, x + 1, by - 4, _P["bright"])
+    _line(g, x - 2, by - 1, x - 5, by + 0, _P["ravenC"])
+    _px(g, x, by + 1, _P["ravenC"])
+    _px(g, x + 1, by + 1, _P["ravenC"])
+
+
+def _ouroboros(g: Grid, cx: int, cy: int) -> None:
+    _ring(g, cx, cy, 5, 5, _P["green"], 0.6, 1.0)
+    _ring(g, cx, cy, 5, 5, _P["teal"], 0.78, 0.92)
+    _disc(g, cx + 5, cy, 1.4, 1.4, _P["green"])
+    _px(g, cx + 6, cy - 1, _P["catEye"])
+
+
+def _jack(g: Grid, cx: int, cy: int) -> None:
+    _glow_ring(g, cx, cy, 4, _P["pumpkinGlow"])
+    _disc(g, cx, cy, 4, 3.4, _P["pumpkin"])
+    for y in range(cy - 3, cy + 4):
+        if (y - cy + 9) % 2:
+            for x in range(cx - 4, cx + 5):
+                if 0 <= y < H and 0 <= x < W and g[y][x] == _P["pumpkin"]:
+                    _px(g, x, y, _P["pumpkinD"])
+    _px(g, cx - 2, cy - 1, _P["pumpkinGlow"])
+    _px(g, cx + 2, cy - 1, _P["pumpkinGlow"])
+    _px(g, cx, cy, _P["pumpkinGlow"])
+    _line(g, cx - 2, cy + 2, cx + 2, cy + 2, _P["pumpkinGlow"])
+    _px(g, cx, cy - 4, _P["stem"])
+    _px(g, cx, cy - 5, _P["stem"])
+
+
+def _cat(g: Grid, x: int, by: int) -> None:
+    _ground(g, by + 1, _P["bookSpine"])
+    _disc(g, x, by - 2, 2.6, 3, _P["catC"])
+    _px(g, x - 2, by - 5, _P["catC"])
+    _px(g, x - 3, by - 6, _P["catC"])
+    _px(g, x + 2, by - 5, _P["catC"])
+    _px(g, x + 3, by - 6, _P["catC"])
+    _px(g, x - 1, by - 3, _P["catEye"])
+    _px(g, x + 1, by - 3, _P["catEye"])
+    for k in range(5):
+        _px(g, x + 3 + k, by - (2 if k > 2 else 0), _P["catC"])
+
+
+def _fairy_ring(g: Grid) -> None:
+    _ring(g, 23, 12, 6, 1.8, _P["mushGlow"], 0.74, 1.12)
+    for a in range(0, 360, 60):
+        t = a * math.pi / 180
+        x = _round(23 + math.cos(t) * 6)
+        y = _round(12 + math.sin(t) * 1.8)
+        _px(g, x, y, _P["mushStem"])
+        _disc(g, x, y - 1, 1.3, 1, _P["cap1"] if (a // 60) % 2 else _P["cap2"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -937,6 +994,36 @@ def _s_bats(g: Grid) -> None:
     _L(g)
 
 
+def _s_raven(g: Grid) -> None:
+    _stars(g, 8, 0.24)
+    _raven(g, 24, 12)
+    _L(g)
+
+
+def _s_ouroboros(g: Grid) -> None:
+    _stars(g, 7, 0.22)
+    _ouroboros(g, 24, 7)
+    _L(g)
+
+
+def _s_jack_o_lantern(g: Grid) -> None:
+    _stars(g, 7, 0.26)
+    _jack(g, 24, 8)
+    _L(g)
+
+
+def _s_black_cat(g: Grid) -> None:
+    _stars(g, 8, 0.24)
+    _cat(g, 25, 12)
+    _L(g)
+
+
+def _s_fairy_ring(g: Grid) -> None:
+    _stars(g, 7, 0.28)
+    _fairy_ring(g)
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -979,6 +1066,11 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_fireflies, "the lights are out to play.", ANY),
     (_s_spider_web, "caught in a bug? i'll cut it loose.", ANY),
     (_s_bats, "creatures of the night, assemble.", ANY),
+    (_s_raven, "tell me what haunts your codebase.", ANY),
+    (_s_ouroboros, "round and round the refactor goes.", ANY),
+    (_s_jack_o_lantern, "trouble? my specialty.", ANY),
+    (_s_black_cat, "back so soon? good.", ANY),
+    (_s_fairy_ring, "step inside the ring.", ANY),
 ]
 
 MIN_WIDTH = 32

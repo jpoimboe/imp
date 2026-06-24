@@ -624,3 +624,35 @@ def test_nocturnal_scenes_one_are_wired_and_props_paint() -> None:
     idx = [names.index(b.__name__) for b, _p, _w in expect]
     assert idx == sorted(idx)
     assert names.index("_s_glowing_mushrooms") < idx[0]
+
+
+def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._raven(g, 24, 12)
+    assert g[8][28] == splash._P["beak"]        # px(x+4,by-4) beak at (28,8)
+    g = splash._make_grid()
+    splash._ouroboros(g, 24, 7)
+    assert g[7][29] == splash._P["green"]        # disc(cx+5,cy) head at (29,7)
+    g = splash._make_grid()
+    splash._jack(g, 24, 8)
+    assert g[8][24] == splash._P["pumpkinGlow"]  # px(cx,cy) mouth glow at (24,8)
+    g = splash._make_grid()
+    splash._cat(g, 25, 12)
+    assert g[9][24] == splash._P["catEye"]       # px(x-1,by-3) left eye at (24,9)
+    g = splash._make_grid()
+    splash._fairy_ring(g)
+    assert g[12][29] == splash._P["cap2"]  # a=0 cap disc (29,11) overwrites node (29,12)
+    expect = [
+        (splash._s_raven, "tell me what haunts your codebase.", splash.ANY),
+        (splash._s_ouroboros, "round and round the refactor goes.", splash.ANY),
+        (splash._s_jack_o_lantern, "trouble? my specialty.", splash.ANY),
+        (splash._s_black_cat, "back so soon? good.", splash.ANY),
+        (splash._s_fairy_ring, "step inside the ring.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_bats") < idx[0]
