@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import textwrap
+import types as _types
 from pathlib import Path
 
 import pytest
 
 from imp.engine.errors import LoadError
+from imp.engine.executor import _step_started_payload
 from imp.engine.loader import _parse_phase_label, load_workflow
-from imp.engine.types import SourceLoc
+from imp.engine.types import Continue, SourceLoc, Step
 
 _SRC = SourceLoc(file=Path("workflow.yaml"), line=1)
 
@@ -68,3 +70,23 @@ def test_load_workflow_phase_label_absent_is_none(tmp_path: Path) -> None:
     w = load_workflow(wf)
     assert w.phases[0].label is None
     assert all(s.phase_label is None for s in w.flat_steps())
+
+
+def _step(*, phase_label: str | None) -> Step:
+    return Step(
+        name="task-lead", phase="code", kind="agent", rules=(),
+        on_max_retries=Continue(), max_loops=1,
+        source=SourceLoc(file=Path("workflow.yaml"), line=1),
+        phase_label=phase_label)
+
+
+def test_payload_carries_rendered_phase_label_when_set() -> None:
+    p = _step_started_payload(_step(phase_label="implementation phase"),
+                              _types.SimpleNamespace(route_label=None))
+    assert p["phase_label"] == "implementation phase"
+
+
+def test_payload_omits_phase_label_when_unset() -> None:
+    p = _step_started_payload(_step(phase_label=None),
+                              _types.SimpleNamespace(route_label=None))
+    assert "phase_label" not in p
