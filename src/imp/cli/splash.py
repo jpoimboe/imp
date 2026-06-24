@@ -196,3 +196,134 @@ def _bg_open(c: Color | None) -> str:
     if isinstance(c, tuple):
         return f"\x1b[48;2;{c[0]};{c[1]};{c[2]}m"
     return f"\x1b[{_NAMED[c][1]}m"
+
+
+def _make_grid() -> Grid:
+    return [[None] * W for _ in range(H)]
+
+
+def _round(v: float) -> int:
+    """Round half toward +infinity, matching JS Math.round for the values used here."""
+    return math.floor(v + 0.5)
+
+
+def _imul(a: int, b: int) -> int:
+    return ((a & 0xFFFFFFFF) * (b & 0xFFFFFFFF)) & 0xFFFFFFFF
+
+
+def _hash(x: int, y: int) -> float:
+    """Multiply-xor-shift hash in [0, 1); no RNG, so a chosen scene renders identically."""
+    h = (_imul(int(x), 374761393) + _imul(int(y), 668265263)) & 0xFFFFFFFF
+    h = _imul(h ^ (h >> 13), 1274126177)
+    h ^= h >> 16
+    return (h & 0xFFFFFFFF) / 4294967296.0
+
+
+def _px(g: Grid, x: float, y: float, c: Color | None) -> None:
+    xi = _round(x)
+    yi = _round(y)
+    if c is not None and 0 <= yi < H and 0 <= xi < W:
+        g[yi][xi] = c
+
+
+def _rect(g: Grid, x: int, y: int, w: int, h: int, c: Color | None) -> None:
+    for j in range(h):
+        for i in range(w):
+            _px(g, x + i, y + j, c)
+
+
+def _disc(g: Grid, cx: float, cy: float, rx: float, ry: float, c: Color | None) -> None:
+    for y in range(H):
+        for x in range(W):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy <= 1:
+                g[y][x] = c
+
+
+def _carve(g: Grid, cx: float, cy: float, rx: float, ry: float) -> None:
+    for y in range(H):
+        for x in range(W):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            if dx * dx + dy * dy <= 1:
+                g[y][x] = None
+
+
+def _ring(g: Grid, cx: float, cy: float, rx: float, ry: float,
+          c: Color | None, inn: float, out: float) -> None:
+    for y in range(H):
+        for x in range(W):
+            dx = (x - cx) / rx
+            dy = (y - cy) / ry
+            d = dx * dx + dy * dy
+            if inn <= d <= out:
+                _px(g, x, y, c)
+
+
+def _line(g: Grid, x0: float, y0: float, x1: float, y1: float, c: Color | None) -> None:
+    xi0, yi0, xi1, yi1 = int(x0), int(y0), int(x1), int(y1)
+    dx = abs(xi1 - xi0)
+    dy = abs(yi1 - yi0)
+    sx = 1 if xi0 < xi1 else -1
+    sy = 1 if yi0 < yi1 else -1
+    e = dx - dy
+    while True:
+        _px(g, xi0, yi0, c)
+        if xi0 == xi1 and yi0 == yi1:
+            break
+        e2 = 2 * e
+        if e2 > -dy:
+            e -= dy
+            xi0 += sx
+        if e2 < dx:
+            e += dx
+            yi0 += sy
+
+
+def _spark(g: Grid, x: float, y: float, c: Color | None) -> None:
+    _px(g, x, y, c)
+    _px(g, x - 1, y, c)
+    _px(g, x + 1, y, c)
+    _px(g, x, y - 1, c)
+    _px(g, x, y + 1, c)
+
+
+def _stars(g: Grid, max_y: int, dens: float) -> None:
+    """Deterministic scatter of round(dens*34) stars, confined to x >= 19."""
+    n = _round(dens * 34)
+    for i in range(n):
+        jx = 19 + math.floor(_hash(i + 1, 3) * (W - 19))
+        jy = math.floor(_hash(i + 1, 7) * max_y)
+        br = _hash(i + 2, 11)
+        c = _P["bright"] if br < 0.16 else (_P["star"] if br < 0.58 else _P["starD"])
+        _px(g, jx, jy, c)
+
+
+def _glow_ring(g: Grid, cx: float, cy: float, r: float, c: Color | None) -> None:
+    for y in range(H):
+        for x in range(W):
+            dx = (x - cx) / (r + 2.2)
+            dy = (y - cy) / (r + 2.2)
+            d = dx * dx + dy * dy
+            if 0.6 <= d <= 1.0 and (x + y) & 1 and g[y][x] is None:
+                _px(g, x, y, c)
+
+
+def _ground(g: Grid, y: int, c: Color | None) -> None:
+    for x in range(W):
+        _px(g, x, y, c)
+
+
+def _imp(g: Grid, ox: int, oy: int) -> None:
+    m: dict[str, Color | None] = {"o": _P["o"], "O": _P["O"], "W": _P["W"], "b": _P["b"]}
+    for r, row in enumerate(IMP):
+        for c, ch in enumerate(row):
+            col = m.get(ch)
+            if col is not None:
+                _px(g, ox + c, oy + r, col)
+
+
+def _L(g: Grid) -> Grid:
+    _imp(g, 2, 0)
+    return g

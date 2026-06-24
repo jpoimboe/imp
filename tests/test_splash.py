@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from imp.cli import splash
 
 
@@ -47,3 +49,108 @@ def test_bg_open_emits_truecolor_and_named_background_codes() -> None:
 def test_imp_sprite_is_sixteen_wide_and_fifteen_tall() -> None:
     assert len(splash.IMP) == 15
     assert all(len(row) == 16 for row in splash.IMP)
+
+
+def test_make_grid_is_exactly_thirty_by_fifteen() -> None:
+    g = splash._make_grid()
+    assert len(g) == splash.H == 15
+    assert all(len(row) == splash.W == 30 for row in g)
+
+
+def test_hash_is_deterministic_in_range_and_varies_by_input() -> None:
+    assert splash._hash(3, 7) == splash._hash(3, 7)
+    assert 0.0 <= splash._hash(3, 7) < 1.0
+    assert splash._hash(3, 7) != splash._hash(4, 7)
+    # Pin the exact JS-gallery hash output so a change to the constants/shifts is caught.
+    assert splash._hash(1, 3) == pytest.approx(0.35122208995744586)
+    assert splash._hash(2, 7) == pytest.approx(0.4000562112778425)
+    assert splash._hash(3, 11) == pytest.approx(0.6067249327898026)
+
+
+def test_px_rounds_half_toward_positive_infinity() -> None:
+    g = splash._make_grid()
+    splash._px(g, 2.5, 0.0, (9, 9, 9))
+    assert g[0][3] == (9, 9, 9)  # Math.round(2.5) == 3
+
+
+def test_px_out_of_bounds_is_a_silent_no_op() -> None:
+    g = splash._make_grid()
+    splash._px(g, -1, 0, (1, 1, 1))
+    splash._px(g, splash.W + 5, 0, (1, 1, 1))
+    splash._px(g, 0, splash.H + 5, (1, 1, 1))
+    assert all(cell is None for row in g for cell in row)
+
+
+def test_line_truncates_endpoints_toward_zero_not_rounding() -> None:
+    g = splash._make_grid()
+    splash._line(g, 0.9, 0.0, 3.9, 0.0, (1, 1, 1))
+    assert g[0][0] == (1, 1, 1)  # 0.9 truncates to 0
+    assert g[0][4] is None       # 3.9 truncates to 3 (rounding would have set column 4)
+
+
+def test_disc_fills_an_ellipse_and_carve_clears_it() -> None:
+    g = splash._make_grid()
+    splash._disc(g, 5, 5, 3, 3, (2, 2, 2))
+    assert g[5][5] == (2, 2, 2)
+    splash._carve(g, 5, 5, 3, 3)
+    assert g[5][5] is None
+
+
+def test_ring_paints_a_band_but_not_the_centre() -> None:
+    g = splash._make_grid()
+    splash._ring(g, 10, 7, 4, 4, (3, 3, 3), 0.6, 1.0)
+    assert g[7][10] is None  # centre (d == 0) is outside the band
+    assert any(c == (3, 3, 3) for row in g for c in row)
+
+
+def test_stars_places_at_most_round_dens_times_34_and_confines_to_accent_columns() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._stars(g, splash.H, 1.0)  # N = round(34) = 34
+    placed = [(x, y) for y, row in enumerate(g) for x, c in enumerate(row) if c is not None]
+    assert 0 < len(placed) <= 34
+    assert all(x >= 19 for x, _ in placed)
+
+
+def test_stars_bounded_by_max_y_and_empty_at_zero_density() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._stars(g, 8, 0.5)
+    assert all(y < 8 for y, row in enumerate(g) for c in row if c is not None)
+    g2 = splash._make_grid()
+    splash._stars(g2, splash.H, 0.0)  # N = round(0) = 0
+    assert all(c is None for row in g2 for c in row)
+
+
+def test_glow_ring_paints_only_odd_parity_empty_cells() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._glow_ring(g, 24, 7, 4, (5, 5, 5))
+    painted = [(x, y) for y, row in enumerate(g) for x, c in enumerate(row) if c == (5, 5, 5)]
+    assert painted
+    assert all((x + y) & 1 for x, y in painted)
+
+
+def test_ground_fills_the_row_with_the_given_colour() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._ground(g, 13, splash._P["mtnNear"])
+    assert all(g[13][x] == splash._P["mtnNear"] for x in range(splash.W))
+
+
+def test_left_imp_anchors_horn_glint_and_eye_at_column_two() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._L(g)
+    assert g[0][5] == splash._P["O"]   # horn 'O' sprite (row0,col3) -> grid col 2+3
+    assert g[7][7] == splash._P["W"]   # glint 'W' sprite (row7,col5) -> grid col 2+5
+    assert g[7][8] == splash._P["b"]   # eye 'b' sprite (row7,col6) -> grid col 2+6
+    assert any(g[5][x] == splash._P["o"] for x in range(2, 18))
+
+
+def test_imp_offset_shifts_the_sprite_up() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._imp(g, 2, -1)
+    assert g[0][5] is None            # horn row pushed off the top at oy=-1
+    assert any(c == splash._P["o"] for row in g for c in row)
