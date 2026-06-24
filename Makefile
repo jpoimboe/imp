@@ -96,8 +96,12 @@ format: ## Format code with ruff.
 typecheck: ## Run mypy on the source tree.
 	$(MYPY) src
 
+.PHONY: lockcheck
+lockcheck: ## Verify uv.lock is in sync with pyproject.toml.
+	uv lock --check
+
 .PHONY: check
-check: lint typecheck test ## Full pre-merge gate: lint + types + tests.
+check: lint typecheck lockcheck test ## Full pre-merge gate: lint + types + lockfile + tests.
 
 .PHONY: build
 build: ## Build wheel + sdist into dist/.
