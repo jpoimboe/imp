@@ -2105,3 +2105,20 @@ def test_breadcrumb_without_phase_label_is_unchanged() -> None:
         action={"verb": "continue"}, step_label="routing", show_complete=True)
     out = list(rt._render(bc, depth=1, full=False, color=False, width=80))
     assert out and out[0].strip().startswith("routing · complete")
+
+
+def test_markdown_single_newlines_render_as_separate_lines() -> None:
+    # A single "\n" is a markdown-it softbreak (rendered as a space); we rewrite it to hardbreak.
+    from imp.cli.render_text import _markdown_to_ansi
+    out = _markdown_to_ansi("alpha\nbeta\ngamma", width=40, color=False)
+    visible = [ln.rstrip() for ln in out.splitlines() if ln.strip()]
+    assert visible == ["alpha", "beta", "gamma"]
+
+
+def test_markdown_paragraph_breaks_and_lists_unaffected_by_hardbreak() -> None:
+    # The rewrite must not disturb paragraph separation or bullet lists.
+    from imp.cli.render_text import _markdown_to_ansi
+    para = [ln.rstrip() for ln in _markdown_to_ansi("p1\n\np2", 40, False).splitlines()]
+    assert para == ["p1", "", "p2"]
+    items = [ln.rstrip() for ln in _markdown_to_ansi("- one\n- two", 40, False).splitlines()]
+    assert items == ["", " • one", " • two"]

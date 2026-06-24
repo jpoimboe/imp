@@ -175,6 +175,11 @@ def _markdown_to_ansi(text: str, width: int, color: bool) -> str:
     from rich.theme import Theme
     buf = io.StringIO()
     md = Markdown(text)
+    for token in md.parsed:
+        if token.type == "inline" and token.children:
+            for child in token.children:
+                if child.type == "softbreak":
+                    child.type = "hardbreak"
     no_bg = _no_bg_code_block_cls()
     md.elements["fence"] = no_bg
     md.elements["code_block"] = no_bg

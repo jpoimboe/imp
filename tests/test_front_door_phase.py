@@ -185,3 +185,18 @@ def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
     assert isinstance(full.action, Goto) and full.action.target == "spec-finalizer"
     # The spec phase is still the second phase, entered only on the full path.
     assert [p.name for p in wf.phases][:2] == ["front-door", "spec"]
+
+
+def test_front_door_routes_inline_satisfiable_requests_to_wait_for_user() -> None:
+    # A pure question or a content/text-generation ask that is not a software
+    # change is answered in prose and then wait_for_user — never complete_step,
+    # which is exclusively the go-live build terminator.
+    body = _wf().agents["front-door"].prompt_template_source
+    low = body.lower()
+    assert "text-generation ask" in low
+    assert "answered in prose" in low and "wait_for_user" in body
+    assert "**never** `complete_step`" in body
+    # complete_step is framed as the build terminator, and express stays a build path.
+    assert "go-live build terminator" in low
+    assert "build *quickly*" in body
+    assert "no-build exit" in low
