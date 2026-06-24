@@ -352,3 +352,78 @@ def _encode_row(g: Grid, top_idx: int, bot_idx: int, *, color: bool) -> str:
 
 def _encode_grid(g: Grid, *, color: bool) -> list[str]:
     return [_encode_row(g, 2 * k, 2 * k + 1, color=color) for k in range((H + 1) // 2)]
+
+
+# --- scene builders (imp drawn last so it sits above any full-width ground) ---
+
+def _s_constellation(g: Grid) -> None:
+    _stars(g, H, 0.16)
+    p = [(19, 3), (23, 2), (26, 5), (24, 8), (28, 9)]
+    for k in range(len(p) - 1):
+        _line(g, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1], _P["dim"])
+    for i, (x, y) in enumerate(p):
+        _px(g, x, y, _P["star"] if i % 2 else _P["bright"])
+    _L(g)
+
+
+def _s_starfield(g: Grid) -> None:
+    _stars(g, H, 0.5)
+    _spark(g, 24, 4, _P["bright"])
+    _spark(g, 28, 9, _P["star"])
+    _L(g)
+
+
+# --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
+
+ANY = "ANY"
+DAY = "DAY"
+NIGHT = "NIGHT"
+
+SCENES: list[tuple[SceneBuilder, str, str]] = [
+    (_s_constellation, "drawn in the stars.", ANY),
+    (_s_starfield, "your imp is listening.", ANY),
+]
+
+MIN_WIDTH = 32
+
+
+def _now_hour() -> int:
+    return datetime.datetime.now().hour
+
+
+def _period(hour: int) -> str:
+    return "night" if (hour >= 20 or hour < 5) else "day"
+
+
+def _eligible() -> list[int]:
+    period = _period(_now_hour())
+    out: list[int] = []
+    for i, (_builder, _phrase, when) in enumerate(SCENES):
+        if (when == ANY
+                or (when == DAY and period == "day")
+                or (when == NIGHT and period == "night")):
+            out.append(i)
+    return out
+
+
+def choose_index() -> int:
+    return random.choice(_eligible())
+
+
+def scene_lines(index: int, *, theme: str, color: bool) -> list[str]:
+    """Deterministically render scene `index` to half-block lines."""
+    _use_theme(theme)
+    g = _make_grid()
+    SCENES[index][0](g)
+    return _encode_grid(g, color=color)
+
+
+def splash_block(*, theme: str, width: int, color: bool) -> str:
+    """The opening splash: a random eligible scene over a grey-blue italic tagline."""
+    index = choose_index()
+    phrase = SCENES[index][1]
+    if not color or width < MIN_WIDTH:
+        return phrase
+    lines = scene_lines(index, theme=theme, color=color)
+    tag = _fg_open(_build_palette(theme)["tag"]) + _ITALIC + phrase + _RESET
+    return "\n".join(lines) + "\n" + tag

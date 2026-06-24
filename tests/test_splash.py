@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib
+import io
+
 import pytest
 
 from imp.cli import splash
@@ -195,3 +198,129 @@ def test_encode_grid_yields_eight_lines_and_handles_the_odd_last_row() -> None:
     lines = splash._encode_grid(g, color=False)
     assert len(lines) == 8
     assert lines[7].endswith("▀")
+
+
+@pytest.mark.parametrize("hour,period", [
+    (20, "night"), (23, "night"), (4, "night"), (0, "night"),
+    (5, "day"), (12, "day"), (19, "day"),
+])
+def test_period_splits_night_at_2000_and_day_at_0500(hour, period) -> None:
+    assert splash._period(hour) == period
+
+
+def test_eligible_includes_every_any_scene_in_both_periods(monkeypatch) -> None:
+    any_idx = {i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.ANY}
+    monkeypatch.setattr(splash, "_now_hour", lambda: 23)  # night
+    night = set(splash._eligible())
+    monkeypatch.setattr(splash, "_now_hour", lambda: 12)  # day
+    day = set(splash._eligible())
+    assert any_idx and any_idx <= night and any_idx <= day
+
+
+def test_choose_index_only_returns_eligible_indices(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "_now_hour", lambda: 12)
+    eligible = set(splash._eligible())
+    for _ in range(200):
+        assert splash.choose_index() in eligible
+
+
+def test_scenes_are_builder_phrase_when_triples() -> None:
+    assert splash.SCENES
+    for builder, phrase, when in splash.SCENES:
+        assert callable(builder)
+        assert isinstance(phrase, str)
+        assert when in (splash.ANY, splash.DAY, splash.NIGHT)
+
+
+def test_scene_lines_is_deterministic() -> None:
+    assert splash.scene_lines(0, theme="dark", color=True) == \
+        splash.scene_lines(0, theme="dark", color=True)
+
+
+def test_scene_lines_always_yields_eight_rows_in_every_theme() -> None:
+    for index in range(len(splash.SCENES)):
+        for theme in ("dark", "light", "ansi"):
+            assert len(splash.scene_lines(index, theme=theme, color=True)) == 8
+
+
+def test_ansi_render_emits_only_named_codes_never_truecolor() -> None:
+    for index in range(len(splash.SCENES)):
+        out = "\n".join(splash.scene_lines(index, theme="ansi", color=True))
+        assert "38;2" not in out and "48;2" not in out
+
+
+@pytest.mark.parametrize("theme", ["dark", "light", "ansi"])
+def test_every_scene_paints_imp_and_accent_in_bounds(theme) -> None:
+    splash._use_theme(theme)
+    for builder, _phrase, _when in splash.SCENES:
+        g = splash._make_grid()
+        builder(g)  # must not raise (all drawing is bounds-clamped)
+        assert len(g) == splash.H and all(len(r) == splash.W for r in g)
+        imp = any(g[y][x] == splash._P["o"]
+                  for y in range(splash.H) for x in range(2, 18))
+        accent = any(g[y][x] is not None
+                     for y in range(splash.H) for x in range(18, splash.W))
+        assert imp, f"{builder.__name__} drew no imp in {theme}"
+        assert accent, f"{builder.__name__} drew no accent in {theme}"
+
+
+def test_splash_block_renders_a_multiline_scene_per_theme() -> None:
+    for theme in ("dark", "light", "ansi"):
+        out = splash.splash_block(theme=theme, width=40, color=True)
+        assert out
+        assert "\n" in out
+        assert "▀" in out
+
+
+def test_splash_block_no_colour_returns_the_plain_tagline_only(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 0)
+    out = splash.splash_block(theme="dark", width=40, color=False)
+    assert out == splash.SCENES[0][1]
+    assert "▀" not in out and "\x1b[" not in out
+
+
+def test_splash_block_narrow_width_returns_the_plain_tagline_only(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 0)
+    out = splash.splash_block(theme="dark", width=31, color=True)
+    assert out == splash.SCENES[0][1]
+    assert "▀" not in out and "\x1b[" not in out
+
+
+def test_splash_block_tagline_is_grey_blue_italic_when_rendered(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 0)
+    out = splash.splash_block(theme="dark", width=40, color=True)
+    assert out.endswith("\x1b[38;2;154;160;168m\x1b[3m" + splash.SCENES[0][1] + "\x1b[0m")
+
+
+def test_main_wires_the_splash_module() -> None:
+    main = importlib.import_module("imp.cli.main")
+    assert main.splash.splash_block is splash.splash_block
+
+
+def test_retired_opening_module_is_gone() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("imp.cli.opening")
+
+
+def test_print_splash_banner_emits_blank_line_then_scene_when_interactive(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
+    buf = io.StringIO()
+    m._print_splash_banner(interactive=True, stream=buf)
+    assert buf.getvalue() == "\nSCENE\n"
+
+
+def test_print_splash_banner_is_noop_when_not_interactive(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
+    buf = io.StringIO()
+    m._print_splash_banner(interactive=False, stream=buf)
+    assert buf.getvalue() == ""
+
+
+def test_print_splash_banner_skips_empty_scene(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "")
+    buf = io.StringIO()
+    m._print_splash_banner(interactive=True, stream=buf)
+    assert buf.getvalue() == ""
