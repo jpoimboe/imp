@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import re
 
 import pytest
 
@@ -748,3 +749,16 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
     idx = [names.index(b.__name__) for b, _p, _w in expect]
     assert idx == sorted(idx)
     assert names.index("_s_fairy_ring") < idx[0]
+
+
+def test_splash_block_centers_tagline_under_the_art(monkeypatch) -> None:
+    monkeypatch.setattr(splash, "choose_index", lambda: 0)
+    out = splash.splash_block(theme="dark", width=80, color=True)
+    *art, tag = out.split("\n")
+    sgr = re.compile(r"\x1b\[[0-9;]*m")
+    art_w = max(len(sgr.sub("", ln)) for ln in art)
+    phrase = splash.SCENES[0][1]
+    lead = len(tag) - len(tag.lstrip(" "))
+    assert lead == max(0, (art_w - len(phrase)) // 2)
+    # The colored italic tagline still follows the leading padding.
+    assert tag.lstrip(" ").startswith("\x1b[38;2;154;160;168m\x1b[3m")
