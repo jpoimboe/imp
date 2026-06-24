@@ -58,3 +58,43 @@ def test_resume_reentry_resets_phase_label() -> None:
     ]:
         b.add(e)
     assert _steps(b)[0].phase_label == "implementation phase · plan 3/4"
+
+
+def test_current_activity_burst_exposes_phase_label() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+           model="m", provider="anthropic",
+           phase_label="implementation phase · plan 2/4"),
+        ev("3", "tool_call", agent_id="step:code/task-lead", id="b1",
+           name="bash", input={"command": "make test"}),
+    ]:
+        b.add(e)
+    assert b.current_activity().phase_label == "implementation phase · plan 2/4"
+
+
+def test_current_activity_subagent_running_exposes_phase_label() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+           model="m", provider="anthropic",
+           phase_label="implementation phase · plan 2/4"),
+        ev("3", "tool_call", agent_id="step:code/task-lead", id="t1",
+           name="task", input={"subagent_name": "coder"}),
+    ]:
+        b.add(e)
+    assert b.current_activity().phase_label == "implementation phase · plan 2/4"
+
+
+def test_current_activity_chrome_step_exposes_phase_label() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="gate", kind="script", phase="verify",
+           label="testing", command="make test",
+           phase_label="implementation phase · plan 2/4"),
+    ]:
+        b.add(e)
+    assert b.current_activity().phase_label == "implementation phase · plan 2/4"
