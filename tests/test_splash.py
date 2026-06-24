@@ -400,9 +400,9 @@ def test_meteor_head_is_bright_and_tail_trends_to_star() -> None:
 def test_cosmic_batch_a_scenes_are_wired_in_gallery_order() -> None:
     expect = [
         (splash._s_crescent_stars, "the familiar awakens.", splash.ANY),
-        (splash._s_crescent_perch, "perched and ready.", splash.ANY),
+        (splash._s_crescent_perch, "perched. where to?", splash.ANY),
         (splash._s_full_moon_cloud, "what are we building tonight?", splash.NIGHT),
-        (splash._s_meteor_shower, "make a wish.", splash.ANY),
+        (splash._s_meteor_shower, "make a wish — i'll bend it your way.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -460,8 +460,8 @@ def test_comet_scene_paints_a_bright_head() -> None:
 
 def test_cosmic_batch_b_scenes_are_wired_in_gallery_order() -> None:
     expect = [
-        (splash._s_ringed_planet, "a world, from nothing.", splash.ANY),
-        (splash._s_mountain_moon, "welcome back.", splash.ANY),
+        (splash._s_ringed_planet, "a world — from nothing.", splash.ANY),
+        (splash._s_mountain_moon, "the mountains waited. so did i.", splash.ANY),
         (splash._s_comet, "something wicked this way ships.", splash.ANY),
         (splash._s_aurora, "the sky's showing off — let's match it.", splash.ANY),
     ]
@@ -498,9 +498,9 @@ def test_summoning_circle_scene_paints_a_portal_ring_and_runes() -> None:
 
 def test_cosmic_batch_c_scenes_complete_the_thirteen_scene_pool() -> None:
     expect = [
-        (splash._s_galaxy, "lost in the stack? i know the way.", splash.ANY),
+        (splash._s_galaxy, "lost in the spiral? i know the way out.", splash.ANY),
         (splash._s_void, "conjured from the void.", splash.ANY),
-        (splash._s_summoning_circle, "the circle is drawn.", splash.ANY),
+        (splash._s_summoning_circle, "the circle's drawn. name what we summon.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
