@@ -632,10 +632,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.RenameNode):
         # A naming reads as a quiet agent-style aside, inline where it happened:
-        # a yellow "• " turn bullet, then "Set name to" with the new title in
-        # yellow (the change's identity hue — see NODE_COLORS["change_id"], minus
-        # the bold that anchors it in the run-header chrome). The bullet shares the
-        # title's hue so the whole aside reads as one change-identity signal.
+        # a yellow "• " turn bullet, then "Set name to" with the new title also in
+        # yellow — the warm accent — so the whole aside reads as one identity signal.
         indent = _gutter_indent(depth, gutters, color)
         bullet = pal.ansi("• ", "yellow", enabled=color)
         name = pal.ansi(_caret_escape(node.name), "yellow", enabled=color)
