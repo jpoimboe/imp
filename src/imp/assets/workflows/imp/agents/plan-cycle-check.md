@@ -66,9 +66,10 @@ your sole lever is `more_plans`.
 
 ## Anticipated plan total — `plan_total`
 
-You are the **sole emitter** of `plan_total` (no other step sets it). Emit your
-honest anticipated number of plans for the whole spec, already clamped so the
-rendered `plan N/total` position is never dishonest:
+You are the per-lap **refiner** of `plan_total`. `plan-writer` seeds the first value
+alongside plan 1 (`plan_index == 1`); from your first lap onward you refine and clamp it,
+so the rendered `plan N/total` position is never dishonest. Emit your honest anticipated
+number of plans for the whole spec, already clamped:
 
 - `plan_total` MUST be `>= {{ vars.plan_index }}` (the current plan number).
 - When `more_plans` is **true** (another plan follows), `plan_total` MUST be
@@ -77,5 +78,4 @@ rendered `plan N/total` position is never dishonest:
 - When `more_plans` is **false** (coverage complete), emit
   `plan_total == {{ vars.plan_index }}` exactly.
 
-On your first lap this is your best estimate of the total; refine it every lap
-thereafter.
+plan-writer's first-plan seed is only a starting estimate; refine it on every lap you run.

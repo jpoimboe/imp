@@ -49,3 +49,18 @@ def test_plan_writer_documents_first_run_plan_total_estimate() -> None:
     assert "estimate" in low
     # The complete_step examples carry the plan_total argument.
     assert "plan_total=" in text
+
+
+def test_plan_cycle_check_reconciles_plan_total_emitter_wording() -> None:
+    text = (AGENTS_DIR / "plan-cycle-check.md").read_text()
+    low = text.lower()
+    # The stale "sole emitter (no other step sets it)" claim for plan_total is gone.
+    assert "sole emitter" not in low
+    # plan-writer is acknowledged as the first-value seeder; plan-cycle-check refines.
+    assert "plan-writer" in low
+    assert "refine" in low
+    # Pin the specific new reconciliation wording, not strings that predated the change.
+    assert "seeds the first value" in low
+    assert "per-lap" in low
+    # The completeness-guard role is untouched.
+    assert "sole completeness guard" in low
