@@ -46,7 +46,7 @@ def stub_new(monkeypatch, tmp_path):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("route", ["interactive", "headless", "tui"])
+@pytest.mark.parametrize("route", ["interactive", "headless", "tui", "non_interactive"])
 async def test_run_header_emitted_exactly_once(stub_new, monkeypatch, route) -> None:
     m = stub_new
     calls = {"header": 0}
@@ -79,6 +79,8 @@ async def test_run_header_emitted_exactly_once(stub_new, monkeypatch, route) -> 
         monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
     elif route == "tui":
         monkeypatch.setattr(m, "_tui_requested", lambda args: True)
+    elif route == "non_interactive":
+        monkeypatch.setattr(m, "_is_interactive", lambda **k: False)
 
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
