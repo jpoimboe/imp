@@ -41,6 +41,8 @@ def compose_activity_status(
         return None
     spin = pal.ansi(pal.spinner_frame(frame), "cyan", enabled=color)
     parts: list[str] = []
+    if activity.phase_label:
+        parts.append(pal.ansi(activity.phase_label, enabled=color))
     if activity.step_label:
         parts.append(pal.ansi(activity.step_label, enabled=color))
     if activity.count is not None:
@@ -50,7 +52,7 @@ def compose_activity_status(
     elif activity.label:
         parts.append(pal.ansi(activity.label, enabled=color))
     parts.append(pal.ansi(rt.fmt_seconds(elapsed), "dim", enabled=color))
-    return f"{spin} " + " · ".join(parts)
+    return f"{spin} " + rt.compose_label(parts)
 
 
 @dataclass
