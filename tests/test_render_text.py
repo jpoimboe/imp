@@ -2086,3 +2086,22 @@ def test_opening_intent_renders_under_first_step_header_before_narration() -> No
     intent_idx = next(i for i, ln in enumerate(out) if "add a --json flag" in ln)
     narr_idx = next(i for i, ln in enumerate(out) if "starting the work" in ln)
     assert step_idx < intent_idx < narr_idx
+
+
+def test_breadcrumb_completion_composes_phase_label() -> None:
+    bc = nv.BreadcrumbLine(
+        step_name="finalize", kind="agent", elapsed_s=0.0,
+        action={"verb": "continue"}, step_label="finalizing",
+        phase_label="implementation phase · plan 1/3", show_complete=True)
+    out = list(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert out
+    assert out[0].strip().startswith(
+        "implementation phase · plan 1/3 · finalizing · complete")
+
+
+def test_breadcrumb_without_phase_label_is_unchanged() -> None:
+    bc = nv.BreadcrumbLine(
+        step_name="router", kind="branch", elapsed_s=0.0,
+        action={"verb": "continue"}, step_label="routing", show_complete=True)
+    out = list(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert out and out[0].strip().startswith("routing · complete")
