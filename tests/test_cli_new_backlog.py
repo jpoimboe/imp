@@ -151,6 +151,80 @@ def test_interactive_backlog_seeds_session_and_sets_origin(
     assert meta["depends_on"] == ["2026-06-16-dep001"]
 
 
+def test_headless_backlog_sets_scope_only(
+        tmp_path: Path, monkeypatch) -> None:
+    import sys
+
+    import anyio
+
+    from imp.cli import main as cli_main
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_session_client(
+        change, *, driver, coord, solicit, seed_opening=None, status=None,
+        opening_intent=None, leave_mode=None, scope_only=False,
+    ) -> int:
+        captured["scope_only"] = scope_only
+        return 0
+
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: False   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: False  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
+            idea="My backlog item", opening="a longer brief", title=None,
+            non_interactive=False, message=None, tui=False,
+            depends_on=[], workflow=None))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert captured["scope_only"] is True
+
+
+def test_tui_backlog_sets_scope_only(
+        tmp_path: Path, monkeypatch) -> None:
+    import sys
+
+    import anyio
+
+    from imp.cli import main as cli_main
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_tui_session(
+        change, *, seed_opening=None, resume=False, opening_intent=None,
+        leave_mode=None, scope_only=False,
+    ) -> int:
+        captured["scope_only"] = scope_only
+        return 0
+
+    monkeypatch.setattr(cli_main, "_run_tui_session", _fake_run_tui_session)
+
+    orig_out = sys.stdout.isatty
+    sys.stdout.isatty = lambda: True   # type: ignore[method-assign]
+    try:
+        rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
+            idea="My backlog item", opening="a longer brief", title=None,
+            non_interactive=False, message=None, tui=True,
+            depends_on=[], workflow=None))
+    finally:
+        sys.stdout.isatty = orig_out   # type: ignore[method-assign]
+
+    assert rc == 0
+    assert captured["scope_only"] is True
+
+
 def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> None:
     import asyncio
     _seed_control(tmp_path)
