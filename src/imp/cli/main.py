@@ -828,17 +828,25 @@ async def _run_fresh_session(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=seed_opening, status=status)
     if _tui_requested(args):
-        return await _run_tui_session(change, seed_opening=seed_opening)
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(stream=sys.stdout,
-                        color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        seed_opening=seed_opening, status=status)
+        async def _first_tui(leave_state: dict[str, str]) -> int:
+            return await _run_tui_session(
+                change, seed_opening=seed_opening, leave_state=leave_state)
+
+        return await _clear_loop(change.control_root, tui=True, first=_first_tui)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=seed_opening, status=status, leave_state=leave_state)
+
+    return await _clear_loop(change.control_root, tui=False, first=_first)
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
@@ -1117,7 +1125,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if _tui_requested(args):
         print(_run_header_line(
             change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
-        return await _run_tui_session(change, resume=True)
+
+        async def _first_tui(leave_state: dict[str, str]) -> int:
+            return await _run_tui_session(
+                change, resume=True, leave_state=leave_state)
+
+        return await _clear_loop(change.control_root, tui=True, first=_first_tui)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
@@ -1126,17 +1139,21 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         non_interactive=bool(getattr(args, "non_interactive", False))))
     print(_run_header_line(
         change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(stream=sys.stdout,
-                        color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status,
-                        suppress_replay=True)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        resume=True, status=status)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status,
+                            suppress_replay=True)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            resume=True, status=status, leave_state=leave_state)
+
+    return await _clear_loop(change.control_root, tui=False, first=_first)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:

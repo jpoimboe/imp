@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
 from pathlib import Path
 
@@ -8,6 +9,8 @@ import anyio
 import pytest
 
 import imp.cli.main as m
+from imp.engine.change import Change
+from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
@@ -237,6 +240,108 @@ def test_new_interactive_routes_through_clear_loop(
     assert seen["tui"] is False        # interactive line client → line modality
 
 
+def test_resume_tui_routes_through_clear_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, *, tui, first):
+        seen["tui"] = tui
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+            token="feat", non_interactive=False, message=None, tui=True))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert seen["tui"] is True
+
+
+def test_fresh_session_line_routes_through_clear_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, *, tui, first):
+        seen["tui"] = tui
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(functools.partial(
+            m._run_fresh_session, ch,
+            args=argparse.Namespace(tui=False, non_interactive=False, message=None),
+            seed_opening="hi"))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert seen["tui"] is False
+
+
+def test_fresh_session_tui_routes_through_clear_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, *, tui, first):
+        seen["tui"] = tui
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(functools.partial(
+            m._run_fresh_session, ch,
+            args=argparse.Namespace(tui=True, non_interactive=False, message=None),
+            seed_opening="hi"))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert seen["tui"] is True
+
+
 def test_new_tui_routes_through_clear_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -265,3 +370,37 @@ def test_new_tui_routes_through_clear_loop(
 
     assert rc == 0
     assert seen["tui"] is True        # TUI arm → tui modality
+
+
+def test_resume_interactive_routes_through_clear_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, *, tui, first):
+        seen["tui"] = tui
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+            token="feat", non_interactive=False, message=None, tui=False))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert seen["tui"] is False

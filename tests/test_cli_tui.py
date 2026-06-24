@@ -312,7 +312,8 @@ def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
 
     seen: dict[str, object] = {}
 
-    async def _fake_tui(change, *, seed_opening=None, resume=False) -> int:
+    async def _fake_tui(change, *, seed_opening=None, resume=False,
+                        leave_state=None) -> int:
         seen["resume"] = resume
         return 0
 
