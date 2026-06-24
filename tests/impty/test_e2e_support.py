@@ -52,7 +52,7 @@ def test_default_workflow_script_covers_the_fast_path_agents() -> None:
 
     script = default_workflow_script("IMP_DOGFOOD_t2t2t2")
     steps = script["steps"]
-    for agent in ("front-door", "spec-writer", "plan-writer", "task-lead",
+    for agent in ("front-door", "spec-finalizer", "plan-writer", "task-lead",
                   "code-reviewer", "deferred-sweep", "plan-cycle-check", "finalize"):
         assert agent in steps, f"{agent} missing from the default-workflow script"
 
@@ -77,4 +77,4 @@ def test_seed_default_repo_installs_the_real_default_workflow(tmp_path: Path) ->
     assert (wf / "workflow.yaml").is_file()
     assert (wf / "scripts" / "cleanup.sh").is_file()
     assert (wf / "scripts" / "run-verify.sh").is_file()
-    assert (wf / "agents" / "spec-writer.md").is_file()
+    assert (wf / "agents" / "spec-finalizer.md").is_file()
