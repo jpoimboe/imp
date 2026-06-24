@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.engine.executor import _step_started_payload
 from imp.engine.loader import _parse_phase_label, load_workflow
 from imp.engine.types import Continue, SourceLoc, Step
+from tests.conftest import _seed_control
 
 _SRC = SourceLoc(file=Path("workflow.yaml"), line=1)
 
@@ -84,6 +86,17 @@ def test_payload_carries_rendered_phase_label_when_set() -> None:
     p = _step_started_payload(_step(phase_label="implementation phase"),
                               _types.SimpleNamespace(route_label=None))
     assert p["phase_label"] == "implementation phase"
+
+
+def test_payload_renders_templated_phase_label(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="t", change_id="aaa111", base_branch="main")
+    p = _step_started_payload(
+        _step(phase_label="plan {{ vars.plan_index }}/{{ vars.plan_total }}"),
+        _types.SimpleNamespace(route_label=None, vars={"plan_index": 2, "plan_total": 5}),
+        change=ch, log=ch.event_log(),
+    )
+    assert p["phase_label"] == "plan 2/5"
 
 
 def test_payload_omits_phase_label_when_unset() -> None:
