@@ -48,6 +48,32 @@ def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
     return False
 
 
+def _last_pause_was_script_blocked(log: EventLog) -> bool:
+    for event in reversed(list(log.read())):
+        etype = event.get("type")
+        if etype == "workflow_paused":
+            return (event.get("payload") or {}).get("reason") == "script_blocked"
+        if etype == "workflow_resumed":
+            return False
+    return False
+
+
+def _last_script_blocked_stderr(log: EventLog) -> str:
+    for event in reversed(list(log.read())):
+        if event.get("type") == "script_blocked":
+            return (event.get("payload") or {}).get("stderr") or ""
+    return ""
+
+
+def _hold_prompt(result: Any, coordinator: Any, log: EventLog) -> str | None:
+    if _is_interrupt_pause(result, coordinator):
+        return _RESUME_PROMPT
+    if result is RunResult.PAUSED and _last_pause_was_script_blocked(log):
+        stderr = _last_script_blocked_stderr(log).strip()
+        return f"{stderr}\n{_RESUME_PROMPT}" if stderr else _RESUME_PROMPT
+    return None
+
+
 async def serve_change_session(
     change: Change,
     *,
@@ -106,10 +132,10 @@ async def serve_change_session(
             wait_for_turn_fn=server.wait_for_turn,
             **first_kwargs,
         )
-        while _is_interrupt_pause(result, coordinator):
-            prompt_event = {"type": "awaiting_user_input",
-                            "payload": {"prompt": _RESUME_PROMPT}}
-            on_event(prompt_event)
+        prompt = _hold_prompt(result, coordinator, change.event_log())
+        while prompt is not None:
+            on_event({"type": "awaiting_user_input",
+                      "payload": {"prompt": prompt}})
             try:
                 reply = await user_chat_input_fn("")
             except AwaitingUserInput:
@@ -125,6 +151,7 @@ async def serve_change_session(
                 coordinator=coordinator,
                 wait_for_turn_fn=server.wait_for_turn,
             )
+            prompt = _hold_prompt(result, coordinator, change.event_log())
         return result
 
     try:
