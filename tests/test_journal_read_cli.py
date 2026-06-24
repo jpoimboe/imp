@@ -391,7 +391,7 @@ def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
         {"plans/doomed-plan-1.md": art / "doomed-plan-1.md"},
         message="artifact: plan")
 
-    rc = m._abandon(tmp_path, "doomed", assume_yes=True)
+    rc = m._abandon(tmp_path, "doomed")
     assert rc == 0
     from imp.engine.archive import read as archive_read
     # Artifact stays reachable on the RETAINED wip ref (spec AC 3).
@@ -411,7 +411,7 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
     Change.create(tmp_path, title="Bare", change_id="bare",
                   base_branch="main")
     # No artifact committed → no wip ref exists.
-    rc = m._abandon(tmp_path, "bare", assume_yes=True)
+    rc = m._abandon(tmp_path, "bare")
     assert rc == 0
     from imp.engine.archive import read as archive_read
     # Runtime state is archived even without any artifact; no wip ref was ever created.
