@@ -23,7 +23,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.classify import (
+    ResumeState,
+    classify_resume,
+    unresolved_wait_for_user,
+)
 from imp.agents.runner import (
     Message,
     TextBlock,
@@ -313,25 +317,42 @@ def resolve_wait_for_user_on_resume(
 ) -> Message | None:
     """Resolve a paused wait_for_user with the REAL human reply (C1).
 
-    The transcript ends with an assistant message whose last tool_use is
-    `wait_for_user`. Append a user message with a SUCCESS-shaped tool_result
-    (is_error=False) carrying `reply` against that id — the inverse of the
-    placeholder repair, which is deliberately skipped for wait_for_user. Returns
-    the injected message, or None if there is no dangling wait_for_user.
+    Locate the unresolved ask exactly as classify_resume does
+    (unresolved_wait_for_user → (assistant_index, id)), so the two seams never
+    disagree: any ask classify routes to AWAITING_USER is balanced here, no
+    matter how many user turns already trail it. When the ask is the LAST message
+    (no trailing turn yet), append a new user message carrying a SUCCESS-shaped
+    tool_result (is_error=False). Otherwise inject that result at the HEAD of the
+    user turn immediately following the ask's assistant turn (Anthropic requires
+    the result in the turn directly after the tool_use — the FIRST trailing turn,
+    not the last), dropping any pre-existing placeholder result for the same id so
+    the ask is never double-resolved. Returns the injected/repaired Message, or
+    None when no unresolved wait_for_user is present.
     """
-    last = messages[-1] if messages else None
-    if last is None or last.role != "assistant":
+    located = unresolved_wait_for_user(messages)
+    if located is None:
         return None
-    wfu = next((b for b in last.content
-                if isinstance(b, ToolUseBlock) and b.name == "wait_for_user"), None)
-    if wfu is None:
-        return None
-    block = ToolResultBlock(tool_use_id=wfu.id, content=reply, is_error=False)
-    injected = Message(role="user", content=(block,))
-    messages.append(injected)
-    transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected)
-    return injected
+    idx, wfu_id = located
+    block = ToolResultBlock(tool_use_id=wfu_id, content=reply, is_error=False)
+
+    # The ask is the last message: append a new user turn carrying the reply.
+    if idx == len(messages) - 1:
+        injected = Message(role="user", content=(block,))
+        messages.append(injected)
+        transcript.append(injected)
+        elog.append_user_message(agent_id=agent_id, message=injected)
+        return injected
+
+    # A user turn already trails the ask: balance it at the head of the FIRST
+    # following turn, dropping any placeholder result for this id.
+    follow = messages[idx + 1]
+    kept = [b for b in follow.content
+            if not (isinstance(b, ToolResultBlock) and b.tool_use_id == wfu_id)]
+    repaired = Message(role="user", content=(block, *kept))
+    messages[idx + 1] = repaired
+    transcript.rewrite(messages)
+    elog.append_user_message(agent_id=agent_id, message=repaired)
+    return repaired
 
 
 def inject_continue_nudge_on_resume(
