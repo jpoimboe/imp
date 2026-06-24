@@ -17,14 +17,14 @@ def _rules(wf, name):
 
 def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
     wf = load_workflow(WF)
-    names = [s.name for s in _phase(wf, "merge").steps]
+    names = [s.name for s in _phase(wf, "integrate").steps]
     assert names == [
         "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
     ]
-    by = {s.name: s for s in _phase(wf, "merge").steps}
+    by = {s.name: s for s in _phase(wf, "integrate").steps}
     assert by["wait-for-head"].acquire == "base"
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
     assert all(s.name != "integration-resolver" for s in wf.flat_steps())
@@ -61,9 +61,9 @@ def test_reconciler_stuck_pauses_and_else_continues() -> None:
 
 def test_merge_phase_never_routes_to_planning_or_releases_the_lane() -> None:
     wf = load_workflow(WF)
-    planning = {s.name for p in wf.phases if p.name in ("spec", "plan", "code")
+    planning = {s.name for p in wf.phases if p.name in ("spec", "plan", "implement")
                 for s in p.steps}
-    for step in _phase(wf, "merge").steps:
+    for step in _phase(wf, "integrate").steps:
         for rule in step.rules:
             a = rule.action
             assert getattr(a, "target", None) not in planning, (step.name, a)
@@ -128,7 +128,7 @@ def test_cleanup_merge_routes_by_exit_code() -> None:
 
 def test_assert_stamped_is_readonly_gate_before_merge() -> None:
     wf = load_workflow(WF)
-    names = [s.name for s in _phase(wf, "merge").steps]
+    names = [s.name for s in _phase(wf, "integrate").steps]
     assert names.index("assert-stamped") == names.index("merge-to-base") - 1
     step = next(s for s in wf.flat_steps() if s.name == "assert-stamped")
     assert step.kind == "script"

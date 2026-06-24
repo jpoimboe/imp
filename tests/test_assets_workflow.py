@@ -98,7 +98,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert isinstance(by["plan-code-reviewer"].rules[-1].action, Continue)
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
-    assert wf.phases[-1].name == "merge"
+    assert wf.phases[-1].name == "integrate"
     assert [s.name for s in wf.phases[-1].steps] == [
         "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
@@ -248,10 +248,10 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_finalize_tails_the_code_phase() -> None:
+def test_finalize_tails_the_implement_phase() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    impl = next(p for p in wf.phases if p.name == "code")
+    impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
     assert "stamp-trailers" not in names
     assert names[-1] == "finalize"

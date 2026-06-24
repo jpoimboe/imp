@@ -1,6 +1,6 @@
 name: feature
 description: |
-  front-door -> spec -> (plan -> code*)* -> merge
+  front-door -> spec -> (plan -> implement*)* -> integrate
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
@@ -130,7 +130,7 @@ phases:
         rules:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
-  - name: code
+  - name: implement
     label: "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     steps:
       - name: task-lead
@@ -274,8 +274,8 @@ phases:
           - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
-  # ── merge: the FIFO merge queue. Only the head touches the base. ───────
-  - name: merge
+  # ── integrate: the FIFO merge queue. Only the head touches the base. ───────
+  - name: integrate
     label: "integration phase"
     steps:
       - name: wait-for-head
