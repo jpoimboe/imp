@@ -152,7 +152,7 @@ def test_create_seeds_raw_templated_label(tmp_path: Path) -> None:
     assert st.step_label == "seeding {{ vars.k }}"
 
 
-def test_cmd_status_renders_draft_provenance_under_backlog(
+def test_cmd_status_renders_draft_in_active(
     tmp_path: Path, capsys,
 ) -> None:
     _seed_control(tmp_path)
@@ -161,8 +161,6 @@ def test_cmd_status_renders_draft_provenance_under_backlog(
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "Backlog" in out
+    assert "Backlog" not in out          # a lone draft creates no Backlog section
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
-    assert "draft" in d1_line           # Backlog shows provenance in the status cell
-    # The home sits under the Backlog heading, never in the Active section above it.
-    assert "d1" not in out[:out.index("Backlog")]
+    assert "running" in d1_line          # a live draft shows running in Active
