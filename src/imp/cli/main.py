@@ -29,7 +29,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, playbooks, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.init import GitSetupDeclined, run_init
-from imp.cli.live_driver import LiveDriver, compute_start_phase
+from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
@@ -122,19 +122,7 @@ class ReplyInterjectRouter:
 
 SPEC_SEED_MARKER = "Implement this spec"
 
-OPENING_QUESTION_NEW = (
-    "What change would you like to make? Describe what you have in mind, "
-    "and I'll help shape it into a spec.")
-
-OPENING_QUESTION_CHAT = (
-    "What's on your mind? I can answer questions, look over your project, "
-    "or help scope a change.")
-
 OPENING_HINT = "type a message, or /help for commands"
-
-
-def _opening_question(leave_mode: str) -> str:
-    return OPENING_QUESTION_CHAT if leave_mode == "chat" else OPENING_QUESTION_NEW
 
 
 def _should_prompt_opening(
@@ -147,6 +135,34 @@ def _should_prompt_opening(
 
 def _normalize_opening_reply(reply: str) -> str | None:
     return reply.strip() or None
+
+
+def _is_interactive(
+    *, non_interactive: bool, stdin: Any = None, stdout: Any = None,
+) -> bool:
+    """An interactive entry: not flagged off, both streams are ttys, and color
+    is on. The splash banner and the opening prompt both gate on this so the
+    no-color / non-interactive paths show neither (spec AC6)."""
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+    return (not non_interactive
+            and getattr(stdin, "isatty", lambda: False)()
+            and getattr(stdout, "isatty", lambda: False)()
+            and should_use_color(stdout))
+
+
+def _print_splash_banner(*, interactive: bool, stream: Any = None) -> None:
+    """Leading blank line then the splash scene, printed on an interactive entry
+    only. Shared by new/chat and resume so the banner is identical everywhere.
+    A no-op when not interactive or when the scene is empty."""
+    if not interactive:
+        return
+    out = sys.stdout if stream is None else stream
+    block = splash.splash_block(theme=pal.active_theme(), width=_term_width(), color=True)
+    if not block:
+        return
+    print(file=out)
+    print(block, file=out)
 
 
 class SeedError(Exception):
@@ -793,21 +809,15 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
-    interactive = (not non_interactive
-                   and sys.stdin.isatty() and sys.stdout.isatty())
+    interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
+    _print_splash_banner(interactive=interactive)
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         color = should_use_color(sys.stdout)
-        block = splash.splash_block(
-            theme=pal.active_theme(), width=_term_width(), color=color)
-        if block:
-            print(block)
-            print()
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
-            reply = (await prompt.ask_async(question=_opening_question(leave_mode),
-                                            width=_term_width(),
+            reply = (await prompt.ask_async(width=_term_width(),
                                             hint=OPENING_HINT)).strip()
         except (EOFError, KeyboardInterrupt):
             print("imp: cancelled", file=sys.stderr)
@@ -977,7 +987,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width(), status=status,
-                            start_phase=compute_start_phase(change.events_path))
+                            suppress_replay=True)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -991,13 +1001,15 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     _warn_if_tui_unavailable(args, sys.stdout)
+    _print_splash_banner(interactive=_is_interactive(
+        non_interactive=bool(getattr(args, "non_interactive", False))))
     print(_run_header_line(
         change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
                         width=_term_width(), status=status,
-                        start_phase=compute_start_phase(change.events_path))
+                        suppress_replay=True)
     coord = InterruptCoordinator()
     solicit = make_interactive_solicit(
         change, status=status, driver=driver, coord=coord)

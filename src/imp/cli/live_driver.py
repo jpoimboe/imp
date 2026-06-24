@@ -24,41 +24,13 @@ cancellation-sentinel leak).
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus
-
-
-def compute_start_phase(events_path: Path) -> str | None:
-    try:
-        raw = events_path.read_bytes()
-    except FileNotFoundError:
-        return None
-    first: str | None = None
-    last: str | None = None
-    for line in raw.decode("utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict) and event.get("type") == "step_started":
-            payload = event.get("payload")
-            if isinstance(payload, dict) and isinstance(payload.get("phase"), str):
-                if first is None:
-                    first = payload["phase"]
-                last = payload["phase"]
-    if last is None or last == first:
-        return None
-    return last
 
 
 def compose_activity_status(
@@ -108,14 +80,19 @@ def _container_closed(container: Any) -> bool:
 
 class LiveDriver:
     def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
-                 start_phase: str | None = None) -> None:
+                 suppress_replay: bool = False) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
         self._width = width
         self._status = status
-        self._start_phase = start_phase
-        self._suppressing = start_phase is not None
+        self._suppressing = suppress_replay
+        # Snapshot of every tree-node id present when the first live (un-marked)
+        # event arrives — i.e. the replayed prefix. The walk lifts suppression
+        # only when it reaches a node NOT in this set (a live continuation node),
+        # so a prior phase's completion breadcrumb (emitted when a live event
+        # closes the replayed phase) stays suppressed. None until the boundary.
+        self._replayed_node_ids: set[int] | None = None
         # True after the last emitted block was agent prose, so the next prose
         # block gets one blank-line separator — matching render_text's lean spacing
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
@@ -130,6 +107,15 @@ class LiveDriver:
 
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
+        if (self._suppressing and self._replayed_node_ids is None
+                and isinstance(event, dict) and not event.get("_replay")):
+            # First live (un-marked) event. The replayed prefix carries a _replay
+            # marker (stamped by the session daemon's replay snapshot). Freeze the
+            # replayed tree: every node that exists now is replayed and stays
+            # suppressed — including a prior phase's completion breadcrumb that
+            # this event will trigger by closing the phase. The walk lifts only at
+            # a node created AFTER this point (see _maybe_lift).
+            self._replayed_node_ids = self._snapshot_node_ids()
         self._builder.add(event)
         if isinstance(event, dict):
             etype = event.get("type")
@@ -197,6 +183,7 @@ class LiveDriver:
             if not force and not self._is_final(child, container=cur.container):
                 return                          # block on a not-final child
             cur.index += 1
+            self._maybe_lift(child)
             if _is_container(child):
                 # PhaseNode/StepNode: print the header now and descend, streaming
                 # the container's children as their events route in. The transcript
@@ -207,10 +194,6 @@ class LiveDriver:
                 suppress = rt.chrome_suppressed(child)
                 if not suppress and rt.spaces_before(child):
                     self._prev_prose = True
-                if (self._suppressing and isinstance(child, nv.PhaseNode)
-                        and child.name == self._start_phase):
-                    self._suppressing = False
-                    self._prev_prose = False
                 if not suppress:
                     self._stream_or_hold(
                         rt.header_line(child, depth=cur.depth, color=self._color,
@@ -224,6 +207,25 @@ class LiveDriver:
                 if not (isinstance(child, nv.BreadcrumbLine)
                         and rt.chrome_suppressed(cur.container)):
                     self._emit_leaf(child, cur.depth, gutters=self._gutters())
+
+    def _snapshot_node_ids(self) -> set[int]:
+        acc: set[int] = set()
+        stack = [self._builder.tree.root]
+        while stack:
+            node = stack.pop()
+            acc.add(id(node))
+            stack.extend(getattr(node, "children", ()))
+        return acc
+
+    def _maybe_lift(self, node: Any) -> None:
+        # Lift suppression the moment the walk reaches a node created after the
+        # replay boundary (a live continuation node). Replayed nodes — and the
+        # prior phase's breadcrumb, emitted at the pop site while still
+        # suppressed — are left hidden.
+        if (self._suppressing and self._replayed_node_ids is not None
+                and id(node) not in self._replayed_node_ids):
+            self._suppressing = False
+            self._prev_prose = False
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if (node is self._builder._opening_intent_node

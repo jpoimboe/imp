@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 
 import pytest
 
@@ -776,3 +777,117 @@ def test_die_paints_a_page_face_with_pips_in_the_given_color() -> None:
     splash._die(g, 19, 9, [(1, 1)], splash._P["impEye"])
     assert g[9][19] == splash._P["bookPage"]
     assert g[10][20] == splash._P["impEye"]
+
+
+def test_print_splash_banner_emits_blank_line_then_scene_when_interactive(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
+    buf = io.StringIO()
+    m._print_splash_banner(interactive=True, stream=buf)
+    assert buf.getvalue() == "\nSCENE\n"
+
+
+def test_print_splash_banner_is_noop_when_not_interactive(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
+    buf = io.StringIO()
+    m._print_splash_banner(interactive=False, stream=buf)
+    assert buf.getvalue() == ""
+
+
+def test_print_splash_banner_skips_empty_scene(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "")
+    buf = io.StringIO()
+    m._print_splash_banner(interactive=True, stream=buf)
+    assert buf.getvalue() == ""
+
+
+def test_is_interactive_requires_no_flag_two_ttys_and_color(monkeypatch) -> None:
+    import imp.cli.main as m
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    tty = _Tty()
+    monkeypatch.setattr(m, "should_use_color", lambda _s: True)
+    assert m._is_interactive(non_interactive=False, stdin=tty, stdout=tty) is True
+    assert m._is_interactive(non_interactive=True, stdin=tty, stdout=tty) is False
+
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    assert m._is_interactive(non_interactive=False, stdin=tty, stdout=tty) is False
+
+    monkeypatch.setattr(m, "should_use_color", lambda _s: True)
+    assert m._is_interactive(
+        non_interactive=False, stdin=io.StringIO(), stdout=io.StringIO()) is False
+
+
+def test_resume_prints_splash_banner_before_resuming_header(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_select_headless", lambda *_a, **_k: (False, False))
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: False)
+    monkeypatch.setattr(m, "_warn_if_tui_unavailable", lambda *_a, **_k: None)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m, "_print_splash_banner", lambda **_k: print("<<SPLASH-BANNER>>"))
+
+    async def _ok(*_a, **_k) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+
+    rc = anyio.run(
+        m._async_cmd_resume,
+        argparse.Namespace(token="feat", tui=False, non_interactive=False,
+                           message=None))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "<<SPLASH-BANNER>>" in out
+    assert out.index("<<SPLASH-BANNER>>") < out.index("resuming")
+
+
+def test_headless_resume_prints_no_splash_banner(
+    tmp_path, monkeypatch,
+) -> None:
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    banner_called = []
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_select_headless", lambda *_a, **_k: (True, False))
+    monkeypatch.setattr(
+        m, "_print_splash_banner", lambda **_k: banner_called.append(True))
+
+    async def _ok(*_a, **_k) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+
+    rc = anyio.run(
+        m._async_cmd_resume,
+        argparse.Namespace(token="feat", tui=False, non_interactive=False,
+                           message=None))
+    assert rc == 0
+    assert not banner_called

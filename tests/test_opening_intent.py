@@ -1,11 +1,8 @@
 import argparse
 
 from imp.cli.main import (
-    OPENING_QUESTION_CHAT,
-    OPENING_QUESTION_NEW,
     SeedResolution,
     _normalize_opening_reply,
-    _opening_question,
     _should_prompt_opening,
     resolve_spec_seed,
 )
@@ -28,8 +25,8 @@ def test_spec_file_suppresses_opening_intent(tmp_path) -> None:
     f = tmp_path / "draft.md"
     f.write_text("Implement this spec\n...")
     res = resolve_spec_seed(_ns(spec_file=str(f)))
-    assert res.seed_text is not None          # the wrapped draft is the seed
-    assert res.opening_intent is None         # but no intent turn is rendered
+    assert res.seed_text is not None
+    assert res.opening_intent is None
 
 
 def test_unseeded_suppresses_opening_intent() -> None:
@@ -55,29 +52,16 @@ def test_no_prompt_when_seeded_from_spec_file() -> None:
         seed_text="Implement this spec\n...", interactive=True) is False
 
 
-def test_opening_question_constant_is_removed() -> None:
+def test_opening_question_helpers_are_removed() -> None:
     import imp.cli.main as main_mod
-    assert not hasattr(main_mod, "OPENING_QUESTION")
+    assert not hasattr(main_mod, "OPENING_QUESTION_NEW")
+    assert not hasattr(main_mod, "OPENING_QUESTION_CHAT")
+    assert not hasattr(main_mod, "_opening_question")
 
 
-def test_opening_question_selects_new_variant_by_default() -> None:
-    assert _opening_question("new") == OPENING_QUESTION_NEW
-    assert _opening_question("anything-else") == OPENING_QUESTION_NEW
-    assert "spec" in OPENING_QUESTION_NEW
-    assert "?" in OPENING_QUESTION_NEW
-    assert OPENING_QUESTION_NEW.startswith("What change")
-    assert "load" not in OPENING_QUESTION_NEW.lower()
-    assert "tool" not in OPENING_QUESTION_NEW.lower()
-
-
-def test_opening_question_selects_chat_variant_for_chat_mode() -> None:
-    assert _opening_question("chat") == OPENING_QUESTION_CHAT
-    assert OPENING_QUESTION_CHAT.startswith("What's on your mind?")
-    # Canon nouns only — no internal jargon.
-    assert "look over your project" in OPENING_QUESTION_CHAT
-    assert "scope a change" in OPENING_QUESTION_CHAT
-    assert "load" not in OPENING_QUESTION_CHAT.lower()
-    assert "tool" not in OPENING_QUESTION_CHAT.lower()
+def test_opening_hint_is_kept() -> None:
+    import imp.cli.main as main_mod
+    assert main_mod.OPENING_HINT == "type a message, or /help for commands"
 
 
 def test_empty_reply_falls_back_to_unseeded() -> None:
