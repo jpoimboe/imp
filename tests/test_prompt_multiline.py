@@ -38,3 +38,15 @@ async def test_plain_enter_submits_single_line() -> None:
         pipe.send_text("just one line\r")
         result = await session.prompt_async("> ")
     assert result == "just one line"
+
+
+@pytest.mark.anyio
+async def test_ctrl_j_submits_single_line() -> None:
+    # c-j (LF) must submit just like c-m (CR), for terminals that send LF for Enter.
+    with create_pipe_input() as pipe, create_app_session(
+        input=pipe, output=DummyOutput()
+    ):
+        session = _build_session()
+        pipe.send_text("hello\n")
+        result = await session.prompt_async("> ")
+    assert result == "hello"

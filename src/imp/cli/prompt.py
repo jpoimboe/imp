@@ -72,6 +72,10 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
         # completion (prompt_toolkit's default c-m binding) rather than submit.
         event.app.current_buffer.validate_and_handle()
 
+    @kb.add("c-j", filter=~completion_is_selected)
+    def _(event: Any) -> None:
+        event.app.current_buffer.validate_and_handle()
+
     @kb.add("escape", "c-m")
     def _(event: Any) -> None:
         event.app.current_buffer.insert_text("\n")
