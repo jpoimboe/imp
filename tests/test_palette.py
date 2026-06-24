@@ -242,3 +242,19 @@ def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
 
 def test_change_id_role_wears_imp_gold_wordmark() -> None:
     assert pal.NODE_COLORS["change_id"] == ("bold", "wordmark")
+
+
+def test_yellow_accent_retuned_to_warm_gold_family() -> None:
+    # Golden values (spec candidates): a desaturated, slightly darkened variant
+    # of the wordmark hue so the warm accents read as one family.
+    assert pal._DARK_RGB["yellow"] == (0xC7, 0x97, 0x6A)
+    assert pal._LIGHT_RGB["yellow"] == (0x9A, 0x6A, 0x2A)
+    # Hue family: warm gold (R > G > B) on both surfaces, like wordmark.
+    for rgb in (pal._DARK_RGB["yellow"], pal._LIGHT_RGB["yellow"]):
+        r, g, b = rgb
+        assert r > g > b
+    # Muted, not the saturated brand: dimmer than the wordmark on the dark surface.
+    assert _lum(pal._DARK_RGB["yellow"]) < _lum(pal._DARK_RGB["wordmark"])
+    # Wiring is UNCHANGED: warning + lifecycle still reference the yellow role.
+    assert pal.NODE_COLORS["warning"] == ("yellow",)
+    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
