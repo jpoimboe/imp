@@ -131,8 +131,8 @@ flowchart LR
   SPEC --> PLAN["② plan"]
   PLAN --> IMPL["③ implement"]
   IMPL --> REVIEW["④ review"]
-  REVIEW --> MERGE["⑤ merge"]
-  MERGE --> done([done])
+  REVIEW --> INTG["⑤ integrate"]
+  INTG --> done([done])
   IMPL -. "supercycle" .-> PLAN
   REVIEW -. "rework" .-> PLAN
 ```
@@ -226,10 +226,10 @@ flowchart TD
   IV --> FIN["finalize<br/>review resolution · summarize ·<br/>HUMAN: merge / rework / pause"]
   FIN -->|rework| back([→ plan-writer])
   FIN -. pause .-> HUMAN
-  FIN -->|merge| out([→ merge])
+  FIN -->|merge| out([→ integrate])
 ```
 
-### Phase ⑤ merge
+### Phase ⑤ integrate
 
 A cheap freshness check, then the lock-protected engine-native merge. If base moved, loop back to re-integrate.
 
