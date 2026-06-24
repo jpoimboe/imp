@@ -14,9 +14,11 @@ import pytest
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_WAITING, GLYPH_WORKING, TerminalTitle
+from imp.engine.change import Change
 from imp.remote.session.client import SessionClient
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import SessionSocket
+from tests.conftest import _seed_control
 
 
 class _TTYStream(io.StringIO):
@@ -325,7 +327,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
         await client.connect()
         return client
 
-    replies = iter(["/abandon", "y"])
+    replies = iter(["/abandon"])
 
     async def _solicit(_prompt: str) -> str:
         return next(replies)
@@ -347,60 +349,6 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
             tg.start_soon(_client)
 
     assert server.abandoned
-
-
-@pytest.mark.anyio
-async def test_abandon_slash_command_declined_does_not_abandon(
-    tmp_path: Path,
-) -> None:
-    sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
-    got: list[str] = []
-
-    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
-        reply = await user_chat_input_fn("reply?")
-        got.append(reply)
-        return reply
-
-    coord = InterruptCoordinator()
-
-    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, "c1", "T", on_event=on_event)
-        await client.connect()
-        return client
-
-    replies = iter(["/abandon", "n", "real answer"])
-    prompts: list[str] = []
-
-    async def _solicit(prompt: str) -> str:
-        prompts.append(prompt)
-        return next(replies)
-
-    class _Driver:
-        def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
-
-    with anyio.fail_after(10):
-        async with anyio.create_task_group() as tg:
-            await server.open()
-            tg.start_soon(server.serve, run_fn)
-
-            async def _client() -> None:
-                await run_terminal_client(
-                    attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1")
-
-            tg.start_soon(_client)
-
-    assert not server.abandoned
-    assert got == ["real answer"]
-    assert len(prompts) == 3
-    assert "abandon" in prompts[1].lower()
-    assert "[y/n]" in prompts[1].lower()
 
 
 @pytest.mark.anyio
@@ -434,61 +382,6 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
 
     async def _solicit(_prompt: str) -> str:
         raise EOFError
-
-    class _Driver:
-        def on_event(self, _event: dict[str, Any]) -> None: ...
-        def finish(self) -> None: ...
-
-    with anyio.fail_after(15):
-        async with anyio.create_task_group() as tg:
-            await server.open()
-            tg.start_soon(server.serve, run_fn)
-
-            async def _client() -> None:
-                await run_terminal_client(
-                    attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit)
-
-            tg.start_soon(_client)
-
-    assert survived == [True]
-
-
-@pytest.mark.anyio
-async def test_eoferror_at_abandon_confirm_also_detaches_cleanly(
-    tmp_path: Path,
-) -> None:
-    sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
-    survived: list[bool] = []
-
-    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
-        with anyio.fail_after(5):
-            while server.attached_count != 0:
-                await server.wait_for_attach_change()
-        survived.append(True)
-        return "done"
-
-    coord = InterruptCoordinator()
-    call_count = 0
-
-    async def _attach(
-        on_event: Callable[[dict[str, Any]], None],
-    ) -> SessionClient:
-        client = SessionClient(sock, "c1", "T", on_event=on_event)
-        await client.connect()
-        return client
-
-    async def _solicit(_prompt: str) -> str:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return "/abandon"   # first call: user types /abandon
-        raise EOFError          # second call (confirm prompt): EOF/Ctrl-D
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -623,7 +516,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
 
 
 @pytest.mark.anyio
-async def test_abandon_slash_command_records_abandon_intent_when_confirmed(
+async def test_abandon_slash_command_records_abandon_intent(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -643,7 +536,7 @@ async def test_abandon_slash_command_records_abandon_intent_when_confirmed(
         await client.connect()
         return client
 
-    replies = iter(["/abandon", "y"])
+    replies = iter(["/abandon"])
 
     async def _solicit(_prompt: str) -> str:
         return next(replies)
@@ -777,3 +670,106 @@ async def test_replayed_awaiting_does_not_flip_to_waiting(
 
     waiting = f"\x1b]2;{GLYPH_WAITING} imp — My Change\x07"
     assert waiting not in s.getvalue()
+
+
+@pytest.mark.anyio
+async def test_abandon_records_materialized_false_for_unmaterialized_draft(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="D", change_id="ab1", base_branch="main")
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "ab1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "/abandon"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="ab1", control_root=tmp_path,
+                    leave_state=leave_state)
+
+            tg.start_soon(_client)
+
+    assert server.abandoned
+    assert leave_state["intent"] == "abandon"
+    assert leave_state["materialized"] == ""
+
+
+@pytest.mark.anyio
+async def test_abandon_records_materialized_true_for_materialized_change(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="D", change_id="ab2", base_branch="main")
+    meta_path = ch.change_dir / "change.json"
+    meta = json.loads(meta_path.read_text())
+    meta["materialized"] = True
+    meta_path.write_text(json.dumps(meta))
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "ab2", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "/abandon"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="ab2", control_root=tmp_path,
+                    leave_state=leave_state)
+
+            tg.start_soon(_client)
+
+    assert server.abandoned
+    assert leave_state["intent"] == "abandon"
+    assert leave_state["materialized"] == "1"
