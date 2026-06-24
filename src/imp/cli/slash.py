@@ -54,7 +54,7 @@ def handle_slash_line(
         # to resume), it is a no-op that re-prompts rather than a skill lookup.
         output_fn("/continue resumes a paused run; there is nothing to resume here.")
         return REPROMPT
-    if cmd == "ls":
+    if cmd == "list":
         import argparse
 
         from imp.cli.main import _cmd_status
@@ -133,7 +133,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
     out("  /continue          Resume a paused run (at the post-interrupt prompt)")
-    out("  /ls [-a]           List your changes (-a adds completed/abandoned)")
+    out("  /list [-a]         List your changes (-a adds completed/abandoned)")
     out("  /search <query>    Search archived changes by title or id")
     out("  /save              Save this conversation to your Backlog")
     out("  /abandon           Abandon the current change")
