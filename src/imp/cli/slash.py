@@ -77,6 +77,8 @@ def handle_slash_line(
         return "/abandon"
     if cmd == "save":
         return "/save"
+    if cmd == "clear":
+        return "/clear"
     if cmd == "resume":
         if not args:
             output_fn("Usage: /resume <id|query>")
@@ -136,6 +138,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /list [-a]         List your changes (-a adds completed/abandoned)")
     out("  /search <query>    Search archived changes by title or id")
     out("  /save              Save this conversation to your Backlog")
+    out("  /clear             Park this chat and start a fresh one")
     out("  /abandon           Abandon the current change")
     out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
