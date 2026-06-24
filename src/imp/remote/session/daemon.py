@@ -85,6 +85,7 @@ async def serve_change_session(
     seed_opening: str | None = None,
     resume: bool = False,
     opening_intent: str | None = None,
+    scope_only: bool = False,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -119,6 +120,9 @@ async def serve_change_session(
                 state.resume_pending = state.step
             state.status = "running"
             state.save(change.state_dir)
+        run_kwargs: dict[str, Any] = {}
+        if scope_only:
+            run_kwargs["scope_only"] = True
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:
             first_kwargs["seed_opening"] = seed_opening
@@ -130,6 +134,7 @@ async def serve_change_session(
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
             wait_for_turn_fn=server.wait_for_turn,
+            **run_kwargs,
             **first_kwargs,
         )
         prompt = _hold_prompt(result, coordinator, change.event_log())
@@ -150,6 +155,7 @@ async def serve_change_session(
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
                 wait_for_turn_fn=server.wait_for_turn,
+                **run_kwargs,
             )
             prompt = _hold_prompt(result, coordinator, change.event_log())
         return result
@@ -181,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed-opening", default=None)
     parser.add_argument("--opening-intent", default=None)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--scope-only", action="store_true")
     ns = parser.parse_args(argv)
     try:
         change = Change.load(Path(ns.control_root), ns.change_id)
@@ -194,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["opening_intent"] = ns.opening_intent
     if ns.resume:
         kwargs["resume"] = True
+    if ns.scope_only:
+        kwargs["scope_only"] = True
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_change_session, change, **kwargs))

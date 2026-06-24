@@ -460,3 +460,41 @@ def test_load_reads_origin_and_seed_opening(tmp_path: Path) -> None:
     loaded = Change.load(tmp_path, "drforg3")
     assert loaded.origin == "followup"
     assert loaded.seed_opening == "X\n\nbody"
+
+
+def test_set_origin_rewrites_change_json(tmp_path: Path) -> None:
+    import json as _json
+
+    from imp.engine import worktree
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    base = worktree.current_branch(tmp_path)
+    change = Change.create_draft(
+        tmp_path, title="X", change_id="2026-06-24-orig01",
+        base_branch=base, origin="draft")
+    change.set_origin("idea")
+    assert change.origin == "idea"
+    meta = _json.loads((change.change_dir / "change.json").read_text())
+    assert meta["origin"] == "idea"
+
+
+def test_set_depends_on_rewrites_change_json(tmp_path: Path) -> None:
+    import json as _json
+
+    from imp.engine import worktree
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    base = worktree.current_branch(tmp_path)
+    change = Change.create_draft(
+        tmp_path, title="X", change_id="2026-06-24-deps01",
+        base_branch=base, origin="draft")
+    change.set_depends_on(["a", "b"])
+    meta = _json.loads((change.change_dir / "change.json").read_text())
+    assert meta["depends_on"] == ["a", "b"]
+    change.set_depends_on([])
+    meta = _json.loads((change.change_dir / "change.json").read_text())
+    assert meta["depends_on"] == []

@@ -645,14 +645,15 @@ async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
         resume: bool = False,
         opening_intent: str | None = None,
-        leave_mode: str | None = None) -> int:
+        leave_mode: str | None = None,
+        scope_only: bool = False) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent)
+        opening_intent=opening_intent, scope_only=scope_only)
     leave_state: dict[str, str] = {}
 
     async def _solicit(_prompt: str) -> str:
@@ -685,9 +686,9 @@ async def _run_tui_session(
 def _record_idea(args: argparse.Namespace, control: Path) -> int:
     title = args.idea
     if not title.strip():
-        print("imp: idea title must be non-empty", file=sys.stderr)
+        print("imp: --backlog title must be non-empty", file=sys.stderr)
         return 2
-    description = getattr(args, "description", None) or ""
+    description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
     base = worktree.current_branch(control)
     change_id = new_change_id()
@@ -765,39 +766,47 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     worktree.ensure_imp_ignored(control)
     base = worktree.current_branch(control)
 
-    if getattr(args, "description", None) and getattr(args, "idea", None) is None:
-        print("imp: --description requires --idea", file=sys.stderr)
-        return 2
-
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
 
+    backlog_interactive = False
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
-            print("imp: --idea and --title cannot be combined "
-                  "(--idea is the title)", file=sys.stderr)
+            print("imp: --backlog and --title cannot be combined "
+                  "(--backlog is the title)", file=sys.stderr)
             return 2
-        return _record_idea(args, control)
+        if not args.idea.strip():
+            print("imp: --backlog title must be non-empty", file=sys.stderr)
+            return 2
+        if bool(getattr(args, "non_interactive", False)):
+            return _record_idea(args, control)
+        backlog_interactive = True
 
-    try:
-        playbook_name = getattr(args, "playbook", None)
-        if playbook_name and getattr(args, "spec_file", None):
-            raise SeedError("--playbook and --spec-file are mutually exclusive")
-        if getattr(args, "findings_only", False) and not playbook_name:
-            raise SeedError("--findings-only requires --playbook")
-        seed = resolve_spec_seed(args)
-        if playbook_name:
-            seed = SeedResolution(
-                seed.title,
-                resolve_playbook_seed(
-                    control, playbook_name, getattr(args, "opening", None),
-                    findings_only=getattr(args, "findings_only", False)),
-                opening_intent=None)
-    except (SeedError, ValueError) as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
+    if backlog_interactive:
+        seed_text = backlog.seed_opening(
+            {"title": args.idea, "description": getattr(args, "opening", None) or ""})
+        seed = SeedResolution(
+            title=args.idea, seed_text=seed_text, opening_intent=seed_text)
+    else:
+        try:
+            playbook_name = getattr(args, "playbook", None)
+            if playbook_name and getattr(args, "spec_file", None):
+                raise SeedError("--playbook and --spec-file are mutually exclusive")
+            if getattr(args, "findings_only", False) and not playbook_name:
+                raise SeedError("--findings-only requires --playbook")
+            seed = resolve_spec_seed(args)
+            if playbook_name:
+                seed = SeedResolution(
+                    seed.title,
+                    resolve_playbook_seed(
+                        control, playbook_name, getattr(args, "opening", None),
+                        findings_only=getattr(args, "findings_only", False)),
+                    opening_intent=None)
+        except (SeedError, ValueError) as e:
+            print(f"imp: {e}", file=sys.stderr)
+            return 2
 
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
@@ -835,13 +844,20 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
+    scope_only = backlog_interactive
+    origin = "idea" if backlog_interactive else "draft"
     try:
-        change = Change.create_draft(control, title=title, change_id=change_id,
-                                     base_branch=base, workflow=wf_arg,
-                                     origin="draft")
+        change = Change.create_draft(
+            control, title=title, change_id=change_id, base_branch=base,
+            workflow=wf_arg, origin=origin,
+            depends_on=(list(getattr(args, "depends_on", None) or [])
+                        if backlog_interactive else None),
+            seed_opening=(opening_text if backlog_interactive else None))
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
+
+    _scope_kw: dict[str, Any] = {"scope_only": True} if scope_only else {}
 
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
@@ -860,14 +876,14 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent)
+            opening_intent=opening_intent, **_scope_kw)
 
     if _tui_requested(args):
         _print_run_header(
             change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
         return await _run_tui_session(change, seed_opening=opening_text,
                                       opening_intent=opening_intent,
-                                      leave_mode=leave_mode)
+                                      leave_mode=leave_mode, **_scope_kw)
 
     _print_run_header(
         change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
@@ -881,7 +897,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     return await run_session_client(
         change, driver=driver, coord=coord, solicit=solicit,
         seed_opening=opening_text, status=status,
-        opening_intent=opening_intent, leave_mode=leave_mode)
+        opening_intent=opening_intent, leave_mode=leave_mode, **_scope_kw)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -2028,6 +2044,37 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon(control, change_id, assume_yes=args.yes)
 
 
+def _cmd_edit(args: argparse.Namespace) -> int:
+    control = _control_root()
+    change_id = _resolve_id(control, args.token)
+    change = Change.load(control, change_id)
+
+    zone_change = args.backlog or args.active
+    dep_change = args.depends_on is not None or args.clear_deps
+    if args.title is None and not zone_change and not dep_change:
+        print("imp: imp edit needs at least one of --title, --backlog/--active, "
+              "or --depends-on/--clear-deps", file=sys.stderr)
+        return 2
+
+    if zone_change and change.materialized:
+        print(f"imp: {change_id} is already built; zone moves apply to "
+              "un-materialized changes only (use abandon/pause instead)",
+              file=sys.stderr)
+        return 2
+
+    if args.title is not None:
+        change.rename(args.title, log=change.event_log())
+    if args.backlog:
+        change.set_origin("idea")
+    elif args.active:
+        change.set_origin("draft")
+    if args.clear_deps:
+        change.set_depends_on([])
+    elif args.depends_on is not None:
+        change.set_depends_on(args.depends_on)
+    return 0
+
+
 def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     control = _control_root()
     change_id = os.environ.get("IMP_CHANGE_ID")
@@ -2222,13 +2269,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
-    p_new.add_argument("--idea", metavar="TITLE", default=None,
-                       help="Jot a backlog Change with this TITLE WITHOUT opening a "
-                            "conversation; prints its id. Add --description for a "
-                            "longer brief. Start it later with `imp resume <id>`.")
-    p_new.add_argument("--description", metavar="TEXT", default=None,
-                       help="Optional longer description for an --idea Change "
-                            "(may be empty).")
+    p_new.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
+                       help="Scope a Change for your backlog with this TITLE. "
+                            "Non-interactive: files it instantly with no "
+                            "conversation (the positional MESSAGE is an optional "
+                            "longer brief). Interactive: opens a scoping "
+                            "conversation biased toward saving for later. Start it "
+                            "later with `imp resume <id>`.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A change id this backlog Change depends on "
@@ -2398,6 +2445,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
+
+    p_edit = sub.add_parser(
+        "edit",
+        help="Edit a Change's title, backlog membership, or dependencies.")
+    p_edit.add_argument("token", help="Change id or its short token.")
+    p_edit.add_argument("--title", metavar="TEXT", default=None,
+                        help="Set the Change title.")
+    p_edit_zone = p_edit.add_mutually_exclusive_group()
+    p_edit_zone.add_argument(
+        "--backlog", action="store_true",
+        help="Move an un-materialized Change to the Backlog zone (origin=idea).")
+    p_edit_zone.add_argument(
+        "--active", action="store_true",
+        help="Return an un-materialized Change to the Active zone (origin=draft).")
+    p_edit_deps = p_edit.add_mutually_exclusive_group()
+    p_edit_deps.add_argument(
+        "--depends-on", metavar="ID", action="append", default=None,
+        dest="depends_on", help="Replace the dependency list (repeatable).")
+    p_edit_deps.add_argument(
+        "--clear-deps", action="store_true",
+        help="Empty the dependency list.")
+    p_edit.set_defaults(func=_cmd_edit)
 
     p_artifact = sub.add_parser(
         "artifact-commit",

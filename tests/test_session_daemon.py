@@ -1195,3 +1195,105 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
             change, run_fn=fake_run, hibernate=True)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1   # held once, then hibernated — never looped
+
+
+def test_main_forwards_scope_only_via_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--scope-only",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.keywords == {"scope_only": True}
+
+
+@pytest.mark.anyio
+async def test_scope_only_forwarded_to_run_fn(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-sco")
+    captured: dict[str, Any] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None, scope_only: bool = False,
+    ) -> RunResult:
+        captured["scope_only"] = scope_only
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, scope_only=True)
+    assert result is RunResult.COMPLETED
+    assert captured["scope_only"] is True
+
+
+@pytest.mark.anyio
+async def test_scope_only_forwarded_to_run_fn_on_hold_loop_rerun(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-scrl")
+    sock = str(session_socket_path(change.control_root, change.id))
+    calls: list[bool] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None, scope_only: bool = False,
+    ) -> RunResult:
+        calls.append(scope_only)
+        if len(calls) == 1:
+            log = change.event_log()
+            log.append(agent_id=None, type="script_blocked",
+                       payload={"step": "integrate", "exit": 3, "stdout": "",
+                                "stderr": "blocked"})
+            log.append(agent_id=None, type="workflow_paused",
+                       payload={"reason": "script_blocked"})
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False, scope_only=True)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)
+        await client.send_input("go")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert len(calls) == 2
+        assert calls[0] is True
+        assert calls[1] is True
+        await client.aclose()
+        tg.cancel_scope.cancel()

@@ -123,6 +123,19 @@ class Change:
         meta["project_root"] = str(new_root)
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
+    def set_origin(self, origin: str) -> None:
+        self.origin = origin
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["origin"] = origin
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    def set_depends_on(self, depends_on: list[str]) -> None:
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["depends_on"] = list(depends_on)
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
     def materialize(self) -> bool:
         """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
         flip project_root to the worktree, and persist project_root + cur_base_head.
