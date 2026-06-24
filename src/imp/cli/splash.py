@@ -354,7 +354,64 @@ def _encode_grid(g: Grid, *, color: bool) -> list[str]:
     return [_encode_row(g, 2 * k, 2 * k + 1, color=color) for k in range((H + 1) // 2)]
 
 
+# --- prop builders ---
+
+def _crescent(g: Grid, cx: int, cy: int) -> None:
+    for dx, dy in [(0, -2), (1, -2), (-1, -1), (0, -1), (-1, 0), (0, 0),
+                   (-1, 1), (0, 1), (0, 2), (1, 2)]:
+        _px(g, cx + dx, cy + dy, _P["moon"])
+
+
+def _moon_glow(g: Grid, cx: int, cy: int, r: int, cres: bool) -> None:
+    _glow_ring(g, cx, cy, r, _P["moonGlow"])
+    _disc(g, cx, cy, r, r, _P["moon"])
+    if cres:
+        _carve(g, cx + _round(r * 0.7), cy - 1, r, r)
+
+
+def _cloud(g: Grid, cx: int, cy: int, c: Color | None) -> None:
+    _disc(g, cx, cy, 5, 1.5, c)
+    _disc(g, cx - 3, cy + 1, 3, 1.4, c)
+    _disc(g, cx + 3, cy + 1, 3, 1.4, c)
+    _disc(g, cx + 1, cy - 1, 2.4, 1.2, c)
+
+
+def _meteor(g: Grid, x: int, y: int, length: int) -> None:
+    for k in range(length):
+        t = k / length
+        _px(g, x + k, y - k, _P["bright"] if t < 0.4 else _P["star"])
+    _spark(g, x, y, _P["bright"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
+
+def _s_crescent_stars(g: Grid) -> None:
+    _stars(g, 10, 0.5)
+    _crescent(g, 24, 4)
+    _L(g)
+
+
+def _s_crescent_perch(g: Grid) -> None:
+    _stars(g, 12, 0.5)
+    _crescent(g, 24, 8)
+    _L(g)
+
+
+def _s_full_moon_cloud(g: Grid) -> None:
+    _stars(g, 8, 0.4)
+    _moon_glow(g, 24, 5, 4, False)
+    _cloud(g, 24, 8, _P["steam"])
+    _L(g)
+
+
+def _s_meteor_shower(g: Grid) -> None:
+    _stars(g, H, 0.24)
+    _meteor(g, 19, 3, 5)
+    _meteor(g, 25, 7, 4)
+    _meteor(g, 22, 12, 4)
+    _px(g, 28, 2, _P["bright"])
+    _L(g)
+
 
 def _s_constellation(g: Grid) -> None:
     _stars(g, H, 0.16)
@@ -380,6 +437,10 @@ DAY = "DAY"
 NIGHT = "NIGHT"
 
 SCENES: list[tuple[SceneBuilder, str, str]] = [
+    (_s_crescent_stars, "the familiar awakens.", ANY),
+    (_s_crescent_perch, "perched and ready.", ANY),
+    (_s_full_moon_cloud, "what are we building tonight?", NIGHT),
+    (_s_meteor_shower, "make a wish.", ANY),
     (_s_constellation, "drawn in the stars.", ANY),
     (_s_starfield, "your imp is listening.", ANY),
 ]

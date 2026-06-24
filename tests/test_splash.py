@@ -324,3 +324,62 @@ def test_print_splash_banner_skips_empty_scene(monkeypatch) -> None:
     buf = io.StringIO()
     m._print_splash_banner(interactive=True, stream=buf)
     assert buf.getvalue() == ""
+
+
+def test_crescent_paints_moon_pixels_around_the_anchor() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._crescent(g, 24, 4)
+    assert g[4][24] == splash._P["moon"]  # (0,0) offset
+    assert g[2][24] == splash._P["moon"]  # (0,-2) offset
+
+
+def test_moon_glow_full_disc_then_crescent_carves_part_away() -> None:
+    splash._use_theme("dark")
+    full = splash._make_grid()
+    splash._moon_glow(full, 24, 5, 4, False)
+    cres = splash._make_grid()
+    splash._moon_glow(cres, 24, 5, 4, True)
+    full_moon = sum(1 for row in full for c in row if c == splash._P["moon"])
+    cres_moon = sum(1 for row in cres for c in row if c == splash._P["moon"])
+    assert full_moon > 0
+    assert cres_moon < full_moon
+
+
+def test_cloud_fills_its_centre_with_the_given_colour() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._cloud(g, 24, 8, splash._P["steam"])
+    assert g[8][24] == splash._P["steam"]
+
+
+def test_meteor_head_is_bright_and_tail_trends_to_star() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._meteor(g, 19, 3, 5)
+    assert g[3][19] == splash._P["bright"]  # spark head at (x,y)
+    assert g[1][21] == splash._P["star"]    # tail pixel k=2 (t=0.4) -> star
+
+
+def test_cosmic_batch_a_scenes_are_wired_in_gallery_order() -> None:
+    expect = [
+        (splash._s_crescent_stars, "the familiar awakens.", splash.ANY),
+        (splash._s_crescent_perch, "perched and ready.", splash.ANY),
+        (splash._s_full_moon_cloud, "what are we building tonight?", splash.NIGHT),
+        (splash._s_meteor_shower, "make a wish.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    order = ["_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud",
+             "_s_meteor_shower", "_s_constellation"]
+    positions = [names.index(n) for n in order]
+    assert positions == sorted(positions)
+
+
+def test_full_moon_scene_is_eligible_only_at_night(monkeypatch) -> None:
+    idx = next(i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.NIGHT)
+    monkeypatch.setattr(splash, "_now_hour", lambda: 23)
+    assert idx in splash._eligible()
+    monkeypatch.setattr(splash, "_now_hour", lambda: 12)
+    assert idx not in splash._eligible()
