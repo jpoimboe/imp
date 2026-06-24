@@ -326,6 +326,38 @@ def test_print_splash_banner_skips_empty_scene(monkeypatch) -> None:
     assert buf.getvalue() == ""
 
 
+def test_arcane_item_scenes_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._wisps(g)
+    assert g[3][20] == splash._P["wisp"]       # first wisp core at (20,3)
+    g = splash._make_grid()
+    splash._potions(g, 12)
+    assert g[5][20] == splash._P["rune"]        # spark(x+1,by-7) of bottle 0 at (20,5)
+    g = splash._make_grid()
+    splash._wand(g, 19, 12)
+    assert g[4][27] == splash._P["flame2"]      # spark(x+8,by-8) tip at (27,4)
+    g = splash._make_grid()
+    splash._hourglass(g, 24, 3)
+    assert g[9][24] == splash._P["flame2"]      # px(cx,top_y+6) lower sand at (24,9)
+    g = splash._make_grid()
+    splash._scroll(g, 24, 7)
+    assert g[12][24] == splash._P["O"]          # disc(cx,cy+5) seal at (24,12)
+    expect = [
+        (splash._s_floating_wisps, "the void is listening.", splash.ANY),
+        (splash._s_potion_shelf, "every spell has a price — name yours.", splash.ANY),
+        (splash._s_magic_wand, "speak, and it shall be built.", splash.ANY),
+        (splash._s_hourglass, "time's a construct. ship anyway.", splash.ANY),
+        (splash._s_scroll, "the ink is wet. dictate.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_rune_sigil") < idx[0]
+
+
 def test_crescent_paints_moon_pixels_around_the_anchor() -> None:
     splash._use_theme("dark")
     g = splash._make_grid()

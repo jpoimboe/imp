@@ -557,6 +557,61 @@ def _rune_sigil(g: Grid, cx: int, cy: int) -> None:
     _px(g, cx, cy, _P["rune"])
 
 
+def _wisps(g: Grid) -> None:
+    for x, y in [(20, 3), (26, 5), (23, 9), (28, 11)]:
+        _px(g, x, y, _P["wisp"])
+        _px(g, x - 1, y, _P["teal"])
+        _px(g, x + 1, y, _P["teal"])
+        _px(g, x, y - 1, _P["teal"])
+        _px(g, x, y + 1, _P["teal"])
+
+
+def _potions(g: Grid, by: int) -> None:
+    cols = [_P["rune"], _P["port"], _P["flame"]]
+    for i in range(3):
+        x = 19 + i * 4
+        c = cols[i]
+        _rect(g, x, by - 3, 3, 3, _P["glass"])
+        _rect(g, x, by - 2, 3, 2, c)
+        _px(g, x + 1, by - 5, _P["metalD"])
+        _px(g, x + 1, by - 4, _P["wax"])
+        _spark(g, x + 1, by - 7, c)
+    _ground(g, by + 1, _P["bookSpine"])
+
+
+def _wand(g: Grid, x: int, by: int) -> None:
+    for k in range(8):
+        _px(g, x + k, by - k, _P["bookSpine"])
+    _spark(g, x + 8, by - 8, _P["flame2"])
+    _px(g, x + 10, by - 9, _P["spark"])
+    _px(g, x + 6, by - 10, _P["spark"])
+    _px(g, x + 11, by - 6, _P["spark"])
+
+
+def _hourglass(g: Grid, cx: int, top_y: int) -> None:
+    _rect(g, cx - 3, top_y, 7, 1, _P["wood"])
+    _rect(g, cx - 3, top_y + 8, 7, 1, _P["wood"])
+    for j in range(4):
+        _px(g, cx - 3 + j, top_y + 1 + j, _P["metal"])
+        _px(g, cx + 3 - j, top_y + 1 + j, _P["metal"])
+    for j in range(4):
+        _px(g, cx - 3 + j, top_y + 8 - j, _P["metal"])
+        _px(g, cx + 3 - j, top_y + 8 - j, _P["metal"])
+    _px(g, cx, top_y + 4, _P["spark"])
+    _rect(g, cx - 1, top_y + 2, 3, 1, _P["flame2"])
+    _px(g, cx, top_y + 6, _P["flame2"])
+
+
+def _scroll(g: Grid, cx: int, cy: int) -> None:
+    _rect(g, cx - 5, cy - 5, 10, 2, _P["paperD"])
+    _rect(g, cx - 4, cy - 3, 8, 8, _P["paper"])
+    _rect(g, cx - 5, cy + 5, 10, 2, _P["paperD"])
+    _rect(g, cx - 3, cy - 1, 6, 1, _P["ink"])
+    _rect(g, cx - 3, cy + 1, 5, 1, _P["ink"])
+    _rect(g, cx - 3, cy + 3, 6, 1, _P["ink"])
+    _disc(g, cx, cy + 5, 1.3, 1, _P["O"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -706,6 +761,36 @@ def _s_rune_sigil(g: Grid) -> None:
     _L(g)
 
 
+def _s_floating_wisps(g: Grid) -> None:
+    _stars(g, H, 0.2)
+    _wisps(g)
+    _L(g)
+
+
+def _s_potion_shelf(g: Grid) -> None:
+    _stars(g, 7, 0.24)
+    _potions(g, 12)
+    _L(g)
+
+
+def _s_magic_wand(g: Grid) -> None:
+    _stars(g, 8, 0.28)
+    _wand(g, 19, 12)
+    _L(g)
+
+
+def _s_hourglass(g: Grid) -> None:
+    _stars(g, 7, 0.26)
+    _hourglass(g, 24, 3)
+    _L(g)
+
+
+def _s_scroll(g: Grid) -> None:
+    _stars(g, 7, 0.24)
+    _scroll(g, 24, 7)
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -734,6 +819,11 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_twin_candles, "whisper your wish.", ANY),
     (_s_twin_torches, "let's raise a little hell.", ANY),
     (_s_rune_sigil, "the runes are ready.", ANY),
+    (_s_floating_wisps, "the void is listening.", ANY),
+    (_s_potion_shelf, "every spell has a price — name yours.", ANY),
+    (_s_magic_wand, "speak, and it shall be built.", ANY),
+    (_s_hourglass, "time's a construct. ship anyway.", ANY),
+    (_s_scroll, "the ink is wet. dictate.", ANY),
 ]
 
 MIN_WIDTH = 32
