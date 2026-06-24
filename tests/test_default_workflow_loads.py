@@ -136,9 +136,9 @@ def test_every_nonquiet_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "front-door": "chatting",
-        "spec-finalizer": "spec · finalizing",
-        "spec-reviewer": "spec · reviewing",
+        "front-door": "ideating",
+        "spec-finalizer": "finalizing spec",
+        "spec-reviewer": "reviewing spec",
         "plan-writer": (
             "plan {{ vars.plan_index }}"
             "{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
@@ -197,3 +197,9 @@ def test_route_labels_assigned() -> None:
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"
+
+
+def test_phase_labels_assigned() -> None:
+    by = {p.name: p for p in _wf().phases}
+    assert by["front-door"].label is None
+    assert by["spec"].label == "spec phase"

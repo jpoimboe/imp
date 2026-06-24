@@ -698,8 +698,11 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     assert not any("[resume]" in ln for ln in body), (
         "raw [resume] annotation leaked into the transcript:\n" + "\n".join(body))
     # A loud clean forward goto is UNLABELED -> silent: spec-reviewer (label:
-    # "spec · reviewing") renders only its gray completion line, with no own-line "→ …".
-    spec_rev_i = next((i for i, ln in enumerate(body) if "spec · reviewing · complete" in ln), None)
+    # "reviewing spec") renders only its gray completion line, with no own-line "→ …".
+    spec_rev_i = next(
+        (i for i, ln in enumerate(body) if "spec phase · reviewing spec · complete" in ln),
+        None,
+    )
     assert spec_rev_i is not None, (
         "expected the spec-reviewer completion breadcrumb:\n" + "\n".join(body))
     # The line after the spec-reviewer completion must not be an own-line route label.

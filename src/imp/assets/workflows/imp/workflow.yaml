@@ -38,17 +38,18 @@ phases:
       - name: front-door
         file: agents/front-door.md
         tier: high
-        label: chatting
+        label: ideating
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
           - {else: true, set: {fast_path: false}, goto: spec-finalizer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
 
   - name: spec
+    label: "spec phase"
     steps:
       - name: spec-finalizer
         file: agents/spec-finalizer.md
         tier: high
-        label: spec · finalizing
+        label: finalizing spec
         rules:
           - {else: true, continue: true}
 
@@ -62,7 +63,7 @@ phases:
       - name: spec-reviewer
         file: agents/spec-reviewer.md
         tier: high
-        label: spec · reviewing
+        label: reviewing spec
         read_only: ["."]
         # The reviewer gets the last word: the loop ends only on a clean review with
         # nothing left to integrate. spec_minors_integrated tracks whether the writer
