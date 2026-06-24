@@ -61,6 +61,6 @@ def resume_change(control_root: Path, token: str) -> str:
 
 
 def abandon_change(control_root: Path, change_id: str) -> int:
-    """Abandon a Change via `imp abandon --yes`, synchronously; returns its exit code."""
+    """Abandon a Change via `imp abandon`, synchronously; returns its exit code."""
     return _run_foreground(
-        _imp("abandon", change_id, "--yes"), _base_env(), control_root)
+        _imp("abandon", change_id), _base_env(), control_root)

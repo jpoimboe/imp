@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _status_rows
+from imp.cli.main import _abandon, _build_parser, _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
@@ -95,6 +95,33 @@ def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> 
     rc = _abandon(tmp_path, "feat")
     assert rc == 0                                              # not the rc=2 LoadError path
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # reaped
+
+
+def test_abandon_never_reads_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    # Force the interactive condition that USED to gate the prompt; abandon must
+    # still not read stdin.
+    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _p: (_ for _ in ()).throw(AssertionError("abandon must not read stdin")))
+    rc = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_rejects_yes_flag() -> None:
+    parser = _build_parser()
+    # The bare token form still parses.
+    assert parser.parse_args(["abandon", "feat"]).token == "feat"
+    # -y / --yes is no longer a recognized flag.
+    with pytest.raises(SystemExit):
+        parser.parse_args(["abandon", "-y", "feat"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["abandon", "--yes", "feat"])
 
 
 def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:

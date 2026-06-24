@@ -63,7 +63,7 @@ def test_resume_change_reports_no_match_and_does_not_spawn(
     assert "'ghost'" in msg
 
 
-def test_abandon_change_runs_imp_abandon_yes_and_returns_rc(
+def test_abandon_change_runs_imp_abandon_and_returns_rc(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -78,7 +78,7 @@ def test_abandon_change_runs_imp_abandon_yes_and_returns_rc(
     rc = spawn.abandon_change(tmp_path, "2026-06-13-abc")
     assert rc == 2
     assert captured["argv"] == [
-        sys.executable, "-m", "imp", "abandon", "2026-06-13-abc", "--yes"]
+        sys.executable, "-m", "imp", "abandon", "2026-06-13-abc"]
     assert captured["cwd"] == tmp_path
     assert "IMP_REMOTE_CONTROL_SOCK" not in captured["env"]
 
