@@ -821,3 +821,40 @@ def test_is_interactive_requires_no_flag_two_ttys_and_color(monkeypatch) -> None
     monkeypatch.setattr(m, "should_use_color", lambda _s: True)
     assert m._is_interactive(
         non_interactive=False, stdin=io.StringIO(), stdout=io.StringIO()) is False
+
+
+def test_resume_prints_splash_banner_before_resuming_header(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_select_headless", lambda *_a, **_k: (False, False))
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: False)
+    monkeypatch.setattr(m, "_warn_if_tui_unavailable", lambda *_a, **_k: None)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m, "_print_splash_banner", lambda **_k: print("<<SPLASH-BANNER>>"))
+
+    async def _ok(*_a, **_k) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+
+    rc = anyio.run(
+        m._async_cmd_resume,
+        argparse.Namespace(token="feat", tui=False, non_interactive=False,
+                           message=None))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "<<SPLASH-BANNER>>" in out
+    assert out.index("<<SPLASH-BANNER>>") < out.index("resuming")
