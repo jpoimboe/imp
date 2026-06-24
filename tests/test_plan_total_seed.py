@@ -37,3 +37,15 @@ def test_plan_writer_does_not_reseed_plan_total_on_later_plans() -> None:
                        vars={"plan_index": 2}, output={"plan_total": 99})
     assert "plan_total" not in m.var_mutations
     assert isinstance(m.action, Continue)
+
+
+def test_plan_writer_documents_first_run_plan_total_estimate() -> None:
+    text = (AGENTS_DIR / "plan-writer.md").read_text()
+    low = text.lower()
+    # A dedicated section states the first-run estimate contract.
+    assert "first-run plan_total estimate" in low
+    # The estimate is gated on the first plan and is an honest count, not boilerplate.
+    assert "plan_index == 1" in text
+    assert "estimate" in low
+    # The complete_step examples carry the plan_total argument.
+    assert "plan_total=" in text
