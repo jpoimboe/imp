@@ -101,9 +101,9 @@ def scene_splash(*, color: bool, width: int, theme: str = "dark",
     from imp.cli import splash
 
     pal.set_theme(theme)
-    lines, phrase = splash.render_scene(index, theme=theme, width=width, color=color)
-    sys.stdout.write("\n".join(lines) + "\n")
-    sys.stdout.write(splash.styled_phrase(phrase, theme=theme, color=color) + "\n")
+    lines = splash.scene_lines(index, theme=theme, color=color)
+    phrase = splash.SCENES[index][1]
+    sys.stdout.write("\n".join(lines) + "\n" + phrase + "\n")
     sys.stdout.flush()
 
 
