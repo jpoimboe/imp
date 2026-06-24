@@ -771,30 +771,42 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
 
+    backlog_interactive = False
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
             print("imp: --backlog and --title cannot be combined "
                   "(--backlog is the title)", file=sys.stderr)
             return 2
-        return _record_idea(args, control)
+        if not args.idea.strip():
+            print("imp: --backlog title must be non-empty", file=sys.stderr)
+            return 2
+        if bool(getattr(args, "non_interactive", False)):
+            return _record_idea(args, control)
+        backlog_interactive = True
 
-    try:
-        playbook_name = getattr(args, "playbook", None)
-        if playbook_name and getattr(args, "spec_file", None):
-            raise SeedError("--playbook and --spec-file are mutually exclusive")
-        if getattr(args, "findings_only", False) and not playbook_name:
-            raise SeedError("--findings-only requires --playbook")
-        seed = resolve_spec_seed(args)
-        if playbook_name:
-            seed = SeedResolution(
-                seed.title,
-                resolve_playbook_seed(
-                    control, playbook_name, getattr(args, "opening", None),
-                    findings_only=getattr(args, "findings_only", False)),
-                opening_intent=None)
-    except (SeedError, ValueError) as e:
-        print(f"imp: {e}", file=sys.stderr)
-        return 2
+    if backlog_interactive:
+        seed_text = backlog.seed_opening(
+            {"title": args.idea, "description": getattr(args, "opening", None) or ""})
+        seed = SeedResolution(
+            title=args.idea, seed_text=seed_text, opening_intent=seed_text)
+    else:
+        try:
+            playbook_name = getattr(args, "playbook", None)
+            if playbook_name and getattr(args, "spec_file", None):
+                raise SeedError("--playbook and --spec-file are mutually exclusive")
+            if getattr(args, "findings_only", False) and not playbook_name:
+                raise SeedError("--findings-only requires --playbook")
+            seed = resolve_spec_seed(args)
+            if playbook_name:
+                seed = SeedResolution(
+                    seed.title,
+                    resolve_playbook_seed(
+                        control, playbook_name, getattr(args, "opening", None),
+                        findings_only=getattr(args, "findings_only", False)),
+                    opening_intent=None)
+        except (SeedError, ValueError) as e:
+            print(f"imp: {e}", file=sys.stderr)
+            return 2
 
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
@@ -832,13 +844,20 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
+    scope_only = backlog_interactive
+    origin = "idea" if backlog_interactive else "draft"
     try:
-        change = Change.create_draft(control, title=title, change_id=change_id,
-                                     base_branch=base, workflow=wf_arg,
-                                     origin="draft")
+        change = Change.create_draft(
+            control, title=title, change_id=change_id, base_branch=base,
+            workflow=wf_arg, origin=origin,
+            depends_on=(list(getattr(args, "depends_on", None) or [])
+                        if backlog_interactive else None),
+            seed_opening=(opening_text if backlog_interactive else None))
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
+
+    _scope_kw: dict[str, Any] = {"scope_only": True} if scope_only else {}
 
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
@@ -857,14 +876,14 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent)
+            opening_intent=opening_intent, **_scope_kw)
 
     if _tui_requested(args):
         _print_run_header(
             change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
         return await _run_tui_session(change, seed_opening=opening_text,
                                       opening_intent=opening_intent,
-                                      leave_mode=leave_mode)
+                                      leave_mode=leave_mode, **_scope_kw)
 
     _print_run_header(
         change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
@@ -878,7 +897,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     return await run_session_client(
         change, driver=driver, coord=coord, solicit=solicit,
         seed_opening=opening_text, status=status,
-        opening_intent=opening_intent, leave_mode=leave_mode)
+        opening_intent=opening_intent, leave_mode=leave_mode, **_scope_kw)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
