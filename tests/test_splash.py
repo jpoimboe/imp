@@ -596,3 +596,31 @@ def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
     idx = [names.index(b.__name__) for b, _p, _w in expect]
     assert idx == sorted(idx)
     assert names.index("_s_scroll") < idx[0]
+
+
+def test_nocturnal_scenes_one_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._campfire(g, 24, 13)
+    assert g[4][23] == splash._P["ember"]      # first rising ember at (23,4)
+    g = splash._make_grid()
+    splash._s_fireflies(g)
+    assert g[3][20] == splash._P["spark"]       # firefly core at (20,3)
+    g = splash._make_grid()
+    splash._s_spider_web(g)
+    assert g[6][23] == splash._P["catEye"]      # left spider eye at (23,6)
+    g = splash._make_grid()
+    splash._s_bats(g)
+    assert g[3][22] == splash._P["ravenC"]      # first bat body centre at (22,3)
+    expect = [
+        (splash._s_campfire, "by emberlight, we code.", splash.ANY),
+        (splash._s_fireflies, "the lights are out to play.", splash.ANY),
+        (splash._s_spider_web, "caught in a bug? i'll cut it loose.", splash.ANY),
+        (splash._s_bats, "creatures of the night, assemble.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_glowing_mushrooms") < idx[0]

@@ -650,6 +650,52 @@ def _mush(g: Grid, x: int, by: int, h: int, cap: Color | None, cap_d: Color | No
     _px(g, x - 1, by - h - 1, _P["white"])
 
 
+def _campfire(g: Grid, cx: int, by: int) -> None:
+    _line(g, cx - 4, by, cx + 4, by - 2, _P["wood"])
+    _line(g, cx - 4, by - 2, cx + 4, by, _P["wood"])
+    for i in range(6):
+        w = 3 - i // 2
+        c = _P["fire1"] if i < 2 else (_P["fire2"] if i < 4 else _P["fire3"])
+        for x in range(cx - w, cx + w + 1):
+            _px(g, x, by - 1 - i, c)
+    for k in range(4):
+        _px(g, cx - 1 + k, by - 9 - k, _P["ember"])
+
+
+def _firefly(g: Grid, x: int, y: int) -> None:
+    _px(g, x, y, _P["spark"])
+    _px(g, x - 1, y, _P["O"])
+    _px(g, x + 1, y, _P["O"])
+    _px(g, x, y - 1, _P["O"])
+    _px(g, x, y + 1, _P["O"])
+
+
+def _spider(g: Grid) -> None:
+    _line(g, 18, 0, 30, 12, _P["dim"])
+    _line(g, 30, 0, 18, 12, _P["dim"])
+    _line(g, 24, 0, 24, 12, _P["dim"])
+    _line(g, 18, 6, 30, 6, _P["dim"])
+    _ring(g, 24, 6, 4, 4, _P["dim"], 0.7, 1.1)
+    _disc(g, 24, 6, 1.4, 1.4, _P["ravenC"])
+    for d in (-2, -1, 1, 2):
+        _px(g, 24 + d, 6 - 2, _P["ravenC"])
+        _px(g, 24 + d, 6 + 2, _P["ravenC"])
+    _px(g, 23, 6, _P["catEye"])
+    _px(g, 25, 6, _P["catEye"])
+
+
+def _bat(g: Grid, cx: int, cy: int) -> None:
+    _disc(g, cx, cy, 1.4, 1.2, _P["ravenC"])
+    _px(g, cx - 1, cy - 2, _P["ravenC"])
+    _px(g, cx + 1, cy - 2, _P["ravenC"])
+    _line(g, cx - 1, cy, cx - 4, cy - 1, _P["ravenC"])
+    _line(g, cx - 4, cy - 1, cx - 6, cy + 1, _P["ravenC"])
+    _line(g, cx + 1, cy, cx + 4, cy - 1, _P["ravenC"])
+    _line(g, cx + 4, cy - 1, cx + 6, cy + 1, _P["ravenC"])
+    _line(g, cx - 4, cy - 1, cx - 5, cy + 1, _P["ravenC"])
+    _line(g, cx + 4, cy - 1, cx + 5, cy + 1, _P["ravenC"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -863,6 +909,34 @@ def _s_glowing_mushrooms(g: Grid) -> None:
     _L(g)
 
 
+def _s_campfire(g: Grid) -> None:
+    _stars(g, 8, 0.34)
+    _mountains(g, 14, 16)
+    _ground(g, 14, _P["mtnNear"])
+    _campfire(g, 24, 13)
+    _L(g)
+
+
+def _s_fireflies(g: Grid) -> None:
+    _stars(g, 6, 0.18)
+    for x, y in [(20, 3), (26, 5), (22, 8), (28, 7), (24, 11)]:
+        _firefly(g, x, y)
+    _L(g)
+
+
+def _s_spider_web(g: Grid) -> None:
+    _spider(g)
+    _L(g)
+
+
+def _s_bats(g: Grid) -> None:
+    _stars(g, H, 0.22)
+    _bat(g, 22, 3)
+    _bat(g, 27, 6)
+    _bat(g, 24, 10)
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -901,6 +975,10 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_tarot, "pick a card. any card.", ANY),
     (_s_quill_ink, "name your desire.", ANY),
     (_s_glowing_mushrooms, "let's make some mischief.", ANY),
+    (_s_campfire, "by emberlight, we code.", ANY),
+    (_s_fireflies, "the lights are out to play.", ANY),
+    (_s_spider_web, "caught in a bug? i'll cut it loose.", ANY),
+    (_s_bats, "creatures of the night, assemble.", ANY),
 ]
 
 MIN_WIDTH = 32
