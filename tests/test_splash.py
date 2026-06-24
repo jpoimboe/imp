@@ -858,3 +858,36 @@ def test_resume_prints_splash_banner_before_resuming_header(
     assert rc == 0
     assert "<<SPLASH-BANNER>>" in out
     assert out.index("<<SPLASH-BANNER>>") < out.index("resuming")
+
+
+def test_headless_resume_prints_no_splash_banner(
+    tmp_path, monkeypatch,
+) -> None:
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    banner_called = []
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_select_headless", lambda *_a, **_k: (True, False))
+    monkeypatch.setattr(
+        m, "_print_splash_banner", lambda **_k: banner_called.append(True))
+
+    async def _ok(*_a, **_k) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+
+    rc = anyio.run(
+        m._async_cmd_resume,
+        argparse.Namespace(token="feat", tui=False, non_interactive=False,
+                           message=None))
+    assert rc == 0
+    assert not banner_called
