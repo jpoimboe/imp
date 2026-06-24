@@ -588,11 +588,11 @@ def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
     splash._s_will_o_wisp(g)
     assert g[4][22] == splash._P["wisp"]         # spark at (22,4) survives the scene
     expect = [
-        (splash._s_crystal_cluster, "small imp, big leverage.", splash.ANY),
-        (splash._s_will_o_wisp, "follow the light.", splash.ANY),
+        (splash._s_crystal_cluster, "small imp. sharp edges.", splash.ANY),
+        (splash._s_will_o_wisp, "one light in the dark. stay close.", splash.ANY),
         (splash._s_tarot, "pick a card. any card.", splash.ANY),
-        (splash._s_quill_ink, "name your desire.", splash.ANY),
-        (splash._s_glowing_mushrooms, "let's make some mischief.", splash.ANY),
+        (splash._s_quill_ink, "name it. i'll put it to ink.", splash.ANY),
+        (splash._s_glowing_mushrooms, "toadstool glow's up. trouble's brewing.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
