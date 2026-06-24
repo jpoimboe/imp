@@ -154,3 +154,44 @@ def test_imp_offset_shifts_the_sprite_up() -> None:
     splash._imp(g, 2, -1)
     assert g[0][5] is None            # horn row pushed off the top at oy=-1
     assert any(c == splash._P["o"] for row in g for c in row)
+
+
+def test_cell_is_a_space_when_both_halves_are_transparent() -> None:
+    assert splash._cell(None, None, color=True) == " "
+    assert splash._cell(None, None, color=False) == " "
+
+
+def test_cell_emits_top_fg_bottom_bg_upper_half_block_when_coloured() -> None:
+    out = splash._cell((255, 0, 0), (0, 255, 0), color=True)
+    assert out == "\x1b[38;2;255;0;0m\x1b[48;2;0;255;0m▀\x1b[0m"
+
+
+def test_cell_colored_top_only_emits_fg_and_upper_block() -> None:
+    assert splash._cell((255, 0, 0), None, color=True) == "\x1b[38;2;255;0;0m▀\x1b[0m"
+
+
+def test_cell_colored_bottom_only_emits_bottom_fg_and_lower_block() -> None:
+    assert splash._cell(None, (0, 255, 0), color=True) == "\x1b[38;2;0;255;0m▄\x1b[0m"
+
+
+def test_cell_colour_off_uses_a_bare_half_block_with_no_escapes() -> None:
+    assert splash._cell((255, 0, 0), None, color=False) == "▀"
+    assert splash._cell(None, (0, 255, 0), color=False) == "▄"
+    assert "\x1b[" not in splash._cell((1, 2, 3), (4, 5, 6), color=False)
+    assert splash._cell((1, 2, 3), (4, 5, 6), color=False) == "▀"
+
+
+def test_encode_row_pairs_top_and_bottom_and_rstrips_trailing_space() -> None:
+    g = splash._make_grid()
+    g[0][0] = (255, 0, 0)
+    g[1][0] = (0, 255, 0)
+    row = splash._encode_row(g, 0, 1, color=True)
+    assert row == "\x1b[38;2;255;0;0m\x1b[48;2;0;255;0m▀\x1b[0m"
+
+
+def test_encode_grid_yields_eight_lines_and_handles_the_odd_last_row() -> None:
+    g = splash._make_grid()
+    g[14][19] = (1, 2, 3)  # last row has no paired bottom row (index 15 is absent)
+    lines = splash._encode_grid(g, color=False)
+    assert len(lines) == 8
+    assert lines[7].endswith("▀")
