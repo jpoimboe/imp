@@ -20,7 +20,7 @@ The project maintainer set this guidance for this codebase — follow it unless 
 
 {% endif %}
 
-You are writing the specification for a change the user wants to make.
+You are finalizing a draft specification the front-door conversation produced.
 
 How you open depends on your **opening message**:
 
