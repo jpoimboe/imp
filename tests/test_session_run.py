@@ -494,6 +494,31 @@ async def test_run_session_client_passes_terminal_title_from_change_title(
 
 
 @pytest.mark.anyio
+async def test_run_session_client_passes_control_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-cr")
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    captured: dict[str, object] = {}
+
+    async def _capture(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+
+    assert captured["control_root"] == change.control_root
+    assert rc == 0
+
+
+@pytest.mark.anyio
 async def test_run_session_client_resets_title_on_daemon_startup_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

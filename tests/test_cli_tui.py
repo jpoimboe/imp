@@ -231,7 +231,7 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
             captured.append(self)
 
     async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+        *, attach, driver, coord, solicit, change_id: str = "", control_root=None, leave_state=None
     ) -> None:
         driver.on_event({"id": "1", "agent_id": None, "type": "change_created",
                          "payload": {"slug": "s", "title": "t"}})
@@ -244,7 +244,7 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
     monkeypatch.setattr(m, "_handle_terminal_outcome",
                         lambda change, result, coord: outcomes.append(result) or 0)
 
-    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"))
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id", control_root=None))
 
     assert rc == 0
     assert outcomes == [RunResult.COMPLETED]
@@ -256,7 +256,7 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
 @pytest.mark.anyio
 async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
     async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+        *, attach, driver, coord, solicit, change_id: str = "", control_root=None, leave_state=None
     ) -> None:
         await coord.signal_pause(reason="ctrl-c")     # sets should_pause + reason
 
@@ -267,7 +267,7 @@ async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
     monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.PAUSED)
     monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 1)
 
-    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"))
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id", control_root=None))
 
     assert rc == 130
 
@@ -281,7 +281,7 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
             return "the reply"
 
     async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", leave_state=None
+        *, attach, driver, coord, solicit, change_id: str = "", control_root=None, leave_state=None
     ) -> None:
         replies.append(await solicit("prompt?"))
 
@@ -292,7 +292,7 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
     monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
     monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
 
-    rc = await m._run_tui_session(SimpleNamespace(id="fake-id"))
+    rc = await m._run_tui_session(SimpleNamespace(id="fake-id", control_root=None))
 
     assert rc == 0
     assert replies == ["the reply"]

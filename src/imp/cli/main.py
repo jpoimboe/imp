@@ -441,7 +441,17 @@ async def _maybe_apply_leave_disposition(
     change: Change, leave_mode: str | None, leave_state: dict[str, str],
 ) -> int | None:
     """Finalize a left phase-0 conversation. Returns 0 when applied, None to defer."""
-    if leave_mode is None or leave_state.get("intent") == "abandon":
+    intent = leave_state.get("intent")
+    if intent == "abandon":
+        label = change.title or change.id
+        if leave_state.get("materialized") == "1":
+            print(f"imp: '{label}' abandoned — torn down; "
+                  f"find it later with `imp search`")
+        else:
+            print(f"imp: '{label}' abandoned — "
+                  f"recover with `imp resume {change.id}`")
+        return None
+    if leave_mode is None:
         return None
     try:
         change = Change.load(change.control_root, change.id)
@@ -685,7 +695,8 @@ async def _run_tui_session(
                     with contextlib.suppress(TimeoutError):
                         await run_terminal_client(
                             attach=attach, driver=app, coord=coord, solicit=_solicit,
-                            change_id=change.id, leave_state=leave_state)
+                            change_id=change.id, control_root=change.control_root,
+                            leave_state=leave_state)
                 finally:
                     app.exit()
 
