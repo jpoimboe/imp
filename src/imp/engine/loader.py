@@ -581,6 +581,13 @@ def _parse_phase_chrome(praw: dict[str, Any], source: SourceLoc) -> str | None:
     return "none"
 
 
+def _parse_phase_label(praw: dict[str, Any], source: SourceLoc) -> str | None:
+    label = praw.get("label")
+    if label is not None and not isinstance(label, str):
+        raise LoadError("a phase's `label:` must be a string", source)
+    return label
+
+
 def _parse_step(
     raw: dict[str, Any],
     phase_name: str,
@@ -590,6 +597,7 @@ def _parse_step(
     var_types: dict[str, ExprType],
     yaml_path: Path,
     chrome: str | None = None,
+    phase_label: str | None = None,
 ) -> Step:
     fallback = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
@@ -647,6 +655,7 @@ def _parse_step(
             acquire=acquire,
             release=release,
             chrome=chrome,
+            phase_label=phase_label,
         )
     elif kind == "script":
         step = Step(
@@ -658,6 +667,7 @@ def _parse_step(
             quiet=quiet,
             label=label,
             chrome=chrome,
+            phase_label=phase_label,
         )
     elif kind in ("merge_and_exit_worktree",):
         step = Step(
@@ -666,6 +676,7 @@ def _parse_step(
             quiet=quiet,
             label=label,
             chrome=chrome,
+            phase_label=phase_label,
         )
     else:  # branch
         step = Step(
@@ -676,6 +687,7 @@ def _parse_step(
             acquire=acquire,
             release=release,
             chrome=chrome,
+            phase_label=phase_label,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).
@@ -750,12 +762,13 @@ def load_workflow(
         if not isinstance(steps_raw, list):
             raise LoadError(f"phase {pname!r}: 'steps' must be a list", psrc)
         phase_chrome = _parse_phase_chrome(praw, psrc)
+        phase_label = _parse_phase_label(praw, psrc)
         steps = tuple(
             _parse_step(s, pname, workflow_dir, defaults, agents, var_types,
-                        yaml_path, chrome=phase_chrome)
+                        yaml_path, chrome=phase_chrome, phase_label=phase_label)
             for s in steps_raw
         )
-        phase_objs.append(Phase(name=pname, steps=steps, source=psrc))
+        phase_objs.append(Phase(name=pname, steps=steps, source=psrc, label=phase_label))
 
     # Best-effort cycle pre-check on the workflow's per-step differ_from DAG.
     # The authoritative validator is in providers.resolve.resolve_run; this
