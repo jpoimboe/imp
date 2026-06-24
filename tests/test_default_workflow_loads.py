@@ -136,7 +136,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "front-door": "ideating",
+        "front-door": "{{ front_door_status_phrase() }}",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}",

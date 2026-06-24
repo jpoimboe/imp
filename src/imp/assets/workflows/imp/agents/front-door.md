@@ -1,6 +1,6 @@
 ---
 name: front-door
-label: ideating
+label: "{{ front_door_status_phrase() }}"
 description: An open conversation — answer questions about imp, scout existing work, or scope a build — that goes live only when the user is ready.
 subagents: [explorer, researcher]
 drivers: [impty]

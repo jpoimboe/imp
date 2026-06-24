@@ -30,7 +30,7 @@ def test_front_door_is_first_phase_with_chrome_none() -> None:
     assert step.name == "front-door"
     assert step.kind == "agent"
     assert step.chrome == "none"          # bare-conversation render (Part 1 mechanism)
-    assert step.label == "ideating"
+    assert step.label == "{{ front_door_status_phrase() }}"
 
 
 def test_front_door_express_routes_to_plan_writer_and_sets_fast_path() -> None:
@@ -200,3 +200,11 @@ def test_front_door_routes_inline_satisfiable_requests_to_wait_for_user() -> Non
     assert "go-live build terminator" in low
     assert "build *quickly*" in body
     assert "no-build exit" in low
+
+
+def test_front_door_status_label_resolves_to_a_pool_member() -> None:
+    from imp.agents.front_door_status import FRONT_DOOR_STATUS_PHRASES
+    from imp.agents.prompts import render_label
+    step = _wf().phases[0].steps[0]
+    rendered = render_label(step.label, change=None, log=None)
+    assert rendered in FRONT_DOOR_STATUS_PHRASES
