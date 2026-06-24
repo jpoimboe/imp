@@ -19,7 +19,7 @@ vars:
   change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-plan, not re-paneled
   integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
   plan_index:             {type: int, default: 1}         # current plan number, rendered in plan/task step labels
-  plan_total:             {type: int, default: 0}         # anticipated total plans (0 = unknown → drops the denominator); sole emitter plan-cycle-check
+  plan_total:             {type: int, default: 1}         # anticipated total plans; always >= plan_index. plan-cycle-check refines/clamps it each lap.
   task_total:             {type: int, default: 0}         # tasks in the current plan, set by plan-finalized
 
 defaults:
@@ -80,12 +80,13 @@ phases:
           - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 
   - name: plan
+    label: "planning phase"
     steps:
       # plan-writer is the plan-phase entry: the spec phase routes here, and supercycle/rework goto plan-writer directly.
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
-        label: "plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · writing"
+        label: "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
 
       - name: plan-verify-commit
         quiet: true
@@ -98,7 +99,7 @@ phases:
       - name: plan-reviewer
         file: agents/plan-reviewer.md
         tier: high
-        label: "plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · reviewing"
+        label: "reviewing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
         read_only: ["."]
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
@@ -119,7 +120,7 @@ phases:
       - name: plan-finalized
         file: agents/plan-finalized.md
         tier: medium
-        label: "plan {{ vars.plan_index }}{% if vars.plan_total %}/{{ vars.plan_total }}{% endif %} · finalizing"
+        label: "finalizing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
         read_only: ["."]
         rules:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
