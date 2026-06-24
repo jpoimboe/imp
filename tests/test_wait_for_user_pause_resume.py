@@ -522,3 +522,109 @@ async def test_claude_code_e2e_headless_pause_then_attended_resume(
     log_types = [e["type"] for e in log_events]
     assert "awaiting_user_input" in log_types
     assert "user_message" in log_types
+
+
+# ── Task 3 — regression: trailing-interrupt shape routes to AWAITING_USER ────
+
+
+@pytest.mark.anyio
+async def test_cc_resume_trailing_interrupt_resolves_not_unbalanced(
+    tmp_path: Path,
+) -> None:
+    """claude_code: a resume of [assistant wait_for_user][user interrupt] with a
+    reply channel re-presents the ask (awaiting_user_input) and resolves it with
+    the real reply before any query — never replaying the unbalanced ask."""
+    import dataclasses
+
+    from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+
+    inv = _cc_inv(tmp_path)
+    seed = Transcript(inv.transcript_dir / "transcript.jsonl")
+    seed.append(Message(role="assistant", content=(
+        TextBlock(text="need approval"),
+        ToolUseBlock(id="w7", name="wait_for_user", input={"prompt": "ok?"}))))
+    seed.append(Message(role="user", content=(
+        TextBlock(text="[Request interrupted by user]"),)))
+
+    log_resume = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=[
+            assistant(text("done"),
+                      tool_use("c1", "complete_step",
+                               {"outcome": "ok", "status": "Success"})),
+            result(),
+        ]),
+        user_input_fn=lambda _p: "go ahead")
+    inv_resume = dataclasses.replace(
+        inv, event_log=log_resume, balance_on_resume=True, non_interactive=False)
+
+    events = [ev async for ev in runner.run(inv_resume)]
+    kinds = [e["type"] for e in events]
+    log_types = [e["type"] for e in log_resume.read()]
+
+    assert "awaiting_user_input" in log_types
+    assert "agent_output" in kinds
+
+    injected = None
+    for m in Transcript(inv.transcript_dir / "transcript.jsonl").load():
+        for b in m.content:
+            if isinstance(b, ToolResultBlock) and b.tool_use_id == "w7":
+                injected = b
+    assert injected is not None
+    assert injected.content == "go ahead"
+    assert injected.is_error is False
+
+
+@pytest.mark.anyio
+async def test_cc_resume_trailing_interrupt_no_channel_withholds_query(
+    tmp_path: Path,
+) -> None:
+    """claude_code: the same shape with NO reply channel must NOT stream the
+    unbalanced ask to the provider — it returns a clean no_user_input_fn error and
+    never reaches a query (the client factory is never invoked)."""
+    import dataclasses
+
+    from imp.agents.runner import Message, TextBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+
+    inv = _cc_inv(tmp_path)
+    seed = Transcript(inv.transcript_dir / "transcript.jsonl")
+    seed.append(Message(role="assistant", content=(
+        TextBlock(text="need approval"),
+        ToolUseBlock(id="w8", name="wait_for_user", input={"prompt": "ok?"}))))
+    seed.append(Message(role="user", content=(
+        TextBlock(text="[Request interrupted by user]"),)))
+
+    queried = {"hit": False}
+
+    def factory(opts):
+        queried["hit"] = True
+        return FakeClaudeSDKClient(opts, scripted_messages=[
+            assistant(text("should-not-run"),
+                      tool_use("c1", "complete_step",
+                               {"outcome": "x", "status": "Success"})),
+            result(),
+        ])
+
+    runner = ClaudeCodeAgentRunner(  # no user_input_fn → no reply channel
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    inv_resume = dataclasses.replace(
+        inv, event_log=InMemoryEventLog(), balance_on_resume=True,
+        non_interactive=True)
+
+    events = [ev async for ev in runner.run(inv_resume)]
+    kinds = [e["type"] for e in events]
+
+    assert "agent_output" not in kinds
+    assert queried["hit"] is False, "no transcript may be streamed to the provider"
+    errors = [e for e in events if e["type"] == "error"]
+    assert errors
+    assert errors[0]["payload"]["kind"] == "no_user_input_fn"
