@@ -3,9 +3,9 @@
 One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
 EOFError — the CLI's signal handler catches both and triggers save-and-exit.
 
-ESC during the prompt is owned by prompt_toolkit's built-in handling
-(meta-prefix in emacs mode; leaves insert mode in vi mode — see editing_mode
-plumbing).
+A bare ESC is still owned by prompt_toolkit's built-in handling (meta-prefix
+in emacs mode; leaves insert mode in vi mode — see editing_mode plumbing).
+Alt+Enter (`escape c-m`) is bound by `_build_session` to insert a newline.
 
 History is per-session in-memory; persisted history is a post-V0 feature.
 """
@@ -38,6 +38,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                    color: bool = False) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
+    from prompt_toolkit.filters import completion_is_selected
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
 
@@ -63,11 +64,27 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             # returned Future is intentionally not awaited from this sync handler.
             run_in_terminal(lambda: print("press ctrl-d to exit"))
 
+    @kb.add("c-m", filter=~completion_is_selected)
+    def _(event: Any) -> None:
+        # Enter submits. Alt+Enter (below) inserts a newline — the pair is the
+        # reverse of prompt_toolkit's multiline default (Enter=newline,
+        # Meta+Enter=accept). The filter lets Enter still ACCEPT a selected
+        # completion (prompt_toolkit's default c-m binding) rather than submit.
+        event.app.current_buffer.validate_and_handle()
+
+    @kb.add("c-j", filter=~completion_is_selected)
+    def _(event: Any) -> None:
+        event.app.current_buffer.validate_and_handle()
+
+    @kb.add("escape", "c-m")
+    def _(event: Any) -> None:
+        event.app.current_buffer.insert_text("\n")
+
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
     return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
                          editing_mode=mode, erase_when_done=True,
-                         reserve_space_for_menu=0)
+                         multiline=True, reserve_space_for_menu=0)
 
 
 class SlashCompleter:
@@ -137,7 +154,7 @@ class Prompt:
         return indent + text
 
     def ask(self, prompt_text: str | None = None) -> str:
-        """Read a single line. Returns the user's text.
+        """Read input. Returns the user's text.
         Raises KeyboardInterrupt (Ctrl+C) or EOFError (Ctrl+D) up to caller."""
         # handle_sigint=False: see ask_async for the rationale. The sync path is
         # not used interactively, but we keep the two consistent.

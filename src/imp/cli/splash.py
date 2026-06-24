@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import math
 import random
+import re
 from collections.abc import Callable
 
 Color = tuple[int, int, int] | str
@@ -21,6 +22,12 @@ H = 15
 
 _RESET = "\x1b[0m"
 _ITALIC = "\x1b[3m"
+
+_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visible_width(s: str) -> int:
+    return len(_SGR_RE.sub("", s))
 
 # name -> (fg SGR code, bg SGR code) for the 16 named ANSI colors.
 _NAMED: dict[str, tuple[int, int]] = {
@@ -1287,11 +1294,14 @@ def scene_lines(index: int, *, theme: str, color: bool) -> list[str]:
 
 
 def splash_block(*, theme: str, width: int, color: bool) -> str:
-    """The opening splash: a random eligible scene over a grey-blue italic tagline."""
+    """The opening splash: a random eligible scene over a centered grey-blue
+    italic tagline (centered relative to the art's rendered width)."""
     index = choose_index()
     phrase = SCENES[index][1]
     if not color or width < MIN_WIDTH:
         return phrase
     lines = scene_lines(index, theme=theme, color=color)
-    tag = _fg_open(_build_palette(theme)["tag"]) + _ITALIC + phrase + _RESET
+    art_w = max((_visible_width(ln) for ln in lines), default=0)
+    pad = " " * max(0, (art_w - len(phrase)) // 2)
+    tag = pad + _fg_open(_build_palette(theme)["tag"]) + _ITALIC + phrase + _RESET
     return "\n".join(lines) + "\n" + tag

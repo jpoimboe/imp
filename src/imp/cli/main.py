@@ -594,6 +594,23 @@ def _print_run_header(change_id: str, title: str, marker: str,
     print()
 
 
+async def _read_opening_message(
+    change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
+    width: int, editing_mode: str,
+    _prompt_factory: Callable[[], Any] | None = None,
+) -> str | None:
+    """Print the run header, then read the opening message — header first so the
+    layout stays put when erase_when_done erases and the turn is reprinted."""
+    if banner_shown:
+        print()
+    _print_run_header(change.id, change.title, leave_mode, color=color)
+    make = _prompt_factory or (
+        lambda: Prompt(editing_mode=editing_mode, color=color))
+    prompt = make()
+    reply = await prompt.ask_async(width=width, hint=OPENING_HINT)
+    return _normalize_opening_reply(reply)
+
+
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -824,21 +841,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
     banner_shown = _print_splash_banner(interactive=interactive)
-    if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
-        if banner_shown:
-            print()
-        color = should_use_color(sys.stdout)
-        prompt = Prompt(editing_mode=_editing_mode(control), color=color)
-        try:
-            reply = (await prompt.ask_async(width=_term_width(),
-                                            hint=OPENING_HINT)).strip()
-        except (EOFError, KeyboardInterrupt):
-            print("imp: cancelled", file=sys.stderr)
-            return 130
-        # An empty reply falls back to the unseeded path (front-door opens
-        # by asking); a real answer becomes the opening intent.
-        opening_text = _normalize_opening_reply(reply)
-        opening_intent = opening_text
+    color = should_use_color(sys.stdout)
 
     change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title. The agent
@@ -859,14 +862,33 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     _scope_kw: dict[str, Any] = {"scope_only": True} if scope_only else {}
 
+    # Print the run header before the prompt so erase/reprint causes no layout jump.
+    header_printed = False
+    if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
+        try:
+            reply = await _read_opening_message(
+                change, leave_mode=leave_mode, banner_shown=banner_shown,
+                color=color, width=_term_width(),
+                editing_mode=_editing_mode(control))
+        except (EOFError, KeyboardInterrupt):
+            discard_conversation(change)   # drop the just-minted draft on cancel
+            print("imp: cancelled", file=sys.stderr)
+            return 130
+        header_printed = True
+        # An empty reply falls back to the unseeded path (front-door opens
+        # by asking); a real answer becomes the opening intent.
+        opening_text = reply
+        opening_intent = reply
+
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
                   f"`imp resume {change.id}`", file=sys.stderr)
-        _print_run_header(
-            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+        if not header_printed:
+            _print_run_header(
+                change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -879,14 +901,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             opening_intent=opening_intent, **_scope_kw)
 
     if _tui_requested(args):
-        _print_run_header(
-            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+        if not header_printed:
+            _print_run_header(
+                change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
         return await _run_tui_session(change, seed_opening=opening_text,
                                       opening_intent=opening_intent,
                                       leave_mode=leave_mode, **_scope_kw)
 
-    _print_run_header(
-        change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+    if not header_printed:
+        _print_run_header(
+            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(stream=sys.stdout,
                         color=should_use_color(sys.stdout),
