@@ -13,6 +13,7 @@ PYTHON   ?= python3
 PYTEST   ?= $(PYTHON) -m pytest
 RUFF     ?= $(PYTHON) -m ruff
 MYPY     ?= $(PYTHON) -m mypy
+UV       ?= uv
 # Empirical: serial ~282s -> parallel ~34s (-n auto, 12 workers); 20 runs identical; serial override: make test XDIST=
 XDIST    ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n auto --dist loadgroup")
 
@@ -98,7 +99,7 @@ typecheck: ## Run mypy on the source tree.
 
 .PHONY: lockcheck
 lockcheck: ## Verify uv.lock is in sync with pyproject.toml.
-	uv lock --check
+	$(UV) lock --check
 
 .PHONY: check
 check: lint typecheck lockcheck test ## Full pre-merge gate: lint + types + lockfile + tests.
