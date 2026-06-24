@@ -271,10 +271,11 @@ phases:
 
   # ── merge: the FIFO merge queue. Only the head touches the base. ───────
   - name: merge
+    label: "integration phase"
     steps:
       - name: wait-for-head
         acquire: base
-        label: merge · waiting
+        label: waiting in merge queue
         rules:
           - {else: true, continue: true}
 
@@ -290,14 +291,14 @@ phases:
       - name: reconciler
         file: agents/reconciler.md
         tier: high
-        label: merge · reconciling
+        label: resolving merge conflicts
         rules:
           - {if: {stuck: true}, pause: true}
           - {else: true, continue: true}
 
       - name: integration-verify
         command: ./scripts/run-verify.sh
-        label: merge · testing
+        label: running tests
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
@@ -307,7 +308,7 @@ phases:
       - name: integration-reviewer
         file: agents/integration-review.md
         tier: high
-        label: merge · reviewing
+        label: reviewing merge conflicts
         max_loops: 6
         rules:
           - {if: {blocking: true}, resume: reconciler,
@@ -331,7 +332,7 @@ phases:
       - name: autosquash-resolve-merge
         file: agents/autosquash-resolve.md
         tier: high
-        label: merge · resolving fixups
+        label: resolving merge fixups
         max_loops: 6
         rules:
           - {else: true, goto: cleanup-merge}
@@ -345,7 +346,7 @@ phases:
 
       - name: merge-to-base
         kind: merge_and_exit_worktree
-        label: merge · finalizing
+        label: merging
         rules:
           - {if: {merge: MERGED}, continue: true}
           - {else: true, pause: true}
