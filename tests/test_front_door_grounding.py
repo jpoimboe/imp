@@ -61,3 +61,29 @@ def test_front_door_introduces_no_new_cli_command_or_read_tool() -> None:
     for banned in ("list_changes", "show_change",
                    "imp explain", "imp doctor", "imp workflow show"):
         assert banned not in body, banned
+
+
+def test_front_door_has_lazy_orientation_cue() -> None:
+    body = _front_door()
+    # The cue lives in its own section.
+    assert "## Orienting before you offer" in body
+    low = body.lower()
+    # Orient by reading the tree (manifest/build files) or dispatching an explorer.
+    assert "manifest" in low
+    assert "explorer" in low
+    # Ground the offer in an established stack when one is found.
+    assert "established stack" in low
+    # Treat an empty/greenfield repo's stack as an open design question.
+    assert "greenfield" in low
+    assert "open design question" in low
+    # Orientation is lazy / on demand — a pure imp-mechanics question does not
+    # trigger a project-stack read.
+    assert "how does imp work" in low
+    assert "lazy" in low or "on demand" in low
+    # The cue honors Speak plainly and surfaces no internal terms. Scope this to
+    # the new section so the assertion can't pass on the body's pre-existing
+    # "## Speak plainly" heading.
+    marker = "## Orienting before you offer"
+    start = body.index(marker)
+    section = body[start:body.index("{% include", start)].lower()
+    assert "speak plainly" in section
