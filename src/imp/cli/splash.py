@@ -423,6 +423,24 @@ def _aurora(g: Grid) -> None:
     _px(g, 27, 9, _P["bright"])
 
 
+def _galaxy(g: Grid, cx: int, cy: int) -> None:
+    for a in range(22):
+        t = a * 0.5
+        r = t * 0.7
+        _px(g, cx + math.cos(t) * r, cy + math.sin(t) * r * 0.7,
+            _P["star"] if a % 3 else _P["bright"])
+        _px(g, cx - math.cos(t) * r, cy - math.sin(t) * r * 0.7,
+            _P["port"] if a % 3 else _P["portI"])
+    _disc(g, cx, cy, 1.2, 1.2, _P["bright"])
+
+
+def _void_hole(g: Grid, cx: int, cy: int) -> None:
+    _glow_ring(g, cx, cy, 4, _P["ember"])
+    _ring(g, cx, cy, 4.6, 2.8, _P["O"], 0.7, 1.1)
+    _ring(g, cx, cy, 4.6, 2.8, _P["port"], 0.85, 1.0)
+    _disc(g, cx, cy, 2.4, 1.6, _P["voidCore"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -499,6 +517,29 @@ def _s_starfield(g: Grid) -> None:
     _L(g)
 
 
+def _s_galaxy(g: Grid) -> None:
+    _stars(g, H, 0.14)
+    _galaxy(g, 24, 6)
+    _L(g)
+
+
+def _s_void(g: Grid) -> None:
+    _stars(g, H, 0.18)
+    _void_hole(g, 23, 7)
+    _L(g)
+
+
+def _s_summoning_circle(g: Grid) -> None:
+    _stars(g, 8, 0.35)
+    _ring(g, 14, 12, 13, 2.3, _P["port"], 0.74, 1.08)
+    _ring(g, 14, 12, 9, 1.6, _P["portG"], 0.66, 1.16)
+    for a in range(0, 360, 45):
+        t = a * math.pi / 180
+        _px(g, 14 + math.cos(t) * 13, 12 + math.sin(t) * 2.3, _P["rune"])
+    _spark(g, 22, 9, _P["rune"])
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -515,7 +556,10 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_mountain_moon, "welcome back.", ANY),
     (_s_comet, "something wicked this way ships.", ANY),
     (_s_aurora, "the sky's showing off — let's match it.", ANY),
+    (_s_galaxy, "lost in the stack? i know the way.", ANY),
+    (_s_void, "conjured from the void.", ANY),
     (_s_starfield, "your imp is listening.", ANY),
+    (_s_summoning_circle, "the circle is drawn.", ANY),
 ]
 
 MIN_WIDTH = 32

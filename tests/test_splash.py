@@ -434,3 +434,44 @@ def test_cosmic_batch_b_scenes_are_wired_in_gallery_order() -> None:
     names = [b.__name__ for b, _p, _w in splash.SCENES]
     assert names.index("_s_constellation") < names.index("_s_ringed_planet")
     assert names.index("_s_ringed_planet") < names.index("_s_starfield")
+
+
+def test_galaxy_paints_a_bright_core_and_a_mirrored_arm() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._galaxy(g, 24, 6)
+    assert g[6][24] == splash._P["bright"]  # core disc centre
+    assert any(c == splash._P["port"] for row in g for c in row)  # mirrored arm hue
+
+
+def test_void_hole_paints_a_dark_core_inside_an_ember_glow() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._void_hole(g, 23, 7)
+    assert any(c == splash._P["voidCore"] for row in g for c in row)
+    assert any(c == splash._P["ember"] for row in g for c in row)
+
+
+def test_summoning_circle_scene_paints_a_portal_ring_and_runes() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._s_summoning_circle(g)
+    assert any(c == splash._P["port"] for row in g for c in row)
+    assert any(c == splash._P["rune"] for row in g for c in row)
+
+
+def test_cosmic_batch_c_scenes_complete_the_thirteen_scene_pool() -> None:
+    expect = [
+        (splash._s_galaxy, "lost in the stack? i know the way.", splash.ANY),
+        (splash._s_void, "conjured from the void.", splash.ANY),
+        (splash._s_summoning_circle, "the circle is drawn.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    assert len(splash.SCENES) == 13
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    assert names == [
+        "_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud", "_s_meteor_shower",
+        "_s_constellation", "_s_ringed_planet", "_s_mountain_moon", "_s_comet", "_s_aurora",
+        "_s_galaxy", "_s_void", "_s_starfield", "_s_summoning_circle",
+    ]
