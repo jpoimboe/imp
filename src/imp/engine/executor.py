@@ -621,6 +621,7 @@ async def _route_script(
         _emit(log, "script_blocked", {
             "step": step.name, "exit": out["exit"],
             "stdout": out["stdout"], "stderr": out["stderr"]})
+        action = Pause(reason="script_blocked")
     return action, feedback, muts
 
 

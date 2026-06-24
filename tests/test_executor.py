@@ -1451,6 +1451,42 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
     assert "boom-remediation" in last["payload"]["stderr"]
 
 
+@pytest.mark.anyio
+async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
+    tmp_path: Path,
+) -> None:
+    """A script gate that exits non-zero into a pause rule must emit
+    workflow_paused with reason 'script_blocked' (not the bare-pause default
+    'interrupt'), while leaving status 'paused'."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: check\n"
+        "        command: 'echo boom >&2; exit 7'\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    assert State.load(change.state_dir).status == "paused"
+    paused = [e for e in change.event_log().read()
+              if e.get("type") == "workflow_paused"]
+    assert paused, "expected a workflow_paused event"
+    assert paused[-1]["payload"]["reason"] == "script_blocked"
+
+
 # ── _last_script_blocked selection logic ────────────────────────────────────
 
 
