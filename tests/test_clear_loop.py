@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
+import anyio
 import pytest
 
 import imp.cli.main as m
@@ -203,3 +206,62 @@ async def test_clear_loop_propagates_exception_from_cleared_session(
 
     with pytest.raises(RuntimeError, match="boom"):
         await m._clear_loop(tmp_path, tui=False, first=_first)
+
+
+def test_new_interactive_routes_through_clear_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, *, tui, first):
+        seen["tui"] = tui
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(m._async_cmd_new, argparse.Namespace(
+            title=None, opening="add a thing", non_interactive=False,
+            message=None, tui=False, spec_file=None))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert seen["tui"] is False        # interactive line client → line modality
+
+
+def test_new_tui_routes_through_clear_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    seen: dict[str, object] = {}
+
+    async def _fake_loop(control, *, tui, first):
+        seen["tui"] = tui
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(m._async_cmd_new, argparse.Namespace(
+            title=None, opening="add a thing", non_interactive=False,
+            message=None, tui=True, spec_file=None))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert seen["tui"] is True        # TUI arm → tui modality

@@ -295,7 +295,8 @@ def test_new_tui_delivers_seed(
     async def _fake_tui(change: object, *, seed_opening: str | None = None,
                         resume: bool = False,
                         opening_intent: str | None = None,
-                        leave_mode: str | None = None) -> int:
+                        leave_mode: str | None = None,
+                        leave_state: dict[str, str] | None = None) -> int:
         captured["seed_opening"] = seed_opening
         return 0
 
@@ -391,7 +392,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object = None,
                            status: object = None, opening_intent: object = None,
-                           leave_mode: object = None) -> int:
+                           leave_mode: object = None,
+                           leave_state: object = None) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -430,7 +432,8 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
     async def _fake_client(change: object, *, driver: object, coord: object,
                            solicit: object, seed_opening: object = None,
                            status: object = None, opening_intent: object = None,
-                           leave_mode: object = None) -> int:
+                           leave_mode: object = None,
+                           leave_state: object = None) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0

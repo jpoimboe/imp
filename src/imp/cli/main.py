@@ -971,24 +971,34 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if not header_printed:
             _print_run_header(
                 change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
-        return await _run_tui_session(change, seed_opening=opening_text,
-                                      opening_intent=opening_intent,
-                                      leave_mode=leave_mode, **_scope_kw)
+
+        async def _first_tui(leave_state: dict[str, str]) -> int:
+            return await _run_tui_session(
+                change, seed_opening=opening_text,
+                opening_intent=opening_intent, leave_mode=leave_mode,
+                leave_state=leave_state, **_scope_kw)
+
+        return await _clear_loop(control, tui=True, first=_first_tui)
 
     if not header_printed:
         _print_run_header(
             change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(stream=sys.stdout,
-                        color=should_use_color(sys.stdout),
-                        width=_term_width(), status=status)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        seed_opening=opening_text, status=status,
-        opening_intent=opening_intent, leave_mode=leave_mode, **_scope_kw)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(stream=sys.stdout,
+                            color=should_use_color(sys.stdout),
+                            width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=opening_text, status=status,
+            opening_intent=opening_intent, leave_mode=leave_mode,
+            leave_state=leave_state, **_scope_kw)
+
+    return await _clear_loop(control, tui=False, first=_first)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
