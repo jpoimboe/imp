@@ -151,18 +151,20 @@ def _is_interactive(
             and should_use_color(stdout))
 
 
-def _print_splash_banner(*, interactive: bool, stream: Any = None) -> None:
+def _print_splash_banner(*, interactive: bool, stream: Any = None) -> bool:
     """Leading blank line then the splash scene, printed on an interactive entry
     only. Shared by new/chat and resume so the banner is identical everywhere.
-    A no-op when not interactive or when the scene is empty."""
+    Returns True only when the banner was actually printed (interactive and a
+    non-empty scene), so the opening flow can tie its separator to it."""
     if not interactive:
-        return
+        return False
     out = sys.stdout if stream is None else stream
     block = splash.splash_block(theme=pal.active_theme(), width=_term_width(), color=True)
     if not block:
-        return
+        return False
     print(file=out)
     print(block, file=out)
+    return True
 
 
 class SeedError(Exception):
@@ -812,8 +814,10 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
-    _print_splash_banner(interactive=interactive)
+    banner_shown = _print_splash_banner(interactive=interactive)
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
+        if banner_shown:
+            print()
         color = should_use_color(sys.stdout)
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
