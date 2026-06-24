@@ -11,6 +11,7 @@ from imp.cli.prompt import Prompt
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import ask_line_with_slash
+from imp.cli.terminal_title import TerminalTitle
 from imp.engine.change import Change
 from imp.engine.executor import RunResult
 from imp.engine.state import State
@@ -39,6 +40,7 @@ async def run_session_client(
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state: dict[str, str] = {}
+    title = TerminalTitle(sys.stdout, change.title)
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only)
@@ -50,9 +52,11 @@ async def run_session_client(
         try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
-                change_id=change.id, leave_state=leave_state)
+                change_id=change.id, leave_state=leave_state, title=title)
         except TimeoutError:
             startup_failed = True
+            # attach raised before run_terminal_client's teardown finally runs.
+            title.reset()
         tg.cancel_scope.cancel()
     if startup_failed and infer_session_result(change) is not RunResult.COMPLETED:
         print(

@@ -462,3 +462,73 @@ async def test_run_session_client_archives_unmaterialized_chat_leave(
     assert not (tmp_path / ".imp" / "changes" / "c1").exists()     # archived, home dropped
     rec = record.read_record(records_root(tmp_path), "c1")
     assert rec is not None and rec["resumable"] is True
+
+
+@pytest.mark.anyio
+async def test_run_session_client_passes_terminal_title_from_change_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.terminal_title import TerminalTitle
+
+    change = _make_change(tmp_path, "2026-06-15-title")   # _make_change sets title="T"
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    captured: dict[str, object] = {}
+
+    async def _capture(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+
+    title = captured["title"]
+    assert isinstance(title, TerminalTitle)
+    assert title._name == "T"
+    assert rc == 0
+
+
+@pytest.mark.anyio
+async def test_run_session_client_resets_title_on_daemon_startup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Worktree exists + non-completed state → infer_session_result returns PAUSED,
+    # so this is the rc=3 daemon-startup-failure path (not a fast-completed run).
+    change = _make_change(tmp_path, "2026-06-15-leak")
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step="plan", step_attempt=0, status="paused").save(
+        change.state_dir)
+
+    reset_calls: list[str] = []
+
+    class _FakeTitle:
+        def __init__(self, stream: object, change_name: str) -> None:
+            self._name = change_name
+
+        def working(self) -> None: ...
+        def waiting(self) -> None: ...
+
+        def reset(self) -> None:
+            reset_calls.append("reset")
+
+    # TimeoutError is raised by attach BEFORE run_terminal_client enters the try
+    # whose finally resets the title, so run_session_client must reset it itself.
+    monkeypatch.setattr("imp.cli.session_run.TerminalTitle", _FakeTitle)
+
+    async def _boom(**_kwargs: object) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _boom)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 1)
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+
+    assert rc == 3
+    assert reset_calls == ["reset"]

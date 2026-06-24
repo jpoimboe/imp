@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import signal
@@ -12,9 +13,15 @@ import pytest
 
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
+from imp.cli.terminal_title import GLYPH_WAITING, GLYPH_WORKING, TerminalTitle
 from imp.remote.session.client import SessionClient
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import SessionSocket
+
+
+class _TTYStream(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 @pytest.fixture
@@ -660,3 +667,113 @@ async def test_abandon_slash_command_records_abandon_intent_when_confirmed(
 
     assert server.abandoned
     assert leave_state == {"intent": "abandon"}
+
+
+@pytest.mark.anyio
+async def test_title_flips_working_waiting_back_to_working_and_resets(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "step_started", "payload": {}})
+        on_event({"type": "awaiting_user_input",
+                   "payload": {"prompt": "name?"}})
+        await user_chat_input_fn("name?")
+        # A wait_for_user resume fires NO new step_started; the first live event
+        # the resumed agent emits must flip the glyph back to working.
+        on_event({"type": "llm_response", "payload": {}})
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:
+        return "imp"
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    out = s.getvalue()
+    working = f"\x1b]2;{GLYPH_WORKING} imp — My Change\x07"
+    waiting = f"\x1b]2;{GLYPH_WAITING} imp — My Change\x07"
+    reset = "\x1b]2;\x07"
+    assert working in out
+    assert waiting in out
+    assert out.index(waiting) > out.index(working)
+    post_gate = out[out.index(waiting) + len(waiting):]
+    assert working in post_gate          # flipped back to working after the reply
+    assert out.endswith(reset)           # reset last, on teardown
+
+
+@pytest.mark.anyio
+async def test_replayed_awaiting_does_not_flip_to_waiting(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "_replay": True,
+                   "payload": {"prompt": "old?"}})
+        on_event({"type": "step_started", "payload": {}})
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("a replayed gate must not solicit")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    waiting = f"\x1b]2;{GLYPH_WAITING} imp — My Change\x07"
+    assert waiting not in s.getvalue()
