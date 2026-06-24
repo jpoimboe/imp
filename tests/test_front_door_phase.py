@@ -81,6 +81,7 @@ def test_front_door_agent_prose_carries_the_three_hats_and_handoff() -> None:
     assert "{{ change.home }}/artifacts/spec/{{ change.id }}.md" in body
     # AC10: a standing directive never to leak internal vocabulary to the user.
     assert "never surface these internal terms" in low
+    assert "announce the name in prose without asking permission" in body
 
 
 def test_front_door_headless_auto_go_live_branch(tmp_path) -> None:
@@ -140,6 +141,7 @@ def test_front_door_owns_complexity_classification() -> None:
     # front-door decides the draft's shape (thin vs four-part) and never leaks the label.
     assert "trivial" in low and "standard" in low
     assert "goal + acceptance" in low or "goal and acceptance" in low
+    assert "never name the internal classification" in low
 
 
 def test_front_door_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None:

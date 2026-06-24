@@ -32,3 +32,4 @@ def test_interactive_keeps_build_solicit(tmp_path: Path) -> None:
     assert "build this out now" in out.lower()
     assert "create_and_enter_worktree" in out
     assert "imp resume <id>" in out
+    assert "spec phase pauses" in out.lower()
