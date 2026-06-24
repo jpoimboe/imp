@@ -628,3 +628,125 @@ async def test_cc_resume_trailing_interrupt_no_channel_withholds_query(
     errors = [e for e in events if e["type"] == "error"]
     assert errors
     assert errors[0]["payload"]["kind"] == "no_user_input_fn"
+
+
+# ── Task 4 — anthropic parity: trailing-interrupt resume ─────────────────────
+
+
+def _anthropic_wfu_inv(tmp_path: Path, **overrides):
+    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+    agent_def = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step", "wait_for_user"}), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="hi", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    base: dict = dict(
+        agent_def=agent_def,
+        provider_name="anthropic", model_name="claude-sonnet-4-6",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=tmp_path / "step",
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=InMemoryEventLog())
+    base.update(overrides)
+    return AgentInvocation(**base)
+
+
+def _seed_trailing_interrupt(transcript_dir: Path, wfu_id: str) -> None:
+    from imp.agents.runner import Message, TextBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    seed = Transcript(transcript_dir / "transcript.jsonl")
+    seed.append(Message(role="assistant", content=(
+        TextBlock(text="need approval"),
+        ToolUseBlock(id=wfu_id, name="wait_for_user", input={"prompt": "ok?"}))))
+    seed.append(Message(role="user", content=(
+        TextBlock(text="[Request interrupted by user]"),)))
+
+
+@pytest.mark.anyio
+async def test_anthropic_resume_trailing_interrupt_resolves_not_unbalanced(
+    tmp_path: Path,
+) -> None:
+    """Anthropic parity: a resume of the trailing-interrupt shape with a reply
+    channel re-presents and resolves the ask before any query."""
+    from imp.agents.runner import ToolResultBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    _seed_trailing_interrupt(tmp_path / "step", "w9")
+
+    log_resume = InMemoryEventLog()
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda: FakeAsyncAnthropic([
+            response(tool_use("c1", "complete_step",
+                              {"outcome": "ok", "status": "Success"}),
+                     stop_reason="tool_use")]),
+        user_input_fn=lambda _p: "go ahead")
+    inv_resume = _anthropic_wfu_inv(
+        tmp_path, event_log=log_resume, balance_on_resume=True)
+
+    events = [ev async for ev in runner.run(inv_resume)]
+    kinds = [e["type"] for e in events]
+    log_types = [e["type"] for e in log_resume.read()]
+
+    assert "awaiting_user_input" in log_types
+    assert "agent_output" in kinds
+
+    injected = None
+    for m in Transcript(tmp_path / "step" / "transcript.jsonl").load():
+        for b in m.content:
+            if isinstance(b, ToolResultBlock) and b.tool_use_id == "w9":
+                injected = b
+    assert injected is not None
+    assert injected.content == "go ahead"
+    assert injected.is_error is False
+
+
+@pytest.mark.anyio
+async def test_anthropic_resume_trailing_interrupt_no_channel_withholds_query(
+    tmp_path: Path,
+) -> None:
+    """Anthropic parity: the trailing-interrupt shape with NO reply channel returns
+    a clean no_user_input_fn error and never reaches a query."""
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    _seed_trailing_interrupt(tmp_path / "step", "w10")
+
+    queried = {"hit": False}
+
+    def factory():
+        queried["hit"] = True
+        return FakeAsyncAnthropic([
+            response(tool_use("c1", "complete_step",
+                              {"outcome": "x", "status": "Success"}),
+                     stop_reason="tool_use")])
+
+    runner = AnthropicAgentRunner(  # no user_input_fn
+        model_name="claude-sonnet-4-6", client_factory=factory)
+    inv_resume = _anthropic_wfu_inv(
+        tmp_path, event_log=InMemoryEventLog(), balance_on_resume=True)
+
+    events = [ev async for ev in runner.run(inv_resume)]
+    kinds = [e["type"] for e in events]
+
+    assert "agent_output" not in kinds
+    assert queried["hit"] is False
+    errors = [e for e in events if e["type"] == "error"]
+    assert errors
+    assert errors[0]["payload"]["kind"] == "no_user_input_fn"
