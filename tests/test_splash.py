@@ -306,24 +306,27 @@ def test_print_splash_banner_emits_blank_line_then_scene_when_interactive(monkey
     import imp.cli.main as m
     monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
     buf = io.StringIO()
-    m._print_splash_banner(interactive=True, stream=buf)
+    shown = m._print_splash_banner(interactive=True, stream=buf)
     assert buf.getvalue() == "\nSCENE\n"
+    assert shown is True
 
 
 def test_print_splash_banner_is_noop_when_not_interactive(monkeypatch) -> None:
     import imp.cli.main as m
     monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
     buf = io.StringIO()
-    m._print_splash_banner(interactive=False, stream=buf)
+    shown = m._print_splash_banner(interactive=False, stream=buf)
     assert buf.getvalue() == ""
+    assert shown is False
 
 
 def test_print_splash_banner_skips_empty_scene(monkeypatch) -> None:
     import imp.cli.main as m
     monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "")
     buf = io.StringIO()
-    m._print_splash_banner(interactive=True, stream=buf)
+    shown = m._print_splash_banner(interactive=True, stream=buf)
     assert buf.getvalue() == ""
+    assert shown is False
 
 
 def test_arcane_item_scenes_are_wired_and_props_paint() -> None:
