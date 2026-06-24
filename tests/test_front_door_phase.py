@@ -105,8 +105,69 @@ def test_front_door_headless_auto_go_live_branch(tmp_path) -> None:
         change_home=".imp/changes/abc", non_interactive=False,
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "headless run" not in interactive
+    assert "the ceremony is predetermined" not in interactive
     assert 'ceremony="full"' not in interactive
+
+
+def test_front_door_includes_both_brainstorm_partials() -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    assert '{% include "partials/spec-design-principles.md" %}' in body
+    assert '{% include "partials/brainstorm-dialogue.md" %}' in body
+
+
+def test_front_door_renders_full_brainstorm_depth(tmp_path) -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", non_interactive=False,
+        project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    low = out.lower()
+    # dialogue conduct expanded from brainstorm-dialogue
+    assert "one question at a time" in low
+    assert "present it in sections" in out
+    assert "build this out now" in low
+    assert "final readback before committing" in low
+    # design lens expanded from spec-design-principles
+    assert "architecture, components, data flow, error handling, and testing" in out
+    assert "do not propose unrelated refactoring" in out
+
+
+def test_front_door_owns_complexity_classification() -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    low = body.lower()
+    # front-door decides the draft's shape (thin vs four-part) and never leaks the label.
+    assert "trivial" in low and "standard" in low
+    assert "goal + acceptance" in low or "goal and acceptance" in low
+
+
+def test_front_door_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", non_interactive=False,
+        project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "spec-writer" not in out
+    assert "spec-finalizer" in out
+
+
+def test_front_door_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
+    # Regression guard: the moved unseeded-open prose must NOT force a build-only
+    # question or a no-file-read freeze on the bare <imp:begin/> open.
+    body = _wf().agents["front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    low = out.lower()
+    assert "do not read any files, do not explore the codebase" not in low
+    assert "what the user wants to build" not in low
+    assert "take stock of existing work" in low
+    assert "their reply picks the hat" in low
 
 
 def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
