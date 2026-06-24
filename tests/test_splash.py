@@ -563,3 +563,36 @@ def test_flame_and_sigil_scenes_are_wired_and_props_paint() -> None:
     idx = [names.index(b.__name__) for b, _p, _w in expect]
     assert idx == sorted(idx)
     assert names.index("_s_grimoire") < idx[0]
+
+
+def test_crystal_and_craft_scenes_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._crystals(g, 13, [(20, 5), (23, 7), (27, 6), (30, 4)])
+    assert g[8][20] == splash._P["crysTip"]    # tip of the (20,5) crystal at (20,8)
+    g = splash._make_grid()
+    splash._tarot(g, 21, 2)
+    assert g[9][25] == splash._P["star"]        # disc(x+4,y+7) emblem at (25,9)
+    g = splash._make_grid()
+    splash._quill(g, 20, 12)
+    assert g[3][28] == splash._P["white"]       # feather tip at (28,3)
+    g = splash._make_grid()
+    splash._mush(g, 21, 13, 4, splash._P["cap1"], splash._P["cap1D"])
+    assert g[8][20] == splash._P["white"]       # px(x-1,by-h-1) speck at (20,8)
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._s_will_o_wisp(g)
+    assert g[4][22] == splash._P["wisp"]         # spark at (22,4) survives the scene
+    expect = [
+        (splash._s_crystal_cluster, "small imp, big leverage.", splash.ANY),
+        (splash._s_will_o_wisp, "follow the light.", splash.ANY),
+        (splash._s_tarot, "pick a card. any card.", splash.ANY),
+        (splash._s_quill_ink, "name your desire.", splash.ANY),
+        (splash._s_glowing_mushrooms, "let's make some mischief.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_scroll") < idx[0]

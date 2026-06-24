@@ -612,6 +612,44 @@ def _scroll(g: Grid, cx: int, cy: int) -> None:
     _disc(g, cx, cy + 5, 1.3, 1, _P["O"])
 
 
+def _crystals(g: Grid, by: int, pts: list[tuple[int, int]]) -> None:
+    for x, h in pts:
+        for j in range(h):
+            w = (h - j) // 2
+            for dx in range(-w, w + 1):
+                _px(g, x + dx, by - j, _P["crysShade"] if dx < 0 else _P["crysLit"])
+        _px(g, x, by - h, _P["crysTip"])
+        _px(g, x, by - h + 1, _P["crysTip"])
+
+
+def _tarot(g: Grid, x: int, y: int) -> None:
+    _rect(g, x, y, 8, 11, _P["paper"])
+    _rect(g, x, y, 8, 1, _P["O"])
+    _rect(g, x, y + 10, 8, 1, _P["O"])
+    _rect(g, x, y, 1, 11, _P["O"])
+    _rect(g, x + 7, y, 1, 11, _P["O"])
+    _spark(g, x + 4, y + 4, _P["flame2"])
+    _disc(g, x + 4, y + 7, 1.2, 1.2, _P["star"])
+
+
+def _quill(g: Grid, x: int, by: int) -> None:
+    _rect(g, x, by - 2, 4, 3, _P["bookSpine"])
+    _rect(g, x + 1, by - 3, 2, 1, _P["ravenC"])
+    for k in range(7):
+        _px(g, x + 2 + k, by - 3 - k, _P["white"])
+    for k in range(1, 6):
+        _px(g, x + 2 + k - 1, by - 3 - k, _P["bookPageD"])
+
+
+def _mush(g: Grid, x: int, by: int, h: int, cap: Color | None, cap_d: Color | None) -> None:
+    for j in range(h):
+        _px(g, x, by - j, _P["mushStem"])
+    _disc(g, x, by - h, 3, 2, cap)
+    _px(g, x - 2, by - h + 1, cap_d)
+    _px(g, x + 2, by - h + 1, cap_d)
+    _px(g, x - 1, by - h - 1, _P["white"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -791,6 +829,40 @@ def _s_scroll(g: Grid) -> None:
     _L(g)
 
 
+def _s_crystal_cluster(g: Grid) -> None:
+    _stars(g, 8, 0.28)
+    _crystals(g, 13, [(20, 5), (23, 7), (27, 6), (30, 4)])
+    _ground(g, 14, _P["crysBase"])
+    _L(g)
+
+
+def _s_will_o_wisp(g: Grid) -> None:
+    _stars(g, H, 0.18)
+    for x, y in [(22, 4), (26, 7), (24, 10)]:
+        _spark(g, x, y, _P["wisp"])
+    _L(g)
+
+
+def _s_tarot(g: Grid) -> None:
+    _stars(g, 6, 0.22)
+    _tarot(g, 21, 2)
+    _L(g)
+
+
+def _s_quill_ink(g: Grid) -> None:
+    _stars(g, 7, 0.24)
+    _quill(g, 20, 12)
+    _L(g)
+
+
+def _s_glowing_mushrooms(g: Grid) -> None:
+    _stars(g, 8, 0.3)
+    _ground(g, 13, _P["ground"])
+    _mush(g, 21, 13, 4, _P["cap1"], _P["cap1D"])
+    _mush(g, 26, 13, 5, _P["cap2"], _P["cap2D"])
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -824,6 +896,11 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_magic_wand, "speak, and it shall be built.", ANY),
     (_s_hourglass, "time's a construct. ship anyway.", ANY),
     (_s_scroll, "the ink is wet. dictate.", ANY),
+    (_s_crystal_cluster, "small imp, big leverage.", ANY),
+    (_s_will_o_wisp, "follow the light.", ANY),
+    (_s_tarot, "pick a card. any card.", ANY),
+    (_s_quill_ink, "name your desire.", ANY),
+    (_s_glowing_mushrooms, "let's make some mischief.", ANY),
 ]
 
 MIN_WIDTH = 32
