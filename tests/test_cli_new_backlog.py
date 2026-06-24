@@ -10,7 +10,7 @@ from tests.conftest import _seed_control
 
 
 def _args(**kw) -> argparse.Namespace:
-    base = dict(idea="Wire OAuth login", description=None,
+    base = dict(idea="Wire OAuth login", opening=None,
                 depends_on=["2026-06-16-dep001"], title=None, workflow=None)
     base.update(kw)
     return argparse.Namespace(**base)
@@ -41,7 +41,7 @@ def test_new_idea_description_populates_seed_opening(
         tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    main._record_idea(_args(description="the longer brief"), tmp_path)
+    main._record_idea(_args(opening="the longer brief"), tmp_path)
     change = Change.load(tmp_path, _only_new_id(tmp_path))
     assert change.seed_opening == "Wire OAuth login\n\nthe longer brief"
 
@@ -62,7 +62,9 @@ def test_new_idea_blank_title_errors_without_creating(
     rc = main._record_idea(_args(idea="   "), tmp_path)
     assert rc == 2
     assert not (tmp_path / ".imp" / "changes").exists()
-    assert "imp:" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "imp:" in captured.err
+    assert "--backlog" in captured.err
 
 
 def test_new_idea_with_title_flag_is_error(
@@ -71,38 +73,23 @@ def test_new_idea_with_title_flag_is_error(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(main._async_cmd_new(
-        argparse.Namespace(idea="A title", description=None, depends_on=[],
+        argparse.Namespace(idea="A title", opening=None, depends_on=[],
                            title="conflicting", base_branch=None,
                            non_interactive=True, message=None, tui=False,
-                           opening=None, spec_file=None, playbook=None,
+                           spec_file=None, playbook=None,
                            findings_only=False, workflow=None)))
     assert rc == 2
     assert not (tmp_path / ".imp" / "changes").exists()
-    assert "imp:" in capsys.readouterr().err
+    assert "--backlog" in capsys.readouterr().err
 
 
-def test_description_without_idea_is_error(
-        tmp_path: Path, monkeypatch, capsys) -> None:
-    import asyncio
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    rc = asyncio.run(main._async_cmd_new(
-        argparse.Namespace(idea=None, description="some text", depends_on=[],
-                           title=None, base_branch=None,
-                           non_interactive=True, message=None, tui=False,
-                           opening=None, spec_file=None, playbook=None,
-                           findings_only=False, workflow=None)))
-    assert rc == 2
-    assert "imp:" in capsys.readouterr().err
-
-
-def test_new_idea_argparse_wiring(tmp_path: Path) -> None:
+def test_new_backlog_argparse_wiring(tmp_path: Path) -> None:
     parser = main._build_parser()
     args = parser.parse_args(
-        ["new", "--idea", "My title", "--description", "longer",
+        ["new", "--backlog", "My title", "longer brief",
          "--depends-on", "2026-06-16-dep001"])
     assert args.idea == "My title"
-    assert args.description == "longer"
+    assert args.opening == "longer brief"
     assert args.depends_on == ["2026-06-16-dep001"]
 
 
@@ -118,7 +105,7 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.setattr(main, "_record_idea", _fake_record)
     rc = asyncio.run(main._async_cmd_new(
-        argparse.Namespace(idea="b", description=None, depends_on=[], title=None,
+        argparse.Namespace(idea="b", opening=None, depends_on=[], title=None,
                            base_branch=None,
                            non_interactive=False, message=None, tui=False,
                            seed=None, seed_file=None, workflow=None)))
