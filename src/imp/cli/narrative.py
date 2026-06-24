@@ -97,6 +97,7 @@ class PhaseNode:
     children: list[Any] = field(default_factory=list)
     closed: bool = False
     chrome: str | None = None
+    label: str | None = None
     collapsible = False
 
 
@@ -116,6 +117,7 @@ class StepNode:
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
     chrome: str | None = None          # "none" → suppress this step's header
+    phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     route_label: str | None = None     # route reason (rule label) of the entering rule
@@ -203,12 +205,13 @@ class Activity:
     """The structured live-status description (§3): step display label spine,
     a count phrase, gray detail (tool name + arg), and a fallback label. Any field may
     be None. Plain text — the driver colors the segments (live_driver.compose_status).
-    The phase is intentionally NOT carried here: the live status line omits it (the
-    phase is already shown by the standalone phase header in the scrollback)."""
+    The phase label, when present, leads the composed status (the live line joins
+    `<phase label> · <step/live label> · <activity>` via compose_label)."""
     count: str | None = None
     detail: str | None = None
     label: str | None = None
     step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
+    phase_label: str | None = None   # owning phase's rendered label; None when absent
 
 
 def activity_to_text(activity: Activity | None) -> str:
@@ -337,6 +340,7 @@ class BreadcrumbLine:
                                        # carries the word "complete".
     label: str | None = None           # workflow-authored route reason, appended
                                        # after the arrow when present
+    phase_label: str | None = None     # owning phase's rendered label
     interrupted: bool = False
     collapsible = False
 
@@ -451,6 +455,7 @@ class NarrativeBuilder:
         """Current activity for the live status line; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
         step_label = (top.live_label or top.label) if top is not None else None
+        phase_label = top.phase_label if top is not None else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -458,7 +463,7 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} {noun})"
-            return Activity(step_label=step_label, label=label)
+            return Activity(step_label=step_label, label=label, phase_label=phase_label)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
@@ -476,17 +481,19 @@ class NarrativeBuilder:
                     arg = _sanitize_activity_arg(
                         next(iter((inflight.input or {}).values()), ""))
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
-                return Activity(count=count, detail=detail, step_label=step_label)
+                return Activity(count=count, detail=detail, step_label=step_label,
+                                phase_label=phase_label)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
             if top.kind in CHROME_KINDS:
                 # Name the running command (script steps carry one); command-less
                 # chrome kinds fall back to a bare label + timer.
-                return Activity(step_label=step_label, label=top.command)
+                return Activity(step_label=step_label, label=top.command,
+                                phase_label=phase_label)
             # Pure-thinking agent turn: the spinner + step label already imply it,
             # so emit no activity word.
-            return Activity(step_label=step_label, label=None)
+            return Activity(step_label=step_label, label=None, phase_label=phase_label)
         if self._current_phase is not None:
             return Activity(label="working")
         return None
@@ -705,7 +712,8 @@ NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
 
-def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None) -> None:
+def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
+                  phase_label: str | None = None) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it
     to the workflow root, and make it the current scope. There are no
@@ -720,7 +728,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None) 
         return
     if self._current_phase is not None:
         self._current_phase.closed = True   # let the live cursor pop the drained phase
-    phase = PhaseNode(name=name, chrome=chrome)
+    phase = PhaseNode(name=name, chrome=chrome, label=phase_label)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
@@ -789,13 +797,14 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.live_label = None
             existing.command = p.get("command")
             existing.chrome = p.get("chrome")
+            existing.phase_label = p.get("phase_label")
             existing.resumed = bool(p.get("resumed", False))
             existing.route_label = p.get("route_label")
             if existing is self._first_step:
                 _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
-    _ensure_phase(self, phase, p.get("chrome"))
+    _ensure_phase(self, phase, p.get("chrome"), p.get("phase_label"))
     # interactive defaults False — it is re-sourced from the event stream (an
     # awaiting_user_input event marks the step interactive); step_started no
     # longer carries an interactive key.
@@ -805,6 +814,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     quiet=bool(p.get("quiet", False)),
                     label=p.get("label"),
                     chrome=p.get("chrome"),
+                    phase_label=p.get("phase_label"),
                     command=p.get("command"),
                     resumed=bool(p.get("resumed", False)),
                     route_label=p.get("route_label"))
@@ -836,6 +846,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
             extras=_breadcrumb_extras(node.agent_output),
             step_label=node.label,
             label=p.get("label"),
+            phase_label=node.phase_label,
             interrupted=node.interrupted)
         node.children.append(breadcrumb)
         node.closed = True
