@@ -12,20 +12,26 @@
 # stable by construction and per-batch stamping is safe.
 #
 # DELIBERATE SEMANTICS: a `fixup!` whose target is at or below the lower bound is
-# out of range, so autosquash cannot reorder it; it stays unfolded, the post-fold
-# directive check trips, and cleanup exits 1 -> a human. A fixup clawing back into
-# already-reviewed history deserves a human, not a silent rewrite of reviewed
-# commits (which would orphan the review pin).
+# out of range, so autosquash cannot reorder it; it stays unfolded and the post-fold
+# directive check trips. Cleanup BOUNCES the surviving directive back to the site's
+# committing agent (exit 3) with a prescriptive diagnostic instead of pausing for a
+# human; the agent fixes forward — converting the misfiled directive into a standalone
+# commit or replacing it with a new forward commit. Cleanup never silently rewrites a
+# commit at or below the lower bound, so the review pin stays stable and reviewed
+# history is never clawed back.
+# After 2 consecutive bounces with the directive still surviving, cleanup falls back
+# to exit 1 so a human steps in; any clean run (exit 0) resets the bounce counter.
 #
 #   0 -> clean tree, fixups folded, trailers stamped (or already-clean no-op) -> continue
 #   2 -> resolvable fold conflict (rebase left in progress) -> autosquash-resolve
-#   3 -> dirty working tree (agent left uncommitted work) -> resume the site's agent
-#   1 -> hard failure / out-of-range fixup target -> pause
+#   3 -> dirty working tree, OR a surviving fixup directive bounced -> resume the site's agent
+#   1 -> hard failure (rebase/stamp failure, empty bound), or surviving-directive bounce cap exhausted -> pause
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
 ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
 STATE="$CHANGE_DIR/state"
+MAX_BOUNCES=2
 
 # Lower bound: the review_base SHA passed as $1, else the recorded fork point.
 LOWER="${1:-}"
@@ -47,6 +53,37 @@ _all_stamped() {
     [ "$(git log -1 --format='%(trailers:key=Change,valueonly)' "$h")" = "$ID" ] \
       || return 1
   done < <(git rev-list --no-merges "$LOWER"..HEAD)
+  return 0
+}
+
+# Per surviving fixup!/squash!/amend! directive in range, emit a prescriptive line
+# naming the offending commit, its target, and the forward-fix remedy. A target at or
+# below LOWER is out of range (base or already-reviewed history); an unmatched target
+# is a likely typo in the --fixup argument.
+_diagnose_surviving_directives() {
+  local lower_short sha subj short target_subj target_sha target_short
+  lower_short=$(git rev-parse --short "$LOWER")
+  echo "a fixup!/squash!/amend! directive survived autosquash and cannot be folded:" >&2
+  while IFS=$'\t' read -r sha subj; do
+    case "$subj" in
+      fixup!*|squash!*|amend!*) ;;
+      *) continue ;;
+    esac
+    short=$(git rev-parse --short "$sha")
+    target_subj=${subj#*! }
+    # No pipe partner: awk's `exit` on first match would SIGPIPE a `git log |` producer,
+    # and under set -e + pipefail that non-zero pipeline aborts the script before `exit 3`.
+    # Feed git log's full output via a here-string instead — the same SIGPIPE-avoidance
+    # idiom _has_directives uses.
+    target_sha=$(awk -F'\t' -v t="$target_subj" '$2==t{print $1; exit}' \
+      <<< "$(git log --format='%H%x09%s')")
+    if [ -n "$target_sha" ] && git merge-base --is-ancestor "$target_sha" "$LOWER"; then
+      target_short=$(git rev-parse --short "$target_sha")
+      echo "  - '$subj' ($short) targets '$target_subj' ($target_short), at or below the change fork $lower_short (base or already-reviewed history). Drop the 'fixup! ' prefix to land it as its own commit, or move the fix into a new forward commit." >&2
+    else
+      echo "  - '$subj' ($short) matches no commit in the change — likely a typo in the --fixup target. Reword it into a standalone commit, or replace it with a new forward commit." >&2
+    fi
+  done < <(git log --format='%H%x09%s' "$LOWER"..HEAD)
   return 0
 }
 
@@ -115,6 +152,7 @@ fi
 # Fast path: nothing to fold AND every commit already stamped -> a true no-op
 # (no rebase, no SHA churn). An empty range stamps vacuously and lands here too.
 if ! _has_directives && _all_stamped; then
+  rm -f "$STATE/directive-bounce-attempts"
   echo "ok: clean tree, no fixups, already stamped over $LOWER..HEAD"
   exit 0
 fi
@@ -128,8 +166,18 @@ if _has_directives; then
   BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
   if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$LOWER"; then
     if _has_directives; then
-      echo "fixup!/squash!/amend! subject remains after autosquash — target out of range (at or below $LOWER) or unmatched" >&2
-      exit 1
+      _diagnose_surviving_directives
+      BOUNCE_FILE="$STATE/directive-bounce-attempts"
+      PREV=$(cat "$BOUNCE_FILE" 2>/dev/null || echo 0)
+      COUNT=$((PREV + 1))
+      if [ "$COUNT" -gt "$MAX_BOUNCES" ]; then
+        rm -f "$BOUNCE_FILE"
+        echo "the committing agent could not clear the surviving directive after $MAX_BOUNCES bounces; pausing for a human." >&2
+        exit 1
+      fi
+      mkdir -p "$STATE"
+      printf '%s\n' "$COUNT" > "$BOUNCE_FILE"
+      exit 3
     fi
   else
     # A genuine fold CONFLICT (rebase in progress AND unmerged paths) is agent-
@@ -163,4 +211,5 @@ while read -r h; do
     || { echo "stamp failed: $h missing Change: $ID" >&2; exit 1; }
 done < <(git rev-list --no-merges "$LOWER"..HEAD)
 
+rm -f "$STATE/directive-bounce-attempts"
 echo "ok: clean tree, fixups folded, Change: $ID stamped over $LOWER..HEAD"
