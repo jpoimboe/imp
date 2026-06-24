@@ -557,3 +557,38 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
 
     assert rc == 3
     assert reset_calls == ["reset"]
+
+
+@pytest.mark.anyio
+async def test_run_session_client_threads_provided_leave_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-ls")
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    async def _capture(**kwargs: object) -> None:
+        kwargs["leave_state"]["intent"] = "clear"  # gate-loop populates the dict
+
+    seen: dict[str, object] = {}
+
+    async def _fake_disposition(change: object, leave_mode: object,
+                                leave_state: object) -> None:
+        seen["leave_state"] = leave_state
+        return None
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr(
+        "imp.cli.main._maybe_apply_leave_disposition", _fake_disposition)
+    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
+
+    coord = InterruptCoordinator()
+    ls: dict[str, str] = {}
+    rc = await run_session_client(
+        change, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        leave_state=ls)
+
+    assert ls["intent"] == "clear"        # the caller's dict surfaced the signal
+    assert seen["leave_state"] is ls      # same dict fed to the disposition
+    assert rc == 0

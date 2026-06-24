@@ -673,7 +673,8 @@ async def _run_tui_session(
         resume: bool = False,
         opening_intent: str | None = None,
         leave_mode: str | None = None,
-        scope_only: bool = False) -> int:
+        scope_only: bool = False,
+        leave_state: dict[str, str] | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
@@ -681,7 +682,7 @@ async def _run_tui_session(
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only)
-    leave_state: dict[str, str] = {}
+    leave_state = {} if leave_state is None else leave_state
 
     async def _solicit(_prompt: str) -> str:
         return await app.solicit(change)

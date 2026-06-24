@@ -325,3 +325,26 @@ def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
 
     assert rc == 0
     assert seen == {"resume": True}
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_threads_provided_leave_state(monkeypatch) -> None:
+    async def _fake_terminal_client(
+        *, attach, driver, coord, solicit, change_id: str = "",
+        control_root=None, leave_state=None,
+    ) -> None:
+        leave_state["intent"] = "clear"
+
+    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "run_terminal_client", _fake_terminal_client)
+    monkeypatch.setattr(m, "build_session_attach",
+                        lambda *a, **k: (lambda on_event: None))
+    monkeypatch.setattr(m, "infer_session_result", lambda change: RunResult.COMPLETED)
+    monkeypatch.setattr(m, "_handle_terminal_outcome", lambda c, r, co: 0)
+
+    ls: dict[str, str] = {}
+    rc = await m._run_tui_session(
+        SimpleNamespace(id="fake-id", control_root=None), leave_state=ls)
+
+    assert rc == 0
+    assert ls["intent"] == "clear"
