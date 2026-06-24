@@ -85,6 +85,48 @@ async def test_run_cleared_session_cancel_returns_130_no_draft(
 
 
 @pytest.mark.anyio
+async def test_clear_loop_reopens_only_on_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    intents = iter(["clear", "save"])
+    calls: list[str] = []
+
+    async def _fake_cleared(control, base, *, tui, leave_state):
+        kind = next(intents)
+        calls.append(f"cleared:{kind}")
+        leave_state["intent"] = kind
+        return {"clear": 0, "save": 5}[kind]
+
+    monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
+    monkeypatch.setattr(m.worktree, "current_branch", lambda c: "main")
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        calls.append("first")
+        leave_state["intent"] = "clear"
+        return 9
+
+    rc = await m._clear_loop(tmp_path, tui=False, first=_first)
+
+    assert rc == 5                                        # the final non-clear rc
+    assert calls == ["first", "cleared:clear", "cleared:save"]  # looped twice
+
+
+@pytest.mark.anyio
+async def test_clear_loop_returns_first_rc_without_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _boom(*a: object, **k: object) -> int:
+        raise AssertionError("must not reopen without /clear")
+
+    monkeypatch.setattr(m, "_run_cleared_session", _boom)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        return 3
+
+    assert await m._clear_loop(tmp_path, tui=False, first=_first) == 3
+
+
+@pytest.mark.anyio
 async def test_run_cleared_session_tui_arm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -117,3 +159,47 @@ async def test_run_cleared_session_tui_arm(
     assert captured["leave_state"] is ls
     assert captured["seed_opening"] == "build a parser"
     assert captured["opening_intent"] == "build a parser"
+
+
+@pytest.mark.anyio
+async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_count = 0
+
+    async def _fake_cleared(control, base, *, tui, leave_state):
+        nonlocal call_count
+        call_count += 1
+        assert call_count <= 3, "loop did not exit — leave_state reset is missing"
+        # intentionally does NOT set leave_state["intent"]
+        return 7
+
+    monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
+    monkeypatch.setattr(m.worktree, "current_branch", lambda c: "main")
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        leave_state["intent"] = "clear"
+        return 9
+
+    rc = await m._clear_loop(tmp_path, tui=False, first=_first)
+
+    assert rc == 7
+    assert call_count == 1
+
+
+@pytest.mark.anyio
+async def test_clear_loop_propagates_exception_from_cleared_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_cleared(control, base, *, tui, leave_state):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
+    monkeypatch.setattr(m.worktree, "current_branch", lambda c: "main")
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        leave_state["intent"] = "clear"
+        return 0
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await m._clear_loop(tmp_path, tui=False, first=_first)

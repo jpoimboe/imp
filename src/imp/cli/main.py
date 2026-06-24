@@ -750,6 +750,23 @@ async def _run_cleared_session(
         opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
 
 
+async def _clear_loop(
+    control: Path,
+    *,
+    tui: bool,
+    first: Callable[[dict[str, str]], Awaitable[int]],
+) -> int:
+    """Run first, then loop only while /clear: open a fresh new-style chat."""
+    leave_state: dict[str, str] = {}
+    rc = await first(leave_state)
+    while leave_state.get("intent") == "clear":
+        leave_state = {}
+        base = worktree.current_branch(control)
+        rc = await _run_cleared_session(
+            control, base, tui=tui, leave_state=leave_state)
+    return rc
+
+
 def _record_idea(args: argparse.Namespace, control: Path) -> int:
     title = args.idea
     if not title.strip():
