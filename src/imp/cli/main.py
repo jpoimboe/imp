@@ -451,7 +451,8 @@ async def _maybe_apply_leave_disposition(
             print(f"imp: '{label}' abandoned — "
                   f"recover with `imp resume {change.id}`")
         return None
-    if leave_mode is None:
+    explicit_save = intent == "save"
+    if leave_mode is None and not explicit_save:
         return None
     try:
         change = Change.load(change.control_root, change.id)
@@ -459,7 +460,6 @@ async def _maybe_apply_leave_disposition(
         return None  # home gone — defer to the normal path
     if change.materialized:
         return None  # a real in-flight change, not a phase-0 leave
-    explicit_save = leave_state.get("intent") == "save"
     try:
         if not explicit_save and not _had_exchange(change.event_log()):
             await _apply_disposition_locked(discard_conversation, change)

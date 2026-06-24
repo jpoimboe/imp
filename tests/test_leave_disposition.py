@@ -328,3 +328,15 @@ async def test_disposition_returns_none_when_reload_raises_load_errors(
     monkeypatch.setattr(m.Change, "load", _raise)
     rc = await m._maybe_apply_leave_disposition(ch, "chat", {})
     assert rc is None
+
+
+@pytest.mark.anyio
+async def test_disposition_save_intent_honored_when_leave_mode_none(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _draft_with_exchange(tmp_path, "rs1")
+    rc = await m._maybe_apply_leave_disposition(ch, None, {"intent": "save"})
+    assert rc == 0
+    assert State.load(ch.state_dir).status == "paused"          # saved to Backlog
+    assert (tmp_path / ".imp" / "changes" / "rs1").exists()     # home kept
