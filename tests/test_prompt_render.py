@@ -227,6 +227,22 @@ def test_renders_run_namespace_false_default(tmp_path: Path) -> None:
     ) == "interactive"
 
 
+def test_renders_run_scope_only_true(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log, scope_only=True)
+    assert render_prompt("{{ run.scope_only }}", ctx) == "True"
+    assert render_prompt(
+        "{% if run.scope_only %}save{% else %}build{% endif %}", ctx) == "save"
+
+
+def test_renders_run_scope_only_false_default(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    assert render_prompt("{{ run.scope_only }}", ctx) == "False"
+    assert render_prompt(
+        "{% if run.scope_only %}save{% else %}build{% endif %}", ctx) == "build"
+
+
 def test_missing_run_attr_raises(tmp_path: Path) -> None:
     ctx = build_context(
         change_title="t", event_log=_log(tmp_path / "events.jsonl", []),

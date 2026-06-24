@@ -7,7 +7,8 @@ Five namespaces (spec §7.5):
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
       because the dict is passed directly under StrictUndefined (strict-within)
   project.<fact> — project facts + guidance; missing key raises (strict-within)
-  run.non_interactive — the run's input-channel mode (bool); a missing attr
+  run.non_interactive — the run's input-channel mode (bool); run.scope_only —
+      whether this is a scope-for-backlog session (bool); a missing attr
       under run raises (strict-within), like change/project
 
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
@@ -85,6 +86,7 @@ class _ChangeNamespace:
 @dataclass(frozen=True, slots=True)
 class _RunNamespace:
     non_interactive: bool = False
+    scope_only: bool = False
 
 
 class _ProjectNamespace:
@@ -129,6 +131,7 @@ def build_context(
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None, guidance: str = "",
     non_interactive: bool = False,
+    scope_only: bool = False,
 ) -> PromptContext:
     facts = {**(project_facts or {}), "guidance": guidance}
     return PromptContext(
@@ -138,7 +141,7 @@ def build_context(
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),
-        run=_RunNamespace(non_interactive=non_interactive),
+        run=_RunNamespace(non_interactive=non_interactive, scope_only=scope_only),
     )
 
 
