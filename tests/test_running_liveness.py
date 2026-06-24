@@ -1,5 +1,5 @@
 """Finding D: a `running` Change whose ProjectLock holder is dead has crashed —
-re-derive it as `errored` so it's visible in `imp ls` and resumable."""
+re-derive it as `errored` so it's visible in `imp list` and resumable."""
 
 from __future__ import annotations
 

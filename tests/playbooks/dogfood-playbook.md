@@ -86,14 +86,14 @@ signal caveats; the only ones that bite here are at prompts and on a deliberate 
   `snapshot()`; `view()`'s header `alive=…` flips to `False` when imp exits.
 - **Drive resumes.** If the run pauses (or you must pause it), continue it with
   `mcp__impty__start(argv=["bash","-lc","… exec imp resume <id>"], cwd="<WT>", …)`. Get `<id>`
-  from `bash: cd "$WT" && imp ls` (its first column is the change id).
+  from `bash: cd "$WT" && imp list` (its first column is the change id).
 - **`send_signal(sig=…)` only where a deterministic pause is wanted** (SIGINT=2, SIGTERM=15) — a
   mid-run cooked-mode Ctrl-C keystroke is unreliable per the README fidelity reference. You do not
   normally need it: dogfood drives the run **forward to completion + merge**, not to an interrupt.
 
 Drive the full pipeline — spec → plan → implement → review → **merge** — answering prompts as a
 reasonable operator would and accepting the workflow's gates so the change reaches a clean merge.
-Confirm completion: `bash: cd "$WT" && imp ls --all` shows the change as **completed**, and the
+Confirm completion: `bash: cd "$WT" && imp list --all` shows the change as **completed**, and the
 working tree is clean.
 
 **Resilience (environmental, not product).** If the run dies for an environmental reason — provider
@@ -118,7 +118,7 @@ verdicts are comparable across runs:
 3. **No leaked internals** — no engine state, scratch files, debug prints, or `.imp/` artifacts in
    the committed diff; nothing a careful author would be embarrassed to merge.
 4. **Clean merge** — the change merged to the base branch (a `--no-ff` merge commit is present), the
-   working tree is clean, and `imp ls --all` reads it back as completed.
+   working tree is clean, and `imp list --all` reads it back as completed.
 5. **Rework / replanning noted as findings** — if the run looped (a failing run-tests resume, a
    reviewer goto, a task-lead needs-replan that triggers a supercycle, re-planning), **note it as a finding** with what triggered
    it. It is *not* an automatic FAIL — only a finding that informs the verdict.
@@ -140,7 +140,7 @@ echo "checker-exit=$?"
 
 It asserts the kept mechanical invariants (clean working tree; no `.imp/` state in the run's git
 history; an atomic non-merge commit touching the sentinel-bearing implementation file; spec and
-plan artifacts committed by the run; `imp log` / `imp log --full` / `imp ls --all` read back the
+plan artifacts committed by the run; `imp log` / `imp log --full` / `imp list --all` read back the
 completed change; the sentinel present anywhere in committed `src/`) and prints a per-check
 `PASS`/`FAIL` summary ending in `RESULT: PASS (7/7)` (exit 0) or `RESULT: FAIL (k/7)` (exit 1). The
 run's commit set defaults to `origin/HEAD..HEAD` (the clone point) — correct for a clone. **Fold
@@ -175,7 +175,7 @@ likely failure of this convention.
 ## 6. Cleanup
 
 ```bash
-cd "$WT" && imp ls | grep . && imp abandon <id>   # skip if no open change (id from `imp ls`)
+cd "$WT" && imp list | grep . && imp abandon <id>   # skip if no open change (id from `imp list`)
 rm -rf "$WT"
 git -C "$REPO" status --short   # only the new report file should appear
 ```
