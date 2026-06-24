@@ -847,3 +847,32 @@ def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
         assert term in out
+
+
+def test_spec_finalizer_replaces_spec_writer() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert "spec-finalizer" in wf.agents
+    assert "spec-writer" not in wf.agents
+    # The finalizer includes the shared design lens but NOT the dialogue partial.
+    body = wf.agents["spec-finalizer"].prompt_template_source
+    assert '{% include "partials/spec-design-principles.md" %}' in body
+    assert "brainstorm-dialogue.md" not in body
+    # Brainstorm-entry sections are gone.
+    assert "## Brainstorm Discipline" not in body
+    assert "## Build now or save for later" not in body
+    assert "## Naming the Change" not in body
+    # Its finalize core remains.
+    assert "Front-door handoff" in body
+    assert "imp artifact-commit spec" in body
+    # Its self-tag in the deferred reader form is renamed.
+    assert "DEFERRED spec-finalizer:" in body
+    assert "DEFERRED spec-writer:" not in body
+
+
+def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
+    from pathlib import Path
+    wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
+    assert "spec-writer" not in wf
+    assert "spec_writer" not in wf
+    assert wf.count("goto: spec-finalizer") == 1   # only front-door's forward entry
