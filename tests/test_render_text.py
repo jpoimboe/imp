@@ -2039,6 +2039,36 @@ def test_phase_end_rule_collapses_when_subsecond() -> None:
     assert line == "spec phase complete"
 
 
+def test_compose_label_joins_present_segments() -> None:
+    assert rt.compose_label(
+        ["implementation phase · plan 1/3", "finalizing", None]
+    ) == "implementation phase · plan 1/3 · finalizing"
+    assert rt.compose_label([None, "spec"]) == "spec"
+    assert rt.compose_label([None, None]) == ""
+    assert rt.compose_label(["", "step"]) == "step"
+    assert rt.compose_label(["", None]) == ""
+
+
+def test_header_line_composes_phase_label_into_step_header() -> None:
+    step = nv.StepNode(name="finalize", kind="agent",
+                       phase_label="implementation phase · plan 1/3",
+                       label="finalizing")
+    assert rt.header_line(step, depth=1, color=False) == (
+        "  implementation phase · plan 1/3 · finalizing")
+
+
+def test_phase_divider_uses_phase_label() -> None:
+    phase = nv.PhaseNode(name="code", label="implementation phase · plan 1/3")
+    assert rt.header_line(phase, depth=0, color=False) == (
+        "── implementation phase · plan 1/3 ───")
+
+
+def test_phase_breadcrumb_uses_phase_label() -> None:
+    phase = nv.PhaseNode(name="code", label="implementation phase · plan 1/3")
+    assert rt.phase_breadcrumb_line(phase, depth=0, color=False) == (
+        "implementation phase · plan 1/3 complete")
+
+
 def test_opening_intent_renders_under_first_step_header_before_narration() -> None:
     out = _lines([
         _ev("e1", "change_created", title="add auth"),

@@ -14,7 +14,7 @@ from __future__ import annotations
 import functools
 import json
 import textwrap
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from imp.cli import narrative as nv
@@ -317,6 +317,11 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         prev_prose = spaces_after(child, full=full)
 
 
+def compose_label(segments: Iterable[str | None]) -> str:
+    """Join the present (truthy) segments with ` · `."""
+    return " · ".join(s for s in segments if s)
+
+
 def _phase_rule(label: str) -> str:
     """Fixed-width by design — the navigational landmark is the yellow
     `lifecycle` color, not a full-width bar."""
@@ -334,7 +339,8 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     elapsed = nv.phase_elapsed(node)
     done = fmt_seconds_done(elapsed)
     secs = f" · {done}" if done else ""
-    return _line(f"{node.name} phase complete{secs}", depth, color,
+    label = node.label or f"{node.name} phase"
+    return _line(f"{label} complete{secs}", depth, color,
                  *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
 
 
@@ -348,12 +354,12 @@ def header_line(node: Any, *, depth: int, color: bool,
     for subagents — they emit `subagent_status_row`. This bare header survives only
     for the --full expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
-        return _line(_phase_rule(f"{node.name} phase"), depth, color,
+        return _line(_phase_rule(node.label or f"{node.name} phase"), depth, color,
                      *pal.NODE_COLORS["lifecycle"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    label = node.label or node.name
+    label = compose_label([node.phase_label, node.label or node.name])
     route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
                       enabled=color)
              if node.route_label else "")
