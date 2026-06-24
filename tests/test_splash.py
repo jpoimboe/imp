@@ -759,6 +759,7 @@ def test_splash_block_centers_tagline_under_the_art(monkeypatch) -> None:
     art_w = max(len(sgr.sub("", ln)) for ln in art)
     phrase = splash.SCENES[0][1]
     lead = len(tag) - len(tag.lstrip(" "))
-    assert lead == max(0, (art_w - len(phrase)) // 2)
+    trail = art_w - lead - len(phrase)
+    assert 0 <= trail - lead <= 1
     # The colored italic tagline still follows the leading padding.
     assert tag.lstrip(" ").startswith("\x1b[38;2;154;160;168m\x1b[3m")
