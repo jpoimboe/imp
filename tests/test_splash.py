@@ -468,10 +468,38 @@ def test_cosmic_batch_c_scenes_complete_the_thirteen_scene_pool() -> None:
     ]
     for entry in expect:
         assert entry in splash.SCENES
-    assert len(splash.SCENES) == 13
+    assert len(splash.SCENES) >= 13
     names = [b.__name__ for b, _p, _w in splash.SCENES]
-    assert names == [
+    assert names[:13] == [
         "_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud", "_s_meteor_shower",
         "_s_constellation", "_s_ringed_planet", "_s_mountain_moon", "_s_comet", "_s_aurora",
         "_s_galaxy", "_s_void", "_s_starfield", "_s_summoning_circle",
     ]
+
+
+def test_ritual_vessel_scenes_are_wired_and_props_paint() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._portal(g, 24, 7)
+    assert g[2][24] == splash._P["portI"]   # spark(cx,cy-5) head at (24,2)
+    g = splash._make_grid()
+    splash._orb(g, 24, 7, 4)
+    assert g[5][22] == splash._P["orbHi"]    # px(cx-2,cy-2) highlight
+    g = splash._make_grid()
+    splash._cauldron(g, 24, 8, 9)
+    assert g[0][24] == splash._P["steam"]    # px(cx,top_y-8) steam plume top
+    g = splash._make_grid()
+    splash._spellbook(g, 23, 11)
+    assert g[6][23] == splash._P["rune"]     # spark(cx,by-5) sigil at (23,6)
+    expect = [
+        (splash._s_portal, "the portal is open. step through.", splash.ANY),
+        (splash._s_crystal_ball, "gaze in — what shall we build?", splash.ANY),
+        (splash._s_cauldron, "stir the cauldron — what's brewing?", splash.ANY),
+        (splash._s_grimoire, "the grimoire is open.", splash.ANY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    idx = [names.index(b.__name__) for b, _p, _w in expect]
+    assert idx == sorted(idx)
+    assert names.index("_s_summoning_circle") < idx[0]

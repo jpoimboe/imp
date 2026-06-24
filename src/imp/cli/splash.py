@@ -441,6 +441,80 @@ def _void_hole(g: Grid, cx: int, cy: int) -> None:
     _disc(g, cx, cy, 2.4, 1.6, _P["voidCore"])
 
 
+def _portal(g: Grid, cx: int, cy: int) -> None:
+    _ring(g, cx, cy, 6, 9, _P["port"], 0.8, 1.08)
+    _ring(g, cx, cy, 4.6, 7, _P["portI"], 0.74, 1.08)
+    for y in range(cy - 9, cy + 9):
+        if not 0 <= y < H:
+            continue
+        for x in range(cx - 6, cx + 6):
+            if not 0 <= x < W:
+                continue
+            dx = (x - cx) / 6
+            dy = (y - cy) / 9
+            if dx * dx + dy * dy < 0.62 and g[y][x] is None:
+                _px(g, x, y, _P["portSwirl"] if (x + y) & 1 else _P["portG"])
+    _spark(g, cx, cy - 5, _P["portI"])
+    _spark(g, cx - 2, cy + 3, _P["rune"])
+
+
+def _orb(g: Grid, cx: int, cy: int, r: int) -> None:
+    _ring(g, cx, cy, r + 1, r + 1, _P["orbRim"], 0.8, 1.25)
+    _disc(g, cx, cy, r, r, _P["glass"])
+    _disc(g, cx - 1, cy - 1, r * 0.45, r * 0.45, _P["portI"])
+    _px(g, cx - 2, cy - 2, _P["orbHi"])
+    _spark(g, cx + 1, cy + 1, _P["rune"])
+    _rect(g, cx - 3, cy + r, 7, 1, _P["orbStand"])
+    _rect(g, cx - 2, cy + r + 1, 5, 1, _P["orbRim"])
+
+
+def _cauldron(g: Grid, cx: int, top_y: int, w: int) -> None:
+    r = w / 2
+    y = top_y
+    while y < top_y + r:
+        x = cx - r
+        while x <= cx + r:
+            dx = (x - cx) / r
+            dy = (y - top_y) / r
+            d = dx * dx + dy * dy
+            if d <= 1:
+                _px(g, x, y, _P["potD"] if d > 0.66 else _P["pot"])
+            x += 1
+        y += 1
+    x = cx - r - 1
+    while x <= cx + r + 1:
+        if abs((x - cx) / (r + 1)) <= 1:
+            _px(g, x, top_y - 1, _P["rim"])
+            _px(g, x, top_y, _P["rim"])
+        x += 1
+    x = cx - r + 1
+    while x <= cx + r - 1:
+        _px(g, x, top_y + 1, _P["brew"] if (int(x) + top_y) & 1 else _P["brewB"])
+        x += 1
+    for i in range(4):
+        bx = cx - r + 2 + int(_hash(i + 3, 2) * (2 * r - 3))
+        by = top_y - 1 - int(_hash(i, 5) * 4)
+        _px(g, bx, by, _P["brewB"])
+    _px(g, cx - 2, top_y - 4, _P["steam"])
+    _px(g, cx + 1, top_y - 6, _P["steam"])
+    _px(g, cx, top_y - 8, _P["steam"])
+
+
+def _spellbook(g: Grid, cx: int, by: int) -> None:
+    for i in range(6):
+        _px(g, cx - 6 + i, by - 3, _P["bookPage"])
+    _rect(g, cx - 6, by - 3, 6, 4, _P["bookPage"])
+    _rect(g, cx, by - 3, 6, 4, _P["bookPage"])
+    _rect(g, cx - 6, by + 1, 12, 1, _P["bookSpine"])
+    _px(g, cx, by - 3, _P["bookSpine"])
+    _px(g, cx, by - 2, _P["bookSpine"])
+    _px(g, cx, by - 1, _P["bookSpine"])
+    for j in range(3):
+        _rect(g, cx - 5, by - 2 + j, 4, 1, _P["bookInk"])
+        _rect(g, cx + 1, by - 2 + j, 4, 1, _P["bookInk"])
+    _spark(g, cx, by - 5, _P["rune"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -540,6 +614,30 @@ def _s_summoning_circle(g: Grid) -> None:
     _L(g)
 
 
+def _s_portal(g: Grid) -> None:
+    _stars(g, 8, 0.3)
+    _portal(g, 24, 7)
+    _L(g)
+
+
+def _s_crystal_ball(g: Grid) -> None:
+    _stars(g, 7, 0.28)
+    _orb(g, 24, 7, 4)
+    _L(g)
+
+
+def _s_cauldron(g: Grid) -> None:
+    _stars(g, 7, 0.28)
+    _cauldron(g, 24, 8, 9)
+    _L(g)
+
+
+def _s_grimoire(g: Grid) -> None:
+    _stars(g, 6, 0.24)
+    _spellbook(g, 23, 11)
+    _L(g)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -560,6 +658,10 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_void, "conjured from the void.", ANY),
     (_s_starfield, "your imp is listening.", ANY),
     (_s_summoning_circle, "the circle is drawn.", ANY),
+    (_s_portal, "the portal is open. step through.", ANY),
+    (_s_crystal_ball, "gaze in — what shall we build?", ANY),
+    (_s_cauldron, "stir the cauldron — what's brewing?", ANY),
+    (_s_grimoire, "the grimoire is open.", ANY),
 ]
 
 MIN_WIDTH = 32
