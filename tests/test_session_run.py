@@ -309,7 +309,7 @@ async def test_run_session_client_threads_resume_into_attach(
 
     def _fake_build(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-        opening_intent: str | None = None,
+        opening_intent: str | None = None, scope_only: bool = False,
     ) -> Any:
         captured["resume"] = resume
 

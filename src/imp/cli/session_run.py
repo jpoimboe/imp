@@ -35,12 +35,13 @@ async def run_session_client(
     resume: bool = False,
     opening_intent: str | None = None,
     leave_mode: str | None = None,
+    scope_only: bool = False,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state: dict[str, str] = {}
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent)
+        opening_intent=opening_intent, scope_only=scope_only)
     startup_failed = False
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)

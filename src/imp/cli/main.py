@@ -645,14 +645,15 @@ async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
         resume: bool = False,
         opening_intent: str | None = None,
-        leave_mode: str | None = None) -> int:
+        leave_mode: str | None = None,
+        scope_only: bool = False) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent)
+        opening_intent=opening_intent, scope_only=scope_only)
     leave_state: dict[str, str] = {}
 
     async def _solicit(_prompt: str) -> str:
