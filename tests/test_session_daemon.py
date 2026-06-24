@@ -1074,3 +1074,124 @@ def test_last_script_blocked_stderr_empty_when_absent(tmp_path: Path) -> None:
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "script_blocked"})
     assert daemon._last_script_blocked_stderr(change.event_log()) == ""
+
+
+def test_hold_prompt_resume_prompt_for_interrupt(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    coord = SimpleNamespace(should_pause=True)
+    assert daemon._hold_prompt(
+        RunResult.PAUSED, coord, change.event_log()) == daemon._RESUME_PROMPT
+
+
+def test_hold_prompt_includes_stderr_for_script_blocked(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    log = change.event_log()
+    log.append(agent_id=None, type="script_blocked",
+               payload={"step": "integrate", "exit": 3, "stdout": "",
+                        "stderr": "integration blocked: worktree dirty"})
+    log.append(agent_id=None, type="workflow_paused",
+               payload={"reason": "script_blocked"})
+    coord = SimpleNamespace(should_pause=False)
+    prompt = daemon._hold_prompt(RunResult.PAUSED, coord, change.event_log())
+    assert prompt is not None
+    assert "integration blocked: worktree dirty" in prompt
+    assert daemon._RESUME_PROMPT in prompt
+
+
+def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
+    coord = SimpleNamespace(should_pause=False)
+    assert daemon._hold_prompt(RunResult.PAUSED, coord, change.event_log()) is None
+
+
+@pytest.mark.anyio
+async def test_script_blocked_pause_holds_and_surfaces_stderr(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-scb")
+    sock = str(session_socket_path(change.control_root, change.id))
+    calls = {"n": 0}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            log = change.event_log()
+            log.append(agent_id=None, type="script_blocked",
+                       payload={"step": "integrate", "exit": 3, "stdout": "",
+                                "stderr": "integration blocked: worktree dirty"})
+            log.append(agent_id=None, type="workflow_paused",
+                       payload={"reason": "script_blocked"})
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(
+                    e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        prompts = [e for e in received if e.get("type") == "awaiting_user_input"]
+        assert "integration blocked: worktree dirty" in prompts[0]["payload"]["prompt"]
+        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
+        await client.send_input("go")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_script_blocked_pause_hibernates_with_zero_clients(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-sch")
+    calls = {"n": 0}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        log = change.event_log()
+        log.append(agent_id=None, type="script_blocked",
+                   payload={"step": "integrate", "exit": 3, "stdout": "",
+                            "stderr": "blocked"})
+        log.append(agent_id=None, type="workflow_paused",
+                   payload={"reason": "script_blocked"})
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True)
+    assert result is RunResult.PAUSED
+    assert calls["n"] == 1   # held once, then hibernated — never looped
