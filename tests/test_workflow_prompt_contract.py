@@ -611,3 +611,21 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         workflow_dir=bundled_workflow_dir("imp")).lower()
     assert "the base branch advanced since the draft started" in headless_moved
     assert "do **not** call `wait_for_user`" in headless_moved
+
+
+def test_front_door_documents_split_off_a_change(tmp_path) -> None:
+    body = load_workflow(bundled_workflow_dir("imp")).agents[
+        "front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    # The capability is documented (create_change is otherwise absent from this file).
+    assert "create_change" in out
+    # Confirm-first discipline: propose, then gate before spawning.
+    assert "before calling `create_change`" in out
+    # depends_on is conditional and the current change id is wired into the example.
+    assert 'depends_on=["abc"]' in out
+    # Plain-language resume hint for the spun-off change.
+    assert "imp resume" in out

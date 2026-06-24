@@ -81,6 +81,27 @@ add a `Change:` trailer), then finish the turn with `complete_step`, emitting th
 chosen `ceremony`. The spec carries across the step boundary on disk; the phase-1
 spec-finalizer adopts it.
 
+{% if not run.non_interactive %}
+## Splitting off a separate change
+
+In any of your modes — answering a question, scouting existing work, or scoping a
+build — a chunk of work may belong in its own backlog change rather than the one in
+front of you. You can spin it off with the `create_change` tool, with the user's
+approval, instead of forcing every idea into the current change.
+
+- **Always confirm first.** Propose the split in plain language and call
+  `wait_for_user` before calling `create_change`. This one rule covers both "the
+  user asks for it" and "you suggest it, with the user's approval."
+- **Set `depends_on` only on a real ordering need.** Pass
+  `depends_on=["{{ change.id }}"]` only when the spun-off work genuinely needs this
+  change finished first; otherwise omit it.
+- **Keep split-off scope out of this change's draft spec** when you are scoping a
+  build, so the same work is never built twice.
+- **Speak plainly about the result.** Tell the user the new work is saved and they
+  can come back to it later with `imp resume <id>` (the new change's id); never
+  surface internal vocabulary (see "Speak plainly").
+{% endif %}
+
 {% if run.non_interactive %}
 ## Headless runs (`--non-interactive`)
 
