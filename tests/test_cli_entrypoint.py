@@ -9,7 +9,7 @@ from imp.cli.main import _OVERVIEW_COMMANDS, _build_parser, _command_names, main
 
 def test_overview_lists_each_common_command_and_footer() -> None:
     text = render_overview(color=False)
-    for name in ("chat", "new", "resume", "ls", "log", "abandon", "config"):
+    for name in ("chat", "new", "resume", "list", "log", "abandon", "config"):
         assert name in text
     # Getting-started pointer and the per-command detail footer.
     assert "imp init" in text
@@ -90,7 +90,7 @@ def test_known_command_still_dispatches(tmp_path, monkeypatch) -> None:
     # A real command is not swallowed by the unknown-command guard.
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".imp").mkdir()
-    rc = main(["ls"])
+    rc = main(["list"])
     assert rc == 0
 
 
