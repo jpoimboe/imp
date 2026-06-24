@@ -658,6 +658,59 @@ def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
     assert names.index("_s_bats") < idx[0]
 
 
+def test_trick_and_sunrise_scenes_complete_the_fifty_scene_pool() -> None:
+    splash._use_theme("dark")
+    g = splash._make_grid()
+    splash._key(g, 21, 7)
+    assert g[5][18] == splash._P["spark"]        # spark(cx-3,cy-2) sparkle at (18,5)
+    g = splash._make_grid()
+    splash._hat(g, 24, 11)
+    assert g[4][29] == splash._P["flame2"]        # spark(cx+5,by-7) at (29,4)
+    g = splash._make_grid()
+    splash._dice(g, 19, 13)
+    assert g[10][21] == splash._P["b"]            # centre pip of the first die at (21,10)
+    g = splash._make_grid()
+    splash._s_sunrise(g)
+    assert g[10][24] == splash._P["sun"]          # sun disc centre at (24,10)
+    expect = [
+        (splash._s_skeleton_key, "i know a shortcut — only slightly cursed.", splash.ANY),
+        (splash._s_top_hat, "now you see it. now you ship it.", splash.ANY),
+        (splash._s_loaded_dice, "the dice are loaded in your favor.", splash.ANY),
+        (splash._s_sunrise, "what are we building today?", splash.DAY),
+    ]
+    for entry in expect:
+        assert entry in splash.SCENES
+    assert len(splash.SCENES) == 50
+    names = [b.__name__ for b, _p, _w in splash.SCENES]
+    assert names == [
+        "_s_crescent_stars", "_s_crescent_perch", "_s_full_moon_cloud", "_s_meteor_shower",
+        "_s_constellation", "_s_ringed_planet", "_s_mountain_moon", "_s_comet", "_s_aurora",
+        "_s_galaxy", "_s_void", "_s_starfield", "_s_summoning_circle",
+        "_s_portal", "_s_crystal_ball", "_s_cauldron", "_s_grimoire",
+        "_s_lantern", "_s_twin_candles", "_s_twin_torches", "_s_rune_sigil",
+        "_s_floating_wisps", "_s_potion_shelf", "_s_magic_wand", "_s_hourglass", "_s_scroll",
+        "_s_crystal_cluster", "_s_will_o_wisp", "_s_tarot", "_s_quill_ink",
+        "_s_glowing_mushrooms",
+        "_s_campfire", "_s_fireflies", "_s_spider_web", "_s_bats",
+        "_s_raven", "_s_ouroboros", "_s_jack_o_lantern", "_s_black_cat", "_s_fairy_ring",
+        "_s_coffee", "_s_terminal", "_s_desk_book", "_s_clockwork", "_s_the_bug",
+        "_s_stacked_tomes",
+        "_s_skeleton_key", "_s_top_hat", "_s_loaded_dice", "_s_sunrise",
+    ]
+
+
+def test_sunrise_scene_is_eligible_only_during_day(monkeypatch) -> None:
+    idx = next(i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.DAY)
+    night_idx = next(i for i, (_b, _p, w) in enumerate(splash.SCENES) if w == splash.NIGHT)
+    monkeypatch.setattr(splash, "_now_hour", lambda: 12)  # day
+    day_pool = splash._eligible()
+    assert idx in day_pool and night_idx not in day_pool
+    monkeypatch.setattr(splash, "_now_hour", lambda: 23)  # night
+    night_pool = splash._eligible()
+    assert idx not in night_pool and night_idx in night_pool
+    assert len(day_pool) == len(night_pool) == 49
+
+
 def test_workshop_scenes_are_wired_and_props_paint() -> None:
     splash._use_theme("dark")
     g = splash._make_grid()

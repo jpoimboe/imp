@@ -808,6 +808,54 @@ def _beetle(g: Grid, cx: int, cy: int) -> None:
     _px(g, cx, cy - 4, _P["O"])
 
 
+def _key(g: Grid, cx: int, cy: int) -> None:
+    _ring(g, cx, cy, 2.2, 2.2, _P["lanCore"], 0.4, 1.2)
+    _line(g, cx + 2, cy, cx + 8, cy, _P["lanCore"])
+    _px(g, cx + 8, cy + 1, _P["lanCore"])
+    _px(g, cx + 7, cy + 1, _P["lanCore"])
+    _spark(g, cx - 3, cy - 2, _P["spark"])
+
+
+def _hat(g: Grid, cx: int, by: int) -> None:
+    _rect(g, cx - 5, by, 11, 1, _P["catC"])
+    _rect(g, cx - 3, by - 5, 7, 5, _P["catC"])
+    _rect(g, cx - 3, by - 1, 7, 1, _P["O"])
+    _spark(g, cx + 5, by - 7, _P["flame2"])
+    _px(g, cx + 7, by - 8, _P["spark"])
+
+
+def _dice(g: Grid, x: int, by: int) -> None:
+    def die(dx: int, pips: list[tuple[int, int]]) -> None:
+        _rect(g, dx, by - 5, 5, 5, _P["white"])
+        for i in range(5):
+            _px(g, dx + i, by - 5, _P["metalD"])
+            _px(g, dx + i, by - 1, _P["metalD"])
+            _px(g, dx, by - 5 + i, _P["metalD"])
+            _px(g, dx + 4, by - 5 + i, _P["metalD"])
+        for a, b in pips:
+            _px(g, dx + a, by - 5 + b, _P["b"])
+    die(x, [(2, 2)])
+    die(x + 6, [(1, 1), (3, 3)])
+    _ground(g, by + 1, _P["bookSpine"])
+
+
+def _sunrise(g: Grid) -> None:
+    hor = 11
+    for x in range(18, W):
+        for y in range(hor, H):
+            _px(g, x, y, _P["mtnMid"])
+    _disc(g, 24, hor, 4, 4, _P["sun"])
+    _carve(g, 24, hor + 1, 5, 5)
+    _disc(g, 24, hor - 1, 3.4, 3.4, _P["sun"])
+    for a in range(-60, 61, 30):
+        t = a * math.pi / 180
+        _px(g, 24 + math.sin(t) * 6, hor - 1 - math.cos(t) * 6, _P["sunD"])
+    for x in range(18, W):
+        h = _round(2 + 1.5 * math.sin(x * 0.4))
+        for y in range(hor, hor + h + 1):
+            _px(g, x, y, _P["mtnNear"])
+
+
 # --- scene builders (imp drawn last so it sits above any full-width ground) ---
 
 def _s_crescent_stars(g: Grid) -> None:
@@ -1118,6 +1166,33 @@ def _s_stacked_tomes(g: Grid) -> None:
     _L(g)
 
 
+def _s_skeleton_key(g: Grid) -> None:
+    _stars(g, 7, 0.24)
+    _key(g, 21, 7)
+    _L(g)
+
+
+def _s_top_hat(g: Grid) -> None:
+    _stars(g, 7, 0.24)
+    _hat(g, 24, 11)
+    _L(g)
+
+
+def _s_loaded_dice(g: Grid) -> None:
+    _stars(g, 6, 0.22)
+    _dice(g, 19, 13)
+    _L(g)
+
+
+def _s_sunrise(g: Grid) -> None:
+    for x in range(18, W):
+        for y in range(6):
+            if (x + y) % 5 == 0:
+                _px(g, x, y, _P["sky"])
+    _sunrise(g)
+    _imp(g, 2, -1)
+
+
 # --- scene pool: (builder, verbatim gallery phrase, when-tag) in gallery 1->50 order ---
 
 ANY = "ANY"
@@ -1171,6 +1246,10 @@ SCENES: list[tuple[SceneBuilder, str, str]] = [
     (_s_clockwork, "let's build the machine.", ANY),
     (_s_the_bug, "show me the bug. i'll deal with it.", ANY),
     (_s_stacked_tomes, "i've read everything. ask.", ANY),
+    (_s_skeleton_key, "i know a shortcut — only slightly cursed.", ANY),
+    (_s_top_hat, "now you see it. now you ship it.", ANY),
+    (_s_loaded_dice, "the dice are loaded in your favor.", ANY),
+    (_s_sunrise, "what are we building today?", DAY),
 ]
 
 MIN_WIDTH = 32
