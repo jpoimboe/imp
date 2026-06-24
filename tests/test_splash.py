@@ -652,7 +652,7 @@ def test_nocturnal_scenes_two_are_wired_and_props_paint() -> None:
         (splash._s_ouroboros, "round and round the refactor goes.", splash.ANY),
         (splash._s_jack_o_lantern, "trouble? my specialty.", splash.ANY),
         (splash._s_black_cat, "back so soon? good.", splash.ANY),
-        (splash._s_fairy_ring, "step inside the ring.", splash.ANY),
+        (splash._s_fairy_ring, "step inside the ring. rules optional.", splash.ANY),
     ]
     for entry in expect:
         assert entry in splash.SCENES
@@ -739,7 +739,7 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
         (splash._s_coffee, "another night, another diff.", splash.ANY),
         (splash._s_terminal, "mischief, compiled.", splash.ANY),
         (splash._s_desk_book, "light the candles. we begin.", splash.ANY),
-        (splash._s_clockwork, "let's build the machine.", splash.ANY),
+        (splash._s_clockwork, "gears are turning. let's make it tick.", splash.ANY),
         (splash._s_the_bug, "show me the bug. i'll deal with it.", splash.ANY),
         (splash._s_stacked_tomes, "i've read everything. ask.", splash.ANY),
     ]
