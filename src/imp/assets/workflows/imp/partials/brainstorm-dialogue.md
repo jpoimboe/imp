@@ -111,6 +111,29 @@ brainstorm assumed and reconcile any drift — before writing the spec. Then pro
 front-door's **Going live** section to write and commit the spec. (A genuine intent-fork
 escalation at the "Ask vs. decide" high bar still parks for a human even headless —
 only this build-or-save gate auto-builds.)
+{% elif run.scope_only %}
+This is a **scope-for-backlog** session (`imp new --backlog`): the user reached for
+"save it for later," so the recommendation is reversed. Once the design is settled
+(the user has approved it) and **before you write and commit the spec**, recommend
+saving to the backlog as the default and offer building now as the opt-in. Ask exactly
+one question at this gate — e.g. **"Want me to save this to your backlog? I can build
+it out now instead if you'd rather start."** Do not present a numbered list and do not
+script reply tokens. Surface the question in your turn text and confirm via
+`wait_for_user`.
+
+- **If the user saves it for later (the default), save it as a draft.** Do **not**
+  call `create_and_enter_worktree`. Tell them it is saved to the backlog and resumable
+  later with `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with
+  the work saved — nothing is built, no branch, no worktree. On a later resume you
+  re-offer this same choice.
+- **If the user opts to build now, build it.** Call `create_and_enter_worktree` (it
+  takes no arguments). It forks the branch and worktree from the base branch's current
+  tip and switches this change into it — your subsequent `Read`/`Bash`/edit tools
+  operate in the new worktree immediately. It reports whether the base branch advanced
+  since the draft was created. **If it reports `head_changed=true`, re-ground the spec
+  against current code in this same turn** — re-read the files the brainstorm assumed
+  and reconcile any drift — before writing the spec. Then proceed to front-door's
+  **Going live** section to write and commit the spec.
 {% else %}
 Once the design is settled (the user has approved it) and **before you write and commit
 the spec**, ask exactly one question at this gate — the bare build affirmative, e.g.

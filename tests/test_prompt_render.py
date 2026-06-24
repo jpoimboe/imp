@@ -281,6 +281,30 @@ def test_render_without_workflow_dir_cannot_resolve_include(tmp_path: Path) -> N
         render_prompt('{% include "partials/frag.md" %}', ctx)
 
 
+def test_scope_only_gate_recommends_saving(tmp_path: Path) -> None:
+    src = Path(
+        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+    ).read_text()
+    log = _log(tmp_path / "events.jsonl", [])
+    rendered = render_prompt(
+        src, build_context(change_title="t", event_log=log, scope_only=True))
+    assert "save this to your backlog" in rendered
+    assert "Want me to build this out now?" not in rendered
+
+
+def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
+    src = Path(
+        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+    ).read_text()
+    log = _log(tmp_path / "events.jsonl", [])
+    rendered = render_prompt(
+        src,
+        build_context(change_title="t", event_log=log,
+                      non_interactive=False, scope_only=False))
+    assert "Want me to build this out now?" in rendered
+    assert "save this to your backlog" not in rendered
+
+
 def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.engine.state import JsonlEventLog
