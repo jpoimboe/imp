@@ -826,7 +826,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         except (EOFError, KeyboardInterrupt):
             print("imp: cancelled", file=sys.stderr)
             return 130
-        # An empty reply falls back to the unseeded path (the spec-writer opens
+        # An empty reply falls back to the unseeded path (front-door opens
         # by asking); a real answer becomes the opening intent.
         opening_text = _normalize_opening_reply(reply)
         opening_intent = opening_text
@@ -2196,11 +2196,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "new", help="Start a new Change: run the workflow from an opening intent.")
     p_new.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
-        help="Opening intent handed verbatim to the spec-writer as its first "
+        help="Opening intent handed verbatim to front-door as its first "
              "message; omit to start with an interactive prompt. Distinct from "
              "--message, which is a headless reply to the first solicit.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
-                       help="Set the Change title explicitly; the spec-writer "
+                       help="Set the Change title explicitly; front-door "
                             "names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
@@ -2210,7 +2210,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "Requires --non-interactive.")
     p_new.add_argument("--spec-file", metavar="PATH", default=None,
                        help="Seed the change from a draft spec file: its content "
-                            "becomes the spec-writer's opening intent. A missing or "
+                            "becomes front-door's opening intent. A missing or "
                             "unreadable PATH is a hard error (rc 2). Mutually "
                             "exclusive with a positional MESSAGE and with --message.")
     p_new.add_argument("--playbook", metavar="NAME", default=None,

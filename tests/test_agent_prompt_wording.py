@@ -22,13 +22,45 @@ def test_finalize_prompt_avoids_full_width_rules() -> None:
     assert "do **not** draw full-width horizontal rules" in body
 
 
-def test_spec_writer_writes_to_artifacts_and_uses_commit_script() -> None:
-    body = _agent_prompt("spec-writer")
+def test_spec_finalizer_writes_to_artifacts_and_uses_commit_script() -> None:
+    body = _agent_prompt("spec-finalizer")
     assert "{{ change.home }}/artifacts/spec/" in body
     assert "imp artifact-commit spec" in body
     # The old code-branch path and git-commit machinery are gone.
     assert "imp/specs/" not in body
     assert "git commit --amend" not in body
+
+
+def test_no_agent_or_partial_names_the_old_spec_writer() -> None:
+    import pathlib
+    base = pathlib.Path("src/imp/assets/workflows/imp")
+    for sub in ("agents", "partials"):
+        for p in sorted((base / sub).glob("*.md")):
+            assert "spec-writer" not in p.read_text(), \
+                f"{p.name} still names spec-writer"
+
+
+def test_changed_files_carry_no_superpowers_provenance() -> None:
+    import pathlib
+    base = pathlib.Path("src/imp/assets/workflows/imp")
+    touched = [
+        base / "agents" / "front-door.md",
+        base / "agents" / "spec-finalizer.md",
+        base / "partials" / "spec-design-principles.md",
+        base / "partials" / "brainstorm-dialogue.md",
+    ]
+    for p in touched:
+        assert "superpowers" not in p.read_text().lower(), \
+            f"{p.name} carries a superpowers provenance line"
+
+
+def test_cli_new_help_does_not_name_the_old_spec_writer() -> None:
+    import pathlib
+    text = pathlib.Path("src/imp/cli/main.py").read_text()
+    assert "handed verbatim to the spec-writer" not in text
+    assert "the spec-writer names the Change" not in text
+    assert "spec-writer's opening intent" not in text
+    assert "the spec-writer opens" not in text
 
 
 def test_plan_writer_writes_to_artifacts_and_uses_commit_script() -> None:

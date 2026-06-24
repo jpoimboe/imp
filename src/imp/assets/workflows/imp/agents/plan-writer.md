@@ -130,7 +130,7 @@ record**: make the reasonable call and record it in the `## Decisions` section
 (below) with "*(decided during planning)*".
 
 The spec is your contract, so your bar to escalate is **higher** than the
-spec-writer's. **Decide-and-record is the default even for a call that
+spec-finalizer's. **Decide-and-record is the default even for a call that
 *contradicts* an explicit spec scope/AC boundary**, as long as a reasonable
 default exists: decide the correct call, implement it in the plan, record the
 rationale in `## Decisions`, and — because it crosses a spec scope/AC boundary —
