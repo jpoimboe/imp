@@ -12,6 +12,7 @@ class TerminalTitle:
         self._stream = stream
         self._name = change_name
         self._enabled = bool(stream.isatty())
+        self._current: str | None = None
         self.working()
 
     def working(self) -> None:
@@ -25,9 +26,13 @@ class TerminalTitle:
             return
         self._stream.write("\x1b]2;\x07")
         self._stream.flush()
+        self._current = None
 
     def _set(self, glyph: str) -> None:
         if not self._enabled:
             return
+        if glyph == self._current:
+            return
         self._stream.write(f"\x1b]2;{glyph} imp — {self._name}\x07")
         self._stream.flush()
+        self._current = glyph
