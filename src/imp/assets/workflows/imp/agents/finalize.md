@@ -42,7 +42,7 @@ end-of-run human asks are born. Populate:
   nothing else. Read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `{{ change.home }}/progress.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
-  `spec-writer`/`plan-writer` appended directly in reader form (they reach you even on
+  `spec-finalizer`/`plan-writer` appended directly in reader form (they reach you even on
   a `fast_path` change where `deferred-sweep` never ran) **and tolerations** the
   `verify` / `sweep-verify` gates recorded as `- [ ] DEFERRED verify: …` /
   `- [ ] DEFERRED sweep-verify: … — needs-decision: …` lines; present them all

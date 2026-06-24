@@ -7,6 +7,7 @@ import pytest
 
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
+from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
 
 AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
@@ -15,7 +16,7 @@ AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 SUBAGENT_FILES = ["coder.md", "code-reviewer.md"]
 # Interactive STEPS: the executor wires their resume hooks, so a turn-ending
 # question is correct for them. Exempt from the no-bare-question rule.
-INTERACTIVE_STEP_FILES = ["spec-writer.md", "finalize.md"]
+INTERACTIVE_STEP_FILES = ["front-door.md", "spec-finalizer.md", "finalize.md"]
 
 SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 
@@ -96,11 +97,17 @@ def test_subagent_prompt_forbids_turn_ending_question(name: str) -> None:
             f"{name}: subagents have no user channel — remove {banned!r}")
 
 
-def test_spec_writer_infers_intent_from_pasted_context() -> None:
-    text = _read("spec-writer.md")
-    assert "context instead of intent" in text
-    assert "wait_for_user" in text
-    assert "infer" in text.lower()
+def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
+    body = load_workflow(bundled_workflow_dir("imp")).agents[
+        "front-door"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "context instead of intent" in out
+    assert "wait_for_user" in out
+    assert "infer" in out.lower()
 
 
 TURN_TERMINAL_REVIEWERS = [
@@ -431,10 +438,10 @@ def test_plan_writer_has_no_deviation_revise_mode() -> None:
 
 
 def test_spec_writer_surfaces_needs_decision_in_reader_form() -> None:
-    text = _read("spec-writer.md")
+    text = _read("spec-finalizer.md")
     assert "Deferred Followups" in text
     assert "— needs-decision:" in text          # finalize's reader-form marker (em dash U+2014)
-    assert "DEFERRED spec-writer:" in text       # tagged with its own source
+    assert "DEFERRED spec-finalizer:" in text    # tagged with its own source
     assert "fast_path" in text
 
 
@@ -458,7 +465,7 @@ def test_deferred_sweep_passes_through_pre_classified_needs_decision() -> None:
 def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
     text = (AGENTS_DIR / "finalize.md").read_text()
     low = text.lower()
-    assert "spec-writer" in low and "plan-writer" in low
+    assert "spec-finalizer" in low and "plan-writer" in low
     assert "fast_path" in low or "fast path" in low
 
 
@@ -550,7 +557,7 @@ def test_no_agent_prompt_mentions_breakage_or_bypass_gate() -> None:
 
 
 def test_spec_writer_recognizes_front_door_handoff() -> None:
-    body = _read("spec-writer.md")
+    body = _read("spec-finalizer.md")
     # The handoff opening and its adopt-with-light-review section are named.
     assert "Adopt the spec drafted with the user and finalize it:" in body
     assert "Front-door handoff" in body
@@ -574,7 +581,7 @@ def test_committing_agents_carry_no_fixup_outside_change_rule(name: str) -> None
 
 
 def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> None:
-    body = _read("spec-writer.md")
+    body = _read("spec-finalizer.md")
     log = JsonlEventLog(tmp_path / "events.jsonl")
     moved = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -582,9 +589,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         cur_base_head="NEW", orig_base_head="OLD",
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    # Key on a phrase unique to the handoff true-branch — NOT "reconcile any
-    # drift", which also appears (line-wrapped) in spec-writer's unrelated
-    # build-gate block and would make this assertion brittle to reflow.
+    # Key on a phrase unique to the handoff true-branch.
     assert "the base branch advanced since the draft started" in moved   # head_changed=true
     assert "adopt near-silently" not in moved
 

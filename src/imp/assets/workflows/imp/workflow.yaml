@@ -31,7 +31,7 @@ phases:
   # ── front-door: phase 0, a bare conversation (chrome:none). It answers
   # questions, scouts existing work, or scopes a build; on go-live it sets the
   # ceremony and routes into the pipeline. express skips the spec beat entirely
-  # (the new edge); full enters spec-writer for adopt-with-light-review.
+  # (the new edge); full enters spec-finalizer for adopt-with-light-review.
   - name: front-door
     chrome: none
     steps:
@@ -41,14 +41,14 @@ phases:
         label: chatting
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
-          - {else: true, set: {fast_path: false}, goto: spec-writer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
+          - {else: true, set: {fast_path: false}, goto: spec-finalizer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
 
   - name: spec
     steps:
-      - name: spec-writer
-        file: agents/spec-writer.md
+      - name: spec-finalizer
+        file: agents/spec-finalizer.md
         tier: high
-        label: spec · writing
+        label: spec · finalizing
         rules:
           - {else: true, continue: true}
 
@@ -57,7 +57,7 @@ phases:
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: spec-writer}
+          - {else: true, resume: spec-finalizer}
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
@@ -71,10 +71,10 @@ phases:
         rules:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
           - {if: {blocking: true}, set: {spec_minors_integrated: false},
-             resume: spec-writer, label: "addressing spec review feedback", feedback: "Here's review feedback to address:"}
+             resume: spec-finalizer, label: "addressing spec review feedback", feedback: "Here's review feedback to address:"}
           # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
           - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
-             resume: spec-writer, label: "addressing spec review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+             resume: spec-finalizer, label: "addressing spec review feedback", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
           - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 

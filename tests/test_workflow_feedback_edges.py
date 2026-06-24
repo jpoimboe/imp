@@ -9,7 +9,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.types import Goto
 
 FINDINGS_TARGETS = {
-    ("spec-reviewer", "spec-writer"),
+    ("spec-reviewer", "spec-finalizer"),
     ("plan-reviewer", "plan-writer"),
     ("finalize", "plan-writer"),
 }

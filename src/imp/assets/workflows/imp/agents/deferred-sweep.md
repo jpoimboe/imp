@@ -43,7 +43,7 @@ parse already skips them. Leave them untouched.
 ## Pre-classified human-decision items — pass through untouched
 
 A `- [ ] DEFERRED ` line that already carries a `— needs-decision: <why>` marker is a
-**pre-classified human decision** — authored directly by `spec-writer`/`plan-writer`
+**pre-classified human decision** — authored directly by `spec-finalizer`/`plan-writer`
 for a concern only a human can settle, recorded by a prior sweep pass, or born as a
 **toleration** at the `verify` / `sweep-verify` gate (source `verify` / `sweep-verify`).
 Recognize the `— needs-decision:` marker and **leave the line exactly as-is**: do not

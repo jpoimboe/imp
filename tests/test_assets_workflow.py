@@ -52,7 +52,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
         "coder", "code-reviewer",
     }
     dispatchers = {"task-lead", "deferred-sweep",
-                   "plan-writer", "spec-writer", "front-door"}
+                   "plan-writer", "spec-finalizer", "front-door"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -73,9 +73,9 @@ def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
     asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
-    spec_writer = wf.agents["spec-writer"]
-    assert "ask_user" not in spec_writer.tools
-    assert "complete_step" not in spec_writer.tools
+    spec_finalizer = wf.agents["spec-finalizer"]
+    assert "ask_user" not in spec_finalizer.tools
+    assert "complete_step" not in spec_finalizer.tools
 
 
 def test_bundled_workflow_loads_and_producers_resume() -> None:
@@ -86,10 +86,10 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     by = {s.name: s for s in wf.flat_steps()}
     # producer back-edges resume their target's conversation
     assert isinstance(by["spec-verify-commit"].rules[-1].action, Goto)
-    assert by["spec-verify-commit"].rules[-1].action.resume is True   # -> spec-writer
+    assert by["spec-verify-commit"].rules[-1].action.resume is True   # -> spec-finalizer
     assert by["plan-verify-commit"].rules[-1].action.resume is True   # -> plan-writer
     assert by["verify"].rules[-1].action.resume is True            # -> task-lead
-    assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
+    assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-finalizer
     # phase jumps clear (plain goto): task_gap -> coder (target task-lead),
     # cross-phase plain goto (resume is False)
     assert by["plan-code-reviewer"].rules[0].action.target == "task-lead"
@@ -142,11 +142,11 @@ def test_default_workflow_loads() -> None:
 def test_spec_writer_declares_complexity_output() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    spec_writer = wf.agents["spec-writer"]
-    assert "complexity" in spec_writer.output_schema.field_names()
+    spec_finalizer = wf.agents["spec-finalizer"]
+    assert "complexity" in spec_finalizer.output_schema.field_names()
     # complexity drives the thin-spec decision only; fast_path is owned by the
     # front-door phase now, so a renamed value no longer silently breaks routing.
-    field = next(f for f in spec_writer.output_schema.fields if f.name == "complexity")
+    field = next(f for f in spec_finalizer.output_schema.fields if f.name == "complexity")
     assert field.type == "enum"
     assert field.values == ("trivial", "standard")
     assert field.required is True
@@ -170,7 +170,7 @@ def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-reviewer"].rules
-    # Critical/Major -> rework to spec-writer; clear the minors-integrated flag so a
+    # Critical/Major -> rework to spec-finalizer; clear the minors-integrated flag so a
     # real fix re-opens the one minors pass.
     m = evaluate_rules(
         rules,
@@ -178,7 +178,7 @@ def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
         output={"blocking": True, "has_minor_findings": False},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.action.target == "spec-finalizer" and m.action.resume is True
     assert m.var_mutations["spec_minors_integrated"] is False
 
 
@@ -195,7 +195,7 @@ def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
     )
     assert m.var_mutations["spec_minors_integrated"] is True
     assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.action.target == "spec-finalizer" and m.action.resume is True
 
 
 def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
@@ -266,10 +266,10 @@ def test_no_agent_declares_the_commit_tool() -> None:
 
 
 def test_committing_agents_declare_bash() -> None:
-    # coder/task-lead/spec-writer/plan-writer commit with raw git via bash.
+    # coder/task-lead/spec-finalizer/plan-writer commit with raw git via bash.
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    for name in ("coder", "task-lead", "spec-writer", "plan-writer"):
+    for name in ("coder", "task-lead", "spec-finalizer", "plan-writer"):
         assert "bash" in wf.agents[name].tools, f"{name} missing bash"
 
 
@@ -360,10 +360,10 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     assert m.var_mutations == {}
 
 
-def test_spec_writer_prompt_has_minors_integration_branch() -> None:
+def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
+    body = wf.agents["spec-finalizer"].prompt_template_source
     # The clean-review branch keys on the injected `blocking:` line and integrates minors.
     assert "blocking: false" in body
     assert "minors" in body.lower()
@@ -379,102 +379,15 @@ def test_plan_writer_prompt_has_minors_integration_branch() -> None:
     assert "without committing" in body.lower()
 
 
-def test_spec_writer_prompt_drops_title_and_auto_titled() -> None:
-    # Acceptance #1: the spec-writer system prompt no longer surfaces the
-    # change title or auto_titled flag anywhere in its body. The agent learns
-    # the user's intent from the first user reply, not from the prompt.
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    assert "{{ change.title }}" not in body
-    assert "{{ change.auto_titled }}" not in body
 
-
-def test_spec_writer_prompt_drops_auto_titled_conditional() -> None:
-    # Acceptance #2: the {% if change.auto_titled %} / {% else %} / {% endif %}
-    # split is gone; slug-settling guidance is a single unconditional section.
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    assert "change.auto_titled" not in body
-    assert "{% if change.auto_titled" not in body
-
-
-def test_spec_writer_prompt_mandates_opening_question() -> None:
-    # Acceptance #3: the prompt explicitly instructs the agent to open the
-    # change by calling wait_for_user (not via a bare turn-end), with no
-    # codebase exploration before the user answers.
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    lowered = body.lower()
-    assert "open by asking" in lowered
-    assert "first action" in lowered
-    # The discipline requires wait_for_user for the opening question.
-    assert "wait_for_user" in lowered
-    # No codebase exploration before the user has answered.
-    assert "do not" in lowered or "do not\n" in lowered or "do not " in lowered
-    assert "codebase" in lowered
-
-
-def test_spec_writer_prompt_mandates_proactive_rename() -> None:
-    # Acceptance #4: the agent renames proactively via rename_change as soon
-    # as intent is clear, ANNOUNCING the name in prose WITHOUT asking the
-    # user. The new guidance (name-on-intent) instructs rename+commit same turn.
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    lowered = body.lower()
-    assert "without asking the user" in lowered
-    assert "announce" in lowered  # "Announce the name in prose"
-    # Name-on-intent: rename_change applies immediately and rename+commit happen
-    # this same turn (the old iron-rule forbidding same-turn is now inverted).
-    assert "this same turn" in body
-    assert "immediately" in body
-
-
-def test_spec_writer_prompt_drops_skip_reflexive_paragraph() -> None:
-    # Acceptance #5 (part 1): the "Skip reflexive questions on fully-specified
-    # requests" paragraph is incompatible with always-ask and must be removed.
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    assert "Skip reflexive questions" not in body
-    assert "fully-specified requests" not in body
-
-
-def test_spec_writer_prompt_has_trivial_carveout() -> None:
-    # Acceptance #5 (part 2): criterion 1 of the complexity rubric gains a
-    # carve-out clarifying that the mandatory opening question does not count
-    # against `trivial`.
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    lowered = body.lower()
-    # "opening question" appears as both the discipline name and the carve-out.
-    assert "opening question" in lowered
-    # The carve-out must explicitly say the opening question does not count.
-    assert "does not count" in lowered or "does NOT count" in body
-
-
-def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
-    from pathlib import Path
-    src = Path("src/imp/assets/workflows/imp/agents/spec-writer.md")
-    text = src.read_text()
-    assert "{{ change.slug }}" not in text
-    assert "{{change.slug}}" not in text
-    # And no leftover "provisional slug" framing.
-    assert "provisional" not in text.lower()
-
-
-def test_no_goto_spec_writer_edge() -> None:
+def test_no_goto_spec_finalizer_edge() -> None:
     from pathlib import Path
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
-    # Rework edges back into spec-writer must be `resume:` (transcript kept), so a
-    # resumed spec-writer always has its rename_change result in history. The one
-    # permitted `goto: spec-writer` is front-door's forward entry on the full path.
-    assert wf.count("goto: spec-writer") == 1  # only front-door's forward entry
-    assert "goto: spec_writer" not in wf
+    # Rework edges back into spec-finalizer must be `resume:` (transcript kept), so a
+    # resumed spec-finalizer always has its rename_change result in history. The one
+    # permitted `goto: spec-finalizer` is front-door's forward entry on the full path.
+    assert wf.count("goto: spec-finalizer") == 1  # only front-door's forward entry
+    assert "goto: spec_finalizer" not in wf
 
 
 def test_plan_writer_declares_wait_for_user() -> None:
@@ -714,25 +627,6 @@ def test_sweep_verify_red_resumes_deferred_sweep() -> None:
     assert m.action.target == "deferred-sweep" and m.action.resume is True
 
 
-def test_spec_writer_prompt_has_build_or_save_section() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    lowered = body.lower()
-    assert "create_and_enter_worktree" in body
-    assert "head_changed" in body
-
-    assert "build this out now" in lowered
-    assert "1. **Build it now**" not in body
-    assert "2. **Save as a draft**" not in body
-
-    assert "imp resume <id>" in body
-    assert "spec phase pauses" in lowered
-
-    assert "going live or parking the draft" not in lowered
-    assert "go live" not in lowered
-    assert "go-live" not in lowered
-
 
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     from imp.assets import bundled_workflow_dir
@@ -788,17 +682,6 @@ def test_finalize_merge_gate_is_recommendation_anchored() -> None:
 
 
 
-def test_spec_writer_fast_path_signal_hides_internal_label() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["spec-writer"].prompt_template_source
-    lowered = body.lower()
-    # Standard path: say nothing about the classification.
-    assert "say nothing to them about the classification" in lowered
-    # Trivial path: a plain-language heads-up, never naming the internal label.
-    assert "brief plain-language heads-up" in lowered
-    assert "never name the internal" in lowered
-
 
 def test_review_base_repin_command_cds_into_project_root() -> None:
     from imp.assets import bundled_workflow_dir
@@ -847,3 +730,32 @@ def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
         assert term in out
+
+
+def test_spec_finalizer_replaces_spec_writer() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert "spec-finalizer" in wf.agents
+    assert "spec-writer" not in wf.agents
+    # The finalizer includes the shared design lens but NOT the dialogue partial.
+    body = wf.agents["spec-finalizer"].prompt_template_source
+    assert '{% include "partials/spec-design-principles.md" %}' in body
+    assert "brainstorm-dialogue.md" not in body
+    # Brainstorm-entry sections are gone.
+    assert "## Brainstorm Discipline" not in body
+    assert "## Build now or save for later" not in body
+    assert "## Naming the Change" not in body
+    # Its finalize core remains.
+    assert "Front-door handoff" in body
+    assert "imp artifact-commit spec" in body
+    # Its self-tag in the deferred reader form is renamed.
+    assert "DEFERRED spec-finalizer:" in body
+    assert "DEFERRED spec-writer:" not in body
+
+
+def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
+    from pathlib import Path
+    wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
+    assert "spec-writer" not in wf
+    assert "spec_writer" not in wf
+    assert wf.count("goto: spec-finalizer") == 1   # only front-door's forward entry

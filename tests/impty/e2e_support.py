@@ -110,7 +110,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 bash(spec_cmd),
                 done(ceremony="express"),
             ]}],
-            "spec-writer": [{"text": "spec", "tools": [
+            "spec-finalizer": [{"text": "spec", "tools": [
                 done(phase="written",
                      spec_path=".imp/change/artifacts/spec/SCRIPTED-STUB.md",
                      complexity="trivial"),
