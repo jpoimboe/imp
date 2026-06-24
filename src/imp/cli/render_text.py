@@ -69,7 +69,7 @@ def fmt_seconds_done(seconds: float | int | None) -> str:
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80, live_viewer: bool = False) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
-    # change id/title belong to `imp` chrome (the run header, `imp ls`), not the
+    # change id/title belong to `imp` chrome (the run header, `imp list`), not the
     # narrative body — so live and log both start with content, not a banner.
     root = tree.root
     yield from _render_children(root.children, depth=0, full=full, color=color, width=width,

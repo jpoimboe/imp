@@ -9,21 +9,21 @@ from imp.engine.change import Change
 from tests.conftest import _seed_control
 
 
-def test_ls_builtin_lists_changes_before_skill_fallback(tmp_path: Path, capsys) -> None:
+def test_list_builtin_lists_changes_before_skill_fallback(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Live one", change_id="live1", base_branch="main")
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
-    result = handle_slash_line("/ls", change=change, output_fn=out.append)
+    result = handle_slash_line("/list", change=change, output_fn=out.append)
     printed = capsys.readouterr().out
     assert result is REPROMPT                 # a built-in, not a skill lookup
     assert "live1" in printed                 # the listing rendered
     assert not any("no such skill" in line for line in out)
 
 
-def test_ls_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsys) -> None:
+def test_list_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsys) -> None:
     # `_completed_rows` reads the archive index (not the live store), so seed a
-    # completed change there directly; the default `/ls` hides it and `/ls -a`
+    # completed change there directly; the default `/list` hides it and `/list -a`
     # surfaces it, pinning that `-a` maps to all=True.
     from imp.engine import archive
     events = tmp_path / "e.jsonl"
@@ -39,11 +39,21 @@ def test_ls_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsys)
         change_json_path=change_json, state_json_path=state_json)
     change = SimpleNamespace(control_root=tmp_path)
 
-    assert handle_slash_line("/ls", change=change, output_fn=[].append) is REPROMPT
+    assert handle_slash_line("/list", change=change, output_fn=[].append) is REPROMPT
     assert "doneid" not in capsys.readouterr().out          # completed hidden by default
 
-    assert handle_slash_line("/ls -a", change=change, output_fn=[].append) is REPROMPT
+    assert handle_slash_line("/list -a", change=change, output_fn=[].append) is REPROMPT
     assert "doneid" in capsys.readouterr().out              # -a surfaces the archive
+
+
+def test_ls_is_unknown_after_rename(tmp_path: Path) -> None:
+    # An unrecognized verb falls through to the skill lookup; with no `ls` skill
+    # present that lands on the "no such skill" path.
+    change = SimpleNamespace(control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/ls", change=change, output_fn=out.append)
+    assert result is REPROMPT
+    assert any("no such skill: /ls" in line for line in out)
 
 
 def test_search_builtin_prints_matching_archived_change(tmp_path: Path) -> None:

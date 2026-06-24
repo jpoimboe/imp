@@ -159,7 +159,7 @@ Run this top-to-bottom once on a real feature-sized intent:
 3. **An in-turn prompt** — when a step asks you a question, read *that* prompt with fresh
    eyes: clear question, obvious default, discoverable affordance? `snapshot()`.
 4. **Pause, then `imp resume`** — with the agent working, pause it (CLI: `send_signal(2)`;
-   TUI: `send("\x1b")` = ESC) and grab the change id (`cd "$WT" && imp ls`, first column).
+   TUI: `send("\x1b")` = ESC) and grab the change id (`cd "$WT" && imp list`, first column).
    Spawn resume in the same mode. Judge: does the resume banner make it obvious which Change
    you're continuing and where it left off? Header parity with the live run?
 5. **Sweep every subcommand** — enumerate the real surface so nothing is missed as imp grows
@@ -178,13 +178,13 @@ to score).
 - **Every subcommand** the live `imp --help` lists, **plus each `imp <cmd> -h`** — alignment,
   headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at:
   - `imp init` — first-run bootstrap (run in a *fresh* clone with no `.imp/config.yaml`).
-  - `imp ls` — the Changes table: headers, alignment, id vs slug, empty state.
+  - `imp list` — the Changes table: headers, alignment, id vs slug, empty state.
   - `imp log <id>` — a readable story or a wall of internals?
   - `imp config` / `imp config --explain high` — layer/source arrows legible? precedence clear?
   - `imp abandon <id>` — teardown wording clear? confirmation/affordance?
   - `imp eval -h` — purpose and usage clear from help alone?
   - any command not listed here — cover it too; flag if its UX lags.
-- **Empty states** — `imp ls` / `imp log` with no Changes yet.
+- **Empty states** — `imp list` / `imp log` with no Changes yet.
 - **`imp init` in a fresh clone** — the real first-run experience.
 
 *TUI mode:*

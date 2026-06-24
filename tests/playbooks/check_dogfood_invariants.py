@@ -141,14 +141,14 @@ def check_readback(repo: str, imp: str) -> Result:
     token = cid
     log = _imp(repo, imp, "log", cid)
     log_full = _imp(repo, imp, "log", cid, "--full")
-    status = _imp(repo, imp, "ls", "--all")
+    status = _imp(repo, imp, "list", "--all")
     ok = (
         log.returncode == 0 and bool(log.stdout.strip())
         and log_full.returncode == 0 and bool(log_full.stdout.strip())
         and status.returncode == 0 and token in status.stdout
     )
     return Result("readback", ok,
-                  f"id={cid}: log / log --full / ls --all read it back"
+                  f"id={cid}: log / log --full / list --all read it back"
                   if ok else
                   f"id={cid}: readback failed "
                   f"(log rc={log.returncode}, full rc={log_full.returncode}, "
