@@ -133,11 +133,23 @@ a genuine fixed choice.
 
 When you need the user's input, ask the question in your turn text and call
 `wait_for_user` (it takes no arguments; the reply returns as the tool result).
-Only call `complete_step` once you have gone live and committed the draft spec.
+
+A request you can fully satisfy inline — a question, or a content /
+text-generation ask that is **not** a software change — is answered in prose and
+then `wait_for_user`, **never** `complete_step`. Generating the requested text is
+the whole job; there is nothing to build, so do not cross into the build pipeline.
+
+`complete_step` is exclusively the go-live build terminator: call it only once you
+have gone live and committed the draft spec. It is **not** a way to end a turn
+after answering inline. "express" means build *quickly* — skipping the spec beat
+and the review gates — it is **not** a no-build exit; it is still a build path that
+runs `plan-writer` against the draft spec you committed.
 
 ## Output
 
 - `status` — `Success` on a normal go-live; `Error` only on an unrecoverable
   failure.
 - `ceremony` — `express` for the build-quickly path (skips the spec beat and the
-  review gates), `full` for the full design-and-review pass (the default).
+  review gates), `full` for the full design-and-review pass (the default). Both
+  are build paths reached only through `complete_step`; neither is a no-build
+  exit — a request you answered inline ends with `wait_for_user` instead.
