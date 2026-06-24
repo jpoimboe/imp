@@ -41,8 +41,12 @@ In `bash`:
   base change and the branch change.
 - **No silent semantic break:** a clean textual merge can still be wrong — base
   renamed/removed a symbol the branch calls, changed a signature, shifted an invariant.
-  Reason about the branch's code against the base-side incoming diff. You may run the
-  project's own test tooling in `bash` to spot-check; do NOT make code changes and do
+  Reason about the branch's code against the base-side incoming diff. When the
+  project runs a combined verification gate, it runs as a separate step immediately
+  before this review and has already passed at the current tree — and you cannot have
+  changed that tree (you do not commit), so re-running the whole suite tells you
+  nothing new; don't. If you form a specific hypothesis that a runtime behavior broke,
+  run only the single narrowest check that tests it. Do NOT make code changes and do
   NOT commit.
 - **Faithful to intent:** each reconciliation must still deliver the change's intent —
   read the reconciler's `progress.md` narration and the branch diff against the spec. A
