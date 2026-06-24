@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from imp.agents.runner import Message, ToolUseBlock
+from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
 
 
 class ResumeState(Enum):
@@ -17,6 +17,24 @@ class ResumeState(Enum):
     AWAITING_USER = "awaiting_user"            # last tool_use is wait_for_user; solicit + fill
     MISSING_COMPLETE_STEP = "missing_complete" # agent stopped without complete_step; replay+nudge
     DANGLING_TOOL_USE = "dangling_tool_use"    # other dangling tool_use; repaired with placeholder
+
+
+def unresolved_wait_for_user(messages: list[Message]) -> tuple[int, str] | None:
+    """Return (assistant_index, tool_use_id) of an unresolved wait_for_user, or None."""
+    resolved = {
+        b.tool_use_id
+        for m in messages if m.role == "user"
+        for b in m.content
+        if isinstance(b, ToolResultBlock) and not b.is_error
+    }
+    for i, m in enumerate(messages):
+        if m.role != "assistant":
+            continue
+        for b in m.content:
+            if (isinstance(b, ToolUseBlock) and b.name == "wait_for_user"
+                    and b.id not in resolved):
+                return i, b.id
+    return None
 
 
 def classify_resume(messages: list[Message]) -> ResumeState:
@@ -28,14 +46,16 @@ def classify_resume(messages: list[Message]) -> ResumeState:
         # Replay artifact — recurse on the previous message.
         return classify_resume(messages[:-1])
 
+    if unresolved_wait_for_user(messages) is not None:
+        return ResumeState.AWAITING_USER
+
     if last.role == "user":
         return ResumeState.SEND_TO_LLM
 
-    # assistant
+    # assistant — any remaining dangling tool_use is a non-wait_for_user one
+    # (an unresolved wait_for_user was already routed to AWAITING_USER above).
     tool_uses = [b for b in last.content if isinstance(b, ToolUseBlock)]
     if tool_uses:
-        if any(b.name == "wait_for_user" for b in tool_uses):
-            return ResumeState.AWAITING_USER
         return ResumeState.DANGLING_TOOL_USE
     return ResumeState.MISSING_COMPLETE_STEP
 
@@ -56,4 +76,5 @@ def count_tool_uses(messages: list[Message]) -> int:
     )
 
 
-__all__ = ["ResumeState", "classify_resume", "count_tool_uses"]
+__all__ = ["ResumeState", "classify_resume", "count_tool_uses",
+           "unresolved_wait_for_user"]
