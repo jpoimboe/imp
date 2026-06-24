@@ -2044,6 +2044,37 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon(control, change_id, assume_yes=args.yes)
 
 
+def _cmd_edit(args: argparse.Namespace) -> int:
+    control = _control_root()
+    change_id = _resolve_id(control, args.token)
+    change = Change.load(control, change_id)
+
+    zone_change = args.backlog or args.active
+    dep_change = args.depends_on is not None or args.clear_deps
+    if args.title is None and not zone_change and not dep_change:
+        print("imp: imp edit needs at least one of --title, --backlog/--active, "
+              "or --depends-on/--clear-deps", file=sys.stderr)
+        return 2
+
+    if zone_change and change.materialized:
+        print(f"imp: {change_id} is already built; zone moves apply to "
+              "un-materialized changes only (use abandon/pause instead)",
+              file=sys.stderr)
+        return 2
+
+    if args.title is not None:
+        change.rename(args.title, log=change.event_log())
+    if args.backlog:
+        change.set_origin("idea")
+    elif args.active:
+        change.set_origin("draft")
+    if args.clear_deps:
+        change.set_depends_on([])
+    elif args.depends_on is not None:
+        change.set_depends_on(args.depends_on)
+    return 0
+
+
 def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     control = _control_root()
     change_id = os.environ.get("IMP_CHANGE_ID")
@@ -2414,6 +2445,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
+
+    p_edit = sub.add_parser(
+        "edit",
+        help="Edit a Change's title, backlog membership, or dependencies.")
+    p_edit.add_argument("token", help="Change id or its short token.")
+    p_edit.add_argument("--title", metavar="TEXT", default=None,
+                        help="Set the Change title.")
+    p_edit_zone = p_edit.add_mutually_exclusive_group()
+    p_edit_zone.add_argument(
+        "--backlog", action="store_true",
+        help="Move an un-materialized Change to the Backlog zone (origin=idea).")
+    p_edit_zone.add_argument(
+        "--active", action="store_true",
+        help="Return an un-materialized Change to the Active zone (origin=draft).")
+    p_edit_deps = p_edit.add_mutually_exclusive_group()
+    p_edit_deps.add_argument(
+        "--depends-on", metavar="ID", action="append", default=None,
+        dest="depends_on", help="Replace the dependency list (repeatable).")
+    p_edit_deps.add_argument(
+        "--clear-deps", action="store_true",
+        help="Empty the dependency list.")
+    p_edit.set_defaults(func=_cmd_edit)
 
     p_artifact = sub.add_parser(
         "artifact-commit",
