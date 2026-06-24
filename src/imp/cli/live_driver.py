@@ -39,7 +39,7 @@ def compose_activity_status(
     activity = builder.current_activity()
     if activity is None:
         return None
-    spin = pal.ansi(pal.spinner_frame(frame), "cyan", enabled=color)
+    spin = pal.ansi(pal.spinner_frame(frame), "wordmark", enabled=color)
     parts: list[str] = []
     if activity.phase_label:
         parts.append(pal.ansi(activity.phase_label, enabled=color))

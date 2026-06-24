@@ -1650,3 +1650,19 @@ def test_suppress_replay_pure_replay_renders_nothing() -> None:
         drv.on_event(e)
     drv.finish()
     assert all(not ln for ln in _body(out))
+
+
+def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_activity_status
+    try:
+        for theme in ("dark", "light", "ansi"):
+            pal.set_theme(theme)
+            b = nv.NarrativeBuilder()
+            b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+            line = compose_activity_status(b, frame=0, elapsed=1.0, color=True)
+            assert line is not None
+            assert line.startswith(pal._ANSI["wordmark"])   # spinner painted gold
+            assert pal._ANSI["cyan"] not in line             # no longer cyan
+    finally:
+        pal.set_theme("ansi")
