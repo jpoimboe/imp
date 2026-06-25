@@ -612,7 +612,7 @@ async def test_title_flips_working_waiting_back_to_working_and_resets(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    working = "\x1b]2;imp · My Change\x07"
+    working = "\x1b]2;✦ imp · My Change\x07"
     waiting = f"\x1b]2;{GLYPH_WAITING} imp · My Change\x07"
     reset = "\x1b]2;\x07"
     assert working in out
