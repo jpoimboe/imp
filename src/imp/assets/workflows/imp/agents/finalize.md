@@ -72,6 +72,8 @@ not a transient.
 This is the final **merge gate**, and a human reads it. Speak in **prose**, never
 a labelled **field-dump**.
 
+{% include "partials/live-gate-dialogue.md" %}
+
 Open with a concise human-readable summary of what changed: what was built (by
 plan/task), the verification state in plain terms, and the one-line rollup of
 opportunistic improvements carried in `built`. Name genuinely controversial
@@ -88,7 +90,8 @@ diff. For EACH item, in its own `wait_for_user` turn (one item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.
-- Ask them to pick one of three dispositions:
+- Engage the human's natural-language response and map it onto one of three **internal
+  outcomes** — do not present these as a menu to choose from:
   - **fix** — fix before merge. Collect the item into the rework brief and
     leave its `progress.md` line `needs-decision` (it rides the rework and is
     re-evaluated next pass).
@@ -100,6 +103,12 @@ diff. For EACH item, in its own `wait_for_user` turn (one item per turn):
     change merges.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
+- **Clarifying questions are first-class.** When the human asks to understand
+  something before deciding, answer it plainly and continue the loop; do not treat it
+  as a stalled decision and do not re-push the recommendation.
+- **Engage a concern straight.** When the human raises a worry, address it directly;
+  do not minimize it ("negligible", "within normal noise") or argue it down to defend
+  your recommendation. One restrained line.
 
 Both `seeded <id>` and `ignored-at-gate` are **terminal**: a later
 `deferred-sweep` or `finalize` pass treats them like `dismissed` and never

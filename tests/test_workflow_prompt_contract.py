@@ -262,7 +262,8 @@ def test_finalize_walks_open_items_one_at_a_time() -> None:
 def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
     low = FINALIZE.read_text().lower()
     for stale in ("fyi", "veto", "fyi-fixed", "silent-fixed", "still-deferred"):
-        assert stale not in low, f"reintroduced stale finalize vocabulary: {stale!r}"
+        assert re.search(rf"\b{re.escape(stale)}\b", low) is None, (
+            f"reintroduced stale finalize vocabulary: {stale!r}")
 
 
 PLAN_CYCLE_CHECK = AGENTS_DIR / "plan-cycle-check.md"

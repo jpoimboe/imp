@@ -679,8 +679,17 @@ def test_finalize_merge_gate_is_recommendation_anchored() -> None:
     # Guardrails retained.
     assert "never announce it" in body
     assert "underspecified" in body
-
-
+    # §2 pulls in the shared live-gate posture partial.
+    assert '{% include "partials/live-gate-dialogue.md" %}' in body
+    # The per-item disposition menu framing is gone (outcomes are now mapped from
+    # the human's natural-language intent, not picked from a presented menu).
+    assert "pick one of three" not in body
+    # fix/defer/ignore survive as internal outcomes.
+    assert "**fix**" in body and "**defer**" in body and "**ignore**" in body
+    # The two finalize-only postures live directly in §2.
+    assert "Clarifying questions are first-class" in body
+    assert "Engage a concern straight" in body
+    assert "within normal noise" in body
 
 
 def test_review_base_repin_command_cds_into_project_root() -> None:
