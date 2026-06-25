@@ -140,16 +140,15 @@ class Prompt:
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:
         """The prompt caret as prompt_toolkit formatted text. The default caret
-        (`prompt_text is None`) is the bright-blue `> ` (pal.CARET); an explicit
-        non-empty `prompt_text` is styled the same bright-blue. Empty text adds no
-        escapes."""
+        (`prompt_text is None`) is the gold `> ` (pal.CARET); an explicit non-empty
+        `prompt_text` is styled the same gold. Empty text adds no escapes."""
         from imp.cli import palette as pal
 
         text = pal.CARET if prompt_text is None else prompt_text
         if self._color:
             from prompt_toolkit.formatted_text import ANSI
 
-            styled = pal.ansi(text, "bright_blue", enabled=True) if text else ""
+            styled = pal.ansi(text, "wordmark", enabled=True) if text else ""
             return ANSI(indent + styled)
         return indent + text
 
