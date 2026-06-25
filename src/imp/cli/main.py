@@ -871,8 +871,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     else:
         try:
             playbook_name = getattr(args, "playbook", None)
-            if playbook_name and getattr(args, "spec_file", None):
-                raise SeedError("--playbook and --spec-file are mutually exclusive")
             if getattr(args, "findings_only", False) and not playbook_name:
                 raise SeedError("--findings-only requires --playbook")
             seed = resolve_spec_seed(args)
@@ -1022,7 +1020,6 @@ async def _async_cmd_run(args: argparse.Namespace) -> int:
         return 2
     args.playbook = name
     args.opening = args.playbook_args
-    args.spec_file = None
     return await _async_cmd_new(args)
 
 
@@ -2339,11 +2336,6 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
-    p_new.add_argument("--spec-file", metavar="PATH", default=None,
-                       help="Seed the change from a draft spec file: its content "
-                            "becomes front-door's opening intent. A missing or "
-                            "unreadable PATH is a hard error (rc 2). Mutually "
-                            "exclusive with a positional MESSAGE and with --message.")
     p_new.add_argument("--playbook", metavar="NAME", default=None,
                        help="Seed the change from imp/playbooks/<NAME>.md, "
                             "rendering {{ args }} from the positional MESSAGE.")

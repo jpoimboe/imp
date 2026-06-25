@@ -231,7 +231,7 @@ def test_new_interactive_routes_through_clear_loop(
     try:
         rc = anyio.run(m._async_cmd_new, argparse.Namespace(
             title=None, opening="add a thing", non_interactive=False,
-            message=None, tui=False, spec_file=None))
+            message=None, tui=False))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
@@ -363,7 +363,7 @@ def test_new_tui_routes_through_clear_loop(
     try:
         rc = anyio.run(m._async_cmd_new, argparse.Namespace(
             title=None, opening="add a thing", non_interactive=False,
-            message=None, tui=True, spec_file=None))
+            message=None, tui=True))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]

@@ -35,14 +35,9 @@ def test_build_parser_new_positional_and_title_flag() -> None:
     assert ns.title == "dark mode"
 
 
-def test_build_parser_new_accepts_spec_file() -> None:
-    ns = cli_main._build_parser().parse_args(["new", "--spec-file", "draft.md"])
-    assert ns.spec_file == "draft.md"
-
-
-def test_build_parser_new_spec_file_defaults_none() -> None:
-    ns = cli_main._build_parser().parse_args(["new"])
-    assert ns.spec_file is None
+def test_build_parser_new_rejects_spec_file() -> None:
+    with pytest.raises(SystemExit):
+        cli_main._build_parser().parse_args(["new", "--spec-file", "draft.md"])
 
 
 def _new_args(**kw: object) -> argparse.Namespace:

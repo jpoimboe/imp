@@ -76,7 +76,7 @@ def test_new_idea_with_title_flag_is_error(
         argparse.Namespace(idea="A title", opening=None, depends_on=[],
                            title="conflicting", base_branch=None,
                            non_interactive=True, message=None, tui=False,
-                           spec_file=None, playbook=None,
+                           playbook=None,
                            findings_only=False, workflow=None)))
     assert rc == 2
     assert not (tmp_path / ".imp" / "changes").exists()
