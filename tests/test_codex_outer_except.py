@@ -56,3 +56,15 @@ async def test_outer_except_reraises_subagent_suspended() -> None:
     with pytest.raises(SubagentSuspended):
         async for _ev in runner.run(object()):  # type: ignore[arg-type]
             pass
+
+
+@pytest.mark.anyio
+async def test_outer_except_reraises_awaiting_user_input() -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    runner = _runner_with_failing_loop(AwaitingUserInput("the question"))
+    runner._cancel = False
+
+    with pytest.raises(AwaitingUserInput):
+        async for _ev in runner.run(object()):  # type: ignore[arg-type]
+            pass
