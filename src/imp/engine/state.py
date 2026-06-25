@@ -27,9 +27,13 @@ if TYPE_CHECKING:
 import filelock
 
 Status = Literal[
-    "running", "paused", "saved", "completed", "errored", "merge_blocked",
-    "abandoned"
+    "new", "paused", "merge_blocked", "completed", "saved", "abandoned"
 ]
+
+# Pre-release coercion of legacy persisted values: `running` was the old birth
+# status (now `new`); `errored` was a derived crash label that no longer persists
+# (a crash is resumable → `paused`).
+_LEGACY_STATUS = {"running": "new", "errored": "paused"}
 
 
 @dataclass
@@ -91,6 +95,8 @@ class State:
         # an old paused/running Change can still be loaded, abandoned, or resumed.
         known = {f.name for f in fields(cls)}
         data = {k: v for k, v in data.items() if k in known}
+        if "status" in data:
+            data["status"] = _LEGACY_STATUS.get(data["status"], data["status"])
         return cls(
             **data,
             current_step=CurrentStep.from_dict(cur) if cur else None,
@@ -542,3 +548,23 @@ class ProjectLock:
             return int(self.path.read_text().strip())
         except (FileNotFoundError, ValueError):
             return None
+
+
+def lock_is_live(lock_path: Path) -> bool:
+    """True iff `lock_path` exists and names a living pid.
+
+    The single pid-liveness probe in the codebase — the display resolver and the
+    daemon crash snapshot both call it so they can't drift. Signal-0 probe:
+    ESRCH (no such process) ⇒ dead; EPERM (exists, not ours) ⇒ alive. A live
+    run's pid is never falsely read as dead (the safe direction)."""
+    try:
+        pid = int(lock_path.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
