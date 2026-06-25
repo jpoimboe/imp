@@ -1429,3 +1429,64 @@ async def test_serve_forwards_non_interactive_to_run_change(tmp_path: Path) -> N
             change, run_fn=fake_run, hibernate=False, non_interactive=True)
     assert result == "done"
     assert captured["non_interactive"] is True
+
+
+def test_spawn_session_daemon_emits_non_interactive_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import imp.remote.session.attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-spwn")
+    captured: dict[str, Any] = {}
+
+    class _FakePopen:
+        def __init__(self, argv: list[str], **_kw: Any) -> None:
+            captured["argv"] = argv
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    attach_mod.spawn_session_daemon(change, non_interactive=True)
+    assert "--non-interactive" in captured["argv"]
+
+
+def test_spawn_session_daemon_omits_flag_when_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import imp.remote.session.attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-spwi")
+    captured: dict[str, Any] = {}
+
+    class _FakePopen:
+        def __init__(self, argv: list[str], **_kw: Any) -> None:
+            captured["argv"] = argv
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    attach_mod.spawn_session_daemon(change)
+    assert "--non-interactive" not in captured["argv"]
+
+
+def test_main_parses_non_interactive_into_serve_kwargs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    calls: dict[str, Any] = {}
+    monkeypatch.setattr(daemon.Change, "load",
+                        staticmethod(lambda cr, cid: loaded))
+
+    def fake_run(fn: Any) -> None:
+        calls["fn"] = fn
+
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-mnint", "--non-interactive"])
+    assert rc == 0
+    fn = calls["fn"]
+    assert fn.func is daemon.serve_change_session
+    assert fn.keywords == {"non_interactive": True}

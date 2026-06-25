@@ -20,6 +20,7 @@ SpawnFn = Callable[[Change], None]
 def spawn_session_daemon(
     change: Change, *, seed_opening: str | None = None, resume: bool = False,
     opening_intent: str | None = None, scope_only: bool = False,
+    non_interactive: bool = False,
 ) -> None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
@@ -34,6 +35,8 @@ def spawn_session_daemon(
         argv.append("--resume")
     if scope_only:
         argv.append("--scope-only")
+    if non_interactive:
+        argv.append("--non-interactive")
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     subprocess.Popen(

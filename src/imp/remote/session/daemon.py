@@ -208,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--opening-intent", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--scope-only", action="store_true")
+    parser.add_argument("--non-interactive", action="store_true")
     ns = parser.parse_args(argv)
     try:
         change = Change.load(Path(ns.control_root), ns.change_id)
@@ -223,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["resume"] = True
     if ns.scope_only:
         kwargs["scope_only"] = True
+    if ns.non_interactive:
+        kwargs["non_interactive"] = True
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_change_session, change, **kwargs))
