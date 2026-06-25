@@ -40,7 +40,8 @@ class _FakeStatus:
 
 class _KbiPrompt:
     async def ask_async(
-        self, prompt_text=None, *, question: str = "", width: int = 80, indent: str = ""
+        self, prompt_text=None, *, question: str = "", width: int = 80, indent: str = "",
+        bottom_toolbar=None
     ) -> str:
         raise KeyboardInterrupt
 
@@ -80,14 +81,16 @@ async def test_out_of_band_sigint_reraises_without_coord(tmp_path: Path) -> None
 
 class _LinePrompt:
     async def ask_async(
-        self, prompt_text=None, *, question: str = "", width: int = 80, indent: str = ""
+        self, prompt_text=None, *, question: str = "", width: int = 80, indent: str = "",
+        bottom_toolbar=None
     ) -> str:
         return "hello"
 
 
 class _EofPrompt:
     async def ask_async(
-        self, prompt_text=None, *, question: str = "", width: int = 80, indent: str = ""
+        self, prompt_text=None, *, question: str = "", width: int = 80, indent: str = "",
+        bottom_toolbar=None
     ) -> str:
         raise EOFError
 

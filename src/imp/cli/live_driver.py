@@ -32,6 +32,96 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus
 
+_FG_RESET = "\x1b[22;39m"
+_RESET = "\x1b[0m"
+
+_CONTEXT_WINDOWS: dict[str, int] = {
+    "haiku": 200_000,
+    "sonnet": 200_000,
+    "opus": 200_000,
+    "gpt-5": 400_000,
+}
+
+_CONTEXT_WIDTH = 10
+_BAR_GREEN_MAX = 0.60
+_BAR_YELLOW_MAX = 0.85
+
+
+def context_window(model: str | None) -> int | None:
+    if not model:
+        return None
+    lowered = model.lower()
+    for token, size in _CONTEXT_WINDOWS.items():
+        if token in lowered:
+            return size
+    return None
+
+
+def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
+    if not color or not codes:
+        return text
+    if over_bg:
+        return pal.sgr(*codes, enabled=True) + text + _FG_RESET
+    return pal.ansi(text, *codes, enabled=True)
+
+
+def context_bar(model: str | None, prompt_tokens: int | None, *,
+                color: bool, over_bg: bool) -> str | None:
+    window = context_window(model)
+    if window is None or prompt_tokens is None:
+        return None
+    frac = prompt_tokens / window
+    filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
+    pct = round(frac * 100)
+    hue = ("green" if frac < _BAR_GREEN_MAX
+           else "yellow" if frac < _BAR_YELLOW_MAX else "red")
+    fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
+    track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
+             if filled < _CONTEXT_WIDTH else "")
+    return f"{fill}{track} {pct}%"
+
+
+def _toolbar_step_segment(activity: nv.Activity, *, color: bool, over_bg: bool) -> str | None:
+    parts: list[str] = []
+    if activity.step_label:
+        parts.append(_paint(activity.step_label, "step", color=color, over_bg=over_bg))
+    if activity.count is not None:
+        parts.append(activity.count)
+        if activity.detail:
+            parts.append(_paint(activity.detail, "gray", color=color, over_bg=over_bg))
+    elif activity.label:
+        parts.append(activity.label)
+    return rt.compose_label(parts) or None
+
+
+def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
+                    prompt_tokens: int | None, elapsed: float, frame: int,
+                    color: bool) -> str:
+    """The single pure toolbar composer: builds the seven-field bar from plain values —
+    change id, title, model, phase, step (+ transient detail), elapsed, context bar —
+    wrapped in the user-message slate background when the active theme supplies one."""
+    bg = pal.user_bg_open(enabled=color)
+    over = bool(bg)
+    spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=over)
+    segments: list[str] = []
+    if change_id:
+        segments.append(_paint(change_id, "gray", color=color, over_bg=over))
+    if title:
+        segments.append(title)
+    if activity.model:
+        segments.append(_paint(activity.model, "magenta", color=color, over_bg=over))
+    if activity.phase_label:
+        segments.append(_paint(activity.phase_label, "blue", color=color, over_bg=over))
+    step = _toolbar_step_segment(activity, color=color, over_bg=over)
+    if step:
+        segments.append(step)
+    segments.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over))
+    bar = context_bar(activity.model, prompt_tokens, color=color, over_bg=over)
+    if bar:
+        segments.append(bar)
+    body = f"{spin} " + rt.compose_label(segments)
+    return f"{bg}{body}{_RESET}" if bg else body
+
 
 def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
@@ -39,20 +129,11 @@ def compose_activity_status(
     activity = builder.current_activity()
     if activity is None:
         return None
-    spin = pal.ansi(pal.spinner_frame(frame), "wordmark", enabled=color)
-    parts: list[str] = []
-    if activity.phase_label:
-        parts.append(pal.ansi(activity.phase_label, enabled=color))
-    if activity.step_label:
-        parts.append(pal.ansi(activity.step_label, enabled=color))
-    if activity.count is not None:
-        parts.append(pal.ansi(activity.count, enabled=color))
-        if activity.detail:
-            parts.append(pal.ansi(activity.detail, "gray", enabled=color))
-    elif activity.label:
-        parts.append(pal.ansi(activity.label, enabled=color))
-    parts.append(pal.ansi(rt.fmt_seconds(elapsed), "dim", enabled=color))
-    return f"{spin} " + rt.compose_label(parts)
+    root = builder.tree.root
+    return compose_toolbar(
+        activity=activity, change_id=root.id, title=root.title,
+        prompt_tokens=builder.latest_prompt_tokens, elapsed=elapsed,
+        frame=frame, color=color)
 
 
 @dataclass
@@ -152,6 +233,13 @@ class LiveDriver:
         # narration, not as a bullet child).
         return compose_activity_status(
             self._builder, frame=frame, elapsed=elapsed, color=self._color)
+
+    def compose_toolbar_static(self) -> str | None:
+        # The prompt-mode toolbar: the same composed content with a STATIC spinner
+        # (frame 0) and the work span's current elapsed, so prompt_toolkit's native
+        # bottom_toolbar renders identically to the work-mode line.
+        return compose_activity_status(
+            self._builder, frame=0, elapsed=self._status.elapsed(), color=self._color)
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:

@@ -170,7 +170,7 @@ class Prompt:
 
     async def ask_async(self, prompt_text: str | None = None, *,
                         question: str = "", width: int = 80, indent: str = "",
-                        hint: str | None = None) -> str:
+                        hint: str | None = None, bottom_toolbar: Any = None) -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run()).
@@ -204,9 +204,14 @@ class Prompt:
         ph_text = hint or "type your reply"
         placeholder: Any = (ANSI(_placeholder_text(color=True, text=ph_text)) if self._color
                             else _placeholder_text(color=False, text=ph_text))
+        extra: dict[str, Any] = {}
+        if bottom_toolbar is not None:
+            from prompt_toolkit.styles import Style
+            extra["bottom_toolbar"] = ANSI(bottom_toolbar) if self._color else bottom_toolbar
+            extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
-            prompt_continuation=lambda _w, _l, _s: cont)
+            prompt_continuation=lambda _w, _l, _s: cont, **extra)
         return str(result) if result is not None else ""
 
     def history_strings(self) -> list[str]:

@@ -533,7 +533,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(model="m")
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -551,7 +551,7 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(model="m")
 
 
 
@@ -1883,7 +1883,7 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(model="m")
 
 
 def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
@@ -2281,3 +2281,47 @@ def test_error_node_falls_back_to_stderr_tail_when_no_full_summary() -> None:
               detail={"full_summary": "the full summary", "stderr_tail": "ignored"}))
     err3 = next(k for k in b3.tree.root.children if isinstance(k, nv.ErrorNode))
     assert err3.detail == "the full summary"
+
+
+def test_latest_prompt_tokens_tracks_most_recent_turn_not_cumulative() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", id="z9gixx", title="streaming toolbar"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p", model="sonnet"))
+    assert b.latest_prompt_tokens is None          # no llm_response yet
+    b.add(ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="sonnet",
+             usage={"input_tokens": 100, "cache_read_input_tokens": 20,
+                    "cache_creation_input_tokens": 5, "output_tokens": 9},
+             raw={"content": []}))
+    assert b.latest_prompt_tokens == 125           # input + both caches, this turn only
+    b.add(ev("4", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="sonnet",
+             usage={"input_tokens": 200, "output_tokens": 4}, raw={"content": []}))
+    assert b.latest_prompt_tokens == 200           # latest turn REPLACES, does not sum
+    assert b.tree.tokens.input == 300              # cumulative total is unchanged behavior
+
+
+def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+             usage={"input_tokens": 42}, raw={"content": []}))
+    b.add(ev("2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+             raw={"content": []}))                 # no usage key at all
+    assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn
+
+
+def test_current_activity_carries_current_step_model() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p",
+             model="claude-sonnet-4-5"))
+    act = b.current_activity()
+    assert act is not None
+    assert act.model == "claude-sonnet-4-5"
+
+
+def test_current_activity_model_none_without_a_step() -> None:
+    b = nv.NarrativeBuilder()
+    # change_created opens the root but starts no step; model has no source.
+    b.add(ev("1", "change_created", id="z9gixx", title="t"))
+    act = b.current_activity()
+    assert act is None or act.model is None

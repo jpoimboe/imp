@@ -73,6 +73,16 @@ class TokenTotals:
         self.cache_creation += int(usage.get("cache_creation_input_tokens", 0) or 0)
 
 
+def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
+    """The prompt-side occupancy of ONE llm_response turn: input + both cache reads.
+    None when the turn carried no usage."""
+    if not usage:
+        return None
+    return (int(usage.get("input_tokens", 0) or 0)
+            + int(usage.get("cache_read_input_tokens", 0) or 0)
+            + int(usage.get("cache_creation_input_tokens", 0) or 0))
+
+
 # ── nodes ───────────────────────────────────────────────────────────────────
 # `collapsible` is a class attribute (not a dataclass field) so isinstance-free
 # code can ask `node.collapsible`. The TUI memo keys on id(node), so nodes carry
@@ -214,6 +224,7 @@ class Activity:
     label: str | None = None
     step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
     phase_label: str | None = None   # owning phase's rendered label; None when absent
+    model: str | None = None         # current step's resolved model id; None when no step
 
 
 def activity_to_text(activity: Activity | None) -> str:
@@ -394,6 +405,7 @@ class NarrativeBuilder:
     def __init__(self) -> None:
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
+        self._latest_prompt_tokens: int | None = None
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -441,6 +453,12 @@ class NarrativeBuilder:
         return NarrativeTree(root=self._root, tokens=self._tokens)
 
     @property
+    def latest_prompt_tokens(self) -> int | None:
+        """Prompt-token occupancy of the most recent llm_response turn (input + cache),
+        or None before any usage has arrived. NOT cumulative."""
+        return self._latest_prompt_tokens
+
+    @property
     def current_burst(self) -> ToolBurstFold | None:
         """The open (still-accumulating) tool burst, or None. Public read-only
         accessor for the live driver's finalization check and LiveStatus."""
@@ -461,6 +479,7 @@ class NarrativeBuilder:
         step_label = (
             (top.live_label or top.rotated_phrase or top.label) if top is not None else None)
         phase_label = top.phase_label if top is not None else None
+        model = top.model if top is not None else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -468,7 +487,8 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} {noun})"
-            return Activity(step_label=step_label, label=label, phase_label=phase_label)
+            return Activity(step_label=step_label, label=label, phase_label=phase_label,
+                            model=model)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
@@ -487,7 +507,7 @@ class NarrativeBuilder:
                         next(iter((inflight.input or {}).values()), ""))
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
                 return Activity(count=count, detail=detail, step_label=step_label,
-                                phase_label=phase_label)
+                                phase_label=phase_label, model=model)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
@@ -495,10 +515,11 @@ class NarrativeBuilder:
                 # Name the running command (script steps carry one); command-less
                 # chrome kinds fall back to a bare label + timer.
                 return Activity(step_label=step_label, label=top.command,
-                                phase_label=phase_label)
+                                phase_label=phase_label, model=model)
             # Pure-thinking agent turn: the spinner + step label already imply it,
             # so emit no activity word.
-            return Activity(step_label=step_label, label=None, phase_label=phase_label)
+            return Activity(step_label=step_label, label=None, phase_label=phase_label,
+                            model=model)
         if self._current_phase is not None:
             return Activity(label="working")
         return None
@@ -560,7 +581,11 @@ class NarrativeBuilder:
 
         # 0. token accumulation — every llm_response, before sub routing (F2).
         if etype == "llm_response":
-            self._tokens.add_usage(payload.get("usage"))
+            usage = payload.get("usage")
+            self._tokens.add_usage(usage)
+            pt = usage_prompt_tokens(usage)
+            if pt is not None:
+                self._latest_prompt_tokens = pt
 
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
         #    a nested builder's own events carry a sub: id that is NOT one of
