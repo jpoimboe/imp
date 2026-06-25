@@ -1713,6 +1713,17 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     drv.finish()
     assert out.getvalue().split("\n")[0] == "> do the thing"
 
+    # Drive _prev_prose=True so the assertion actually falsifies the _emitted_any
+    # guard: without the guard a spurious blank would land here.
+    out2 = _Pipe()
+    drv2 = LiveDriver(stream=out2, color=False, width=80, status=LiveStatus(out2),
+                      preceded_by_blank=True)
+    drv2._prev_prose = True
+    drv2._builder._awaiting_reply = True
+    drv2.on_event(ev("1", "user_message", content=[{"type": "text", "text": "do the thing"}]))
+    drv2.finish()
+    assert out2.getvalue().split("\n")[0] == "> do the thing"
+
 
 def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
     from imp.cli import palette as pal
