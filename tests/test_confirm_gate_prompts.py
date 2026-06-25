@@ -39,10 +39,9 @@ def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
     text = _spec_writer()
     assert "*(decided during review)*" in text
     assert "*(user-confirmed during review)*" in text
-    # the escalation channel is named in the Ask-vs-decide policy itself
-    # (a bare "wait_for_user" also appears in frontmatter, so anchor on the
-    # policy phrasing to actually guard this section).
-    assert "Escalate via `wait_for_user`" in text
+    # the escalation channel is named in the Ask-vs-decide policy itself.
+    assert "Escalate by ending your turn with the question" in text
+    assert "wait_for_user" not in text
     # the decide-and-record default phrasing is present
     assert "decide and record" in text.lower()
 

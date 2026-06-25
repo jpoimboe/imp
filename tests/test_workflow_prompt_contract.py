@@ -633,7 +633,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
     assert "the base branch advanced since the draft started" in headless_moved
-    assert "do **not** call `wait_for_user`" in headless_moved
+    assert "do **not** yield to a human" in headless_moved
 
 
 HUMAN_DECISION_PARTIAL = Path(
