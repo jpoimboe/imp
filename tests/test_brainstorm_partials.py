@@ -87,7 +87,9 @@ def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
     assert "no co-equal dangling alternative" in text
     assert "One question at a time" in text
     assert "closing summary" in text
-    assert "wait_for_user" in text
+    assert "wait_for_user" not in text
+    assert "bare turn-end **is** the yield" in text
+    assert "End your turn with your question to yield" in text
     # The two finalize-only postures must NOT live in the shared partial.
     assert "Clarifying questions are first-class" not in text
     assert "Engage a concern straight" not in text
