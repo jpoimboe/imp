@@ -31,7 +31,7 @@ def test_end_of_change_settle_does_not_advance_plan_index() -> None:
     rules = _steps()["review-base-repin"].rules
     m = evaluate_rules(rules, vars={**_BASE, "review_scope": "change"},
                        output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "finalize"
+    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
     assert "plan_index" not in m.var_mutations
 
 

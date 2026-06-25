@@ -106,9 +106,20 @@ Write the draft spec (Goal + Acceptance criteria at minimum, full four-part
 structure when the change warrants it) to
 `{{ change.home }}/artifacts/spec/{{ change.id }}.md`, commit it with
 `imp artifact-commit spec` (do not run `git add`/`git commit` yourself and do not
-add a `Change:` trailer), then finish the turn with `complete_step`, emitting the
+add a `Change:` trailer), then finish the turn with `complete_step` (on the full path), emitting the
 chosen `ceremony`. The spec carries across the step boundary on disk; the phase-1
 spec-finalizer adopts it.
+
+On the **express path only** (you are about to emit `ceremony: express`), do this in
+the same go-live turn **before** the `complete_step` call above: the spec phase is
+skipped and no end-of-change `summarizer` step runs, so **you** author the change's
+intent-level summary here, drawing the *why* straight from the just-finished
+conversation. Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md` — one
+tight intent-level headline paragraph (what this change accomplishes and why), plus
+a text/ASCII diagram **only** when the change genuinely altered structure (omit it
+otherwise; no mermaid) — and commit it with `imp artifact-commit summary` (again, do
+not run `git add`/`git commit` yourself and do not add a `Change:` trailer). On the
+full path do **not** write the summary — the end-of-change `summarizer` step does.
 
 ## Reading a referenced spec file
 

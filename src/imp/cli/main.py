@@ -1416,6 +1416,11 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     if opening:
         lines.append("")
         lines.append(opening)
+    summary = _show_artifact(control, change_id, f"summary/{change_id}.md")
+    if summary:
+        lines.append("")
+        lines.extend(
+            summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     return lines
 
 
@@ -1451,6 +1456,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return 0
     if resource == "spec":
         data = _show_artifact(control, change_id, f"spec/{change_id}.md")
+    elif resource == "summary":
+        data = _show_artifact(control, change_id, f"summary/{change_id}.md")
     elif resource == "plan":
         rel = _show_newest_plan_rel(control, change_id)
         data = _show_artifact(control, change_id, rel) if rel else None
@@ -2460,7 +2467,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument("token", help="Change id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec", "plan", "review", "events", "status"],
+        choices=["spec", "plan", "review", "events", "status", "summary"],
         help="Which artifact to print (default: a detail card).")
     p_show.set_defaults(func=_cmd_show)
 
@@ -2545,7 +2552,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "artifact-commit",
         help="Commit the change's live artifacts to its journal-wip ref "
              "(invoked by artifact-commit.sh; not for direct use).")
-    p_artifact.add_argument("kind", choices=["spec", "plan"],
+    p_artifact.add_argument("kind", choices=["spec", "plan", "summary"],
                             help="Artifact kind being committed (labels the commit).")
     p_artifact.set_defaults(func=_cmd_artifact_commit)
 

@@ -395,3 +395,109 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
     assert out.strip() != "backlog"  # History item, not a queued Backlog brief
     # log renders the archived conversation, not a brief
     assert main(["log", "2026-06-16-bkg111"]) == 0
+
+
+def test_show_summary_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    summary = ch.change_dir / "artifacts" / "summary"
+    summary.mkdir(parents=True)
+    (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
+    assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID, "summary")
+
+
+def test_show_default_card_renders_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    summary = ch.change_dir / "artifacts" / "summary"
+    summary.mkdir(parents=True)
+    (summary / f"{_ID}.md").write_text(
+        "Gives every change a durable intent-level summary.\n")
+    out = _run(monkeypatch, tmp_path, "show", _ID)  # default card, no resource
+    assert "intent-level summary" in out
+
+
+def test_show_summary_falls_back_after_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    summary = ch.change_dir / "artifacts" / "summary"
+    summary.mkdir(parents=True)
+    (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
+    files = {
+        str(p.relative_to(ch.change_dir / "artifacts")): p
+        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        if p.is_file()
+    }
+    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
+    st = State.load(ch.state_dir)
+    st.status = "completed"
+    st.save(ch.state_dir)
+    with ch.events_path.open("w", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "type": "step_started",
+                    "agent_id": None,
+                    "payload": {"step": "plan-reviewer", "phase": "plan"},
+                }
+            )
+            + "\n"
+        )
+    archive.archive_change(
+        tmp_path,
+        _ID,
+        events_path=ch.events_path,
+        change_json_path=ch.change_dir / "change.json",
+        state_json_path=ch.state_dir / "state.json",
+    )
+    assert _git_wip_present(tmp_path, _ID)
+    worktree.remove_worktree(tmp_path, _ID)
+    assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
+    assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID, "summary")
+
+
+def test_show_default_card_renders_summary_after_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    summary = ch.change_dir / "artifacts" / "summary"
+    summary.mkdir(parents=True)
+    (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
+    files = {
+        str(p.relative_to(ch.change_dir / "artifacts")): p
+        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        if p.is_file()
+    }
+    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
+    st = State.load(ch.state_dir)
+    st.status = "completed"
+    st.save(ch.state_dir)
+    with ch.events_path.open("w", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "type": "step_started",
+                    "agent_id": None,
+                    "payload": {"step": "plan-reviewer", "phase": "plan"},
+                }
+            )
+            + "\n"
+        )
+    archive.archive_change(
+        tmp_path,
+        _ID,
+        events_path=ch.events_path,
+        change_json_path=ch.change_dir / "change.json",
+        state_json_path=ch.state_dir / "state.json",
+    )
+    assert _git_wip_present(tmp_path, _ID)
+    worktree.remove_worktree(tmp_path, _ID)
+    assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
+    assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID)

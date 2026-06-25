@@ -222,20 +222,11 @@ def test_finalize_reads_sweep_dispositions() -> None:
     # Reads the new dispositions: surfaces needs-decision, rolls up fixed,
     # ignores dismissed.
     assert "needs-decision" in low
-    assert "— fixed" in low        # the sweep's output format, counted into built rollup
+    assert "— fixed" in low        # the sweep's output format, excluded from open_items
     assert "dismissed" in low      # named only to exclude it
     # The old per-fix surfacing/veto vocabulary is gone (AC 4).
     for stale in ("fyi-fixed", "still-deferred", "silent-fixed", "veto"):
         assert stale not in low, f"stale finalize vocabulary: {stale!r}"
-
-
-def test_finalize_counts_opportunistic_from_completed_plans() -> None:
-    low = FINALIZE.read_text().lower()
-    # built carries a one-line rollup counting the opportunistic fixes...
-    assert "opportunistic improvement" in low
-    # ...counted from the durable ## Completed plans section, NOT the transient list.
-    assert "## completed plans" in low
-
 
 
 def test_finalize_prompt_states_merge_gate_affordance() -> None:

@@ -461,6 +461,7 @@ async def test_fast_path_skips_reviewers_and_review(
     assert "code-reviewer" not in started, started
     assert "deferred-sweep" not in started, started
     assert "sweep-verify" not in started, started
+    assert "summarizer" not in started, started
     assert "plan-writer" in started, started           # planning still runs
     assert "plan-finalized" in started, started        # task list announced on the fast path
     assert "task-lead" in started, started             # implementation still runs
