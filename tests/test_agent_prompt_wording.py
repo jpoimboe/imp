@@ -134,3 +134,9 @@ def test_plan_writer_carries_illegal_states_steer() -> None:
         "structure rules out the bad case over one that admits it and then validates "
         "or falls back."
     ) in body
+
+
+def test_code_reviewer_flags_defensive_sprawl() -> None:
+    body = _agent_prompt("code-reviewer")
+    assert "Defensive handling of states that can't occur, fallbacks that mask a bad state" in body
+    assert "Simpler-and-stricter beats tolerant-and-complex." in body
