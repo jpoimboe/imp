@@ -22,6 +22,7 @@ from typing import Any
 
 import anyio
 
+from imp.agents.front_door_status import STATUS_PHRASE_LABEL
 from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
     ChangeContext,
@@ -534,6 +535,8 @@ def _step_started_payload(
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "quiet": step.quiet,
                "label": render_label(step.label, change, log, state)}
+    if step.label == STATUS_PHRASE_LABEL:
+        payload["rotate_phrase"] = True
     if step.kind == "script":
         payload["command"] = step.command
     if step.chrome is not None:

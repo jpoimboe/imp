@@ -121,6 +121,8 @@ class StepNode:
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     route_label: str | None = None     # route reason (rule label) of the entering rule
+    rotate_phrase: bool = False        # opt-in (<imp>): rotate status phrase per work segment
+    rotated_phrase: str | None = None  # per-segment phrase; live status line only, never persisted
     closed: bool = False
     interrupted: bool = False
     collapsible = False
@@ -430,6 +432,8 @@ class NarrativeBuilder:
         self._pending_wfu: dict[str, str] = {}
         self._opening_intent_node: UserMessageNode | None = None
         self._first_step: StepNode | None = None
+        # <imp> rotation: work seen this segment, consumed at each prose/user-message boundary.
+        self._segment_had_work = False
 
     # -- public API -----------------------------------------------------------
     @property
@@ -454,7 +458,8 @@ class NarrativeBuilder:
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
-        step_label = (top.live_label or top.label) if top is not None else None
+        step_label = (
+            (top.live_label or top.rotated_phrase or top.label) if top is not None else None)
         phase_label = top.phase_label if top is not None else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
@@ -737,6 +742,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._span_start_ts = event.get("timestamp")
+    self._segment_had_work = False
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
@@ -800,6 +806,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.phase_label = p.get("phase_label")
             existing.resumed = bool(p.get("resumed", False))
             existing.route_label = p.get("route_label")
+            existing.rotate_phrase = bool(p.get("rotate_phrase", False))
+            existing.rotated_phrase = None
             if existing is self._first_step:
                 _inject_opening_intent(self, existing)
             self._step_stack = [existing]
@@ -817,7 +825,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     phase_label=p.get("phase_label"),
                     command=p.get("command"),
                     resumed=bool(p.get("resumed", False)),
-                    route_label=p.get("route_label"))
+                    route_label=p.get("route_label"),
+                    rotate_phrase=bool(p.get("rotate_phrase", False)))
     self._append(node)
     self._step_stack.append(node)
     if self._first_step is None:
@@ -1040,8 +1049,23 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
         return None
 
 
+def _draw_status_phrase() -> str:
+    # Lazy import keeps `import narrative` free of agent-package weight (design D3).
+    from imp.agents.front_door_status import front_door_status_phrase
+    return front_door_status_phrase()
+
+
+def _rotate_status_phrase(self: NarrativeBuilder) -> None:
+    """Draw a fresh phrase onto the open rotating step at a segment boundary if
+    work occurred; always consumes the segment-work flag."""
+    had_work, self._segment_had_work = self._segment_had_work, False
+    if had_work and self._step_stack and self._step_stack[-1].rotate_phrase:
+        self._step_stack[-1].rotated_phrase = _draw_status_phrase()
+
+
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    _rotate_status_phrase(self)
     self._span_start_ts = event.get("timestamp")
     interactive, self._awaiting_reply = self._awaiting_reply, False
     text = _user_message_text(p)
@@ -1065,6 +1089,7 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # shared prose predicate.
     if not llm_response_has_prose(p):
         return
+    _rotate_status_phrase(self)
     node = AgentTextNode(payload=p)
     if self._current_burst is not None:
         self._current_burst.span_end_ts = event.get("timestamp")
@@ -1088,6 +1113,7 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 
 def _h_thinking(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._segment_had_work = True
     # §8: a thinking block that is part of a tool-use turn must not flush an open
     # burst (consecutive tools accumulate). A standalone thinking turn is harmless
     # to leave un-flushed: the next real prose / step boundary flushes the burst.
@@ -1147,6 +1173,7 @@ def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:
 
 
 def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._segment_had_work = True
     if p.get("name") == "task":
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return

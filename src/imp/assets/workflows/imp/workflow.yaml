@@ -38,7 +38,7 @@ phases:
       - name: front-door
         file: agents/front-door.md
         tier: high
-        label: "{{ front_door_status_phrase() }}"
+        label: "<imp>"
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
           - {else: true, set: {fast_path: false}, goto: spec-finalizer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
