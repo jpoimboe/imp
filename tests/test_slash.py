@@ -321,6 +321,52 @@ def test_ask_line_with_slash_pins_driver_toolbar_below_the_prompt(tmp_path: Path
     assert prompt.bottom_toolbars == ["z9gixx · implement · task-lead · 13%"]
 
 
+def test_ask_line_with_slash_forwards_toolbar_through_raced_path(tmp_path: Path) -> None:
+    from imp.cli.slash import ask_line_with_slash
+
+    class _NeverEvent:
+        async def wait(self) -> None:
+            await anyio.sleep(float("inf"))
+
+    class _FakeCoord:
+        def __init__(self) -> None:
+            self._exit_event = _NeverEvent()
+
+        def set_at_prompt(self, val: bool) -> None:
+            pass
+
+        def rearm_signal_handlers(self) -> None:
+            pass
+
+        def request_exit(self, reason: str) -> None:
+            pass
+
+    class _FakeDriver:
+        def prompt_indent(self) -> str:
+            return ""
+
+        def prepare_for_prompt(self) -> None:
+            pass
+
+        def flush_deferred(self) -> None:
+            pass
+
+        def compose_toolbar_static(self) -> str:
+            return "z9gixx · implement · task-lead · 13%"
+
+    change = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["real input"])
+
+    async def _run() -> str:
+        return await ask_line_with_slash(
+            prompt, _NullStatus(), change,
+            coord=_FakeCoord(), driver=_FakeDriver())
+
+    line = anyio.run(_run)
+    assert line == "real input"
+    assert prompt.bottom_toolbars == ["z9gixx · implement · task-lead · 13%"]
+
+
 def test_ask_line_with_slash_passes_no_toolbar_when_no_driver(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     change = _FakeChange(tmp_path)
