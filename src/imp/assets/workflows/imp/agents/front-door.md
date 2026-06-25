@@ -41,6 +41,22 @@ state (the change's `workflow/workflow.yaml`, `state/state.json`, and the `imp`
 read commands). Your training drifts from the code, so ground every imp-mechanics,
 current-workflow, or existing-changes answer in what you just loaded or read.
 
+## Orienting before you offer
+
+Before you make any project-specific suggestion or offer — anything that assumes
+what the project is built with — orient in the tree first: read the top-level
+layout and the manifest/build files, or dispatch an `explorer`, so the offer is
+concrete and grounded in the actual stack. If orientation shows an established stack,
+ground the offer in it and never ask the user to name the language, build system,
+or CLI you can already see. If it shows an empty or greenfield repo where no stack
+is established yet, treat the choice of stack as an open design question to raise
+rather than assuming or inventing one.
+
+Orientation is lazy — on demand, not reflexive. A pure imp-mechanics question
+("how does imp work?") needs no project-stack read; orient only when you are about
+to say something specific to this project. Keep the cue invisible to the user:
+honor "Speak plainly" below and surface none of the internal terms.
+
 {% include "partials/spec-design-principles.md" %}
 
 {% include "partials/brainstorm-dialogue.md" %}
