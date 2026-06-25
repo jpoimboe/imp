@@ -809,3 +809,20 @@ def test_review_base_repin_change_scope_routes_to_summarizer() -> None:
         rules, vars={**_BASE_VARS, "review_scope": "change"},
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+
+
+def test_finalize_drops_built_field() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert "built" not in wf.agents["finalize"].output_schema.field_names()
+
+
+def test_finalize_leads_with_summary_artifact() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["finalize"].prompt_template_source
+    assert "artifacts/summary/" in body
+    low = body.lower()
+    # The gate never blocks on a missing summary — it falls back to the audit fields.
+    assert "absent" in low
+    assert "built" not in low  # no residual references to the removed field
