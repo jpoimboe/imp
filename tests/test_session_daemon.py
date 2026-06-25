@@ -1409,3 +1409,23 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
         assert archived == []
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_serve_forwards_non_interactive_to_run_change(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-nint")
+    captured: dict[str, Any] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+        non_interactive: bool = False,
+    ) -> str:
+        captured["non_interactive"] = non_interactive
+        return "done"
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, non_interactive=True)
+    assert result == "done"
+    assert captured["non_interactive"] is True
