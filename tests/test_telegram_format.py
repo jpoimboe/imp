@@ -44,8 +44,8 @@ def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
 
 
 def test_format_falls_back_to_change_id_then_header_only() -> None:
-    event = {"type": "errored", "change": {"id": "2026-06-11-abc"}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] error"
+    event = {"type": "completed", "change": {"id": "2026-06-11-abc"}, "payload": {}}
+    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] done"
 
 
 def test_clamp_text_leaves_short_text_unchanged() -> None:
@@ -63,17 +63,17 @@ def test_clamp_text_truncates_overflow_and_marks_it() -> None:
 
 
 def test_format_falls_back_to_imp_when_no_title_and_no_id() -> None:
-    event = {"type": "errored", "change": {}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[imp] error"
+    event = {"type": "completed", "change": {}, "payload": {}}
+    assert imp_telegram.format_event_message(event) == "[imp] done"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
     event = {
-        "type": "errored",
+        "type": "completed",
         "change": {"title": "T"},
         "payload": {"message": "something went wrong"},
     }
-    assert imp_telegram.format_event_message(event) == "[T] error\nsomething went wrong"
+    assert imp_telegram.format_event_message(event) == "[T] done\nsomething went wrong"
 
 
 def test_clamp_text_passes_exactly_max_length_unchanged() -> None:

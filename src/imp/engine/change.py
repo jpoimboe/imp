@@ -243,7 +243,7 @@ class Change:
                 render_label(flat[0].label, change=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
-            status="running",
+            status="new",
             vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},
         ).save(change_dir / "state")
@@ -321,7 +321,7 @@ class Change:
                 render_label(flat[0].label, change=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
-            status="running",
+            status="new",
             vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},
         ).save(change_dir / "state")

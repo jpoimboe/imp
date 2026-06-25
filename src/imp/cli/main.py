@@ -55,7 +55,7 @@ from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
-from imp.engine.state import LockHeld, State
+from imp.engine.state import LockHeld, State, lock_is_live
 from imp.providers.config import parse_default_workflow, validate_workflow_name
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.attach import build_session_attach
@@ -1025,9 +1025,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         _warn_if_blocked(change)
         return await _run_fresh_session(change, args=args, seed_opening=seed)
     state = State.load(change.state_dir)
-    # `running` is allowed through: the status may be stale if a previous run
-    # crashed without updating it. The daemon resolves the ambiguity at connect time.
-    if state.status not in RESUMABLE and state.status != "running":
+    # Persisted status is never `running` (it is derived from the lock at display
+    # time); a crashed run is left at its resumable at-rest status (new/paused).
+    if state.status not in RESUMABLE:
         print(
             f"imp: Change {change.id} status is {state.status!r}; "
             "nothing to resume",
@@ -1730,40 +1730,25 @@ def _load_or_rehydrate(control: Path, change_id: str) -> Change | int:
 
 
 # Spec §10: in-flight statuses; completed Changes live in the archive.
-_INFLIGHT = ("running", "paused", "errored", "merge_blocked", "draft")
-RESUMABLE = ("paused", "errored", "merge_blocked", "draft", "saved")
+_INFLIGHT = ("running", "new", "paused", "merge_blocked", "draft")
+RESUMABLE = ("new", "paused", "merge_blocked", "draft", "saved")
 
 
-def _pid_alive(pid: int) -> bool:
-    """Signal-0 liveness probe. ESRCH (no such process) → dead; EPERM (exists,
-    not ours) → alive. A live run's pid is never falsely reported dead, so this
-    never lets two processes into one worktree — the safe direction."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+def resolve_display_status(
+    status: str, change_dir: Path, *, materialized: bool
+) -> str:
+    """The one map from persisted (at-rest) status to display status.
 
-
-def _effective_status(status: str, change_dir: Path) -> str:
-    """Re-derive a `running` status against its ProjectLock holder. A run holds
-    `change_dir/lock` (pid inside) for its whole life; a hard kill / crash has the
-    OS drop the flock but leaves the stale pid file and a `running` state.json. So
-    a `running` Change whose lock pid is dead has CRASHED — surface it as
-    `errored` (in RESUMABLE) so `imp list` shows it and `imp resume` offers it.
-
-    Only `running` is re-derived; every other status is authoritative. A MISSING
-    lock file is left as `running` (the microsecond between Change.create_draft and the
-    run acquiring the lock) — a real crash leaves the pid file behind."""
-    if status != "running":
-        return status
-    try:
-        pid = int((change_dir / "lock").read_text().strip())
-    except (FileNotFoundError, ValueError):
-        return status
-    return status if _pid_alive(pid) else "errored"
+    `running` is derived, never persisted: a live process holds change_dir/lock
+    with its pid inside for its whole run. A stale lock (file present, pid dead)
+    reads as not-running, so the change shows its resumable at-rest status — no
+    manufactured `errored`. An un-materialized new/paused change shows as
+    `draft`, generalizing the already-accepted draft synthesis."""
+    if lock_is_live(change_dir / "lock"):
+        return "running"
+    if status in ("new", "paused") and not materialized:
+        return "draft"
+    return status
 
 
 # Row = (id, status, step, last_activity, title, created_at, step_label).
@@ -1790,18 +1775,6 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         return None
 
 
-def _draft_label(status: str, change_json: bytes) -> str:
-    """Returns "draft" for un-materialized paused changes; otherwise status."""
-    if status != "paused":
-        return status
-    try:
-        if json.loads(change_json).get("materialized", True) is False:
-            return "draft"
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        pass
-    return status
-
-
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = _change_home(control, change_id)
     # archive_read returns bytes | None; the live change-home branch always finds
@@ -1821,9 +1794,8 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
     row = _status_row(change_id, state_json, change_json, last)
     if row is None:
         return None
-    # A live worktree may hold a crashed `running` run — re-derive against its
-    # lock (journaled rows are terminal, so the check is a no-op there).
-    status = _draft_label(_effective_status(row[1], cdir), change_json)
+    materialized = json.loads(change_json).get("materialized", True)
+    status = resolve_display_status(row[1], cdir, materialized=materialized)
     return (row[0], status, *row[2:])
 
 
@@ -1846,7 +1818,8 @@ def _status_rows(control: Path) -> list[_Row]:
         row = _status_row(change_id, state_json, change_json, last)
         if row is None:
             continue
-        status = _draft_label(_effective_status(row[1], cdir), change_json)
+        status = resolve_display_status(
+            row[1], cdir, materialized=meta.get("materialized", True))
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue

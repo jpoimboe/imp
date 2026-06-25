@@ -19,21 +19,21 @@ def test_status_lists_inflight_worktrees(tmp_path: Path) -> None:
     assert slugs == {"alpha", "beta"}
 
 
-def test_status_rows_include_errored_and_carry_iso(tmp_path: Path) -> None:
+def test_status_rows_include_blocked_and_carry_iso(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
     ch = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
-    # Flip beta to errored: it must still appear in the in-flight default view.
+    # A non-running in-flight status must still appear in the default view.
     st = State.load(ch.state_dir)
-    st.status = "errored"
+    st.status = "merge_blocked"
     st.save(ch.state_dir)
     # Give alpha a known last event so its row carries a raw ISO timestamp.
     ch_a = Change.load(tmp_path, "alpha")
     ch_a.events_path.write_text('{"timestamp":"2026-06-05T12:00:00+00:00"}\n')
 
     rows = {r[0]: r for r in _status_rows(tmp_path)}
-    assert set(rows) == {"alpha", "beta"}          # errored beta is in-flight
-    assert rows["beta"][1] == "errored"
+    assert set(rows) == {"alpha", "beta"}          # blocked beta is in-flight
+    assert rows["beta"][1] == "merge_blocked"
     assert rows["alpha"][3] == "2026-06-05T12:00:00+00:00"   # r[3] is raw ISO, not local
 
 
@@ -76,7 +76,7 @@ def test_cmd_status_merges_status_and_renders_bare_backlog(
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "running (s)" in out                      # merged Active status + step label
+    assert "new (s)" in out                           # merged Active status + step label
     backlog_line = next(ln for ln in out.splitlines() if ln.startswith("bk1"))
     assert "idea" in backlog_line
     assert "(" not in backlog_line                   # ready ⇒ bare word, no suffix
@@ -163,4 +163,4 @@ def test_cmd_status_renders_draft_in_active(
     assert rc == 0
     assert "Backlog" not in out          # a lone draft creates no Backlog section
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
-    assert "running" in d1_line          # a live draft shows running in Active
+    assert "draft" in d1_line          # a fresh un-materialized draft shows draft in Active

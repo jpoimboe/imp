@@ -5,7 +5,7 @@ from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 
 
 def test_state_roundtrip_vars_and_loop_counts(tmp_path: Path) -> None:
-    s = State(id="c1", step="spec-writer", step_attempt=0, status="running",
+    s = State(id="c1", step="spec-writer", step_attempt=0, status="new",
               vars={"review_done": False, "round": 0},
               loop_counts={"spec-reviewer": 2})
     s.save(tmp_path)
@@ -17,7 +17,7 @@ def test_state_roundtrip_vars_and_loop_counts(tmp_path: Path) -> None:
 
 
 def test_state_defaults(tmp_path: Path) -> None:
-    s = State(id="c1", step=None, step_attempt=0, status="running")
+    s = State(id="c1", step=None, step_attempt=0, status="new")
     s.save(tmp_path)
     back = State.load(tmp_path)
     assert back.vars == {}
@@ -29,7 +29,7 @@ def test_state_round_trip(tmp_path: Path) -> None:
         id="c5",
         step="intent",
         step_attempt=1,
-        status="running",
+        status="new",
     )
     s.save(tmp_path)
     loaded = State.load(tmp_path)
@@ -39,12 +39,12 @@ def test_state_round_trip(tmp_path: Path) -> None:
 def test_state_atomic_overwrite(tmp_path: Path) -> None:
     s = State(
         id="c1", step=None, step_attempt=0,
-        status="running",
+        status="new",
     )
     s.save(tmp_path)
     s2 = State(
         id="c1", step="s", step_attempt=2,
-        status="running",
+        status="new",
     )
     s2.save(tmp_path)
     raw = json.loads((tmp_path / "state.json").read_text())
@@ -55,7 +55,7 @@ def test_state_atomic_overwrite(tmp_path: Path) -> None:
 def test_state_no_partial_writes(tmp_path: Path) -> None:
     s = State(
         id="c1", step=None, step_attempt=0,
-        status="running",
+        status="new",
     )
     s.save(tmp_path)
     # No leftover tmp file
@@ -103,7 +103,7 @@ def test_state_round_trip_with_current_step(tmp_path: Path) -> None:
     from imp.engine.state import CurrentStep, State
     s = State(
         id="c5", step="coder", step_attempt=0,
-        status="running",
+        status="new",
         current_step=CurrentStep(transcript_dir=tmp_path / "steps/coder"),
     )
     s.save(tmp_path)
@@ -128,7 +128,7 @@ def test_state_round_trip_with_retry_feedback(tmp_path: Path) -> None:
         id="c7",
         step="coder",
         step_attempt=1,
-        status="running",
+        status="new",
         retry_feedback={"target_step": "coder", "text": "fix the lint error"},
     )
     s.save(tmp_path)
@@ -140,7 +140,7 @@ def test_state_round_trip_with_retry_feedback(tmp_path: Path) -> None:
 def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
     s = State(
         id="c1", step=None, step_attempt=0,
-        status="running",
+        status="new",
     )
     s.save(tmp_path)
     raw = json.loads((tmp_path / "state.json").read_text())
@@ -149,7 +149,7 @@ def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
 
 
 def test_state_resume_pending_roundtrip(tmp_path: Path) -> None:
-    s = State(id="c1", step="coder", step_attempt=0, status="running",
+    s = State(id="c1", step="coder", step_attempt=0, status="new",
               resume_pending="coder")
     s.save(tmp_path)
     back = State.load(tmp_path)
@@ -157,14 +157,14 @@ def test_state_resume_pending_roundtrip(tmp_path: Path) -> None:
 
 
 def test_state_resume_pending_defaults_none() -> None:
-    s = State(id="c1", step=None, step_attempt=0, status="running")
+    s = State(id="c1", step=None, step_attempt=0, status="new")
     assert s.resume_pending is None
 
 
 def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) -> None:
     # An older state.json (written before this field existed) still loads.
     (tmp_path / "state.json").write_text(json.dumps({
-        "id": "c1", "step": "coder", "step_attempt": 0, "status": "running",
+        "id": "c1", "step": "coder", "step_attempt": 0, "status": "new",
         "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
     }))
     back = State.load(tmp_path)
@@ -175,7 +175,7 @@ def test_state_resolved_tiers_and_steps_roundtrip(tmp_path):
     from imp.engine.state import State
     from imp.providers.config import ProviderModel
     s = State(
-        id="c1", step="a", step_attempt=0, status="running",
+        id="c1", step="a", step_attempt=0, status="new",
         resolved_tiers={
             "low":    ProviderModel(provider="anthropic", model="haiku"),
             "medium": ProviderModel(provider="anthropic", model="sonnet"),
@@ -197,7 +197,7 @@ def test_state_resolved_tiers_none_preserved(tmp_path):
     """A fresh State persists resolved_tiers=null and loads back as None, so the
     executor's compute-if-absent (`is None`) check still fires after a resume."""
     from imp.engine.state import State
-    s = State(id="c1", step="a", step_attempt=0, status="running")
+    s = State(id="c1", step="a", step_attempt=0, status="new")
     assert s.resolved_tiers is None
     s.save(tmp_path)
     assert State.load(tmp_path).resolved_tiers is None
@@ -280,7 +280,7 @@ def test_jsonl_tail_empty_file_returns_empty(tmp_path: Path) -> None:
 
 
 def test_state_roundtrip_outcome_history(tmp_path: Path) -> None:
-    s = State(id="c1", step="writer", step_attempt=0, status="running",
+    s = State(id="c1", step="writer", step_attempt=0, status="new",
               outcome_history={"writer": [{"lap": 1, "outcome": "wrote plan-1"}]})
     s.save(tmp_path)
     back = State.load(tmp_path)
@@ -288,7 +288,7 @@ def test_state_roundtrip_outcome_history(tmp_path: Path) -> None:
 
 
 def test_state_outcome_history_defaults_empty(tmp_path: Path) -> None:
-    s = State(id="c1", step=None, step_attempt=0, status="running")
+    s = State(id="c1", step=None, step_attempt=0, status="new")
     assert s.outcome_history == {}
     s.save(tmp_path)
     assert State.load(tmp_path).outcome_history == {}
@@ -296,7 +296,7 @@ def test_state_outcome_history_defaults_empty(tmp_path: Path) -> None:
 
 def test_state_load_forward_compatible_without_outcome_history(tmp_path: Path) -> None:
     (tmp_path / "state.json").write_text(json.dumps({
-        "id": "c1", "step": "writer", "step_attempt": 0, "status": "running",
+        "id": "c1", "step": "writer", "step_attempt": 0, "status": "new",
         "vars": {}, "loop_counts": {}, "current_step": None,
         "retry_feedback": None,
     }))
@@ -304,7 +304,7 @@ def test_state_load_forward_compatible_without_outcome_history(tmp_path: Path) -
 
 
 def test_state_step_label_roundtrips(tmp_path: Path) -> None:
-    s = State(id="c1", step="write_spec", step_attempt=0, status="running",
+    s = State(id="c1", step="write_spec", step_attempt=0, status="new",
               step_label="writing spec")
     s.save(tmp_path)
     back = State.load(tmp_path)
@@ -312,14 +312,14 @@ def test_state_step_label_roundtrips(tmp_path: Path) -> None:
 
 
 def test_state_step_label_defaults_none() -> None:
-    s = State(id="c1", step=None, step_attempt=0, status="running")
+    s = State(id="c1", step=None, step_attempt=0, status="new")
     assert s.step_label is None
 
 
 def test_state_load_forward_compatible_without_step_label(tmp_path: Path) -> None:
     # A state.json written before this field existed must load with step_label=None.
     (tmp_path / "state.json").write_text(json.dumps({
-        "id": "c1", "step": "coder", "step_attempt": 0, "status": "running",
+        "id": "c1", "step": "coder", "step_attempt": 0, "status": "new",
         "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
     }))
     assert State.load(tmp_path).step_label is None
@@ -328,7 +328,7 @@ def test_state_load_forward_compatible_without_step_label(tmp_path: Path) -> Non
 def test_state_round_trips_hold_mark(tmp_path) -> None:
     from imp.engine.state import State
     sd = tmp_path / "state"
-    s = State(id="feat", step="touch-base", step_attempt=0, status="running")
+    s = State(id="feat", step="touch-base", step_attempt=0, status="new")
     s.held_lane = "main"
     s.held_acquire_step = "wait-for-head"
     s.save(sd)
@@ -340,7 +340,7 @@ def test_state_round_trips_hold_mark(tmp_path) -> None:
 def test_state_hold_mark_defaults_none(tmp_path: Path) -> None:
     from imp.engine.state import State
     (tmp_path / "state.json").write_text(json.dumps({
-        "id": "feat", "step": "s", "step_attempt": 0, "status": "running",
+        "id": "feat", "step": "s", "step_attempt": 0, "status": "new",
         "vars": {}, "loop_counts": {}, "current_step": None,
         "retry_feedback": None,
     }))
@@ -369,7 +369,7 @@ def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -
         raise FakeCancelled
 
     monkeypatch.setattr(state_mod.os, "replace", boom)
-    s = State(id="c1", step="x", step_attempt=0, status="running",
+    s = State(id="c1", step="x", step_attempt=0, status="new",
               vars={}, loop_counts={})
     try:
         s.save(tmp_path)

@@ -16,7 +16,7 @@ def test_resumable_rows_drops_running_and_sorts_newest_first(
     rows = [
         _row("a", "running", "2026-06-10T00:00:00+00:00"),       # excluded (executing)
         _row("b", "paused", "2026-06-11T00:00:00+00:00"),        # newest resumable
-        _row("c", "errored", "2026-06-09T00:00:00+00:00"),
+        _row("c", "new", "2026-06-09T00:00:00+00:00"),          # resumable at-rest
         _row("d", "merge_blocked", "2026-06-08T00:00:00+00:00"),
     ]
     monkeypatch.setattr(m, "_status_rows", lambda control: rows)

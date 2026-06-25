@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from imp.engine.change import LAYOUT_VERSION
@@ -15,7 +16,8 @@ def _seed_change(tmp_path: Path) -> str:
     cdir = tmp_path / ".imp" / "changes" / cid
     (cdir / "state").mkdir(parents=True)
     (cdir / "state" / "state.json").write_text(
-        json.dumps({"status": "running", "step": "implement"}))
+        json.dumps({"status": "new", "step": "implement"}))
+    (cdir / "lock").write_text(str(os.getpid()))   # live holder ⇒ derived "running"
     (cdir / "change.json").write_text(json.dumps({
         "id": cid, "title": "Dark mode", "base_branch": "main",
         "created_at": "2026-06-14T00:00:00Z",

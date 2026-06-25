@@ -13,10 +13,10 @@ and state — its whole record lives there.
 
 ## Statuses
 
-A Change carries one status: `running`, `paused`, `saved`, `completed`,
-`errored`, `merge_blocked`, `abandoned`. A **paused** Change that has not been
-built yet (un-materialized) is shown to the user as **draft** rather than
-`paused`.
+A Change carries one at-rest status: `new`, `paused`, `saved`, `completed`,
+`merge_blocked`, `abandoned`. `running` is **derived** — a live process holds the
+change's lock — and is never stored. A **new** or **paused** Change that has not
+been built yet (un-materialized) is shown to the user as **draft**.
 
 ## Zones: active list, Backlog, archive
 

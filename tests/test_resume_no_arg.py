@@ -56,7 +56,7 @@ async def test_multiple_non_interactive_lists_candidates_and_exits_2(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     rows = [_row("2026-06-11-aaa111", "paused", "2026-06-11T00:00:00+00:00"),
-            _row("2026-06-10-bbb222", "errored", "2026-06-10T00:00:00+00:00")]
+            _row("2026-06-10-bbb222", "new", "2026-06-10T00:00:00+00:00")]
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: False)
     rc = await m._pick_resume_target(tmp_path, non_interactive=False)
@@ -71,7 +71,7 @@ async def test_explicit_non_interactive_flag_skips_picker_even_on_a_tty(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     rows = [_row("2026-06-11-aaa111", "paused", "2026-06-11T00:00:00+00:00"),
-            _row("2026-06-10-bbb222", "errored", "2026-06-10T00:00:00+00:00")]
+            _row("2026-06-10-bbb222", "new", "2026-06-10T00:00:00+00:00")]
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)   # tty present, but flag wins
 
@@ -90,7 +90,7 @@ async def test_multiple_interactive_uses_picker_selection(
     monkeypatch, tmp_path: Path,
 ) -> None:
     rows = [_row("2026-06-11-aaa111", "paused", "2026-06-11T00:00:00+00:00"),
-            _row("2026-06-10-bbb222", "errored", "2026-06-10T00:00:00+00:00")]
+            _row("2026-06-10-bbb222", "new", "2026-06-10T00:00:00+00:00")]
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
@@ -107,7 +107,7 @@ async def test_multiple_interactive_cancel_returns_2(
     monkeypatch, tmp_path: Path,
 ) -> None:
     rows = [_row("2026-06-11-aaa111", "paused", "2026-06-11T00:00:00+00:00"),
-            _row("2026-06-10-bbb222", "errored", "2026-06-10T00:00:00+00:00")]
+            _row("2026-06-10-bbb222", "new", "2026-06-10T00:00:00+00:00")]
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)
 

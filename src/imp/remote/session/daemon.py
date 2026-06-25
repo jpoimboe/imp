@@ -15,7 +15,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.merge_queue import ensure_head_driven
-from imp.engine.state import EventLog, LockHeld, ProjectLock, State
+from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
@@ -113,12 +113,12 @@ async def serve_change_session(
             log = change.event_log()
             state = State.load(change.state_dir)
             _append_workflow_resumed(log)
-            # P1 crash recovery: a crashed run (status still "running" on disk)
-            # never set resume_pending, so the executor would re-enter the current
-            # step fresh and re-burn its work. Keep and replay it.
-            if state.status == "running":
+            # Crash recovery keys on the lock, not the status field. `crashed` is
+            # snapshotted BEFORE acquire() (see below): a stale lock means the
+            # prior run died mid-step, so replay the interrupted step instead of
+            # re-burning it. A clean pause (no lock) leaves resume_pending unset.
+            if crashed:
                 state.resume_pending = state.step
-            state.status = "running"
             state.save(change.state_dir)
         run_kwargs: dict[str, Any] = {}
         if scope_only:
@@ -160,6 +160,13 @@ async def serve_change_session(
             prompt = _hold_prompt(result, coordinator, change.event_log())
         return result
 
+    # Snapshot crash liveness BEFORE acquire(): ProjectLock.acquire() overwrites
+    # the lock file with THIS daemon's own pid, so a probe read inside the lock
+    # would always see a live pid and never detect the crash. `_bound` (defined
+    # above) closes over `crashed`; it is read only when _bound runs, after this
+    # assignment, so the forward reference is sound.
+    lock_path = change.change_dir / "lock"
+    crashed = resume and lock_path.exists() and not lock_is_live(lock_path)
     try:
         with ProjectLock(change.change_dir / "lock").acquire():
             await server.open()

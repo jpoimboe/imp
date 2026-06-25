@@ -16,7 +16,7 @@ def test_list_changes_reports_id_title_status_step(tmp_path: Path) -> None:
     info = infos["alpha"]
     assert isinstance(info, ChangeInfo)
     assert info.title == "Add dark mode"
-    assert info.status == "running"      # Change.create seeds status="running"
+    assert info.status == "new"          # Change.create seeds status="new"
     assert info.step == "s"              # the seed workflow's single step name
 
 
@@ -47,4 +47,4 @@ def test_list_changes_excludes_terminal_changes(tmp_path: Path) -> None:
         st.status = terminal
         st.save(ch.state_dir)
     ids = {c.id for c in list_changes(tmp_path)}
-    assert ids == {live.id}   # only the running Change survives the filter
+    assert ids == {live.id}   # only the in-flight (new) Change survives the filter

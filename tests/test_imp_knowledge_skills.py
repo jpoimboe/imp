@@ -19,11 +19,12 @@ def test_mental_model_skill_is_loadable_profile_b() -> None:
     assert "superpowers" not in body.lower()
 
 
-def test_mental_model_lists_full_status_set_and_draft_relabel() -> None:
+def test_mental_model_lists_status_set_and_draft_relabel() -> None:
     body = load_agent_skill(_skills_dir(), "imp-mental-model").lower()
-    for status in ("running", "paused", "saved", "completed",
-                   "errored", "merge_blocked", "abandoned"):
+    for status in ("new", "running", "paused", "saved", "completed",
+                   "merge_blocked", "abandoned"):
         assert status in body, status
+    assert "errored" not in body
     assert "draft" in body
 
 

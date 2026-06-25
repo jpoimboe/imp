@@ -18,7 +18,7 @@ def _cands() -> list[Candidate]:
         Candidate(change_id="2026-06-11-aaa111", title="Add version flag",
                   status="paused", step="plan", last_iso="2026-06-11T11:45:00+00:00"),
         Candidate(change_id="2026-06-10-bbb222", title="Other change",
-                  status="errored", step="spec", last_iso="2026-06-10T11:45:00+00:00"),
+                  status="new", step="spec", last_iso="2026-06-10T11:45:00+00:00"),
     ]
 
 

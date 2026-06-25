@@ -457,7 +457,7 @@ async def test_seed_opening_is_forwarded_to_the_first_run_only(
 
 
 @pytest.mark.anyio
-async def test_resume_marks_running_and_journals_workflow_resumed(
+async def test_resume_journals_workflow_resumed_without_flipping_status(
     tmp_path: Path,
 ) -> None:
     from imp.engine.state import State
@@ -476,7 +476,6 @@ async def test_resume_marks_running_and_journals_workflow_resumed(
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        # The prep must already be visible to the run: status flipped to running.
         seen["status"] = State.load(change.state_dir).status
         return RunResult.COMPLETED
 
@@ -485,15 +484,17 @@ async def test_resume_marks_running_and_journals_workflow_resumed(
             change, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
-    assert seen["status"] == "running"          # status flipped before the run
+    assert seen["status"] == "paused"           # never flipped to a persisted "running"
     assert change.events_path.exists() and "workflow_resumed" in change.events_path.read_text()
 
 
 @pytest.mark.anyio
-async def test_resume_sets_resume_pending_for_a_crashed_run(tmp_path: Path) -> None:
-    """A hard-killed run leaves status='running' on disk and never set
-    resume_pending. P1: daemon resume prep must set resume_pending to the current
-    step so the executor replays its transcript instead of re-running it fresh."""
+async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path) -> None:
+    """A hard-killed run leaves a lock file naming a now-dead pid (the OS frees
+    the flock but not the pid file). The pre-acquire snapshot reads that as a
+    crash and sets resume_pending to the current step so the executor replays it."""
+    import subprocess
+
     from imp.engine.state import State
     from tests.conftest import _seed_control
 
@@ -501,7 +502,43 @@ async def test_resume_sets_resume_pending_for_a_crashed_run(tmp_path: Path) -> N
     change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.step = "review"
-    st.status = "running"          # crashed: status on disk, lock freed by the OS
+    st.status = "paused"
+    st.resume_pending = None
+    st.save(change.state_dir)
+    p = subprocess.Popen(["true"])           # dead pid ⇒ stale lock ⇒ crash
+    p.wait()
+    (change.change_dir / "lock").write_text(str(p.pid))
+
+    seen: dict[str, object] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        seen["resume_pending"] = State.load(change.state_dir).resume_pending
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert result is RunResult.COMPLETED
+    assert seen["resume_pending"] == "review"
+
+
+@pytest.mark.anyio
+async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -> None:
+    """A clean pause leaves no lock file: resume must NOT replay (resume_pending
+    stays unset) so the run advances normally."""
+    from imp.engine.state import State
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(change.state_dir)
+    st.step = "review"
+    st.status = "paused"
     st.resume_pending = None
     st.save(change.state_dir)
 
@@ -520,7 +557,7 @@ async def test_resume_sets_resume_pending_for_a_crashed_run(tmp_path: Path) -> N
             change, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
-    assert seen["resume_pending"] == "review"
+    assert seen["resume_pending"] is None
 
 
 @pytest.mark.anyio

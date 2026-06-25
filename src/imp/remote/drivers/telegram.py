@@ -21,7 +21,7 @@ from typing import Any
 
 # Curation map (spec Decisions §"Default curation"). Curation classifies an event
 # type as loud / silent / dropped; imp only streams event *types*.
-_LOUD = frozenset({"awaiting_user_input", "errored", "merge_blocked", "completed"})
+_LOUD = frozenset({"awaiting_user_input", "merge_blocked", "completed"})
 _SILENT = frozenset({"agent_output", "llm_response"})
 
 # Human-readable headers for loud events. The phone-buzzing notifications read as
@@ -30,7 +30,6 @@ _SILENT = frozenset({"agent_output", "llm_response"})
 _EVENT_LABELS = {
     "awaiting_user_input": "needs your input",
     "merge_blocked": "merge blocked",
-    "errored": "error",
     "completed": "done",
 }
 

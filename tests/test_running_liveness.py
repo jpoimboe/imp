@@ -1,5 +1,6 @@
-"""Finding D: a `running` Change whose ProjectLock holder is dead has crashed —
-re-derive it as `errored` so it's visible in `imp list` and resumable."""
+"""`running` is derived from the lock, not persisted: a live lock ⇒ running, a
+stale lock (dead pid) or absent lock ⇒ the resumable at-rest status, never
+`errored`. An un-materialized new/paused change shows as `draft`."""
 
 from __future__ import annotations
 
@@ -13,46 +14,49 @@ from tests.conftest import _seed_control
 
 
 def _dead_pid() -> int:
-    # A reaped child's pid is gone (and not reused within this test).
     p = subprocess.Popen(["true"])
     p.wait()
     return p.pid
 
 
-def test_effective_status_live_lock_stays_running(tmp_path: Path) -> None:
-    (tmp_path / "lock").write_text(str(os.getpid()))   # this process is alive
-    assert m._effective_status("running", tmp_path) == "running"
+def test_resolver_live_lock_is_running(tmp_path: Path) -> None:
+    (tmp_path / "lock").write_text(str(os.getpid()))
+    assert m.resolve_display_status("new", tmp_path, materialized=True) == "running"
 
 
-def test_effective_status_dead_lock_becomes_errored(tmp_path: Path) -> None:
+def test_resolver_absent_lock_keeps_at_rest_status(tmp_path: Path) -> None:
+    assert m.resolve_display_status("new", tmp_path, materialized=True) == "new"
+
+
+def test_resolver_stale_lock_keeps_at_rest_status_never_errored(tmp_path: Path) -> None:
     (tmp_path / "lock").write_text(str(_dead_pid()))
-    assert m._effective_status("running", tmp_path) == "errored"
+    assert m.resolve_display_status("paused", tmp_path, materialized=True) == "paused"
 
 
-def test_effective_status_missing_lock_stays_running(tmp_path: Path) -> None:
-    # Startup window between Change.create and the run acquiring the lock: no lock
-    # file yet — leave it running rather than false-flag a crash.
-    assert m._effective_status("running", tmp_path) == "running"
+def test_resolver_unmaterialized_new_is_draft(tmp_path: Path) -> None:
+    assert m.resolve_display_status("new", tmp_path, materialized=False) == "draft"
 
 
-def test_effective_status_non_running_is_authoritative(tmp_path: Path) -> None:
-    (tmp_path / "lock").write_text(str(_dead_pid()))
-    for status in ("paused", "errored", "completed", "merge_blocked", "abandoned"):
-        assert m._effective_status(status, tmp_path) == status
+def test_resumable_and_inflight_include_new_not_errored() -> None:
+    assert "new" in m.RESUMABLE and "errored" not in m.RESUMABLE
+    assert "new" in m._INFLIGHT and "errored" not in m._INFLIGHT
 
 
-def test_status_rows_surfaces_crashed_running_as_errored(tmp_path: Path) -> None:
+def test_status_rows_surfaces_crashed_run_as_at_rest_not_errored(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Crashed run",
                        change_id="2026-06-11-deadaa", base_branch="main")
-    assert m._status_row(  # sanity: Change.create starts it running
-        ch.id, (ch.state_dir / "state.json").read_bytes(),
-        (ch.change_dir / "change.json").read_bytes(), "")[1] == "running"
-    # Simulate a crash: a leftover lock file with a dead holder pid.
+    # Simulate a crash: a leftover lock file naming a dead holder pid.
     (ch.change_dir / "lock").write_text(str(_dead_pid()))
-
-    rows = m._status_rows(tmp_path)
-    by_id = {r[0]: r for r in rows}
-    assert by_id[ch.id][1] == "errored"                 # re-derived from the dead lock
-    # ...and it is therefore resumable.
+    rows = {r[0]: r for r in m._status_rows(tmp_path)}
+    assert rows[ch.id][1] == "new"                       # at-rest, never errored
     assert ch.id in {r[0] for r in m._resumable_rows(tmp_path)}
+
+
+def test_created_draft_with_no_lock_is_draft_never_running(tmp_path: Path) -> None:
+    # Regression (m6rmch): a created draft with no lock must never show running.
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="D", change_id="m6rmch", base_branch="main")
+    row = m._row_for_id(tmp_path, "m6rmch")
+    assert row is not None
+    assert row[1] == "draft"

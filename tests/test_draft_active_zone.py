@@ -26,13 +26,13 @@ def test_paused_draft_is_active_labeled_draft(tmp_path: Path) -> None:
     assert "pdraft" not in {r[0] for r in m._backlog_rows(tmp_path)}
 
 
-def test_live_draft_is_active_labeled_running(tmp_path: Path) -> None:
+def test_live_draft_is_active_labeled_draft(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create_draft(tmp_path, title="X", change_id="ldraft",
-                        base_branch="main")          # fresh ⇒ state status "running"
+                        base_branch="main")   # fresh, un-materialized, no lock ⇒ draft
     row = next((r for r in m._status_rows(tmp_path) if r[0] == "ldraft"), None)
     assert row is not None
-    assert row[1] == "running"
+    assert row[1] == "draft"
     assert "ldraft" not in {r[0] for r in m._backlog_rows(tmp_path)}
 
 
