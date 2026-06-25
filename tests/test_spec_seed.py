@@ -351,7 +351,7 @@ def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     # Opening behavior must branch on the opening message: the unseeded branch
-    # keys on the begin token, the seeded branch on the seed marker.
+    # keys on the begin token; a plain-prose open carries the verbatim intent.
     assert "<imp:begin/>" in out
 
 
@@ -364,12 +364,12 @@ def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "verbatim opening intent" in out
-    # The bare positional no longer delivers a spec-seed FILE; only --spec-file does.
+    # No spec is inlined into the prompt; the user names a spec file front-door reads.
     assert "imp new <draft>" not in out
     assert "imp new <file>" not in out
 
 
-def test_front_door_prompt_has_seed_branch(tmp_path) -> None:
+def test_front_door_prompt_has_read_and_verify_section(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
@@ -377,9 +377,9 @@ def test_front_door_prompt_has_seed_branch(tmp_path) -> None:
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
-    # Seed-marker invariant: the adopt branch must key on the SAME phrase the CLI
-    # prefixes (_build_seed).
-    assert cli_main.SPEC_SEED_MARKER in out
+    # The seeded/adopt marker is gone; a named spec is read and verified instead.
+    assert "Reading a referenced spec file" in out
+    assert "Implement this spec" not in out
 
 
 def test_opening_prompt_reply_wires_to_seed_opening(
