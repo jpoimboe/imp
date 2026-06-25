@@ -10,12 +10,17 @@ from imp.cli.prompt import SlashCompleter
 
 
 def _skills(tmp_path: Path) -> Path:
-    d = tmp_path / "skills"
-    d.mkdir()
-    (d / "refactor.md").write_text("x")
+    d = tmp_path / "skills" / "user"
+    d.mkdir(parents=True)
+    (d / "refactor.md").write_text("---\ndescription: Refactor helper\n---\nx")
     (d / "review.md").write_text("x")
     (d / "debug.md").write_text("x")
-    return d
+    return tmp_path / "skills"
+
+
+def _metas(completer: SlashCompleter, text: str) -> dict[str, str]:
+    doc = Document(text=text, cursor_position=len(text))
+    return {c.text: c.display_meta_text for c in completer.get_completions(doc, None)}
 
 
 def _texts(completer: SlashCompleter, text: str) -> list[str]:
@@ -55,3 +60,26 @@ def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:
         return [item.text async for item in c.get_completions_async(doc, None)]
 
     assert set(asyncio.run(_collect())) == {"refactor", "review"}
+
+
+def test_completion_carries_description_as_meta(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path))
+    metas = _metas(c, "/re")
+    assert metas["refactor"] == "Refactor helper"
+    assert metas["review"] == ""   # no description -> empty meta
+
+
+def test_agent_skills_never_appear_in_completion(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    agent = skills / "agent"
+    agent.mkdir()
+    (agent / "secret.md").write_text("x")
+    c = SlashCompleter(skills)
+    assert "secret" not in _texts(c, "/s")
+
+
+def test_user_skill_named_like_builtin_not_duplicated(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    (skills / "user" / "help.md").write_text("x")
+    c = SlashCompleter(skills)
+    assert _texts(c, "/help").count("help") == 1

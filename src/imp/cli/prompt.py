@@ -88,9 +88,9 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
 
 class SlashCompleter:
-    """Completes /help, /skills, and skill names (from skills_dir/*.md) when the
-    line starts with '/'. prompt_toolkit Completer protocol (duck-typed to avoid
-    importing prompt_toolkit at module import time)."""
+    """Completes /help, /skills, and user skill names (from skills_dir/user/*.md)
+    when the line starts with '/'. prompt_toolkit Completer protocol (duck-typed to
+    avoid importing prompt_toolkit at module import time)."""
 
     _BUILTINS = ("help", "skills")
 
@@ -100,18 +100,26 @@ class SlashCompleter:
     def get_completions(self, document: Any, complete_event: Any) -> Iterator[Any]:
         from prompt_toolkit.completion import Completion
 
-        from imp.agents.skills import list_skill_names
+        from imp.agents.skills import list_user_skills
 
         text = document.text_before_cursor
         if not text.startswith("/"):
             return
         prefix = text[1:]
-        # dict.fromkeys dedups while preserving order, so a skill named
-        # help.md/skills.md doesn't surface twice (builtin + glob).
-        names = dict.fromkeys(list(self._BUILTINS) + list_skill_names(self._skills_dir))
-        for name in names:
+        # Builtins first (no description); user skills after. setdefault keeps the
+        # builtin entry if a user skill shares its name (e.g. a skills.md), so it
+        # never surfaces twice.
+        candidates: dict[str, str | None] = {}
+        for builtin in self._BUILTINS:
+            candidates.setdefault(builtin, None)
+        for stem, description in list_user_skills(self._skills_dir):
+            candidates.setdefault(stem, description)
+        for name, description in candidates.items():
             if name.startswith(prefix):
-                yield Completion(name, start_position=-len(prefix))
+                yield Completion(
+                    name, start_position=-len(prefix),
+                    display_meta=description or "",
+                )
 
     async def get_completions_async(
         self, document: Any, complete_event: Any
