@@ -2310,6 +2310,29 @@ def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
     assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn
 
 
+def test_subagent_llm_response_does_not_move_latest_prompt_tokens() -> None:
+    # A subagent turn must NOT flip the context bar to its own prompt count, but
+    # its tokens must still fold into the cumulative change total (F2).
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    # A top-level turn sets the bar.
+    b.add(ev("p1", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="m", stop_reason="end_turn",
+             usage={"input_tokens": 100, "output_tokens": 5}, raw={"content": []}))
+    assert b.latest_prompt_tokens == 100
+    # Open a subagent fold so the sub: turn routes through a registered child.
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+             input={"subagent_name": "reviewer", "task_description": "go"}))
+    # The subagent turn carries usage but a sub: agent_id — the bar must not move.
+    b.add(ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+             model="m", stop_reason="end_turn",
+             usage={"input_tokens": 999, "output_tokens": 7}, raw={"content": []}))
+    assert b.latest_prompt_tokens == 100        # frozen at the parent's last value
+    assert b.tree.tokens.input == 1099          # cumulative still folds in subagent (F2)
+    assert b.tree.tokens.output == 12
+
+
 def test_current_activity_carries_current_step_model() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p",
