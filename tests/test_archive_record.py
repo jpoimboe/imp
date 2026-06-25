@@ -32,6 +32,7 @@ def test_build_record_maps_fields_from_change_and_state() -> None:
         "resumable": False,
         "final_state": _final_state(),
         "events_hash": "hash123",
+        "step_blobs": {},
     }
 
 
@@ -71,3 +72,16 @@ def test_build_record_stores_full_meta_and_resumable_flag() -> None:
     assert rec["resumable"] is True
     assert rec["change_meta"] == meta            # whole change.json preserved
     assert rec["change_meta"]["orig_base_head"] == "abc999"
+
+
+def test_build_record_carries_step_blobs_manifest() -> None:
+    rec = record.build_record(
+        _change_meta(), _final_state(), "hash123",
+        resumable=True,
+        step_blobs={"p/s/transcript.jsonl": "deadbeef"})
+    assert rec["step_blobs"] == {"p/s/transcript.jsonl": "deadbeef"}
+
+
+def test_build_record_step_blobs_default_empty() -> None:
+    rec = record.build_record(_change_meta(), _final_state(), "hash123")
+    assert rec["step_blobs"] == {}
