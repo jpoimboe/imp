@@ -62,6 +62,8 @@ Classify each finding against the canonical severity rubric:
 
 {% include "partials/severity.md" %}
 
+{% include "partials/verifying-claims.md" %}
+
 ## Calibration
 
 Be strict but fair. Only flag issues that would cause real problems during implementation planning. A missing section, a direct contradiction, or a requirement that can be interpreted two different ways — those are issues. Minor wording improvements, stylistic preferences, and "sections less detailed than I'd prefer" are Minor or Nit, not blocking.

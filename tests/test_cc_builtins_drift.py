@@ -37,6 +37,9 @@ from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
 def test_builtin_tools_match_cli() -> None:
+    # Do NOT skip on CLAUDECODE=1 — the bundled claude CLI advertises an
+    # identical tool registry with or without it; a CLAUDECODE skip hides real
+    # drift. Verify with `env -u CLAUDECODE … claude`.
     cli = shutil.which("claude")
     if cli is None:
         pytest.skip("`claude` CLI not on PATH")

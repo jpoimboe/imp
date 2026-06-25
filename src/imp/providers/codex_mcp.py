@@ -290,6 +290,10 @@ async def start_server(
     # Register each tool as a FastMCP tool. The wrapper goes through
     # `dispatch_tool` so the cap counter + complete_step capture are
     # uniform with the unit-test path.
+    # Mirrors the claude_code strict_mcp_config note: this loop is where imp
+    # exposes its OWN tools to codex. Adding a first-party server here (dict entry
+    # + mcp__<name>__* allowlist + this codex mirror) is not a posture reversal —
+    # strict_mcp_config blocks only .mcp.json / user-settings servers, not these.
     for tool in tools.values():
         _register_tool(mcp_app, tool, ctx=ctx, state=state)
     return await _serve_fastmcp(
