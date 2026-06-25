@@ -1004,15 +1004,15 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_blue_caret_then_text_color_on() -> None:
+def test_user_message_orange_caret_then_text_color_on() -> None:
     """The user turn renders at the node's own depth (depth=1 → a 2-space indent).
-    First line: a bright-blue `>` caret (outside any slate) + one space + the body.
+    First line: a brand-orange `>` caret (outside any slate) + one space + the body.
     Continuation lines drop the caret (a blank column in its place) so the body
     aligns under the first line's text. No background fill in the ansi theme."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    assert out[0] == "  \x1b[94m>\x1b[0m line one"
+    assert out[0] == "  \x1b[33m>\x1b[0m line one"
     assert out[1] == "    line two"               # caret column blank, body aligned
     assert "\x1b[48;2;" not in out[0] and "\x1b[104m" not in out[0]   # no bg
 
@@ -1029,7 +1029,7 @@ def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
     finally:
         pal.set_theme("ansi")
     assert len(out) == 1
-    caret = "\x1b[38;2;127;162;202m>\x1b[0m"   # truecolor bright-blue caret
+    caret = "\x1b[38;2;255;154;60m>\x1b[0m"   # truecolor brand-orange caret
     bg = "\x1b[48;2;43;47;58m"                 # subtle slate (#2B2F3A) after the caret
     assert out[0] == caret + bg + " hello\x1b[0m"   # space + text on the bg, reset at end
 
@@ -1044,7 +1044,7 @@ def test_user_message_multiline_continuation_carries_slate_no_caret() -> None:
     finally:
         pal.set_theme("ansi")
     assert len(out) == 2
-    caret = "\x1b[38;2;127;162;202m>\x1b[0m"
+    caret = "\x1b[38;2;255;154;60m>\x1b[0m"
     bg = "\x1b[48;2;43;47;58m"
     assert out[0] == caret + bg + " one\x1b[0m"   # caret outside, band hugs the text
     assert out[1] == " " + bg + " two\x1b[0m"     # blank caret column, band continues
