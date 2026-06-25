@@ -187,7 +187,7 @@ def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
     assert [p.name for p in wf.phases][:2] == ["front-door", "spec"]
 
 
-def test_front_door_routes_inline_satisfiable_requests_to_wait_for_user() -> None:
+def test_front_door_routes_inline_satisfiable_requests_to_bare_turn_end_yield() -> None:
     # A pure question or a content/text-generation ask that is not a software
     # change is answered in prose and then the agent ends its turn to yield —
     # never complete_step, which is exclusively the go-live build terminator.
