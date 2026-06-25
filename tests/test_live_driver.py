@@ -1704,3 +1704,73 @@ def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:
     assert context_bar("some-unlisted-model", 1000, color=False, over_bg=False) is None
     assert context_bar(None, 1000, color=False, over_bg=False) is None
     assert context_bar("sonnet", None, color=False, over_bg=False) is None
+
+
+def _toolbar_activity() -> nv.Activity:
+    return nv.Activity(step_label="task-lead", phase_label="implement",
+                       count="2 calls", detail="bash ls", model="claude-sonnet-4-5")
+
+
+def test_compose_toolbar_shows_all_seven_fields_plain() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                           title="streaming toolbar", prompt_tokens=26000,
+                           elapsed=5.0, frame=0, color=False)
+    assert line[0] == "⠋"                       # spinner glyph leads (no bg when plain)
+    assert "z9gixx" in line                      # change id
+    assert "streaming toolbar" in line           # title
+    assert "claude-sonnet-4-5" in line           # model
+    assert "implement" in line                   # phase
+    assert "task-lead" in line                   # step
+    assert "2 calls" in line and "bash ls" in line   # transient activity detail kept
+    assert "5s" in line                          # elapsed
+    assert "█" in line and "13%" in line         # context bar
+
+
+def test_compose_toolbar_paints_field_accents_under_ansi_theme() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                           title="streaming toolbar", prompt_tokens=26000,
+                           elapsed=5.0, frame=0, color=True)
+    assert "\x1b[90m" in line          # change id gray (also the detail track)
+    assert "\x1b[35m" in line          # model magenta
+    assert "\x1b[34m" in line          # phase blue (and step `step` blue)
+    assert "\x1b[2m" in line           # elapsed dim
+
+
+def test_compose_toolbar_wears_user_slate_background_under_dark_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_toolbar
+    try:
+        pal.set_theme("dark")
+        line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                               title="streaming toolbar", prompt_tokens=26000,
+                               elapsed=5.0, frame=0, color=True)
+        assert line.startswith("\x1b[48;2;43;47;58m")   # opens with the user-message slate
+        assert line.endswith("\x1b[0m")                  # closes the bar with a full reset
+        # The dim elapsed segment (SGR 2) must close with SGR 22, not a bare \x1b[39m, or
+        # the dim bleeds into the trailing context bar (the dim-bleed bug). This exact
+        # substring fails if _FG_RESET reverts to a foreground-only reset.
+        assert "\x1b[2m5s\x1b[22;39m" in line
+    finally:
+        pal.set_theme("ansi")
+
+
+def test_compose_toolbar_omits_bar_for_unknown_model() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    act = nv.Activity(step_label="s", phase_label="p", model="unlisted-model")
+    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
+                           prompt_tokens=99, elapsed=1.0, frame=0, color=False)
+    assert "%" not in line             # bar omitted
+    assert "z9gixx" in line and "p" in line and "s" in line   # rest still renders
+
+
+def test_compose_toolbar_step_segment_uses_label_when_no_count() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    # count is None -> the step segment falls back to activity.label, not count/detail.
+    act = nv.Activity(step_label="task-lead", label="reviewing plan",
+                      phase_label="implement", model="claude-sonnet-4-5")
+    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
+                           prompt_tokens=26000, elapsed=5.0, frame=0, color=False)
+    assert "task-lead" in line          # step label still present
+    assert "reviewing plan" in line     # fallback label used when count is None

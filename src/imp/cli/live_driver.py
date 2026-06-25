@@ -81,6 +81,48 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
     return f"{fill}{track} {pct}%"
 
 
+def _toolbar_step_segment(activity: nv.Activity, *, color: bool, over_bg: bool) -> str | None:
+    parts: list[str] = []
+    if activity.step_label:
+        parts.append(_paint(activity.step_label, "step", color=color, over_bg=over_bg))
+    if activity.count is not None:
+        parts.append(activity.count)
+        if activity.detail:
+            parts.append(_paint(activity.detail, "gray", color=color, over_bg=over_bg))
+    elif activity.label:
+        parts.append(activity.label)
+    return rt.compose_label(parts) or None
+
+
+def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
+                    prompt_tokens: int | None, elapsed: float, frame: int,
+                    color: bool) -> str:
+    """The single pure toolbar composer: builds the seven-field bar from plain values —
+    change id, title, model, phase, step (+ transient detail), elapsed, context bar —
+    wrapped in the user-message slate background when the active theme supplies one."""
+    bg = pal.user_bg_open(enabled=color)
+    over = bool(bg)
+    spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=over)
+    segments: list[str] = []
+    if change_id:
+        segments.append(_paint(change_id, "gray", color=color, over_bg=over))
+    if title:
+        segments.append(title)
+    if activity.model:
+        segments.append(_paint(activity.model, "magenta", color=color, over_bg=over))
+    if activity.phase_label:
+        segments.append(_paint(activity.phase_label, "blue", color=color, over_bg=over))
+    step = _toolbar_step_segment(activity, color=color, over_bg=over)
+    if step:
+        segments.append(step)
+    segments.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over))
+    bar = context_bar(activity.model, prompt_tokens, color=color, over_bg=over)
+    if bar:
+        segments.append(bar)
+    body = f"{spin} " + rt.compose_label(segments)
+    return f"{bg}{body}{_RESET}" if bg else body
+
+
 def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
 ) -> str | None:
