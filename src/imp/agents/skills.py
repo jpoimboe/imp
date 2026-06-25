@@ -1,10 +1,14 @@
 """Skill resolution shared by the load_skill tool (agent path, spec §3) and the
 interactive slash dispatcher (human path, spec §4).
 
-A skill is a flat markdown file at <workflow_dir>/skills/<name>.md. The name is
-untrusted input: reject empty / dot / traversal / separator names, confine the
-resolved real path to skills/, and fail closed. A missing skills/ dir reads as
-not-found, never a bare OSError (a Change created before skills landed).
+Skills live in two audience-scoped subdirectories of <workflow_dir>/skills/:
+  agent/  — disciplines loaded by subagents (load_agent_skill)
+  user/   — skills surfaced to the human (load_user_skill / list_user_skills)
+
+Agent path: resolves skills/agent/<name>.md, falling back to skills/user/<name>.md.
+Human path: reads skills/user/ only; agent disciplines are never reachable here.
+Each subdir applies the same name sanitization (reject empty / dot / traversal /
+separator names). A missing subdir reads as not-found/empty, never a bare OSError.
 """
 
 from __future__ import annotations
@@ -95,18 +99,3 @@ def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
             out.append((p.stem, description))
     return out
 
-
-def load_skill_body(skills_dir: Path, name: str) -> str:
-    """Return the markdown body of skill <name>. Raises SkillNameError for a bad
-    name, SkillNotFound if the file (or skills_dir) is missing."""
-    path = _safe_skill_path(skills_dir, name)
-    if not path.is_file():
-        raise SkillNotFound(f"no such skill {name!r}")
-    return path.read_text()
-
-
-def list_skill_names(skills_dir: Path) -> list[str]:
-    """Sorted stems of <skills_dir>/*.md. Empty list if the dir is absent."""
-    if not skills_dir.is_dir():
-        return []
-    return sorted(p.stem for p in skills_dir.glob("*.md") if p.is_file())
