@@ -12,6 +12,7 @@ from imp.agents.skills import (
     list_user_skills,
     load_agent_skill,
     load_user_skill,
+    overlay_project_skills,
 )
 
 
@@ -138,3 +139,41 @@ def test_load_agent_skill_rejects_traversal(tmp_path: Path) -> None:
     skills = _split(tmp_path)
     with pytest.raises(SkillNameError):
         load_agent_skill(skills, "../user/secret")
+
+
+def test_overlay_copies_project_skills_into_user_dir(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    (project / "imp" / "skills").mkdir(parents=True)
+    (project / "imp" / "skills" / "mine.md").write_text("# Mine\nproject body\n")
+    dest = tmp_path / "snap" / "skills" / "user"
+    overlay_project_skills(project, dest)
+    assert (dest / "mine.md").read_text() == "# Mine\nproject body\n"
+
+
+def test_overlay_shadows_workflow_user_skill_on_collision(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    (project / "imp" / "skills").mkdir(parents=True)
+    (project / "imp" / "skills" / "refactor.md").write_text("PROJECT\n")
+    dest = tmp_path / "snap" / "skills" / "user"
+    dest.mkdir(parents=True)
+    (dest / "refactor.md").write_text("WORKFLOW\n")
+    overlay_project_skills(project, dest)
+    assert (dest / "refactor.md").read_text() == "PROJECT\n"
+
+
+def test_overlay_missing_source_is_noop(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    dest = tmp_path / "snap" / "skills" / "user"
+    overlay_project_skills(project, dest)  # must not raise
+    assert not dest.exists()
+
+
+def test_overlay_never_writes_into_agent(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    (project / "imp" / "skills").mkdir(parents=True)
+    (project / "imp" / "skills" / "mine.md").write_text("# Mine\n")
+    skills_root = tmp_path / "snap" / "skills"
+    (skills_root / "agent").mkdir(parents=True)
+    overlay_project_skills(project, skills_root / "user")
+    assert list((skills_root / "agent").iterdir()) == []  # agent/ untouched

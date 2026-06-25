@@ -29,6 +29,7 @@ from imp.agents.runner import (
     Message,
     TextBlock,
 )
+from imp.agents.skills import overlay_project_skills
 from imp.engine.agent_run import (
     AgentRunResult,
     build_agent_invocation,
@@ -203,6 +204,7 @@ async def run_change(
             if tmp.exists():
                 shutil.rmtree(tmp)
             shutil.copytree(change.live_workflow_dir, tmp)
+            overlay_project_skills(change.project_root, tmp / "skills" / "user")
             os.rename(tmp, snapshot)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,

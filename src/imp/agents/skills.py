@@ -13,6 +13,7 @@ separator names). A missing subdir reads as not-found/empty, never a bare OSErro
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 
@@ -83,6 +84,21 @@ def load_user_skill(skills_dir: Path, name: str) -> str:
     if not path.is_file():
         raise SkillNotFound(f"no such skill {name!r}")
     return _split_frontmatter(path.read_text())[1]
+
+
+def overlay_project_skills(project_root: Path, dest_user_dir: Path) -> None:
+    """Overlay <project_root>/imp/skills/*.md into `dest_user_dir` (a snapshot's
+    skills/user/), so a bundled-workflow user drops skills there without forking.
+    On a name collision the project file shadows the workflow's user skill. A
+    missing imp/skills/ source is a no-op. Only user/ is ever written — agent
+    disciplines are never overlaid."""
+    src = project_root / "imp" / "skills"
+    if not src.is_dir():
+        return
+    dest_user_dir.mkdir(parents=True, exist_ok=True)
+    for md in sorted(src.glob("*.md")):
+        if md.is_file():
+            shutil.copy2(md, dest_user_dir / md.name)
 
 
 def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
