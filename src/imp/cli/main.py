@@ -30,6 +30,7 @@ from imp.cli import change_row, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver
+from imp.cli.leave import _had_exchange
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
@@ -363,24 +364,6 @@ def _handle_terminal_outcome(
     _emit_paused_summary(change)
     return 1
 
-
-def _had_exchange(log: Any) -> bool:
-    """True if the user contributed at least one message to a conversation."""
-    events = list(log.read())
-    waited = {
-        ev.get("payload", {}).get("id")
-        for ev in events
-        if ev.get("type") == "tool_call"
-        and ev.get("payload", {}).get("name") == "wait_for_user"
-        and ev.get("payload", {}).get("id") is not None
-    }
-    for ev in events:
-        etype = ev.get("type")
-        if etype in ("opening_intent", "user_message", "user_interjected"):
-            return True
-        if etype == "tool_result" and ev.get("payload", {}).get("id") in waited:
-            return True
-    return False
 
 
 async def _apply_disposition_locked(
