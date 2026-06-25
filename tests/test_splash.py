@@ -751,6 +751,15 @@ def test_workshop_scenes_are_wired_and_props_paint() -> None:
     assert names.index("_s_fairy_ring") < idx[0]
 
 
+def test_print_splash_banner_omits_leading_blank_when_lead_blank_false(monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
+    buf = io.StringIO()
+    shown = m._print_splash_banner(interactive=True, lead_blank=False, stream=buf)
+    assert buf.getvalue() == "SCENE\n"
+    assert shown is True
+
+
 def test_splash_block_centers_tagline_under_the_art(monkeypatch) -> None:
     monkeypatch.setattr(splash, "choose_index", lambda: 0)
     out = splash.splash_block(theme="dark", width=80, color=True)

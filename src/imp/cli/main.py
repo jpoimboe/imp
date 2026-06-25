@@ -151,18 +151,22 @@ def _is_interactive(
             and should_use_color(stdout))
 
 
-def _print_splash_banner(*, interactive: bool, stream: Any = None) -> bool:
-    """Leading blank line then the splash scene, printed on an interactive entry
-    only. Shared by new/chat and resume so the banner is identical everywhere.
-    Returns True only when the banner was actually printed (interactive and a
-    non-empty scene), so the opening flow can tie its separator to it."""
+def _print_splash_banner(
+    *, interactive: bool, lead_blank: bool = True, stream: Any = None,
+) -> bool:
+    """Optional leading blank line then the splash scene, printed on an interactive
+    entry only. Shared by new/chat and resume so the banner is identical everywhere.
+    `lead_blank=False` skips the leading blank for callers whose header already
+    emitted one. Returns True only when the banner was actually printed (interactive
+    and a non-empty scene), so the opening flow can tie its separator to it."""
     if not interactive:
         return False
     out = sys.stdout if stream is None else stream
     block = splash.splash_block(theme=pal.active_theme(), width=_term_width(), color=True)
     if not block:
         return False
-    print(file=out)
+    if lead_blank:
+        print(file=out)
     print(block, file=out)
     return True
 
