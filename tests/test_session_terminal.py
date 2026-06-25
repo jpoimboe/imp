@@ -13,7 +13,7 @@ import pytest
 
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
-from imp.cli.terminal_title import GLYPH_WAITING, TerminalTitle
+from imp.cli.terminal_title import GLYPH_WAITING, GLYPH_WORKING, TerminalTitle
 from imp.engine.change import Change
 from imp.remote.session.client import SessionClient
 from imp.remote.session.server import SessionServer
@@ -612,7 +612,7 @@ async def test_title_flips_working_waiting_back_to_working_and_resets(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    working = "\x1b]2;✦ imp · term1 · My Change\x07"
+    working = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
     waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
     reset = "\x1b]2;\x07"
     assert working in out
