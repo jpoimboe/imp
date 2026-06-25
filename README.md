@@ -173,3 +173,10 @@ A run validates these once at startup (a `getMe` / `getChat` self-check). A reje
 token or unreachable chat is reported at **WARNING** with a fix hint — otherwise a
 broken credential fails silently and no notifications arrive. The driver's other
 diagnostics stay quiet unless you enable debug logging for the `imp.remote` logger.
+
+## Status & contributing
+
+imp is **pre-release** and open source. The engine and the default workflow are
+usable today; interfaces may still shift before a tagged release. Issues and pull
+requests are welcome — start from a clone (`python3 -m pip install -e '.[dev]'`) and
+run `make check` (lint, types, lockfile, tests) before opening a PR.
