@@ -1,8 +1,7 @@
-"""Shared backoff helpers (§10/§12).
+"""Shared backoff helper (§10/§12).
 
 Extracted from executor.py so that both executor and subagents can use
-interruptible_sleep and HEADLESS_RETRY_CEILING_SECONDS without creating an
-import cycle.
+interruptible_sleep without creating an import cycle.
 
 No-cycle invariant: this module imports only anyio and stdlib — it must
 never import from imp.engine.executor, imp.agents.*, or imp.providers.*.
@@ -13,8 +12,6 @@ from __future__ import annotations
 from typing import Any
 
 import anyio
-
-HEADLESS_RETRY_CEILING_SECONDS = 1800.0   # §10/§12: 30-min cumulative backoff
 
 
 async def interruptible_sleep(delay: float, coordinator: Any, *,
