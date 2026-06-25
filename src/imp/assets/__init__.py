@@ -32,22 +32,6 @@ def bundled_workflow_dir(name: str) -> Path:
     return p
 
 
-def playbooks_dir() -> Path:
-    """Real filesystem Path to the shipped playbook library; safe in editable and wheel installs."""
-    resource = files("imp.assets").joinpath("playbooks")
-    p = Path(str(resource))
-    if not p.is_dir():
-        raise RuntimeError(
-            f"shipped playbooks not found at {p}; was the package installed "
-            f"without its assets? Try `pip install -e .` from a checkout."
-        )
-    return p
-
-
-def shipped_playbook_paths() -> list[Path]:
-    return sorted(playbooks_dir().glob("*.md"))
-
-
 def bundled_workflow_names() -> list[str]:
     """Sorted names of every bundled workflow (the 'managed' set)."""
     root = Path(str(files("imp.assets").joinpath("workflows")))
