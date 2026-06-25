@@ -36,13 +36,11 @@ from imp.engine.agent_run import (
     drive_invocation,
 )
 from imp.engine.backoff import (
-    HEADLESS_RETRY_CEILING_SECONDS as _HEADLESS_RETRY_CEILING_SECONDS,
-)
-from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
 from imp.engine.change import Change
 from imp.engine.env import engine_env, overlay_engine_env
+from imp.engine.error_policy import budget_for
 from imp.engine.feedback import (
     format_script_feedback,
     render_output_fields,
@@ -795,7 +793,7 @@ async def _route_agent(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     verify_command: str | None = None,
-    non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
+    non_interactive: bool = False,  # forwarded to the invocation/child runs
     scope_only: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
@@ -853,11 +851,14 @@ async def _route_agent(
             project_facts=project_facts, guidance=guidance)
         if result.delay is None:
             break
-        # §10/§12 headless backstop: an unattended run has no human to Ctrl-C, so
-        # cap cumulative transient-error backoff by wall clock and pause instead of
-        # hanging. Checked BEFORE the agent_retry emit so the journal shows a clean
-        # ceiling pause, not a retry-then-pause. Interactive runs stay unbounded.
-        if non_interactive and cumulative_backoff + result.delay > _HEADLESS_RETRY_CEILING_SECONDS:
+        # Per-category wall-clock budget: pause cleanly when cumulative
+        # transient-error backoff would exceed this category's budget. Checked
+        # BEFORE the agent_retry emit so the journal shows a clean ceiling pause,
+        # not a retry-then-pause. Identical in interactive and headless runs.
+        # delay is non-None only for RetryWithBackoff categories, which always
+        # carry a budget, so budget is non-None here.
+        budget = budget_for(result.error.category if result.error else "unknown")
+        if budget is not None and cumulative_backoff + result.delay > budget:
             pause = Pause(reason="retry_ceiling",
                           kind=result.error.kind if result.error else None)
             _emit(log, "step_completed",

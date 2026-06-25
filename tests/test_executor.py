@@ -732,14 +732,15 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
 
 
 @pytest.mark.anyio
-async def test_headless_retry_ceiling_pauses_non_interactive(
+async def test_retry_budget_pauses_with_retry_ceiling(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """§10/§12: non_interactive run hits the wall-clock ceiling and pauses cleanly."""
+    """Per-category budget: a transient error that can't recover within the
+    budget pauses cleanly with reason="retry_ceiling" — in interactive runs too
+    (the deliberate mode-independent behavior change)."""
     from imp.engine import executor
-    # Patch ceiling to a tiny value so the first retry delay (1.0s) exceeds it.
-    monkeypatch.setattr(executor, "_HEADLESS_RETRY_CEILING_SECONDS", 0.5)
-    # Patch sleep to be instant so the test is fast.
+    # Tiny budget so the first retry delay (1.0s) exceeds it on attempt 1.
+    monkeypatch.setattr(executor, "budget_for", lambda category: 0.5)
     async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
@@ -764,11 +765,10 @@ async def test_headless_retry_ceiling_pauses_non_interactive(
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append, non_interactive=True)
+    result = await run_change(change, on_event=events.append)
     assert result is RunResult.PAUSED
-    # Should pause after the first attempt (ceiling exceeded before retry)
+    # Budget check fires BEFORE the first retry sleep -> exactly one run.
     assert runner.run_count == 1
-    # The pause reason should be retry_ceiling
     paused_events = [e for e in events if e["type"] == "workflow_paused"]
     assert paused_events and paused_events[0]["payload"]["reason"] == "retry_ceiling"
 
