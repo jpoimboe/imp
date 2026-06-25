@@ -397,7 +397,9 @@ class NarrativeBuilder:
 
     Routing order in add() (design §5.3):
       0. accumulate token usage for EVERY llm_response (before sub routing, so
-         subagent tokens count toward the change total — F2).
+         subagent tokens count toward the change total — F2). latest_prompt_tokens
+         (the context-bar value) updates for TOP-LEVEL turns only; a sub: turn
+         folds into the cumulative total but does not move the bar.
       1. if agent_id is a registered child subagent fold → delegate down.
       2. else dispatch by event type at the current open scope.
     """
@@ -580,11 +582,17 @@ class NarrativeBuilder:
         agent_id = event.get("agent_id")
 
         # 0. token accumulation — every llm_response, before sub routing (F2).
+        #    The cumulative total folds in subagents; the context-bar value
+        #    (_latest_prompt_tokens) tracks the TOP-LEVEL agent only, so a
+        #    sub:-prefixed turn never moves the bar. The prefix test (vs. the
+        #    exact membership check in §1 routing) excludes every subagent turn
+        #    at any depth, including a stray sub: event that reaches dispatch.
         if etype == "llm_response":
             usage = payload.get("usage")
             self._tokens.add_usage(usage)
             pt = usage_prompt_tokens(usage)
-            if pt is not None:
+            is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
+            if pt is not None and not is_subagent:
                 self._latest_prompt_tokens = pt
 
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
