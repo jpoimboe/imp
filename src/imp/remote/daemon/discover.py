@@ -24,7 +24,8 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
     `_iter_change_ids` enumerates every known Change including the journal
     (completed / merged / abandoned), but those are terminal: surfacing them in a
     remote `/list` is just noise. Keep only the in-flight statuses
-    (running / paused / errored / merge_blocked)."""
+    (running / new / paused / merge_blocked / draft); `running` and
+    `draft` are derived at display time — there is no persisted `errored`."""
     from imp.cli.main import _INFLIGHT, _iter_change_ids, _row_for_id
     out: list[ChangeInfo] = []
     for change_id in _iter_change_ids(control_root):

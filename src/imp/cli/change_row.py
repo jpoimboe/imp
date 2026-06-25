@@ -37,9 +37,9 @@ _PREFIX_W = ID_W + STATUS_W + AGE_W + 6
 STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("green",),
     "merged": ("green",),
+    "new": ("cyan",),
     "paused": ("cyan",),
     "merge_blocked": ("yellow",),
-    "errored": ("bold", "red"),
     "draft": ("dim",),
     "backlog": ("dim",),
     "idea": ("dim",),

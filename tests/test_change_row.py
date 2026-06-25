@@ -190,3 +190,9 @@ def test_unnamed_when_no_intent():
     line = format_change_line(**_row(title="   ", status="running", step="s"),
                               intent=None, color=False)
     assert "(unnamed)" in line
+
+
+def test_status_colors_have_new_and_no_errored() -> None:
+    from imp.cli.change_row import STATUS_COLORS
+    assert "new" in STATUS_COLORS
+    assert "errored" not in STATUS_COLORS
