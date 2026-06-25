@@ -241,6 +241,19 @@ def test_front_door_sets_fast_path_from_ceremony() -> None:
     assert full.var_mutations["fast_path"] is False
 
 
+def test_front_door_authors_summary_on_express() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["front-door"].prompt_template_source
+    assert "imp artifact-commit summary" in body
+    assert "{{ change.home }}/artifacts/summary/{{ change.id }}.md" in body
+    low = body.lower()
+    # Only on the express path; the full path defers to the end-of-change summarizer.
+    assert "express path" in low
+    assert "summarizer" in low
+    assert "full path do **not** write the summary" in body
+
+
 def test_commit_tool_is_removed_from_registry() -> None:
     # Fix #3: the commit tool is gone; all agents commit with raw git.
     import imp.agents.tools  # noqa: F401 — triggers _register_builtins
