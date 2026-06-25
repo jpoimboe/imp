@@ -27,7 +27,7 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 from imp.providers import resolve
 from imp.providers.anthropic import AnthropicProvider
-from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 from tests.openai_fakes import resp_function_call, resp_response
 
 
@@ -468,9 +468,10 @@ async def test_fast_path_skips_reviewers_and_review(
 
 
 @pytest.mark.anyio
-async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None:
-    """finalize solicits the human via wait_for_user, receives the reply as the
-    tool result, then completes with decision=merge. Positioned directly at
+async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None:
+    """finalize solicits the human by ending its turn with a bare question (no
+    complete_step, no tool); the attended handler delivers the reply as the next
+    user message, then it completes with decision=merge. Positioned directly at
     finalize so only the finalize -> merge path runs."""
     change = _seed_default_workflow(tmp_path)
     st = State.load(change.state_dir)
@@ -478,9 +479,9 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
     st.status = "running"
     st.save(change.state_dir)
 
-    wfu_response = response(
-        tool_use("wfu1", "wait_for_user", {"prompt": "Summary: stub change. Merge or rework?"}),
-        stop_reason="tool_use",
+    solicit_response = response(
+        text("Summary: stub change. Merge or rework?"),
+        stop_reason="end_turn",
     )
     merge_response = response(
         tool_use("c1", "complete_step", {
@@ -490,7 +491,7 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
         stop_reason="tool_use",
     )
     fake = FakeAsyncAnthropic(
-        [wfu_response, merge_response], default_response=_anthropic_step_aware)
+        [solicit_response, merge_response], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic", env_check=lambda: True,

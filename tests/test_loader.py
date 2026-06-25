@@ -819,12 +819,12 @@ def test_parse_agent_deny_tools_real_name_other_context_ok(tmp_path: Path) -> No
     p = write_agent_md(
         tmp_path / "x.md",
         frontmatter=(
-            "name: x\ndeny_tools: [wait_for_user, task]\n"
+            "name: x\ndeny_tools: [rename_change, task]\n"
             "output:\n  status: {type: enum, values: [Success, Error]}"
         ),
     )
     agent = parse_agent_file(p)
-    assert agent.deny_tools == frozenset({"wait_for_user", "task"})
+    assert agent.deny_tools == frozenset({"rename_change", "task"})
 
 
 def test_parse_agent_deny_tools_not_list_of_strings(tmp_path: Path) -> None:
@@ -910,7 +910,7 @@ def test_resolution_assigns_position_appropriate_tools(tmp_path: Path) -> None:
         })
     w = load_workflow(wf)
 
-    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change",
+    top_leaf = BASE_CAPS | {"rename_change", "create_change",
                             "create_and_enter_worktree"}
     assert w.agents["worker"].tools == BASE_CAPS                     # subagent
     assert w.agents["leaf"].tools == top_leaf                       # top-level leaf

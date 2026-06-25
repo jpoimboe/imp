@@ -45,7 +45,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
-    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change",
+    top_leaf = BASE_CAPS | {"rename_change", "create_change",
                             "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"task"}
     subagents = {
@@ -404,10 +404,10 @@ def test_no_goto_spec_finalizer_edge() -> None:
     assert "goto: spec_finalizer" not in wf
 
 
-def test_plan_writer_declares_wait_for_user() -> None:
+def test_plan_writer_does_not_declare_wait_for_user() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    assert "wait_for_user" in wf.agents["plan-writer"].tools
+    assert "wait_for_user" not in wf.agents["plan-writer"].tools
 
 
 def test_review_cadence_vars_declared() -> None:
