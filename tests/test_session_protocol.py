@@ -5,6 +5,8 @@ import json
 import pytest
 
 from imp.remote.session.protocol import (
+    CONTROL_ARCHIVE,
+    CONTROL_DISCARD,
     CONTROL_SAVE,
     Attach,
     Control,
@@ -63,7 +65,7 @@ def test_parse_client_message_recovers_input() -> None:
 
 
 def test_parse_client_message_recovers_control_for_each_action() -> None:
-    for action in ("interrupt", "detach", "abandon", "save"):
+    for action in ("interrupt", "detach", "abandon", "save", "archive", "discard"):
         assert parse_client_message(encode_control(action)) == Control(action)
 
 
@@ -108,3 +110,10 @@ def test_encode_control_accepts_save_and_round_trips() -> None:
     line = encode_control(CONTROL_SAVE)
     assert json.loads(line) == {"kind": "control", "action": CONTROL_SAVE}
     assert parse_client_message(line) == Control(CONTROL_SAVE)
+
+
+def test_encode_control_accepts_archive_and_discard_and_round_trips() -> None:
+    for action in (CONTROL_ARCHIVE, CONTROL_DISCARD):
+        line = encode_control(action)
+        assert json.loads(line) == {"kind": "control", "action": action}
+        assert parse_client_message(line) == Control(action)
