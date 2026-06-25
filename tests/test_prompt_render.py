@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.prompts import PromptRenderError, build_context, render_prompt
+from imp.assets import bundled_workflow_dir
 from imp.engine.state import EventLog, JsonlEventLog
 
 
@@ -287,7 +288,8 @@ def test_scope_only_gate_recommends_saving(tmp_path: Path) -> None:
     ).read_text()
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
-        src, build_context(change_title="t", event_log=log, scope_only=True))
+        src, build_context(change_title="t", event_log=log, scope_only=True),
+        workflow_dir=bundled_workflow_dir("imp"))
     assert "save this to your backlog" in rendered
     assert "Want me to build this out now?" not in rendered
 
@@ -300,7 +302,8 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     rendered = render_prompt(
         src,
         build_context(change_title="t", event_log=log,
-                      non_interactive=False, scope_only=False))
+                      non_interactive=False, scope_only=False),
+        workflow_dir=bundled_workflow_dir("imp"))
     assert "Want me to build this out now?" in rendered
     assert "save this to your backlog" not in rendered
 

@@ -62,8 +62,6 @@ practice, how does an API behave). There is **no cost gating** in the spec
 phase — research as much as the change warrants. Inline `bash`/`grep` stays fine
 for quick checks; fan deep mapping out to the subagents.
 
-**One question at a time.** Do not stack multiple questions in a single message. If a topic needs more exploration, break it into multiple turns.
-
 **Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let them confirm.
 
 **Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get their confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with them via `wait_for_user` rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
@@ -81,16 +79,15 @@ run there is no human to confirm, so skip the readback there too and
 write + commit directly — the standing rule that `wait_for_user` is only
 for when you genuinely need a human applies here as everywhere.
 
-**Yielding to the human.** When you need the human's input or a decision, ask the question itself in your turn text, then call `wait_for_user`. The tool takes no arguments — the human reads only your prose, so the prose must contain the actual question; do not announce a question you never ask ("I'll get your call on this" then a silent gate), and do not just end your turn with plain text and no tool call (a bare turn-end is treated as a bug and will nudge you). The reply comes back as the tool result; continue from there, and call `wait_for_user` again if you need another round. In a headless run `wait_for_user` pauses for a human; only call it when you genuinely need one.
-
 **Direct `web_search` for quick lookups only.** Inline `web_search` is fine for a single quick fact — a version number, an API signature, whether a package exists. For deeper external research, dispatch a `researcher` subagent instead (see **Research before you converge** above).
 
-**One closing summary.** Emit a single closing summary — do not restate
-the same conclusion in two near-identical messages. The CLI streams every
-line, so a repeated summary just adds noise. Keep it brief and do **not**
-restate the pre-commit **Final readback** — that readback already
-summarized the design, so two near-identical summaries are the exact
-noise this rule guards against.
+**One closing summary.** The CLI streams every line, so a repeated summary
+just adds noise — keep your close brief, and do **not** restate the
+pre-commit **Final readback** — that readback already summarized the
+design, so two near-identical summaries are the exact noise this rule
+guards against.
+
+{% include "partials/live-gate-dialogue.md" %}
 
 ## Build now or save for later
 

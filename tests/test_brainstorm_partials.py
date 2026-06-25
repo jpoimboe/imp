@@ -26,8 +26,13 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     # opening-message taxonomy
     assert "<imp:begin/>" in text
     assert "Implement this spec" in text
-    # one question at a time
-    assert "One question at a time" in text
+    # one question at a time — relocated into the shared live-gate partial
+    assert "One question at a time" not in text
+    assert "One question at a time" in (PARTIALS / "live-gate-dialogue.md").read_text()
+    # the yielding paragraph was relocated into the partial as well
+    assert "Yielding to the human" not in text
+    # the dialogue partial now pulls in the shared live-gate posture
+    assert '{% include "partials/live-gate-dialogue.md" %}' in text
     # research before you converge (with the explorer dispatch idiom)
     assert "Research before you converge" in text
     assert 'task(subagent_name="explorer"' in text
