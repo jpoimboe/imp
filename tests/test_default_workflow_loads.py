@@ -151,6 +151,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "deferred-sweep": "sweeping deferred tasks",
         "sweep-verify": "running tests",
         "autosquash-resolve-sweep": "resolving sweep fixups",
+        "summarizer": "summarizing change",
         "finalize": "finalizing",
         "wait-for-head": "waiting in merge queue",
         "reconciler": "resolving merge conflicts",

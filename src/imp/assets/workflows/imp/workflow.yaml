@@ -247,22 +247,33 @@ phases:
 
       # After a plan's review + sweep settle, advance the diff base to HEAD. The
       # end-of-change pass (review_scope==change) is the last review, so route it to
-      # finalize (the per-plan cleanup already stamped); a per-plan pass returns to
-      # plan-writer for the next plan.
+      # summarizer (which writes the summary, then hands off to finalize; the per-plan
+      # cleanup already stamped); a per-plan pass returns to plan-writer for the next plan.
       - name: review-base-repin
         quiet: true
         command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
         rules:
-          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout}, goto: finalize}
+          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout}, goto: summarizer}
           # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
           # never re-enters with more_plans:true; every post-panel per-plan settle is therefore
-          # terminal -> route a corrective/gap-fix plan to finalize, not the next plan. (This keys
-          # solely on change_panel_done; it is correct only while more_plans means uncovered SPEC
-          # scope. If a post-panel corrective could ever legitimately span a multi-plan supercycle,
-          # this rule would need a more_plans guard to avoid dropping the remaining corrective plans.)
-          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout}, goto: finalize}
+          # terminal -> route a corrective/gap-fix plan to summarizer (then finalize), not the next
+          # plan. (This keys solely on change_panel_done; it is correct only while more_plans means
+          # uncovered SPEC scope. If a post-panel corrective could ever legitimately span a
+          # multi-plan supercycle, this rule would need a more_plans guard to avoid dropping the
+          # remaining corrective plans.)
+          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout}, goto: summarizer}
           - {if: {exit: 0}, set: {review_base: output.stdout, plan_index: "var.plan_index + 1"}, goto: plan-writer}
           - {else: true, pause: true}
+
+      - name: summarizer
+        file: agents/summarizer.md
+        tier: medium
+        label: summarizing change
+        # Writes the intent-level summary artifact, then hands off unconditionally —
+        # including on status: Error (it may have erred without committing). A missing
+        # summary is not fatal: finalize falls back to its audit fields.
+        rules:
+          - {else: true, goto: finalize}
 
       - name: finalize
         file: agents/finalize.md

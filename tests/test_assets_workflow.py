@@ -255,7 +255,8 @@ def test_finalize_tails_the_implement_phase() -> None:
     names = [s.name for s in impl.steps]
     assert "stamp-trailers" not in names
     assert names[-1] == "finalize"
-    assert names[-2] == "review-base-repin"
+    assert names[-2] == "summarizer"
+    assert names[-3] == "review-base-repin"
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -553,16 +554,16 @@ def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
     assert "change_panel_done" not in m.var_mutations
 
 
-def test_review_base_repin_corrective_batch_routes_to_finalize() -> None:
+def test_review_base_repin_corrective_batch_routes_to_summarizer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["review-base-repin"].rules
     # A per-batch review settling AFTER the full panel (guard latched) means coverage
-    # is complete: route to finalize, NOT back to plan-writer.
+    # is complete: route to summarizer (which then routes to finalize), NOT plan-writer.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": True},
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "finalize"
+    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
 
 
 def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
@@ -768,3 +769,43 @@ def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
     assert "spec-writer" not in wf
     assert "spec_writer" not in wf
     assert wf.count("goto: spec-finalizer") == 1   # only front-door's forward entry
+
+
+def test_summarizer_step_between_repin_and_finalize() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    impl = next(p for p in wf.phases if p.name == "implement")
+    names = [s.name for s in impl.steps]
+    assert names[-3:] == ["review-base-repin", "summarizer", "finalize"]
+
+
+def test_summarizer_declares_medium_tier() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert _steps(wf)["summarizer"].tier == "medium"
+
+
+def test_summarizer_routes_to_finalize_on_success_and_error() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["summarizer"].rules
+    for status in ("Success", "Error"):
+        m = evaluate_rules(rules, vars=_BASE_VARS, output={"status": status})
+        assert isinstance(m.action, Goto)
+        assert m.action.target == "finalize"
+
+
+def test_summarizer_output_schema_is_status_only() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert set(wf.agents["summarizer"].output_schema.field_names()) == {"status"}
+
+
+def test_review_base_repin_change_scope_routes_to_summarizer() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["review-base-repin"].rules
+    m = evaluate_rules(
+        rules, vars={**_BASE_VARS, "review_scope": "change"},
+        output={"exit": 0, "stdout": "abc123", "stderr": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "summarizer"

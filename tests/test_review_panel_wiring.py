@@ -47,7 +47,7 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
         "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
         "plan-code-reviewer", "deferred-sweep", "sweep-verify",
         "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
-        "finalize",
+        "summarizer", "finalize",
     ]
 
 
@@ -55,7 +55,8 @@ def test_no_separate_review_phase_stamp_and_finalize_tail_code() -> None:
     wf = _wf()
     assert not any(p.name == "review" for p in wf.phases)
     impl = next(p for p in wf.phases if p.name == "implement")
-    assert [s.name for s in impl.steps][-2:] == ["review-base-repin", "finalize"]
+    assert [s.name for s in impl.steps][-3:] == [
+        "review-base-repin", "summarizer", "finalize"]
     names = {s.name for s in wf.flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers",
@@ -247,7 +248,7 @@ def test_review_base_repin_routes_by_scope() -> None:
     rules = _steps(_wf())["review-base-repin"].rules
     m_change = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "change"},
                               output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
-    assert isinstance(m_change.action, Goto) and m_change.action.target == "finalize"
+    assert isinstance(m_change.action, Goto) and m_change.action.target == "summarizer"
     assert m_change.var_mutations["review_base"] == "deadbeef"
     assert "tasks_since_review" not in m_change.var_mutations
     m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan"},
