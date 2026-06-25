@@ -211,7 +211,7 @@ unimplemented task, or the re-opened task from injected feedback):
      commit (still append-only) so the tree stays green, and the needs-replan note
      carries the redo.
 
-   You **never** call `wait_for_user` — a genuine intent-fork is deferred to the
+   You **never** yield to the human — a genuine intent-fork is deferred to the
    `plan-writer` invocation that `plan-cycle-check` triggers. All commits go through
    the coder; you never commit, amend, or rebase yourself.
 

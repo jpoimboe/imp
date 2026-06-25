@@ -321,7 +321,8 @@ def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
     # The needs-replan note is a durable checkbox in the pinned reader shape.
     assert "- [ ] NEEDS-REPLAN task-lead:" in text
     # task-lead never escalates to the human mid-implementation.
-    assert "never** call `wait_for_user`" in low
+    assert "never** yield to the human" in low
+    assert "wait_for_user" not in low
     # It always returns a green tree, reverting forward through the coder.
     assert "revert it forward" in low
     assert "green tree" in low
