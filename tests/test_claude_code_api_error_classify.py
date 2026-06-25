@@ -53,9 +53,11 @@ def test_make_error_event_carries_api_kind() -> None:
     assert ev["payload"]["kind"] == "http_400"
 
 
-def test_four_digit_code_not_misclassified() -> None:
-    # "API Error: 4001" must NOT be read as a 4xx (no grabbing the first 3 digits).
-    assert _classify_agent_text("API Error: 4001 weird") is None
+def test_four_digit_code_is_statusless_network() -> None:
+    # "API Error: 4001" exposes no routable 3-digit HTTP code (the regex's
+    # negative lookahead rejects it), so it is statusless transport -> network.
+    assert isinstance(
+        _classify_agent_text("API Error: 4001 weird"), perr.NetworkError)
 
 
 def test_3xx_code_not_classified() -> None:
@@ -92,19 +94,20 @@ def test_quota_still_wins_over_codeless_phrase() -> None:
     assert isinstance(err, perr.QuotaError)
 
 
-def test_codeless_phrase_on_different_line_is_none() -> None:
-    # Regression: an API Error: line with an unrelated body, plus the transient
-    # word only in prose on a DIFFERENT line, must NOT classify — it pauses.
+def test_codeless_multiline_api_error_is_network() -> None:
+    # Broad transport stance: a statusless `API Error:` line is transient
+    # regardless of where any other words sit. (Old per-line matching paused
+    # these; the catch-all now retries them.)
     multiline = (
         "API Error: the request did not complete\n"
         "Earlier the build server was Overloaded with traffic."
     )
-    assert _classify_agent_text(multiline) is None
+    assert isinstance(_classify_agent_text(multiline), perr.NetworkError)
     multiline2 = (
         "API Error: connection reset by peer\n"
         "An Internal server error happened to a coworker last week."
     )
-    assert _classify_agent_text(multiline2) is None
+    assert isinstance(_classify_agent_text(multiline2), perr.NetworkError)
 
 
 def test_invalid_authentication_credentials_phrase_is_auth() -> None:
@@ -149,3 +152,31 @@ def test_observed_401_credential_string_is_auth() -> None:
     exc = _classify_agent_text(
         "Failed to authenticate. API Error: 401 Invalid authentication credentials")
     assert isinstance(exc, perr.AuthError)
+
+
+def test_connection_refused_codeless_is_network() -> None:
+    # The exact eo5ehc shape: a transport failure carrying no HTTP code.
+    err = _classify_agent_text(
+        "API Error: Unable to connect to API (ConnectionRefused)")
+    assert isinstance(err, perr.NetworkError)
+
+
+def test_termination_connection_refused_is_network_not_terminated() -> None:
+    # The eo5ehc regression at the _termination_from_result boundary: an
+    # is_error result whose text is a statusless transport failure must come
+    # back NetworkError (-> RetryWithBackoff), never TerminatedError (-> Pause).
+    from types import SimpleNamespace
+
+    from imp.providers.claude_code import _termination_from_result
+    sdk_msg = SimpleNamespace(
+        is_error=True, subtype="success", api_error_status=None,
+        stop_reason=None, errors=None)
+    out = _termination_from_result(
+        sdk_msg, "API Error: Unable to connect to API (ConnectionRefused)", {})
+    assert isinstance(out, perr.NetworkError)
+    assert not isinstance(out, perr.TerminatedError)
+
+
+def test_transient_phrases_constant_removed() -> None:
+    import imp.providers.claude_code as cc
+    assert not hasattr(cc, "_TRANSIENT_PHRASES")
