@@ -1520,3 +1520,50 @@ def test_build_session_attach_forwards_non_interactive(
     anyio.run(attach, lambda _e: None)
     holder["spawn_fn"](change)
     assert captured["non_interactive"] is True
+
+
+@pytest.mark.anyio
+async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-nirl")
+    sock = str(session_socket_path(change.control_root, change.id))
+    received_flags: list[bool] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+        non_interactive: bool = False,
+    ) -> RunResult:
+        received_flags.append(non_interactive)
+        if len(received_flags) == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False, non_interactive=True)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let the resume gate open (user_chat_input_fn is awaiting)
+        await client.send_input("redirect")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert received_flags == [True, True]
+        await client.aclose()
+        tg.cancel_scope.cancel()
