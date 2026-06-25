@@ -42,3 +42,11 @@ def test_project_yaml_guidance_loads_with_prerelease_and_pointers() -> None:
     assert "Skip backward-compatibility" in guidance
     assert "docs/imp-conventions.md" in guidance
     assert "docs/imp-invariants.md" in guidance
+
+
+def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
+    body = pathlib.Path("docs/imp-conventions.md").read_text()
+    assert "## Visual identity" in body
+    assert "## Plain-speak copy" in body
+    assert "imp-native" in body
+    assert '"express"' in body
