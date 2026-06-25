@@ -2281,3 +2281,30 @@ def test_error_node_falls_back_to_stderr_tail_when_no_full_summary() -> None:
               detail={"full_summary": "the full summary", "stderr_tail": "ignored"}))
     err3 = next(k for k in b3.tree.root.children if isinstance(k, nv.ErrorNode))
     assert err3.detail == "the full summary"
+
+
+def test_latest_prompt_tokens_tracks_most_recent_turn_not_cumulative() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", id="z9gixx", title="streaming toolbar"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p", model="sonnet"))
+    assert b.latest_prompt_tokens is None          # no llm_response yet
+    b.add(ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="sonnet",
+             usage={"input_tokens": 100, "cache_read_input_tokens": 20,
+                    "cache_creation_input_tokens": 5, "output_tokens": 9},
+             raw={"content": []}))
+    assert b.latest_prompt_tokens == 125           # input + both caches, this turn only
+    b.add(ev("4", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="sonnet",
+             usage={"input_tokens": 200, "output_tokens": 4}, raw={"content": []}))
+    assert b.latest_prompt_tokens == 200           # latest turn REPLACES, does not sum
+    assert b.tree.tokens.input == 300              # cumulative total is unchanged behavior
+
+
+def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+             usage={"input_tokens": 42}, raw={"content": []}))
+    b.add(ev("2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+             raw={"content": []}))                 # no usage key at all
+    assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn

@@ -73,6 +73,16 @@ class TokenTotals:
         self.cache_creation += int(usage.get("cache_creation_input_tokens", 0) or 0)
 
 
+def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
+    """The prompt-side occupancy of ONE llm_response turn: input + both cache reads.
+    None when the turn carried no usage."""
+    if not usage:
+        return None
+    return (int(usage.get("input_tokens", 0) or 0)
+            + int(usage.get("cache_read_input_tokens", 0) or 0)
+            + int(usage.get("cache_creation_input_tokens", 0) or 0))
+
+
 # ── nodes ───────────────────────────────────────────────────────────────────
 # `collapsible` is a class attribute (not a dataclass field) so isinstance-free
 # code can ask `node.collapsible`. The TUI memo keys on id(node), so nodes carry
@@ -394,6 +404,7 @@ class NarrativeBuilder:
     def __init__(self) -> None:
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
+        self._latest_prompt_tokens: int | None = None
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -439,6 +450,12 @@ class NarrativeBuilder:
     @property
     def tree(self) -> NarrativeTree:
         return NarrativeTree(root=self._root, tokens=self._tokens)
+
+    @property
+    def latest_prompt_tokens(self) -> int | None:
+        """Prompt-token occupancy of the most recent llm_response turn (input + cache),
+        or None before any usage has arrived. NOT cumulative."""
+        return self._latest_prompt_tokens
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -560,7 +577,11 @@ class NarrativeBuilder:
 
         # 0. token accumulation — every llm_response, before sub routing (F2).
         if etype == "llm_response":
-            self._tokens.add_usage(payload.get("usage"))
+            usage = payload.get("usage")
+            self._tokens.add_usage(usage)
+            pt = usage_prompt_tokens(usage)
+            if pt is not None:
+                self._latest_prompt_tokens = pt
 
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
         #    a nested builder's own events carry a sub: id that is NOT one of
