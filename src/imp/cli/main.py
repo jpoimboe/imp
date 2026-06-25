@@ -1358,18 +1358,18 @@ def _cmd_show(args: argparse.Namespace) -> int:
     meta = _unstarted_backlog_meta(control, change_id)
     if meta is not None:
         if resource is None:
-            for line in _backlog_card(meta, control, now=datetime.now(UTC)):
-                print(line)
+            _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
+                           no_pager=args.no_pager)
             return 0
         if resource == "status":
-            print("backlog")
+            _page_or_print(["backlog"], no_pager=args.no_pager)
             return 0
         print(f"imp: {change_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
         return 2
     if resource is None:
-        for line in _detail_card(control, change_id, now=datetime.now(UTC)):
-            print(line)
+        _page_or_print(_detail_card(control, change_id, now=datetime.now(UTC)),
+                       no_pager=args.no_pager)
         return 0
     if resource == "spec":
         data = _show_artifact(control, change_id, f"spec/{change_id}.md")
@@ -1385,23 +1385,27 @@ def _cmd_show(args: argparse.Namespace) -> int:
         if raw is None:
             print(f"imp: no state for {change_id!r}", file=sys.stderr)
             return 2
-        print(json.loads(raw).get("status", "unknown"))
+        _page_or_print([json.loads(raw).get("status", "unknown")],
+                       no_pager=args.no_pager)
         return 0
     elif resource == "review":
         raw = _show_runtime(control, change_id, "events.jsonl")
         if raw is None:
             print(f"imp: no events for {change_id!r}", file=sys.stderr)
             return 2
+        review_lines = []
         for ev in _parse_jsonl(raw):
             payload = ev.get("payload") or {}
             if ev.get("type") == "step_started" and \
                     payload.get("step") in _REVIEW_STEPS:
-                print(f"{payload.get('phase', '?')}/{payload.get('step')}")
+                review_lines.append(f"{payload.get('phase', '?')}/{payload.get('step')}")
+        _page_or_print(review_lines, no_pager=args.no_pager)
         return 0
     if data is None:
         print(f"imp: no {resource} for {change_id!r}", file=sys.stderr)
         return 2
-    sys.stdout.write(data.decode("utf-8", errors="replace"))
+    _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
+                   no_pager=args.no_pager)
     return 0
 
 

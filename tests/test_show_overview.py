@@ -67,3 +67,56 @@ def test_show_is_the_overview_verb_and_list_removed() -> None:
     assert "list" not in names
     assert _build_parser().parse_args(["show"]).func is _cmd_show
     assert "Show your changes" in render_overview(color=False)
+
+
+def test_detail_card_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    captured: list[tuple[list[str], bool]] = []
+    monkeypatch.setattr(
+        m, "_page_or_print",
+        lambda lines, *, no_pager: captured.append((list(lines), no_pager)))
+
+    rc = main(["show", "liveid"])
+    assert rc == 0
+    assert len(captured) == 1
+    assert captured[0][0]                 # the detail card lines were paged
+
+
+def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    captured: list[tuple[list[str], bool]] = []
+    monkeypatch.setattr(
+        m, "_page_or_print",
+        lambda lines, *, no_pager: captured.append((list(lines), no_pager)))
+
+    rc = main(["show", "liveid", "status"])
+    assert rc == 0
+    assert len(captured) == 1
+    assert captured[0][0]                 # the resource lines were paged
+
+
+def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    captured: list[bool] = []
+    monkeypatch.setattr(
+        m, "_page_or_print",
+        lambda lines, *, no_pager: captured.append(no_pager))
+
+    main(["show", "liveid"])
+    main(["show", "liveid", "--no-pager"])
+    assert captured == [False, True]
