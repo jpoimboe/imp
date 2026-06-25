@@ -8,8 +8,9 @@ GLYPH_WAITING = "Ⲫ"
 
 
 class TerminalTitle:
-    def __init__(self, stream: Any, change_name: str) -> None:
+    def __init__(self, stream: Any, change_id: str, change_name: str) -> None:
         self._stream = stream
+        self._change_id = change_id
         self._name = change_name
         self._enabled = bool(stream.isatty())
         self._current: str | None = None
@@ -34,7 +35,11 @@ class TerminalTitle:
         if glyph == self._current:
             return
         prefix = f"{glyph} " if glyph else ""
-        label = f"imp · {self._name}" if self._name else "imp"
+        label = (
+            f"imp · {self._change_id} · {self._name}"
+            if self._name
+            else f"imp · {self._change_id}"
+        )
         self._stream.write(f"\x1b]2;{prefix}{label}\x07")
         self._stream.flush()
         self._current = glyph
