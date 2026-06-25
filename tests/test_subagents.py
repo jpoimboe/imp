@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import (
     ChangeContext,
 )
@@ -228,7 +229,7 @@ events_path=tmp_path / "events.jsonl",
     result = anyio.run(dispatch_task, ctx, "sub", "do the thing")
     # build_agent_invocation appends the completion instruction after the rendered
     # prompt — check the rendered portion is correct.
-    assert capture["inv"].system_prompt.startswith(_CORE_HEAD)
+    assert capture["inv"].system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "hello change-7" in capture["inv"].system_prompt
     # Sanity: dispatch_task still returns JSON-stringified agent_output.
     assert "Success" in result

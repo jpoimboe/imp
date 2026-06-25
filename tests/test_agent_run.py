@@ -5,6 +5,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import ChangeContext
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -75,7 +76,7 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         resolved_tiers=None, coordinator=None, subagent_depth=2)
 
     # System prompt = base persona + rendered body + the complete_step contract.
-    assert inv.system_prompt.startswith(_CORE_HEAD)
+    assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "RENDERED BODY" in inv.system_prompt
     assert "complete_step" in inv.system_prompt
     # Non-interactive -> a nudge continuation is wired (omission #1/#2 closed).
@@ -109,7 +110,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
-    assert inv.system_prompt.startswith(_CORE_HEAD)
+    assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "RENDERED BODY" in inv.system_prompt
     assert "IMP_PROJECT_ROOT" in inv.system_prompt
     assert "relative to the project root" in inv.system_prompt
@@ -554,8 +555,8 @@ def test_build_agent_invocation_prepends_base_persona(tmp_path: Path) -> None:
         resolved_tiers=None, coordinator=None)
 
     sp = inv.system_prompt
-    assert sp.startswith(_CORE_HEAD)
-    assert sp.index(_CORE_TAIL) < sp.index("RENDERED BODY")
+    assert sp.startswith(reflow_markdown(_CORE_HEAD))
+    assert sp.index(reflow_markdown(_CORE_TAIL)) < sp.index("RENDERED BODY")
     assert sp.index("RENDERED BODY") < sp.index("IMP_PROJECT_ROOT")
     assert sp.index("IMP_PROJECT_ROOT") < sp.index("<imp:begin/>")
     assert sp.index("<imp:begin/>") < sp.index("complete_step")
@@ -569,7 +570,7 @@ def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
 def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
     from imp.engine.agent_run import _CORE_HEAD
     inv = _build_inv(tmp_path)
-    assert inv.system_prompt.startswith(_CORE_HEAD)
+    assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "BODY" in inv.system_prompt
     assert "Session start: `<imp:begin/>`" in inv.system_prompt   # seed note appended
 
@@ -630,7 +631,7 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
     # The note explains the tag is engine-emitted, not user input.
     assert "engine" in inv.system_prompt.lower()
     # Order: base persona first, rendered body present, engine-seed note before completion contract.
-    assert inv.system_prompt.startswith(_CORE_HEAD)
+    assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "RENDERED BODY" in inv.system_prompt
     assert inv.system_prompt.index("<imp:begin/>") < inv.system_prompt.index(
         "complete_step")

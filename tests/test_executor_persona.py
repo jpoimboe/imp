@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.reflow import reflow_markdown
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL
 from imp.engine.executor import RunResult, run_change
 from tests.test_executor import _make_change, _register_prompt_capturing
@@ -53,7 +54,8 @@ async def test_executor_injects_rendered_persona_into_assembled_prompt(tmp_path:
     prompt = sink[0]
     # Persona is rendered (namespace substituted) and injected after core head.
     assert "# Persona\nfor My Change" in prompt
-    assert prompt.index(_CORE_HEAD) < prompt.index("# Persona\nfor My Change")
+    assert prompt.index(reflow_markdown(_CORE_HEAD)) < prompt.index(
+        "# Persona\nfor My Change")
     assert prompt.index("# Persona\nfor My Change") < prompt.index("STEP BODY MARKER")
 
 
@@ -67,6 +69,6 @@ async def test_executor_personaless_workflow_assembles_without_persona(tmp_path:
     assert result is RunResult.COMPLETED
 
     prompt = sink[0]
-    assert prompt.startswith(f"{_CORE_HEAD}\n\n{_CORE_TAIL}")
+    assert prompt.startswith(reflow_markdown(f"{_CORE_HEAD}\n\n{_CORE_TAIL}"))
     assert "# Doing tasks" not in prompt
     assert "STEP BODY MARKER" in prompt

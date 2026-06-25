@@ -29,6 +29,7 @@ from typing import Any
 
 import anyio
 
+from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import AgentInvocation, ChangeContext, Message
 from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -76,8 +77,9 @@ user had addressed you, and do not quote it back."""
 # (`# Executing actions with care` onward). The workflow-supplied persona is
 # injected BETWEEN them in build_agent_invocation, reoccupying the mid-prompt slot
 # `# Doing tasks` held before the split so an `imp` agent's assembled prompt stays
-# byte-identical. CC's harness fiction is removed (no permission modes, no context
-# compaction, no `<system-reminder>` semantics, no env/gitStatus block).
+# byte-identical to imp's OWN pre-split assembly — not to Claude Code. CC's harness
+# fiction is removed (no permission modes, no context compaction, no
+# `<system-reminder>` semantics, no env/gitStatus block).
 _CORE_HEAD = """\
 You are imp — a focused, slightly mysterious creature and capable
 collaborator executing one step of a software change within imp's multi-agent
@@ -435,6 +437,7 @@ def build_agent_invocation(
         if "bash" in agent_def.tools:
             body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
         body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
+        body = reflow_markdown(body)
         system_prompt = f"{body}\n\n{instruction}"
     continuation_fn = build_continuation_fn(instruction=instruction)
     return AgentInvocation(

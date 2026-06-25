@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import ChangeContext
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -39,7 +40,7 @@ def test_base_prefix_byte_identical_across_agents(tmp_path: Path) -> None:
     # byte-identical across agent defs (fails if the base interpolates name/body).
     a = _build(tmp_path, name="alpha", body="BODY ALPHA")
     b = _build(tmp_path, name="omega", body="BODY OMEGA")
-    engine_base = f"{_CORE_HEAD}\n\n{_CORE_TAIL}"
+    engine_base = reflow_markdown(f"{_CORE_HEAD}\n\n{_CORE_TAIL}")
     assert a.system_prompt.startswith(engine_base)
     assert b.system_prompt.startswith(engine_base)
 
@@ -89,8 +90,8 @@ def test_base_uses_imp_identity_and_tool_names() -> None:
 
 def test_base_reaches_verbatim_provider_field(tmp_path: Path) -> None:
     inv = _build(tmp_path, name="rev", body="BODY")
-    assert _CORE_HEAD in inv.system_prompt
-    assert _CORE_TAIL in inv.system_prompt
+    assert reflow_markdown(_CORE_HEAD) in inv.system_prompt
+    assert reflow_markdown(_CORE_TAIL) in inv.system_prompt
 
 
 def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
@@ -98,8 +99,8 @@ def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
     inv = _build(tmp_path, name="rev", body="BODY")
     built = CodexAgentRunner._build_prompt(None, inv.system_prompt)
     assert built.startswith(inv.system_prompt)
-    assert _CORE_HEAD in built
-    assert _CORE_TAIL in built
+    assert reflow_markdown(_CORE_HEAD) in built
+    assert reflow_markdown(_CORE_TAIL) in built
 
 
 def test_base_has_numbered_options_convention() -> None:
