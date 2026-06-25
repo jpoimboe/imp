@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+import pathlib
+
+WF = pathlib.Path("src/imp/assets/workflows/imp")
+INCLUDE = '{% include "partials/verifying-claims.md" %}'
+
+
+def test_verifying_claims_partial_has_novel_nugget() -> None:
+    body = (WF / "partials" / "verifying-claims.md").read_text()
+    assert "read the construction" in body
+    assert "citation is not proof" in body
+    assert "Absence in a log" in body
+
+
+def test_verifying_claims_included_in_exactly_the_four_reviewers() -> None:
+    expected = {
+        "spec-reviewer.md",
+        "plan-reviewer.md",
+        "plan-code-reviewer.md",
+        "code-reviewer.md",
+    }
+    including = {p.name for p in WF.rglob("*.md") if INCLUDE in p.read_text()}
+    assert including == expected
+
+
+def test_verifying_claims_excluded_from_task_lead_coder_and_skill() -> None:
+    for rel in (
+        "agents/task-lead.md",
+        "agents/coder.md",
+        "skills/verification-before-completion.md",
+    ):
+        assert INCLUDE not in (WF / rel).read_text(), rel

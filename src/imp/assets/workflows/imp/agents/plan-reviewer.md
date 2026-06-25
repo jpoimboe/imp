@@ -94,6 +94,8 @@ Classify every finding against the canonical severity rubric:
 
 {% include "partials/severity.md" %}
 
+{% include "partials/verifying-claims.md" %}
+
 Report `findings` as classified prose, grouped by severity. If there are no issues,
 state that explicitly (e.g., "No findings. Plan is complete and ready for
 implementation.").

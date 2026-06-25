@@ -70,6 +70,8 @@ Classify each finding against the canonical severity rubric:
 
 {% include "partials/severity.md" %}
 
+{% include "partials/verifying-claims.md" %}
+
 Set `blocking: true` if any Critical or Major findings are present. Set `blocking: false` if findings are Minor/Nit only, or if there are no findings.
 
 ## Report Shape

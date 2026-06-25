@@ -97,6 +97,8 @@ Classify each finding against the canonical severity rubric:
 
 {% include "partials/severity.md" %}
 
+{% include "partials/verifying-claims.md" %}
+
 Categorize by actual severity. Not everything is Critical. Acknowledge what was done
 well before listing issues — accurate praise helps trust the rest of the feedback. If
 the plan itself was wrong but the implementation faithfully followed it, say so in
