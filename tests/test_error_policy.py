@@ -115,7 +115,7 @@ def test_auth_retries_with_60s_capped_backoff() -> None:
         assert d.delay_seconds == want
 
 
-def test_auth_hint_honored_below_cap() -> None:
+def test_auth_hint_honored() -> None:
     d = ep.decide("auth", prior_backoff_attempts=0, hint_delay_seconds=10.0)
     assert isinstance(d, ep.RetryWithBackoff)
     assert d.delay_seconds == 10.0
