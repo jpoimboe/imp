@@ -46,3 +46,24 @@ async def test_read_opening_message_returns_none_for_empty_reply() -> None:
         width=80, editing_mode="emacs",
         _prompt_factory=lambda: _FakePrompt())
     assert reply is None
+
+
+def test_print_opening_leads_with_header_then_splash(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main.splash, "splash_block", lambda **_k: "SCENE")
+    monkeypatch.setattr(main, "_term_width", lambda: 80)
+    change = SimpleNamespace(id="ab12cd", title="")
+    shown = main._print_opening(change, "new", interactive=True, color=False)
+    out = capsys.readouterr().out
+    assert shown is True
+    assert out == "ab12cd · new\n\nSCENE\n"
+    assert out.index("ab12cd") < out.index("SCENE")
+
+
+def test_print_opening_skips_splash_when_not_interactive(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main.splash, "splash_block", lambda **_k: "SCENE")
+    change = SimpleNamespace(id="ab12cd", title="Dark mode")
+    shown = main._print_opening(change, "new", interactive=False, color=False)
+    out = capsys.readouterr().out
+    assert shown is False
+    assert out == "ab12cd · Dark mode · new\n\n"
+    assert "SCENE" not in out

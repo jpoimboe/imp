@@ -608,6 +608,15 @@ def _print_run_header(change_id: str, title: str, marker: str,
     print()
 
 
+def _print_opening(change: Change, marker: str, *, interactive: bool, color: bool) -> bool:
+    """Lead with the run header, then the splash scene+phrase when interactive, so
+    the change identity is the first thing on screen. The header already emits its
+    trailing blank line, so the splash is printed without its own leading one.
+    Returns whether the splash was rendered."""
+    _print_run_header(change.id, change.title, marker, color=color)
+    return _print_splash_banner(interactive=interactive, lead_blank=False)
+
+
 async def _read_opening_message(
     change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
