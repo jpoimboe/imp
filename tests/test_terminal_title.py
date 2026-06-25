@@ -20,8 +20,8 @@ class _Pipe(io.StringIO):
 
 
 def test_default_glyphs_match_spec() -> None:
-    assert GLYPH_WORKING == "●"
-    assert GLYPH_WAITING == "◌"
+    assert GLYPH_WORKING == "·"
+    assert GLYPH_WAITING == "Ⲫ"
 
 
 def test_init_sets_working_title_on_tty() -> None:

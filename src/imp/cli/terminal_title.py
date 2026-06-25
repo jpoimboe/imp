@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-GLYPH_WORKING = "●"
-GLYPH_WAITING = "◌"
+GLYPH_WORKING = "·"
+GLYPH_WAITING = "Ⲫ"
 
 
 class TerminalTitle:
