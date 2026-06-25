@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pathlib
+
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
@@ -140,3 +142,14 @@ def test_code_reviewer_flags_defensive_sprawl() -> None:
     body = _agent_prompt("code-reviewer")
     assert "Defensive handling of states that can't occur, fallbacks that mask a bad state" in body
     assert "Simpler-and-stricter beats tolerant-and-complex." in body
+
+
+def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
+    text = pathlib.Path(
+        "src/imp/assets/workflows/imp/persona.md"
+    ).read_text()
+    assert "Design so bad states can't arise; then don't add error handling, fallbacks," in text
+    # The remainder of the rule stays intact.
+    assert "Only validate at system boundaries (user input," in text
+    # The old bare opener is gone.
+    assert "- Don't add error handling, fallbacks, or validation for scenarios" not in text

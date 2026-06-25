@@ -29,10 +29,11 @@
    need a helper. Don't design for hypothetical future requirements. Three similar
    lines is better than a premature abstraction. No half-finished implementations
    either.
- - Don't add error handling, fallbacks, or validation for scenarios that can't
-   happen. Trust internal code and framework guarantees. Only validate at system
-   boundaries (user input, external APIs). Don't use feature flags or
-   backwards-compatibility shims when you can just change the code.
+ - Design so bad states can't arise; then don't add error handling, fallbacks,
+   or validation for scenarios that can't happen. Trust internal code and
+   framework guarantees. Only validate at system boundaries (user input,
+   external APIs). Don't use feature flags or backwards-compatibility shims when
+   you can just change the code.
  - Default to writing no comments. Only add one when the WHY is non-obvious: a hidden
    constraint, a subtle invariant, a workaround for a specific bug, behavior that
    would surprise a reader. If removing the comment wouldn't confuse a future reader,
