@@ -91,3 +91,18 @@ agents. imp's answer to each is structural, not a promise.
   separate work).
 - **Vendor lock-in.** Model selection is per role, and the engine can run different
   roles on different vendors in a single run (see Highlights).
+
+## Highlights
+
+- **Drive a run from your phone.** imp can stream a run's events to a chat surface
+  (Telegram out of the box) and accept your replies back, so you can watch and steer a
+  change from anywhere — not only the terminal you launched it from.
+- **Pause and resume mid-call.** A run can be interrupted in the middle of a model
+  call — ESC, a signal, or a watchdog — and resumed later from the event log without
+  discarding the in-flight step.
+- **Per-role, multi-vendor model selection.** You choose your provider(s). The engine
+  resolves each role to a configured provider and model, and a multi-vendor config can
+  run different roles on different vendors in one run — for example the coder on one
+  vendor and the reviewer on another. This is a capability you configure, not the default:
+  the shipped workflow gets reviewer independence by model *tier* within a single
+  provider, so splitting roles across vendors is opt-in.
