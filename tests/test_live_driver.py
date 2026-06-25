@@ -1666,3 +1666,41 @@ def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
             assert pal._ANSI["cyan"] not in line             # no longer cyan
     finally:
         pal.set_theme("ansi")
+
+
+def test_context_bar_renders_filled_track_and_percent_plain() -> None:
+    from imp.cli.live_driver import context_bar
+    bar = context_bar("sonnet", 26000, color=False, over_bg=False)
+    assert bar == "█░░░░░░░░░ 13%"        # 26000/200000 = 0.13 -> 1 of 10 filled
+
+
+def test_context_bar_color_thresholds_green_yellow_red() -> None:
+    from imp.cli.live_driver import context_bar
+    green = context_bar("sonnet", 100000, color=True, over_bg=False)   # 50% < 60
+    yellow = context_bar("sonnet", 140000, color=True, over_bg=False)  # 70% < 85
+    red = context_bar("sonnet", 180000, color=True, over_bg=False)     # 90% >= 85
+    assert "\x1b[32m" in green                                          # green fill
+    assert "\x1b[33m" in yellow                                         # yellow fill
+    assert "\x1b[31m" in red                                            # red fill
+    # boundary checks: exactly 60% is yellow (not green), exactly 85% is red (not yellow)
+    boundary_yellow = context_bar("sonnet", 120000, color=True, over_bg=False)
+    boundary_red = context_bar("sonnet", 170000, color=True, over_bg=False)
+    assert "\x1b[33m" in boundary_yellow and "\x1b[32m" not in boundary_yellow
+    assert "\x1b[31m" in boundary_red and "\x1b[33m" not in boundary_red
+
+
+def test_context_bar_resolves_dated_and_alias_model_ids() -> None:
+    from imp.cli.live_driver import context_bar, context_window
+    assert context_window("claude-sonnet-4-5") == 200_000
+    assert context_window("opus") == 200_000
+    assert context_window("gpt-5.5") == 400_000
+    # 40000/200000 = 0.2 -> round(0.2*10) = 2 filled cells, 8 track.
+    assert context_bar("claude-opus-4-1", 40000, color=False, over_bg=False) == \
+        "██░░░░░░░░ 20%"
+
+
+def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:
+    from imp.cli.live_driver import context_bar
+    assert context_bar("some-unlisted-model", 1000, color=False, over_bg=False) is None
+    assert context_bar(None, 1000, color=False, over_bg=False) is None
+    assert context_bar("sonnet", None, color=False, over_bg=False) is None

@@ -32,6 +32,54 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus
 
+_FG_RESET = "\x1b[22;39m"
+_RESET = "\x1b[0m"
+
+_CONTEXT_WINDOWS: dict[str, int] = {
+    "haiku": 200_000,
+    "sonnet": 200_000,
+    "opus": 200_000,
+    "gpt-5": 400_000,
+}
+
+_CONTEXT_WIDTH = 10
+_BAR_GREEN_MAX = 0.60
+_BAR_YELLOW_MAX = 0.85
+
+
+def context_window(model: str | None) -> int | None:
+    if not model:
+        return None
+    lowered = model.lower()
+    for token, size in _CONTEXT_WINDOWS.items():
+        if token in lowered:
+            return size
+    return None
+
+
+def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
+    if not color or not codes:
+        return text
+    if over_bg:
+        return pal.sgr(*codes, enabled=True) + text + _FG_RESET
+    return pal.ansi(text, *codes, enabled=True)
+
+
+def context_bar(model: str | None, prompt_tokens: int | None, *,
+                color: bool, over_bg: bool) -> str | None:
+    window = context_window(model)
+    if window is None or prompt_tokens is None:
+        return None
+    frac = prompt_tokens / window
+    filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
+    pct = round(frac * 100)
+    hue = ("green" if frac < _BAR_GREEN_MAX
+           else "yellow" if frac < _BAR_YELLOW_MAX else "red")
+    fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
+    track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
+             if filled < _CONTEXT_WIDTH else "")
+    return f"{fill}{track} {pct}%"
+
 
 def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
