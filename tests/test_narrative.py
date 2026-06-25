@@ -533,7 +533,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(model="m")
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -551,7 +551,7 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(model="m")
 
 
 
@@ -1883,7 +1883,7 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(model="m")
 
 
 def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
@@ -2308,3 +2308,20 @@ def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
     b.add(ev("2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
              raw={"content": []}))                 # no usage key at all
     assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn
+
+
+def test_current_activity_carries_current_step_model() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p",
+             model="claude-sonnet-4-5"))
+    act = b.current_activity()
+    assert act is not None
+    assert act.model == "claude-sonnet-4-5"
+
+
+def test_current_activity_model_none_without_a_step() -> None:
+    b = nv.NarrativeBuilder()
+    # change_created opens the root but starts no step; model has no source.
+    b.add(ev("1", "change_created", id="z9gixx", title="t"))
+    act = b.current_activity()
+    assert act is None or act.model is None

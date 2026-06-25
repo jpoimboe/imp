@@ -224,6 +224,7 @@ class Activity:
     label: str | None = None
     step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
     phase_label: str | None = None   # owning phase's rendered label; None when absent
+    model: str | None = None         # current step's resolved model id; None when no step
 
 
 def activity_to_text(activity: Activity | None) -> str:
@@ -478,6 +479,7 @@ class NarrativeBuilder:
         step_label = (
             (top.live_label or top.rotated_phrase or top.label) if top is not None else None)
         phase_label = top.phase_label if top is not None else None
+        model = top.model if top is not None else None
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -485,7 +487,8 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 label = f"{label} (+{extra} {noun})"
-            return Activity(step_label=step_label, label=label, phase_label=phase_label)
+            return Activity(step_label=step_label, label=label, phase_label=phase_label,
+                            model=model)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
@@ -504,7 +507,7 @@ class NarrativeBuilder:
                         next(iter((inflight.input or {}).values()), ""))
                     detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
                 return Activity(count=count, detail=detail, step_label=step_label,
-                                phase_label=phase_label)
+                                phase_label=phase_label, model=model)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
             top = self._step_stack[-1]
@@ -512,10 +515,11 @@ class NarrativeBuilder:
                 # Name the running command (script steps carry one); command-less
                 # chrome kinds fall back to a bare label + timer.
                 return Activity(step_label=step_label, label=top.command,
-                                phase_label=phase_label)
+                                phase_label=phase_label, model=model)
             # Pure-thinking agent turn: the spinner + step label already imply it,
             # so emit no activity word.
-            return Activity(step_label=step_label, label=None, phase_label=phase_label)
+            return Activity(step_label=step_label, label=None, phase_label=phase_label,
+                            model=model)
         if self._current_phase is not None:
             return Activity(label="working")
         return None
