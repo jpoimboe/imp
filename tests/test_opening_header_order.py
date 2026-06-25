@@ -55,7 +55,7 @@ def test_print_opening_leads_with_header_then_splash(monkeypatch, capsys) -> Non
     shown = main._print_opening(change, "new", interactive=True, color=False)
     out = capsys.readouterr().out
     assert shown is True
-    assert out == "ab12cd · new\n\nSCENE\n"
+    assert out == "ab12cd · new\n\nSCENE\n\n"
     assert out.index("ab12cd") < out.index("SCENE")
 
 

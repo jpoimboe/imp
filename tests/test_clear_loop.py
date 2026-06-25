@@ -454,6 +454,7 @@ def test_resume_interactive_leads_with_header_before_splash(
 
     def _fake_splash(*, interactive: bool) -> bool:
         print("SCENE")
+        print()
         return True
 
     monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
