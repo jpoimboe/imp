@@ -244,7 +244,10 @@ async def test_drive_invocation_auth_backs_off_below_cap(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_drive_invocation_auth_pauses_after_cap(tmp_path: Path) -> None:
+async def test_drive_invocation_auth_backs_off_at_high_attempts(tmp_path: Path) -> None:
+    # The auth attempt cap is gone; its give-up now rides the executor/subagent
+    # 120s budget, so decide() keeps backing off (60s-capped) here instead of
+    # pausing — fatal stays False and a capped delay is returned.
     from imp.engine.agent_run import drive_invocation
 
     coord = InterruptCoordinator()
@@ -253,8 +256,8 @@ async def test_drive_invocation_auth_pauses_after_cap(tmp_path: Path) -> None:
     res = await drive_invocation(_inv(tmp_path), runner,
                                  coordinator=coord, log=None, emit_events=False,
                                  prior_backoff_attempts=7)
-    assert res.fatal is True
-    assert res.delay is None
+    assert res.fatal is False
+    assert res.delay == 60.0
     assert res.error is not None and res.error.category == "auth"
 
 
