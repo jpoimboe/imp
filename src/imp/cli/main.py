@@ -393,6 +393,9 @@ def _print_leave_disposition(
         return 0
     if disposition == "discard":
         return 0
+    if leave_state.get("send_failed"):
+        print(f"imp: left running — resume with `imp resume {change.id}`")
+        return 0
     return None
 
 

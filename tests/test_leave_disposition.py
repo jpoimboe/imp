@@ -133,3 +133,15 @@ def test_print_leave_disposition_none_without_recorded_disposition(
     _seed_control(tmp_path)
     ch = _draft_with_exchange(tmp_path, "no1")
     assert m._print_leave_disposition(ch, {}) is None
+
+
+def test_print_leave_disposition_send_failed_prints_running_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = _draft_with_exchange(tmp_path, "sf1")
+    rc = m._print_leave_disposition(ch, {"send_failed": "1"})
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "left running" in out
+    assert "imp resume sf1" in out

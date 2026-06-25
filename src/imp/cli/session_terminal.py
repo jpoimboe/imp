@@ -163,10 +163,14 @@ async def run_terminal_client(
                 action = resolve_leave_action(
                     control_root, change_id, leave_mode, leave_state.get("intent"))
                 if action is not None:
+                    _sent = False
                     with contextlib.suppress(
                         RuntimeError, anyio.BrokenResourceError,
                         anyio.ClosedResourceError,
                     ):
                         await client.send_control(action)
                         leave_state["disposition"] = action
+                        _sent = True
+                    if not _sent:
+                        leave_state["send_failed"] = "1"
             await client.aclose()
