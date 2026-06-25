@@ -61,3 +61,11 @@ def test_imp_invariants_has_layering_and_future_sections() -> None:
     assert "generic primitives" in body
     assert "Memory retention" in body
     assert "user-level" in body
+
+
+def test_imp_operator_notes_has_unblocking_section() -> None:
+    body = pathlib.Path("docs/imp-operator-notes.md").read_text()
+    assert "## Unblocking a paused change" in body
+    assert "snapshot" in body
+    assert "cherry-pick" in body
+    assert "skew deadlock" in body.lower()
