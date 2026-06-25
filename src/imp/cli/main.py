@@ -170,7 +170,7 @@ def _print_splash_banner(
 
 
 class SeedError(Exception):
-    """A bad seed source: e.g. an unknown playbook, or a misused flag combination."""
+    """A bad seed source: e.g. a misused flag combination."""
 
 
 class SeedResolution(NamedTuple):
@@ -780,7 +780,7 @@ def _select_headless(
 async def _run_fresh_session(
     change: Change, *, args: argparse.Namespace, seed_opening: str | None,
 ) -> int:
-    """Run a freshly-created change (new / playbook / materialized backlog) through
+    """Run a freshly-created change (new / materialized backlog) through
     the per-change session daemon, dispatching on headless / --tui / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
