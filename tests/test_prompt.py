@@ -233,3 +233,63 @@ async def test_ask_async_question_path_caret_at_content_column() -> None:
     # The question block and the `> ` caret line are both prefixed with the indent.
     assert captured["msg"] == "  Merge it?\n\n  > "
     assert captured["prompt_continuation"](80, 1, False) == "    "
+
+
+@pytest.mark.anyio
+async def test_ask_async_passes_plain_bottom_toolbar_through() -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return "ok"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    line = await prompt.ask_async(bottom_toolbar="z9gixx · 13%")
+    assert line == "ok"
+    assert captured["bottom_toolbar"] == "z9gixx · 13%"   # plain str when color is off
+    assert "style" not in captured                       # no style override when color is off
+
+
+@pytest.mark.anyio
+async def test_ask_async_wraps_colored_bottom_toolbar_as_ansi_with_style() -> None:
+    from prompt_toolkit.formatted_text import ANSI
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return "ok"
+
+    prompt = Prompt(color=True, _session_factory=lambda: _SpySession())
+    await prompt.ask_async(bottom_toolbar="\x1b[35mmodel\x1b[39m")
+    assert isinstance(captured["bottom_toolbar"], ANSI)   # parsed so the SGR survives
+    assert "style" in captured                            # neutralizes default reverse
+
+
+@pytest.mark.anyio
+async def test_ask_async_forwards_empty_string_toolbar() -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return "ok"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    await prompt.ask_async(bottom_toolbar="")             # falsy but not None -> still forwards
+    assert captured["bottom_toolbar"] == ""               # an `is not None` gate, not truthiness
+
+
+@pytest.mark.anyio
+async def test_ask_async_without_toolbar_passes_no_toolbar_kwarg() -> None:
+    captured: dict[str, object] = {}
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            return "ok"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    await prompt.ask_async()                               # default: no toolbar
+    assert "bottom_toolbar" not in captured               # pre-toolbar callers unchanged
