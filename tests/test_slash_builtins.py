@@ -22,28 +22,31 @@ def test_list_builtin_lists_changes_before_skill_fallback(tmp_path: Path, capsys
 
 
 def test_list_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsys) -> None:
-    # `_completed_rows` reads the archive index (not the live store), so seed a
-    # completed change there directly; the default `/list` hides it and `/list -a`
-    # surfaces it, pinning that `-a` maps to all=True.
+    # Completed changes now show by default (as `merged`); abandoned ones are the
+    # default-hidden / -a-surfaced case that pins `-a` -> all=True.
     from imp.engine import archive
-    events = tmp_path / "e.jsonl"
-    events.write_text("")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps({
-        "id": "doneid", "title": "Done one", "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    state_json = tmp_path / "s.json"
-    state_json.write_text(json.dumps({"id": "doneid", "status": "completed", "step": "merge"}))
-    archive.archive_change(
-        tmp_path, "doneid", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+    for cid, status in (("doneid", "completed"), ("deadid", "abandoned")):
+        events = tmp_path / f"{cid}-e.jsonl"
+        events.write_text("")
+        change_json = tmp_path / f"{cid}-c.json"
+        change_json.write_text(json.dumps({
+            "id": cid, "title": f"Title {cid}", "base_branch": "main",
+            "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+        state_json = tmp_path / f"{cid}-s.json"
+        state_json.write_text(json.dumps({"id": cid, "status": status, "step": "merge"}))
+        archive.archive_change(
+            tmp_path, cid, events_path=events,
+            change_json_path=change_json, state_json_path=state_json)
     change = SimpleNamespace(control_root=tmp_path)
 
     assert handle_slash_line("/list", change=change, output_fn=[].append) is REPROMPT
-    assert "doneid" not in capsys.readouterr().out          # completed hidden by default
+    default_out = capsys.readouterr().out
+    assert "doneid" in default_out          # completed shows by default (merged)
+    assert "deadid" not in default_out      # abandoned hidden by default
 
     assert handle_slash_line("/list -a", change=change, output_fn=[].append) is REPROMPT
-    assert "doneid" in capsys.readouterr().out              # -a surfaces the archive
+    all_out = capsys.readouterr().out
+    assert "deadid" in all_out              # -a surfaces abandoned
 
 
 def test_ls_is_unknown_after_rename(tmp_path: Path) -> None:

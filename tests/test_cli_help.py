@@ -18,7 +18,7 @@ def test_top_level_help_describes_every_subcommand(
     out = _help_for(["-h"], capsys)
     assert "Start a new Change" in out
     assert "Resume a paused" in out
-    assert "List your changes" in out
+    assert "Show your changes" in out
     assert "effective config" in out
 
 

@@ -1339,6 +1339,16 @@ def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
+    if args.token is None:
+        try:
+            control = _control_root()
+        except worktree.PreconditionError:
+            print(_NO_CHANGES_MESSAGE)
+            return 0
+        lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
+                                color=should_use_color(sys.stdout))
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
     control = _control_root()
     try:
         change_id = _resolve_id(control, args.token)
@@ -1348,18 +1358,18 @@ def _cmd_show(args: argparse.Namespace) -> int:
     meta = _unstarted_backlog_meta(control, change_id)
     if meta is not None:
         if resource is None:
-            for line in _backlog_card(meta, control, now=datetime.now(UTC)):
-                print(line)
+            _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
+                           no_pager=args.no_pager)
             return 0
         if resource == "status":
-            print("backlog")
+            _page_or_print(["backlog"], no_pager=args.no_pager)
             return 0
         print(f"imp: {change_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
         return 2
     if resource is None:
-        for line in _detail_card(control, change_id, now=datetime.now(UTC)):
-            print(line)
+        _page_or_print(_detail_card(control, change_id, now=datetime.now(UTC)),
+                       no_pager=args.no_pager)
         return 0
     if resource == "spec":
         data = _show_artifact(control, change_id, f"spec/{change_id}.md")
@@ -1375,23 +1385,27 @@ def _cmd_show(args: argparse.Namespace) -> int:
         if raw is None:
             print(f"imp: no state for {change_id!r}", file=sys.stderr)
             return 2
-        print(json.loads(raw).get("status", "unknown"))
+        _page_or_print([json.loads(raw).get("status", "unknown")],
+                       no_pager=args.no_pager)
         return 0
     elif resource == "review":
         raw = _show_runtime(control, change_id, "events.jsonl")
         if raw is None:
             print(f"imp: no events for {change_id!r}", file=sys.stderr)
             return 2
+        review_lines = []
         for ev in _parse_jsonl(raw):
             payload = ev.get("payload") or {}
             if ev.get("type") == "step_started" and \
                     payload.get("step") in _REVIEW_STEPS:
-                print(f"{payload.get('phase', '?')}/{payload.get('step')}")
+                review_lines.append(f"{payload.get('phase', '?')}/{payload.get('step')}")
+        _page_or_print(review_lines, no_pager=args.no_pager)
         return 0
     if data is None:
         print(f"imp: no {resource} for {change_id!r}", file=sys.stderr)
         return 2
-    sys.stdout.write(data.decode("utf-8", errors="replace"))
+    _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
+                   no_pager=args.no_pager)
     return 0
 
 
@@ -1723,7 +1737,7 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
     change.json are schema-identical to the in-flight ones (both written by
     State.save / Change.create), so the two sections can't silently drift.
     Returns None on malformed/incomplete JSON so a single corrupt entry can't
-    crash the whole `imp list` listing (callers skip None)."""
+    crash the whole `imp show` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)
@@ -1821,7 +1835,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past change{plural} — see `imp list --all`)",
+            f"({past} past change{plural} — see `imp show --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 
@@ -2062,43 +2076,66 @@ def _backlog_rows(control: Path) -> list[_Row]:
     return rows
 
 
+_HISTORY_CAP = 10
+
+# Display-only disposition word for the overview history block.
+_DISPOSITION = {"completed": "merged", "abandoned": "abandoned"}
+
+
+def _history_rows(control: Path, *, show_all: bool) -> list[_Row]:
+    """Terminal-disposition (completed/abandoned) rows for the history block."""
+    rows = [r for r in _completed_rows(control) if r[1] in _DISPOSITION]
+    if not show_all:
+        rows = [r for r in rows if r[1] == "completed"]
+    rows = _sort_rows_newest_first(rows)
+    return rows if show_all else rows[:_HISTORY_CAP]
+
+
+def _overview_lines(control: Path, *, show_all: bool, now: datetime,
+                    color: bool) -> list[str]:
+    """Build the overview as lines: in-flight, Backlog, then the history block."""
+    name_w = change_row.name_budget()
+    inflight = _sort_rows_newest_first(_status_rows(control))
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
+    history = _history_rows(control, show_all=show_all)
+    if not inflight and not backlog_rows and not history:
+        return [_NO_CHANGES_MESSAGE]
+    lines = [change_row.header_line(color=color)]
+    for r in inflight:
+        intent = None
+        if not r[4].strip():
+            intent = _resolve_intent(_load_events_for_id(control, r[0]) or [])
+        lines.append(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+            last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
+    if backlog_rows:
+        lines.append("")
+        lines.append(pal.ansi("Backlog", "dim", enabled=color))
+        for r in backlog_rows:
+            lines.append(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+                last_iso=r[3], now=now, color=color, name_width=name_w))
+    if history:
+        lines.append("")
+        label = "history" if show_all else "recently merged"
+        lines.append(pal.ansi(label, "dim", enabled=color))
+        for r in history:
+            lines.append(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
+                last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
+    return lines
+
+
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     try:
         control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
         print(_NO_CHANGES_MESSAGE)
         return 0
-    now = datetime.now(UTC)
-    inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
-    past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
-    if not inflight and not backlog_rows and not past:
-        print(_NO_CHANGES_MESSAGE)
-        return 0
-    color = should_use_color(sys.stdout)
-    name_w = change_row.name_budget()
-    print(change_row.header_line(color=color))
-    for r in inflight:
-        intent = None
-        if not r[4].strip():
-            intent = _resolve_intent(_load_events_for_id(control, r[0]) or [])
-        print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
-    if backlog_rows:
-        print()
-        print(pal.ansi("Backlog", "dim", enabled=color))
-        for r in backlog_rows:
-            print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-                last_iso=r[3], now=now, color=color, name_width=name_w))
-    if past:
-        if inflight or backlog_rows:
-            print()
-        for r in past:
-            print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-                last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
+    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
+                            color=should_use_color(sys.stdout))
+    for line in lines:
+        print(line)
     return 0
 
 
@@ -2138,7 +2175,7 @@ _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
     ("new", "Scope a new change in conversation (optional opening message)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
-    ("list", "List your changes (-a also shows completed and abandoned)."),
+    ("show", "Show your changes; `imp show <id>` for one change's detail."),
     ("log", "Show a Change's narrative as plain text."),
     ("abandon", "Tear down a Change's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
@@ -2284,33 +2321,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser(
         "show",
-        help="Show a Change's spec, plan, review, events, or status.",
+        help="Show your changes, or one change's detail/artifact.",
         description=(
-            "Print one artifact of a Change. Reads the live worktree files while "
-            "the Change is in flight, and falls back to the archive once it is "
-            "merged and the worktree is gone."),
+            "With no argument, show an overview of your changes — in-flight, the "
+            "Backlog, and recently merged. With an id, print that change's detail "
+            "card, or name an artifact (spec/plan/review/events/status/summary) "
+            "to print just that. Reads the live worktree files while a change is "
+            "in flight and falls back to the archive once it is merged."),
     )
-    p_show.add_argument("token", help="Change id or its short token.")
+    p_show.add_argument(
+        "token", nargs="?", default=None,
+        help="Change id or its short token (omit for an overview of all changes).")
     p_show.add_argument(
         "resource", nargs="?", default=None,
         choices=["spec", "plan", "review", "events", "status", "summary"],
         help="Which artifact to print (default: a detail card).")
-    p_show.set_defaults(func=_cmd_show)
-
-    p_list = sub.add_parser(
-        "list",
-        help="List your changes (use -a for completed and abandoned).",
-        description=(
-            "List your in-progress changes and the Backlog (saved-for-later "
-            "changes). Use -a/--all to also show completed and abandoned changes."
-        ),
-    )
-    p_list.add_argument(
+    p_show.add_argument(
         "-a", "--all", action="store_true",
-        help="Also list completed and abandoned changes "
-             "(default: in-progress + Backlog).",
-    )
-    p_list.set_defaults(func=_cmd_status)
+        help="In the overview, lift the 10-cap and include abandoned changes "
+             "(the block is then labelled `history`).")
+    p_show.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
+    p_show.set_defaults(func=_cmd_show)
 
     p_search = sub.add_parser(
         "search",

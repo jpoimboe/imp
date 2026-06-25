@@ -139,9 +139,9 @@ def test_status_shows_completed_section_from_archive(
     # in-flight slug appears under in-flight; merged slug under completed.
     assert "live-one" in out
     assert "gone-one" in out
-    # The merged Change shows its title + completed status, not blank columns.
+    # The merged Change shows its title + merged disposition, not blank columns.
     assert "Gone One" in out
-    assert "completed" in out
+    assert "merged" in out
 
 
 def test_status_inflight_takes_precedence_over_archive(
@@ -269,7 +269,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
     assert rc == 0
     out = capsys.readouterr().out
     assert "\x1b[" not in out
-    assert "completed" in out
+    assert "merged" in out
 
 
 def test_status_all_dims_completed_section(
@@ -292,16 +292,16 @@ def test_status_all_dims_completed_section(
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
-    row = next(ln for ln in out.splitlines() if "completed" in ln)
+    row = next(ln for ln in out.splitlines() if "merged" in ln)
     assert row.startswith("\x1b[2m") and row.endswith("\x1b[0m")
 
 
-def test_status_hides_completed_and_abandoned_by_default(
+def test_overview_default_shows_merged_disposition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Without --all, only in-flight Changes list; completed/abandoned Changes
-    (archive-backed history) are suppressed."""
+    """Default overview: completed changes appear under `recently merged` with
+    disposition `merged` (not the raw `completed`); abandoned are excluded."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -315,14 +315,134 @@ def test_status_hides_completed_and_abandoned_by_default(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {"all": False})())
+    rc = m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     assert rc == 0
     out = capsys.readouterr().out
     assert "live" in out
-    assert "done" not in out
-    assert "dead" not in out
-    assert "completed" not in out
+    assert "recently merged" in out
+    assert "history" not in out
+    assert "done" in out
+    assert "merged" in out
+    assert "completed" not in out      # disposition is shown, not raw status
+    assert "dead" not in out           # abandoned excluded by default
     assert "abandoned" not in out
+
+
+def test_overview_all_shows_history_label_and_abandoned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """-a: label is `history`; abandoned appears as `abandoned`, completed as
+    `merged`."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
+    Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
+    _complete_and_archive(tmp_path, "done")
+    _complete_and_archive(tmp_path, "dead", status="abandoned")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "history" in out
+    assert "recently merged" not in out
+    assert "done" in out and "merged" in out
+    assert "dead" in out and "abandoned" in out
+
+
+def test_overview_default_caps_at_ten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default keeps at most 10 merged rows; -a lifts the cap."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    for i in range(12):
+        cid = f"done{i:02d}"
+        Change.create(tmp_path, title=f"Done {i}", change_id=cid, base_branch="main")
+        _complete_and_archive(tmp_path, cid)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    default_out = capsys.readouterr().out
+    assert sum(1 for ln in default_out.splitlines() if "done" in ln) == 10
+
+    m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
+    all_out = capsys.readouterr().out
+    assert sum(1 for ln in all_out.splitlines() if "done" in ln) == 12
+
+
+def test_overview_excludes_left_conversations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A `left` archived conversation never appears in the history block, with or
+    without -a (only completed/abandoned dispositions are rendered)."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Chat", change_id="chatid", base_branch="main")
+    _complete_and_archive(tmp_path, "chatid", status="left")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    assert "chatid" not in capsys.readouterr().out
+    m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
+    assert "chatid" not in capsys.readouterr().out
+
+
+def test_overview_empty_history_omits_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Zero merged changes → no blank line, no label."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Live", change_id="live", base_branch="main")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    out = capsys.readouterr().out
+    assert "live" in out
+    assert "recently merged" not in out
+    assert "history" not in out
+
+
+def test_overview_only_history_not_reported_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An overview with only merged history is NOT reported `No changes.`"""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
+    _complete_and_archive(tmp_path, "done")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
+    out = capsys.readouterr().out
+    assert out != "No changes.\n"
+    assert "done" in out and "merged" in out
 
 
 def test_status_all_dims_abandoned_section(
@@ -567,7 +687,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
     with redirect_stdout(buf):
-        assert m.main(["list", "--all"]) == 0
+        assert m.main(["show", "--all"]) == 0
     out = buf.getvalue()
     assert "arch01" in out
     assert "Archived One" in out
