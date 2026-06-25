@@ -43,3 +43,17 @@ def test_archive_conversation_unmaterialized_draft_has_no_worktree(tmp_path: Pat
     assert full["resumable"] is True
     assert archive_read.status_of(tmp_path, "draft") == "paused"
     assert full["change_meta"]["materialized"] is False        # faithful draft state preserved
+
+
+def test_archive_conversation_captures_steps_subtree(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="x", change_id="draft", base_branch="main")
+    tdir = ch.change_dir / "steps" / "p" / "s"
+    tdir.mkdir(parents=True)
+    (tdir / "transcript.jsonl").write_bytes(b'{"role":"assistant"}\n')
+
+    archive_conversation(ch)
+
+    rec = record.read_record(records_root(tmp_path), "draft")
+    assert rec is not None
+    assert rec["step_blobs"].get("p/s/transcript.jsonl") is not None

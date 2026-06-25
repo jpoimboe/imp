@@ -54,6 +54,7 @@ def archive_conversation(change: Change) -> None:
             events_path=change.events_path,
             change_json_path=change.change_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
+            steps_dir=change.change_dir / "steps",
             resumable=True,
         )
     if materialized:

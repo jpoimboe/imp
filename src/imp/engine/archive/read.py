@@ -70,6 +70,21 @@ def read_events(control_root: Path, change_id: str) -> bytes | None:
     return LocalBlobStore(blobs_root(control_root)).get(rec["events_hash"])
 
 
+def read_step_blobs(control_root: Path, change_id: str) -> dict[str, bytes]:
+    """Steps-relative path -> blob bytes for an archived resumable change.
+    Empty when the change is absent or recorded no step blobs."""
+    rec = record.read_record(records_root(control_root), change_id)
+    if rec is None:
+        return {}
+    store = LocalBlobStore(blobs_root(control_root))
+    out: dict[str, bytes] = {}
+    for rel, digest in (rec.get("step_blobs") or {}).items():
+        blob = store.get(digest)
+        if blob is not None:
+            out[rel] = blob
+    return out
+
+
 def read_state_json(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
     if rec is None:
@@ -141,6 +156,10 @@ def rehydrate_change(control_root: Path, change_id: str) -> Path:
     (change_dir / "change.json").write_bytes(change_json)
     (change_dir / "state" / "state.json").write_bytes(state_json or b"{}")
     (change_dir / "events.jsonl").write_bytes(events or b"")
+    for rel, blob in read_step_blobs(control_root, change_id).items():
+        dest = change_dir / "steps" / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(blob)
     return change_dir
 
 

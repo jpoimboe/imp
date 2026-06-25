@@ -9,7 +9,7 @@ from typing import Any, cast
 
 def build_record(
     change_meta: dict[str, Any], final_state: dict[str, Any], events_hash: str,
-    *, resumable: bool = False,
+    *, resumable: bool = False, step_blobs: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": change_meta["id"],
@@ -21,6 +21,7 @@ def build_record(
         "resumable": resumable,
         "final_state": final_state,
         "events_hash": events_hash,
+        "step_blobs": dict(step_blobs or {}),
     }
 
 
