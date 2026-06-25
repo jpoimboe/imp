@@ -20,14 +20,14 @@ class _Pipe(io.StringIO):
 
 
 def test_default_glyphs_match_spec() -> None:
-    assert GLYPH_WORKING == ""
+    assert GLYPH_WORKING == "✦"
     assert GLYPH_WAITING == "Ⲫ"
 
 
 def test_init_sets_working_title_on_tty() -> None:
     s = _TTY()
     TerminalTitle(s, "My Change")
-    assert s.getvalue() == "\x1b]2;imp · My Change\x07"
+    assert s.getvalue() == "\x1b]2;✦ imp · My Change\x07"
 
 
 def test_waiting_emits_waiting_glyph_with_full_name() -> None:
@@ -46,13 +46,13 @@ def test_working_overwrites_waiting() -> None:
     s.truncate(0)
     s.seek(0)
     title.working()
-    assert s.getvalue() == "\x1b]2;imp · My Change\x07"
+    assert s.getvalue() == "\x1b]2;✦ imp · My Change\x07"
 
 
 def test_empty_name_drops_separator() -> None:
     s = _TTY()
     title = TerminalTitle(s, "")
-    assert s.getvalue() == "\x1b]2;imp\x07"
+    assert s.getvalue() == "\x1b]2;✦ imp\x07"
     s.truncate(0)
     s.seek(0)
     title.waiting()
