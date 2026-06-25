@@ -106,3 +106,70 @@ agents. imp's answer to each is structural, not a promise.
   vendor and the reviewer on another. This is a capability you configure, not the default:
   the shipped workflow gets reviewer independence by model *tier* within a single
   provider, so splitting roles across vendors is opt-in.
+
+## Quickstart
+
+imp is a Python package (requires Python 3.11+). It is pre-release; install from a
+clone for now.
+
+### Install
+
+```bash
+git clone <repo-url> imp && cd imp
+python3 -m pip install -e .
+imp init          # set up imp in your project (git, imp/project.yaml, config)
+```
+
+### Start a change
+
+```bash
+imp new "add rate limiting to the public API"   # state your intent; imp drives the workflow
+imp log                                          # read the narrative for the latest change
+imp resume                                       # resume a paused or interrupted change
+```
+
+You stay at the controls: imp runs autonomously between gates and stops for your
+decision at the spec, plan, and merge boundaries.
+
+### Drive a run remotely
+
+imp can stream a run's events to an external chat surface and accept replies back —
+so you can watch and drive `imp new` from your phone. Enable exactly one built-in
+driver by name in your machine's `~/.config/imp/config.yaml`:
+
+```yaml
+remote:
+  driver: telegram          # bare name; or a mapping with knob overrides:
+  # driver:
+  #   name: telegram
+  #   events: [all]             # or an explicit event-type allowlist
+  #   startup_timeout: 10
+```
+
+Credentials stay in the environment (never in config). Built-ins:
+
+| Driver | Description | Required env |
+|--------|-------------|--------------|
+| `telegram` | Drive an imp run from a Telegram chat (outbound getUpdates; stdlib-only). | `IMP_TELEGRAM_TOKEN`, `IMP_TELEGRAM_CHAT_ID` |
+
+Run `imp config` to see the available drivers and which one is enabled.
+
+#### Telegram setup
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token. A bot
+   token has the form `<id>:<auth>` — exactly **one** colon. Pasting any extra
+   suffix makes every API call fail.
+2. Open your new bot in Telegram and send it `/start` (or any message). A bot can
+   only message a chat that has messaged it first.
+3. Find your numeric chat id (e.g. message [@userinfobot](https://t.me/userinfobot)),
+   then export both credentials:
+
+   ```bash
+   export IMP_TELEGRAM_TOKEN=123456789:AA...      # <id>:<auth>, one colon
+   export IMP_TELEGRAM_CHAT_ID=987654321          # your numeric chat id
+   ```
+
+A run validates these once at startup (a `getMe` / `getChat` self-check). A rejected
+token or unreachable chat is reported at **WARNING** with a fix hint — otherwise a
+broken credential fails silently and no notifications arrive. The driver's other
+diagnostics stay quiet unless you enable debug logging for the `imp.remote` logger.
