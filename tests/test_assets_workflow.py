@@ -839,3 +839,13 @@ def test_finalize_leads_with_summary_artifact() -> None:
     # The gate never blocks on a missing summary — it falls back to the audit fields.
     assert "absent" in low
     assert "built" not in low  # no residual references to the removed field
+
+
+def test_no_wait_for_user_in_workflow_prompts() -> None:
+    # AC2: the deleted tool must not survive in any prompt or partial. A grep of
+    # the workflow assets for `wait_for_user` returns nothing.
+    root = Path("src/imp/assets/workflows")
+    offenders = sorted(
+        str(p) for p in root.rglob("*.md") if "wait_for_user" in p.read_text()
+    )
+    assert offenders == []
