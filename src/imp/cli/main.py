@@ -1416,6 +1416,11 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     if opening:
         lines.append("")
         lines.append(opening)
+    summary = _show_artifact(control, change_id, f"summary/{change_id}.md")
+    if summary:
+        lines.append("")
+        lines.extend(
+            summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     return lines
 
 
