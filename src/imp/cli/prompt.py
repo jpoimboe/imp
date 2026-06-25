@@ -206,14 +206,9 @@ class Prompt:
                             else _placeholder_text(color=False, text=ph_text))
         extra: dict[str, Any] = {}
         if bottom_toolbar is not None:
-            if self._color:
-                from prompt_toolkit.styles import Style
-                # The toolbar carries its own slate via inline SGR; disable prompt_toolkit's
-                # default reverse-video fill so our color controls the bar.
-                extra["bottom_toolbar"] = ANSI(bottom_toolbar)
-                extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
-            else:
-                extra["bottom_toolbar"] = bottom_toolbar
+            from prompt_toolkit.styles import Style
+            extra["bottom_toolbar"] = ANSI(bottom_toolbar) if self._color else bottom_toolbar
+            extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
             prompt_continuation=lambda _w, _l, _s: cont, **extra)

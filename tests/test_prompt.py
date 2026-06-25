@@ -248,7 +248,9 @@ async def test_ask_async_passes_plain_bottom_toolbar_through() -> None:
     line = await prompt.ask_async(bottom_toolbar="z9gixx · 13%")
     assert line == "ok"
     assert captured["bottom_toolbar"] == "z9gixx · 13%"   # plain str when color is off
-    assert "style" not in captured                       # no style override when color is off
+    from prompt_toolkit.styles import Style
+    assert "style" in captured
+    assert isinstance(captured["style"], Style)
 
 
 @pytest.mark.anyio
