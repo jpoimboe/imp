@@ -30,7 +30,6 @@ from imp.cli import change_row, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver
-from imp.cli.leave import _had_exchange
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
@@ -45,9 +44,7 @@ from imp.cli.signals import install_process_group
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
-    archive_conversation,
     discard_conversation,
-    save_to_backlog,
     tear_down_change,
 )
 from imp.engine.archive import read as archive_read
@@ -366,24 +363,15 @@ def _handle_terminal_outcome(
 
 
 
-async def _apply_disposition_locked(
-    fn: Callable[[Change], None], change: Change, *,
-    attempts: int = 100, delay: float = 0.1,
-) -> None:
-    """Apply a lock-taking disposition with retry while the daemon still holds the lock."""
-    for _ in range(attempts - 1):
-        try:
-            await anyio.to_thread.run_sync(fn, change)
-            return
-        except LockHeld:
-            await anyio.sleep(delay)
-    await anyio.to_thread.run_sync(fn, change)
-
-
-async def _maybe_apply_leave_disposition(
-    change: Change, leave_mode: str | None, leave_state: dict[str, str],
+def _print_leave_disposition(
+    change: Change, leave_state: dict[str, str],
 ) -> int | None:
-    """Finalize a left phase-0 conversation. Returns 0 when applied, None to defer."""
+    """Print the optimistic leave message for a daemon-applied disposition.
+
+    The disposition itself is applied by the daemon after it releases the lock;
+    here we only echo what was (or is being) done. Returns 0 when a leave was
+    handled, None to fall through to the normal exit-code path.
+    """
     intent = leave_state.get("intent")
     if intent == "abandon":
         label = change.title or change.id
@@ -394,32 +382,18 @@ async def _maybe_apply_leave_disposition(
             print(f"imp: '{label}' abandoned — "
                   f"recover with `imp resume {change.id}`")
         return None
-    explicit_save = intent == "save"
-    if leave_mode is None and not explicit_save:
-        return None
-    try:
-        change = Change.load(change.control_root, change.id)
-    except (LoadError, LoadErrors):
-        return None  # home gone — defer to the normal path
-    if change.materialized:
-        return None  # a real in-flight change, not a phase-0 leave
-    try:
-        if not explicit_save and not _had_exchange(change.event_log()):
-            await _apply_disposition_locked(discard_conversation, change)
-            return 0
-        if explicit_save or leave_mode == "new":
-            await _apply_disposition_locked(save_to_backlog, change)
-            print(f"imp: saved '{change.title or change.id}' to your Backlog "
-                  f"(resume with `imp resume {change.id}`)")
-            return 0
-        await _apply_disposition_locked(archive_conversation, change)
+    disposition = leave_state.get("disposition")
+    if disposition == "save":
+        print(f"imp: saved '{change.title or change.id}' to your Backlog "
+              f"(resume with `imp resume {change.id}`)")
+        return 0
+    if disposition == "archive":
         print(f"imp: conversation saved — resume with `imp resume {change.id}` "
               f"or find it later with `imp search`")
         return 0
-    except LockHeld:
-        print(f"imp: '{change.id}' is still busy and was left running "
-              f"(resume with `imp resume {change.id}`)", file=sys.stderr)
-        return None
+    if disposition == "discard":
+        return 0
+    return None
 
 
 def _session_exit_code(change: Change, coord: Any) -> int:
@@ -648,7 +622,7 @@ async def _run_tui_session(
                         await run_terminal_client(
                             attach=attach, driver=app, coord=coord, solicit=_solicit,
                             change_id=change.id, control_root=change.control_root,
-                            leave_state=leave_state)
+                            leave_state=leave_state, leave_mode=leave_mode)
                 finally:
                     app.exit()
 
@@ -657,7 +631,7 @@ async def _run_tui_session(
             tg.cancel_scope.cancel()
 
     app.print_collapsed_transcript(sys.stdout)
-    disposition_rc = await _maybe_apply_leave_disposition(change, leave_mode, leave_state)
+    disposition_rc = _print_leave_disposition(change, leave_state)
     if disposition_rc is not None:
         return disposition_rc
     return _session_exit_code(change, coord)

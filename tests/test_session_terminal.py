@@ -825,3 +825,185 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
     assert survived == [True]
     assert leave_state == {"intent": "clear"}
     assert not server.abandoned
+
+
+@pytest.mark.anyio
+async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="D", change_id="c1", base_branch="main")
+    ch.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"role": "user", "content": "hi"})
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise EOFError
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(15):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c1", control_root=tmp_path,
+                    leave_mode="chat", leave_state=leave_state)
+
+            tg.start_soon(_client)
+
+    assert server.archived is True             # daemon received + applied the frame
+    assert leave_state["disposition"] == "archive"
+    assert not server.abandoned
+
+
+@pytest.mark.anyio
+async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="D", change_id="c2", base_branch="main")
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        return "done"   # completes without a gate; daemon drops the socket
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c2", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(15):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c2", control_root=tmp_path,
+                    leave_mode="chat", leave_state=leave_state)
+
+            tg.start_soon(_client)
+
+    assert server.archived is False            # no leave gesture → no frame
+    assert "disposition" not in leave_state
+
+
+@pytest.mark.anyio
+async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
+    tmp_path: Path,
+) -> None:
+    # Primary latency AC: the shell returns well under a second independent of a
+    # slow teardown. Run the real daemon (serve_change_session) with a teardown
+    # that blocks until released; assert run_terminal_client returns AND the
+    # daemon is still inside its (slow) archive when it does.
+    import threading
+
+    from imp.remote.session.daemon import serve_change_session
+    from imp.remote.session.discover import session_socket_path
+
+    _seed_control(tmp_path)
+    change = Change.create_draft(
+        tmp_path, title="D", change_id="slow1", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"role": "user", "content": "hi"})
+    sock = str(session_socket_path(change.control_root, change.id))
+
+    archive_started = threading.Event()
+    release_archive = threading.Event()
+    archived: list[str] = []
+
+    def slow_archive(ch: Change) -> None:
+        archive_started.set()
+        release_archive.wait(5)
+        archived.append(ch.id)
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> str:
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, change.id, change.title, on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise EOFError
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    client_done = anyio.Event()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            async def _serve() -> None:
+                await serve_change_session(
+                    change, run_fn=fake_run, hibernate=False,
+                    archive_left=slow_archive)
+
+            tg.start_soon(_serve)
+            with anyio.fail_after(5):
+                while not Path(sock).exists():
+                    await anyio.sleep(0.02)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id=change.id, control_root=tmp_path,
+                    leave_mode="chat", leave_state=leave_state)
+                client_done.set()
+
+            tg.start_soon(_client)
+            with anyio.fail_after(2):
+                await client_done.wait()              # foreground returns promptly
+            with anyio.fail_after(2):
+                while not archive_started.is_set():   # daemon now in slow teardown
+                    await anyio.sleep(0.02)
+            assert archived == []                     # foreground did NOT wait for it
+            assert leave_state["disposition"] == "archive"
+            release_archive.set()                     # let the daemon finish
+
+    assert archived == [change.id]                    # teardown completed in the daemon
