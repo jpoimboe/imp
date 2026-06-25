@@ -1490,3 +1490,33 @@ def test_main_parses_non_interactive_into_serve_kwargs(
     fn = calls["fn"]
     assert fn.func is daemon.serve_change_session
     assert fn.keywords == {"non_interactive": True}
+
+
+def test_build_session_attach_forwards_non_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-bsa")
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(change: Change, **kw: Any) -> None:
+        captured.update(kw)
+
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
+
+    holder: dict[str, Any] = {}
+
+    async def fake_attach_or_spawn(
+        change: Change, *, on_event: Any, spawn_fn: Any,
+        connect_timeout: float = 10.0,
+    ) -> object:
+        holder["spawn_fn"] = spawn_fn
+        return object()
+
+    monkeypatch.setattr(attach_mod, "attach_or_spawn", fake_attach_or_spawn)
+
+    attach = attach_mod.build_session_attach(change, non_interactive=True)
+    anyio.run(attach, lambda _e: None)
+    holder["spawn_fn"](change)
+    assert captured["non_interactive"] is True

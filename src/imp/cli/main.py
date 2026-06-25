@@ -768,7 +768,7 @@ async def _run_fresh_session(
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=seed_opening, status=status)
+            seed_opening=seed_opening, status=status, non_interactive=True)
     if _tui_requested(args):
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
@@ -909,7 +909,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, title=term_title, **_scope_kw)
+            opening_intent=opening_intent, title=term_title,
+            non_interactive=True, **_scope_kw)
 
     if _tui_requested(args):
         if not header_printed:
@@ -1026,7 +1027,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            resume=True, status=status)
+            resume=True, status=status, non_interactive=True)
     if _tui_requested(args):
         print(_run_header_line(
             change.id, change.title, "resuming", color=should_use_color(sys.stdout)))

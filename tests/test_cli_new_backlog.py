@@ -183,6 +183,7 @@ def test_headless_backlog_sets_scope_only(
     async def _fake_run_session_client(
         change, *, driver, coord, solicit, seed_opening=None, status=None,
         opening_intent=None, leave_mode=None, scope_only=False, title=None,
+        non_interactive=False,
     ) -> int:
         captured["scope_only"] = scope_only
         return 0

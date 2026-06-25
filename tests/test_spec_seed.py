@@ -98,7 +98,8 @@ def test_new_positional_delivers_verbatim_seed(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -124,7 +125,8 @@ def test_new_title_flag_sets_change_title(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -139,6 +141,83 @@ def test_new_title_flag_sets_change_title(
     assert captured["change"].title == "dark mode"  # type: ignore[union-attr]
 
 
+def test_new_spec_file_delivers_wrapped_seed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("# My draft\nGoal: do X\n")
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None,
+                           opening_intent: object = None,
+                           non_interactive: object = False) -> int:
+        captured["change"] = change
+        captured["seed_opening"] = seed_opening
+        return 0
+
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+
+    args = _new_args(spec_file=str(draft), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 0
+    seed = captured["seed_opening"]
+    assert isinstance(seed, str)
+    assert seed.startswith(cli_main.SPEC_SEED_MARKER)
+    assert str(draft) in seed
+    assert "# My draft" in seed
+    assert captured["change"].title == ""  # type: ignore[union-attr]
+
+
+def test_new_positional_and_spec_file_rc2(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("Goal: x\n")
+
+    args = _new_args(opening="add dark mode", spec_file=str(draft),
+                     non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_new_missing_spec_file_rc2_no_change(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    args = _new_args(spec_file=str(tmp_path / "nope.md"), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 2
+    assert "nope.md" in capsys.readouterr().err
+    worktrees = tmp_path / ".imp" / "worktrees"
+    assert not worktrees.exists() or not any(worktrees.iterdir())
+
+
+def test_new_spec_file_and_message_rc2(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("Goal: x\n")
+
+    args = _new_args(spec_file=str(draft), message="hi", non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
 
 def test_new_positional_with_message_legal(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,7 +230,8 @@ def test_new_positional_with_message_legal(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
@@ -192,6 +272,34 @@ def test_new_tui_delivers_seed(
     assert captured["seed_opening"] == "add dark mode"
     assert "--tui does not deliver" not in capsys.readouterr().err
 
+
+def test_new_non_interactive_spec_seed_via_session_client(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("# My draft\nGoal: do X\n")
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(change: object, *, driver: object, coord: object,
+                           solicit: object, seed_opening: object,
+                           status: object = None,
+                           opening_intent: object = None,
+                           non_interactive: object = False) -> int:
+        captured["seed_opening"] = seed_opening
+        return 0
+
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
+
+    args = _new_args(spec_file=str(draft), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 0
+    seed = captured["seed_opening"]
+    assert isinstance(seed, str)
+    assert seed.startswith(cli_main.SPEC_SEED_MARKER)
+    assert str(draft) in seed
 
 
 def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
@@ -246,7 +354,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
                            status: object = None, opening_intent: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -288,7 +397,8 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
                            status: object = None, opening_intent: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -329,7 +439,8 @@ def test_new_creates_unmaterialized_draft(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["change"] = change
         return 0
 
