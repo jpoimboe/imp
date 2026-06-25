@@ -100,3 +100,19 @@ def test_phrase_rotates_at_a_user_message_boundary(monkeypatch) -> None:
     b.add(ev("4", "user_message", agent_id="a", role="user",
              content=[{"type": "text", "text": "go"}]))
     assert b.current_activity().step_label == "rot1"
+
+
+def test_resume_reentry_resets_rotate_phrase_and_rotated_phrase(monkeypatch) -> None:
+    _deterministic_draws(monkeypatch)
+    b = _front_door_builder()
+    b.add(_tool("3", "c1"))
+    b.add(_prose("4"))
+    step = b._step_stack[-1]
+    assert step.rotated_phrase == "rot1"    # phrase advanced before resume
+    b.add(ev("5", "workflow_resumed"))
+    b.add(ev("6", "step_started", step="front-door", kind="agent",
+             phase="front-door", model="m2", provider="anthropic",
+             label="frozen1", rotate_phrase=True))
+    assert b._step_stack[-1] is step        # same node reused
+    assert step.rotated_phrase is None      # cleared on resume re-entry
+    assert step.rotate_phrase is True       # re-armed from the new payload
