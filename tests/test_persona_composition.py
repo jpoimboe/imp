@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.agents.prompts import build_context, render_prompt
+from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import ChangeContext
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 from imp.engine.state import JsonlEventLog
@@ -37,13 +38,13 @@ events_path=tmp_path / "e.jsonl", subagent_defs={},
 def test_empty_persona_composes_head_then_tail_with_nothing_between(tmp_path):
     # AC#3: a personaless workflow renders core_head + core_tail, nothing between.
     sp = _build(tmp_path, rendered_persona="").system_prompt
-    assert sp.startswith(f"{_CORE_HEAD}\n\n{_CORE_TAIL}")
+    assert sp.startswith(reflow_markdown(f"{_CORE_HEAD}\n\n{_CORE_TAIL}"))
 
 
 def test_persona_injected_between_head_and_tail(tmp_path):
     # AC#4: rendered persona lands between head and tail, before the step body.
     sp = _build(tmp_path, rendered_persona="PERSONA TEXT").system_prompt
-    assert sp.startswith(f"{_CORE_HEAD}\n\nPERSONA TEXT\n\n{_CORE_TAIL}")
+    assert sp.startswith(reflow_markdown(f"{_CORE_HEAD}\n\nPERSONA TEXT\n\n{_CORE_TAIL}"))
     assert sp.index("PERSONA TEXT") < sp.index("STEP BODY")
 
 
