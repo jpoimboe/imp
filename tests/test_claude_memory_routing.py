@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pathlib
 
+from imp.providers.config import parse_project_facts
+
 WF = pathlib.Path("src/imp/assets/workflows/imp")
 INCLUDE = '{% include "partials/verifying-claims.md" %}'
 
@@ -31,3 +33,12 @@ def test_verifying_claims_excluded_from_task_lead_coder_and_skill() -> None:
         "skills/verification-before-completion.md",
     ):
         assert INCLUDE not in (WF / rel).read_text(), rel
+
+
+def test_project_yaml_guidance_loads_with_prerelease_and_pointers() -> None:
+    _facts, guidance = parse_project_facts(pathlib.Path("imp/project.yaml"))
+    assert isinstance(guidance, str)
+    assert "pre-release" in guidance
+    assert "Skip backward-compatibility" in guidance
+    assert "docs/imp-conventions.md" in guidance
+    assert "docs/imp-invariants.md" in guidance
