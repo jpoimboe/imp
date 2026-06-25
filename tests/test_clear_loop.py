@@ -4,11 +4,13 @@ import argparse
 import functools
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
 
 import imp.cli.main as m
+import imp.cli.signals as sig
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -483,3 +485,53 @@ def test_resume_interactive_leads_with_header_before_splash(
     assert "feat · demo · resuming" in out
     assert out.index("feat · demo · resuming") < out.index("SCENE")
     assert out.endswith("SCENE\n\n")
+
+
+@pytest.mark.parametrize("splash_shown", [True, False])
+def test_resume_interactive_wires_preceded_by_blank_to_splash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, splash_shown: bool,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: splash_shown)
+    monkeypatch.setattr(m, "_is_interactive", lambda **k: True)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+
+    captured: dict[str, object] = {}
+
+    class _CapDriver:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(m, "LiveDriver", _CapDriver)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+
+    async def _fake_loop(control, *, tui, first):
+        return await first({})
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+            token="feat", non_interactive=False, message=None, tui=False))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert captured["preceded_by_blank"] is splash_shown

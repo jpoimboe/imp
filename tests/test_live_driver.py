@@ -1655,6 +1655,65 @@ def test_suppress_replay_pure_replay_renders_nothing() -> None:
     assert all(not ln for ln in _body(out))
 
 
+def test_resume_with_preceding_blank_omits_driver_leading_separator() -> None:
+    # Interactive resume: the rendered splash already emitted the single pre-
+    # first-emission blank (preceded_by_blank=True). The first LIVE node after
+    # the replayed prefix is a container (the plan phase header — the agent
+    # resuming work), so the driver must NOT prepend its own separator on top of
+    # the splash's blank. The first emitted line is the phase header, no blank
+    # above it.
+    events = _two_phase_events()
+    marked = [{**e, "_replay": True} for e in events[:3]] + events[3:]
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True, preceded_by_blank=True)
+    for e in marked:
+        drv.on_event(e)
+    drv.finish()
+    assert out.getvalue().split("\n")[0] == "── plan phase ───"
+
+
+def test_resume_without_preceding_blank_keeps_driver_leading_separator() -> None:
+    # Headless / non-interactive resume: no splash renders, so only a run-header
+    # line (with no trailing blank) precedes the driver (preceded_by_blank=False,
+    # the default). The driver MUST keep its own separator before the first
+    # container emission so the phase header does not butt against the run-header
+    # — matching the from-scratch non-resume rendering. The first emitted line is
+    # the blank separator.
+    events = _two_phase_events()
+    marked = [{**e, "_replay": True} for e in events[:3]] + events[3:]
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True, preceded_by_blank=False)
+    for e in marked:
+        drv.on_event(e)
+    drv.finish()
+    assert out.getvalue().split("\n")[0] == ""
+    assert out.getvalue().split("\n")[1] == "── plan phase ───"
+
+
+def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
+    # User-first resume: the first LIVE node is a user message (a leaf, never a
+    # container). It already shows no driver leading separator today; this guards
+    # that the preceded_by_blank suppression leaves that flow unchanged — the
+    # message is the first emitted line, no blank above it.
+    events = [
+        ev("1", "change_created", change_id=1, title="t"),
+        ev("2", "step_started", step="spec", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec"),
+        ev("3", "user_message", content=[{"type": "text", "text": "do the thing"}]),
+    ]
+    marked = [{**e, "_replay": True} for e in events[:3]] + events[3:]
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True, preceded_by_blank=True)
+    for e in marked:
+        drv.on_event(e)
+    drv.finish()
+    assert out.getvalue().split("\n")[0] == "> do the thing"
+
+
 def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
     from imp.cli import palette as pal
     from imp.cli.live_driver import compose_activity_status

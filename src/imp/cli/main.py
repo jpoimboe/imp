@@ -1065,7 +1065,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     _warn_if_tui_unavailable(args, sys.stdout)
     color = should_use_color(sys.stdout)
     print(_run_header_line(change.id, change.title, "resuming", color=color))
-    _print_splash_banner(interactive=_is_interactive(
+    splash_shown = _print_splash_banner(interactive=_is_interactive(
         non_interactive=bool(getattr(args, "non_interactive", False))))
 
     async def _first(leave_state: dict[str, str]) -> int:
@@ -1073,7 +1073,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width(), status=status,
-                            suppress_replay=True)
+                            suppress_replay=True,
+                            preceded_by_blank=splash_shown)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)

@@ -163,7 +163,8 @@ def _container_closed(container: Any) -> bool:
 
 class LiveDriver:
     def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
-                 suppress_replay: bool = False) -> None:
+                 suppress_replay: bool = False,
+                 preceded_by_blank: bool = False) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
@@ -183,6 +184,8 @@ class LiveDriver:
         self._prev_prose = False
         self._prompt_active = False        # defer _print_lines while a prompt owns the screen
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
+        self._preceded_by_blank = preceded_by_blank
+        self._emitted_any = False
         self._deferred: list[tuple[list[str], bool, str]] = []
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
@@ -436,8 +439,9 @@ class LiveDriver:
             # prepare_for_prompt already printed the leading blank; consume it
             # (only a non-empty emission consumes — this method is non-empty).
             self._separator_emitted = False
-        elif self._prev_prose:
+        elif self._prev_prose and not (self._preceded_by_blank and not self._emitted_any):
             self._stream.write(separator_indent + "\n")
+        self._emitted_any = True
         for ln in lines:
             self._stream.write(ln + "\n")
         self._stream.flush()
