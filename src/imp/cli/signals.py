@@ -31,6 +31,10 @@ _suppress = contextlib.suppress
 
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 
+# Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
+# (a `new` or `paused` run) becomes `paused` on interrupt.
+_PRESERVE_ON_PAUSE = ("merge_blocked", "completed", "saved", "abandoned")
+
 
 def _open_pause_exists(change: Change) -> bool:
     for event in reversed(list(change.event_log().read())):
@@ -43,15 +47,15 @@ def _open_pause_exists(change: Change) -> bool:
 
 
 def pause_and_exit(change: Change, *, reason: str) -> None:
-    """Save state as paused (ONLY transitioning from running — a missing or
-    merge_blocked status is preserved) and append workflow_paused UNLESS the
+    """Save state as `paused` (from any active status; a terminal/blocked status
+    in _PRESERVE_ON_PAUSE is left untouched) and append workflow_paused UNLESS the
     journal already holds an open pause (a workflow_paused with no intervening
     workflow_resumed). Emission-driven, NOT reason-equality: the
     clean-solicit-SIGINT (point A) and SIGTERM paths emit no engine pause, so the
     tail is not `paused` and they still append correctly."""
     try:
         state = State.load(change.state_dir)
-        if state.status == "running":
+        if state.status not in _PRESERVE_ON_PAUSE:
             state.status = "paused"
             state.save(change.state_dir)
     except FileNotFoundError:
