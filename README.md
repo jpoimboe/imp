@@ -70,3 +70,24 @@ Underneath it all, an append-only **event log is the single source of truth**: e
 step, tool call, and decision is recorded per change. State is a cursor rebuilt from
 the log, so a run can pause mid-step or crash and resume without losing the thread —
 and the same log renders both the live view and `imp log` after the fact.
+
+## What it's for
+
+Each pain below is something experienced engineers already distrust about coding
+agents. imp's answer to each is structural, not a promise.
+
+- **Context drift in long sessions.** Roughly 65% of agent failures trace to context
+  that has drifted from the task. imp hands every step fresh, tightly-scoped context
+  by construction, so there is no long session to drift.
+- **Unauditable agents.** Every byte of every run is logged per change; the event log
+  is the source of truth, not a side effect you hope was captured.
+- **Unreviewed drift to production.** Work runs autonomously only up to a gate, and
+  each change is isolated in its own worktree until you approve it.
+- **Opacity and loss of comprehension.** A declarative workflow plus the
+  event-log-as-truth keep a run legible; an intent-level per-change summary (delivered
+  by separate work) lets you read what happened at the level you care about.
+- **Defensive-code amplification.** The workflow's coding stance pushes back on the
+  reflexive fallbacks and dead error-handling agents tend to pile up (hardened by
+  separate work).
+- **Vendor lock-in.** Model selection is per role, and the engine can run different
+  roles on different vendors in a single run (see Highlights).
