@@ -439,7 +439,15 @@ def build_agent_invocation(
         body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
         body = reflow_markdown(body)
         system_prompt = f"{body}\n\n{instruction}"
-    continuation_fn = build_continuation_fn(instruction=instruction)
+    continuation_fn = build_continuation_fn(
+        instruction=instruction,
+        user_input_fn=user_chat_input_fn,
+        coordinator=coordinator,
+        event_log=event_log,
+        agent_id=agent_id,
+        non_interactive=non_interactive,
+        subagent=subagent_depth > 0,
+    )
     return AgentInvocation(
         agent_def=agent_def,
         provider_name=provider_name,

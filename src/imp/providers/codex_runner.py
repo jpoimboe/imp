@@ -772,6 +772,8 @@ class CodexAgentRunner:
                 nxt = cont(last_text)
                 if _inspect.isawaitable(nxt):
                     nxt = await nxt
+            except AwaitingUserInput:
+                raise  # headless bare-turn-end pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)  # a subagent-origin pause must unwind
                 if self._is_cancelled():

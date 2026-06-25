@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
+import pytest
+
+from imp.cli.signals import InterruptCoordinator
 from imp.engine.completion import NUDGE_LIMIT, build_continuation_fn, completion_instruction
 from imp.engine.types import OutputField, OutputSchema, SourceLoc
 
@@ -62,24 +66,110 @@ def _instruction() -> str:
     return "To finish this step you MUST call the `complete_step` tool with X."
 
 
-def test_nudge_fn_returns_instruction_then_none() -> None:
-    fn = build_continuation_fn(instruction=_instruction())
-    assert fn is not None
-    # First NUDGE_LIMIT calls return the corrective text...
+class _RecordingLog:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    def append(self, **ev: object) -> None:
+        self.events.append(ev)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+def test_subagent_nudges_then_returns_none() -> None:
+    fn = build_continuation_fn(instruction=_instruction(), subagent=True)
     for _ in range(NUDGE_LIMIT):
-        out = fn("some prose")
-        assert out is not None
+        out = fn("still prose, no tool call")
+        assert isinstance(out, str)
         assert "complete_step" in out
-    # ...then None (which the provider turns into agent_incomplete).
-    assert fn("more prose") is None
+    # Exhausted: a subagent fails loudly to its parent via None -> agent_incomplete.
+    assert fn("still prose") is None
 
 
-def test_continuation_always_nudges_and_names_both_terminators() -> None:
-    fn = build_continuation_fn(instruction="CALL complete_step with: done (bool).")
-    first = fn("some text")
-    assert "complete_step" in first and "wait_for_user" in first
-    # exhausts after NUDGE_LIMIT, then None -> agent_incomplete -> pause
-    for _ in range(NUDGE_LIMIT - 1):
-        assert fn("x") is not None
-    assert fn("x") is None
+def test_nudge_text_does_not_name_wait_for_user() -> None:
+    fn = build_continuation_fn(instruction=_instruction(), subagent=True)
+    out = fn("prose")
+    assert isinstance(out, str)
+    assert "complete_step" in out
+    assert "wait_for_user" not in out
+
+
+def test_top_level_no_channel_pauses_after_nudges() -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    fn = build_continuation_fn(instruction=_instruction(), subagent=False)
+    for _ in range(NUDGE_LIMIT):
+        assert fn("prose") is not None
+    # Top-level with no channel: pause carrying the last text, not agent_incomplete.
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("the final question")
+    assert exc_info.value.prompt == "the final question"
+
+
+def test_pending_interject_satisfies_without_soliciting() -> None:
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("actually, stop and reconsider")
+    calls = {"n": 0}
+
+    def reply_fn(_q: str) -> str:
+        calls["n"] += 1
+        return "should-not-be-used"
+
+    fn = build_continuation_fn(
+        instruction=_instruction(), user_input_fn=reply_fn,
+        coordinator=coord, non_interactive=False, subagent=False)
+    assert fn("which database?") == "actually, stop and reconsider"
+    assert calls["n"] == 0
+
+
+@pytest.mark.anyio
+async def test_attended_human_reply_becomes_next_message(
+    anyio_backend: str,
+) -> None:
+    log = _RecordingLog()
+
+    async def reply_fn(_q: str) -> str:
+        return "use postgres"
+
+    fn = build_continuation_fn(
+        instruction=_instruction(), user_input_fn=reply_fn,
+        coordinator=InterruptCoordinator(), event_log=log, agent_id="a1",
+        non_interactive=False, subagent=False)
+    out = fn("which database should I use?")
+    assert inspect.isawaitable(out)
+    assert await out == "use postgres"
+    # Attended path emits awaiting_user_input and NEVER nudges.
+    assert any(e["type"] == "awaiting_user_input" for e in log.events)
+
+
+@pytest.mark.anyio
+async def test_headless_with_channel_nudges_then_solicits(
+    anyio_backend: str,
+) -> None:
+    log = _RecordingLog()
+    calls = {"n": 0}
+
+    async def channel(_q: str) -> str:
+        calls["n"] += 1
+        return "the --message reply"
+
+    fn = build_continuation_fn(
+        instruction=_instruction(), user_input_fn=channel,
+        coordinator=InterruptCoordinator(), event_log=log, agent_id="a1",
+        non_interactive=True, subagent=False)
+    # Headless top-level: nudge FIRST, channel untouched, no awaiting_user_input.
+    for _ in range(NUDGE_LIMIT):
+        out = fn("still prose")
+        assert isinstance(out, str)
+        assert "complete_step" in out
+    assert calls["n"] == 0
+    assert not any(e["type"] == "awaiting_user_input" for e in log.events)
+    # Exhausted: now solicit the channel and emit awaiting_user_input.
+    out = fn("still prose")
+    assert inspect.isawaitable(out)
+    assert await out == "the --message reply"
+    assert calls["n"] == 1
+    assert any(e["type"] == "awaiting_user_input" for e in log.events)
 
