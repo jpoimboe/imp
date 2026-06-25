@@ -108,3 +108,7 @@ symbols or branch paths into a playbook.
   `/list` / `/new` / `/abandon` / the unknown-command notice / the unroutable-message hint, judge
   the multi-Change chat UX, and write a PASS/FAIL + UX verdict → `docs/bugs/`. Validates
   `imp/specs/2026-06-14-remote-control-chat-commands.md`.
+- `imp-ux-playbook.md` — surface polish pass: walk a CLI or TUI surface with fresh eyes and emit an
+  agent-authored PASS/FAIL verdict plus a suggestions list → `docs/issues/`.
+- `interrupt-playbook.md` — correctness matrix: fire every (provider × state × trigger)
+  combination, grep for orphans and event-log classification, pass/fail each cell → `docs/bugs/`.
