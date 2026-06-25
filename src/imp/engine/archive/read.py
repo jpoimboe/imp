@@ -156,6 +156,10 @@ def rehydrate_change(control_root: Path, change_id: str) -> Path:
     (change_dir / "change.json").write_bytes(change_json)
     (change_dir / "state" / "state.json").write_bytes(state_json or b"{}")
     (change_dir / "events.jsonl").write_bytes(events or b"")
+    for rel, blob in read_step_blobs(control_root, change_id).items():
+        dest = change_dir / "steps" / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(blob)
     return change_dir
 
 
