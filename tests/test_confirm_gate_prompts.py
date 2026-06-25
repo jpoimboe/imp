@@ -89,7 +89,8 @@ def test_plan_writer_has_ask_vs_decide_and_decisions_section() -> None:
     assert "*(decided during planning)*" in text
     assert "*(user-confirmed during planning)*" in text
     assert "## Decisions" in text
-    assert "wait_for_user" in text
+    assert "yield to the human" in text
+    assert "wait_for_user" not in text
     # minors pass ban kept (the phrase wraps across a line break in the file;
     # "do not reopen planning" is distinctive and sits on one line)
     assert "do not reopen planning" in text
