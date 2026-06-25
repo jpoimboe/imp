@@ -49,6 +49,9 @@ Review the task's diff for code quality. Evaluate:
 **Design:**
 - No magic numbers — constants should be named
 - No dead code or overbuild (YAGNI)
+- Defensive handling of states that can't occur, fallbacks that mask a bad state
+  instead of preventing it, or speculative abstraction — flag it.
+  Simpler-and-stricter beats tolerant-and-complex.
 - Each file has one clear responsibility with a well-defined interface
 - Units are decomposed so they can be understood and tested independently
 - The implementation follows the file structure from the plan

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pathlib
+
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
@@ -125,3 +127,29 @@ def test_plan_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -
         workflow_dir=bundled_workflow_dir("imp"))
     assert "git diff RB..imp/abc" in batch
     assert "..HEAD" not in batch
+
+
+def test_plan_writer_carries_illegal_states_steer() -> None:
+    body = _agent_prompt("plan-writer")
+    assert (
+        "Make illegal states unrepresentable — prefer a design where the type or "
+        "structure rules out the bad case over one that admits it and then validates "
+        "or falls back."
+    ) in body
+
+
+def test_code_reviewer_flags_defensive_sprawl() -> None:
+    body = _agent_prompt("code-reviewer")
+    assert "Defensive handling of states that can't occur, fallbacks that mask a bad state" in body
+    assert "Simpler-and-stricter beats tolerant-and-complex." in body
+
+
+def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
+    text = pathlib.Path(
+        "src/imp/assets/workflows/imp/persona.md"
+    ).read_text()
+    assert "Design so bad states can't arise; then don't add error handling, fallbacks," in text
+    # The remainder of the rule stays intact.
+    assert "Only validate at system boundaries (user input," in text
+    # The old bare opener is gone.
+    assert "- Don't add error handling, fallbacks, or validation for scenarios" not in text

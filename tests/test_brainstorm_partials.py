@@ -72,6 +72,13 @@ def test_brainstorm_dialogue_bare_open_does_not_freeze_concierge_or_scout() -> N
     assert "their reply picks the hat" in low
 
 
+def test_spec_design_principles_carries_illegal_states_principle() -> None:
+    text = (PARTIALS / "spec-design-principles.md").read_text()
+    assert "**Make illegal states unrepresentable.**" in text
+    assert "rules out the bad case over one that admits it and then validates or" in text
+    assert "Push correctness into the shape of the data, not into runtime guards." in text
+
+
 def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
     text = (PARTIALS / "live-gate-dialogue.md").read_text()
     # Door-agnostic posture present.
