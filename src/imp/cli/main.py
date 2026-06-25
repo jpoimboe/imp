@@ -151,18 +151,22 @@ def _is_interactive(
             and should_use_color(stdout))
 
 
-def _print_splash_banner(*, interactive: bool, stream: Any = None) -> bool:
-    """Leading blank line then the splash scene, printed on an interactive entry
-    only. Shared by new/chat and resume so the banner is identical everywhere.
-    Returns True only when the banner was actually printed (interactive and a
-    non-empty scene), so the opening flow can tie its separator to it."""
+def _print_splash_banner(
+    *, interactive: bool, lead_blank: bool = True, stream: Any = None,
+) -> bool:
+    """Optional leading blank line then the splash scene, printed on an interactive
+    entry only. Shared by new/chat and resume so the banner is identical everywhere.
+    `lead_blank=False` skips the leading blank for callers whose header already
+    emitted one. Returns True only when the banner was actually printed (interactive
+    and a non-empty scene), so the opening flow can tie its separator to it."""
     if not interactive:
         return False
     out = sys.stdout if stream is None else stream
     block = splash.splash_block(theme=pal.active_theme(), width=_term_width(), color=True)
     if not block:
         return False
-    print(file=out)
+    if lead_blank:
+        print(file=out)
     print(block, file=out)
     return True
 
@@ -604,16 +608,26 @@ def _print_run_header(change_id: str, title: str, marker: str,
     print()
 
 
+def _print_opening(change: Change, marker: str, *, interactive: bool, color: bool) -> bool:
+    """Lead with the run header, then the splash scene+phrase when interactive, so
+    the change identity is the first thing on screen. The header already emits its
+    trailing blank line, so the splash is printed without its own leading one.
+    Returns whether the splash was rendered."""
+    _print_run_header(change.id, change.title, marker, color=color)
+    return _print_splash_banner(interactive=interactive, lead_blank=False)
+
+
 async def _read_opening_message(
     change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
-    """Print the run header, then read the opening message — header first so the
-    layout stays put when erase_when_done erases and the turn is reprinted."""
-    if banner_shown:
+    """Lead with the run header, then the splash (when interactive), then read the
+    opening message — so the change identity is the first thing on screen.
+    `banner_shown` is True on an interactive entry that should render the splash."""
+    shown = _print_opening(change, leave_mode, interactive=banner_shown, color=color)
+    if shown:
         print()
-    _print_run_header(change.id, change.title, leave_mode, color=color)
     make = _prompt_factory or (
         lambda: Prompt(editing_mode=editing_mode, color=color))
     prompt = make()
@@ -719,35 +733,40 @@ async def _run_cleared_session(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
-    banner_shown = _print_splash_banner(interactive=True)
-    if banner_shown:
-        print()
-    prompt = Prompt(editing_mode=_editing_mode(control), color=color)
-    try:
-        reply = (await prompt.ask_async(
-            width=_term_width(), hint=OPENING_HINT)).strip()
-    except (EOFError, KeyboardInterrupt):
-        print("imp: cancelled", file=sys.stderr)
-        return 130
-    opening_text = _normalize_opening_reply(reply)
     change = Change.create_draft(
         control, title="", change_id=new_change_id(),
         base_branch=base, origin="draft")
-    _print_run_header(change.id, change.title, "new", color=color)
-    if tui:
-        return await _run_tui_session(
-            change, seed_opening=opening_text, opening_intent=opening_text,
-            leave_mode="new", leave_state=leave_state)
-    status = LiveStatus(sys.stdout)
-    driver = LiveDriver(
-        stream=sys.stdout, color=color, width=_term_width(), status=status)
-    coord = InterruptCoordinator()
-    solicit = make_interactive_solicit(
-        change, status=status, driver=driver, coord=coord)
-    return await run_session_client(
-        change, driver=driver, coord=coord, solicit=solicit,
-        seed_opening=opening_text, status=status,
-        opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
+    _session_started = False
+    try:
+        print(_run_header_line(change.id, change.title, "new", color=color))
+        if _print_splash_banner(interactive=True):
+            print()
+        prompt = Prompt(editing_mode=_editing_mode(control), color=color)
+        try:
+            reply = (await prompt.ask_async(
+                width=_term_width(), hint=OPENING_HINT)).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("imp: cancelled", file=sys.stderr)
+            return 130
+        _session_started = True
+        opening_text = _normalize_opening_reply(reply)
+        if tui:
+            return await _run_tui_session(
+                change, seed_opening=opening_text, opening_intent=opening_text,
+                leave_mode="new", leave_state=leave_state)
+        status = LiveStatus(sys.stdout)
+        driver = LiveDriver(
+            stream=sys.stdout, color=color, width=_term_width(), status=status)
+        coord = InterruptCoordinator()
+        solicit = make_interactive_solicit(
+            change, status=status, driver=driver, coord=coord)
+        return await run_session_client(
+            change, driver=driver, coord=coord, solicit=solicit,
+            seed_opening=opening_text, status=status,
+            opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
+    finally:
+        if not _session_started:
+            discard_conversation(change)
 
 
 async def _clear_loop(
@@ -915,7 +934,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
-    banner_shown = _print_splash_banner(interactive=interactive)
     color = should_use_color(sys.stdout)
 
     change_id = new_change_id()
@@ -942,7 +960,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         try:
             reply = await _read_opening_message(
-                change, leave_mode=leave_mode, banner_shown=banner_shown,
+                change, leave_mode=leave_mode, banner_shown=interactive,
                 color=color, width=_term_width(),
                 editing_mode=_editing_mode(control))
         except (EOFError, KeyboardInterrupt):
@@ -977,8 +995,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     if _tui_requested(args):
         if not header_printed:
-            _print_run_header(
-                change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+            _print_opening(change, leave_mode, interactive=interactive, color=color)
 
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
@@ -989,8 +1006,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await _clear_loop(control, tui=True, first=_first_tui)
 
     if not header_printed:
-        _print_run_header(
-            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+        _print_opening(change, leave_mode, interactive=interactive, color=color)
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
@@ -1135,10 +1151,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     _warn_if_tui_unavailable(args, sys.stdout)
-    _print_splash_banner(interactive=_is_interactive(
-        non_interactive=bool(getattr(args, "non_interactive", False))))
-    print(_run_header_line(
-        change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
+    color = should_use_color(sys.stdout)
+    print(_run_header_line(change.id, change.title, "resuming", color=color))
+    if _print_splash_banner(interactive=_is_interactive(
+            non_interactive=bool(getattr(args, "non_interactive", False)))):
+        print()
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)

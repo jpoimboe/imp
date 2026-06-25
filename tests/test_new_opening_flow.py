@@ -114,3 +114,44 @@ async def test_cancel_at_opening_prompt_discards_the_minted_draft(
 
     assert rc == 130
     assert discarded["id"] == "z9y8x7"   # the just-minted draft was torn down
+
+
+@pytest.mark.anyio
+async def test_seeded_interactive_leads_with_header_before_splash(
+    stub_new, monkeypatch, capsys,
+) -> None:
+    m = stub_new
+
+    def _fake_splash(*, interactive, lead_blank=True, stream=None):
+        if interactive:
+            print("SCENE")
+            return True
+        return False
+
+    monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
+
+    class _FakePrompt:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def ask_async(self, **kwargs: object) -> str:
+            return "unused"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    args = _new_args()
+    args.opening = "build a parser"
+    rc = await m._async_cmd_new(args, leave_mode="new")
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "z9y8x7 · new\n\nSCENE\n" in out
+    assert out.index("z9y8x7") < out.index("SCENE")

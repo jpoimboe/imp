@@ -372,6 +372,42 @@ def test_new_tui_routes_through_clear_loop(
     assert seen["tui"] is True        # TUI arm → tui modality
 
 
+@pytest.mark.anyio
+async def test_run_cleared_session_leads_with_header_before_splash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    def _fake_splash(*, interactive: bool) -> bool:
+        print("SCENE")
+        return True
+
+    monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+
+    class _FakePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    async def _fake_client(change: object, **kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    rc = await m._run_cleared_session(tmp_path, "main", tui=False, leave_state={})
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert " · new" in out                       # the run header (minted id · new)
+    assert out.index(" · new") < out.index("SCENE")   # header precedes the splash
+
+
 def test_resume_interactive_routes_through_clear_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -404,3 +440,45 @@ def test_resume_interactive_routes_through_clear_loop(
 
     assert rc == 0
     assert seen["tui"] is False
+
+
+def test_resume_interactive_leads_with_header_before_splash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    def _fake_splash(*, interactive: bool) -> bool:
+        print("SCENE")
+        return True
+
+    monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
+    monkeypatch.setattr(m, "_is_interactive", lambda **k: True)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+
+    async def _fake_loop(control, *, tui, first):
+        return 0
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(m._async_cmd_resume, argparse.Namespace(
+            token="feat", non_interactive=False, message=None, tui=False))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "feat · demo · resuming" in out
+    assert out.index("feat · demo · resuming") < out.index("SCENE")
+    assert out.endswith("SCENE\n\n")
