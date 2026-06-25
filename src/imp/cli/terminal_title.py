@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-GLYPH_WORKING = "·"
+GLYPH_WORKING = ""
 GLYPH_WAITING = "Ⲫ"
 
 
@@ -33,6 +33,8 @@ class TerminalTitle:
             return
         if glyph == self._current:
             return
-        self._stream.write(f"\x1b]2;{glyph} imp — {self._name}\x07")
+        prefix = f"{glyph} " if glyph else ""
+        label = f"imp · {self._name}" if self._name else "imp"
+        self._stream.write(f"\x1b]2;{prefix}{label}\x07")
         self._stream.flush()
         self._current = glyph
