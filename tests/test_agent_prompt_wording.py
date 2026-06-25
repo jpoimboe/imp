@@ -125,3 +125,12 @@ def test_plan_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -
         workflow_dir=bundled_workflow_dir("imp"))
     assert "git diff RB..imp/abc" in batch
     assert "..HEAD" not in batch
+
+
+def test_plan_writer_carries_illegal_states_steer() -> None:
+    body = _agent_prompt("plan-writer")
+    assert (
+        "Make illegal states unrepresentable — prefer a design where the type or "
+        "structure rules out the bad case over one that admits it and then validates "
+        "or falls back."
+    ) in body

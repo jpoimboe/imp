@@ -122,6 +122,8 @@ not re-fire on an already-covered note.
 
 Write a complete, zero-ambiguity implementation plan that a skilled developer with no project context can execute mechanically. Document every file to touch, every test to write, every command to run. DRY. YAGNI. TDD. Frequent commits.
 
+Make illegal states unrepresentable — prefer a design where the type or structure rules out the bad case over one that admits it and then validates or falls back.
+
 ## Ask vs. decide
 
 The policy is **turn-agnostic** — it governs fresh authoring (plan 1,
