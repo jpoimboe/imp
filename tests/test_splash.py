@@ -308,7 +308,7 @@ def test_print_splash_banner_emits_blank_line_then_scene_when_interactive(monkey
     monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
     buf = io.StringIO()
     shown = m._print_splash_banner(interactive=True, stream=buf)
-    assert buf.getvalue() == "\nSCENE\n"
+    assert buf.getvalue() == "\nSCENE\n\n"
     assert shown is True
 
 
@@ -756,7 +756,7 @@ def test_print_splash_banner_omits_leading_blank_when_lead_blank_false(monkeypat
     monkeypatch.setattr(m.splash, "splash_block", lambda **_k: "SCENE")
     buf = io.StringIO()
     shown = m._print_splash_banner(interactive=True, lead_blank=False, stream=buf)
-    assert buf.getvalue() == "SCENE\n"
+    assert buf.getvalue() == "SCENE\n\n"
     assert shown is True
 
 

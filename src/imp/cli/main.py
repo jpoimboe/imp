@@ -166,6 +166,7 @@ def _print_splash_banner(
     if lead_blank:
         print(file=out)
     print(block, file=out)
+    print(file=out)
     return True
 
 
@@ -580,9 +581,7 @@ async def _read_opening_message(
     """Lead with the run header, then the splash (when interactive), then read the
     opening message — so the change identity is the first thing on screen.
     `banner_shown` is True on an interactive entry that should render the splash."""
-    shown = _print_opening(change, leave_mode, interactive=banner_shown, color=color)
-    if shown:
-        print()
+    _print_opening(change, leave_mode, interactive=banner_shown, color=color)
     make = _prompt_factory or (
         lambda: Prompt(editing_mode=editing_mode, color=color))
     prompt = make()
@@ -694,8 +693,7 @@ async def _run_cleared_session(
     _session_started = False
     try:
         print(_run_header_line(change.id, change.title, "new", color=color))
-        if _print_splash_banner(interactive=True):
-            print()
+        _print_splash_banner(interactive=True)
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(
@@ -1067,16 +1065,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     _warn_if_tui_unavailable(args, sys.stdout)
     color = should_use_color(sys.stdout)
     print(_run_header_line(change.id, change.title, "resuming", color=color))
-    if _print_splash_banner(interactive=_is_interactive(
-            non_interactive=bool(getattr(args, "non_interactive", False)))):
-        print()
+    splash_shown = _print_splash_banner(interactive=_is_interactive(
+        non_interactive=bool(getattr(args, "non_interactive", False))))
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width(), status=status,
-                            suppress_replay=True)
+                            suppress_replay=True,
+                            preceded_by_blank=splash_shown)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
