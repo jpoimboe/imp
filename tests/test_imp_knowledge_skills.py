@@ -60,7 +60,7 @@ def test_introspect_names_ground_truth_files() -> None:
 def test_introspect_names_the_read_commands() -> None:
     body = load_agent_skill(_skills_dir(), "imp-introspect")
     assert "imp help" in body
-    assert "imp list" in body
-    assert "imp list --all" in body
+    assert "imp show" in body
+    assert "imp show --all" in body
     assert "imp search" in body
     assert "imp show <id> [spec|plan|events|status|review]" in body

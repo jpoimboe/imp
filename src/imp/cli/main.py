@@ -1835,7 +1835,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past change{plural} — see `imp list --all`)",
+            f"({past} past change{plural} — see `imp show --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 

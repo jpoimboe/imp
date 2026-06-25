@@ -19,9 +19,9 @@ names rather than guessing them.
 
 ## What work exists
 
-- `imp list` — active in-flight changes plus the Backlog (including parked /
+- `imp show` — active in-flight changes plus the Backlog (including parked /
   `saved` changes).
-- `imp list --all` — also includes completed and abandoned past changes.
+- `imp show --all` — also includes completed and abandoned past changes.
 - `imp search <query>` — search the archive (completed, abandoned, and left
   conversations) for changes whose title or id contains `<query>` (a required
   substring; bare `imp search` errors).
