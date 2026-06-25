@@ -99,7 +99,7 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
     assertion 3 verifies it still appears in the step_context tools_schema.
     """
     workflow_dir = tmp_path / ".imp" / "change" / "workflow"
-    skills_dir = workflow_dir / "skills"
+    skills_dir = workflow_dir / "skills" / "agent"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
 
@@ -326,7 +326,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
     """
     # Set up workflow_dir with skills/refactor.md
     workflow_dir = tmp_path / ".imp" / "change" / "workflow"
-    skills_dir = workflow_dir / "skills"
+    skills_dir = workflow_dir / "skills" / "agent"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
 
