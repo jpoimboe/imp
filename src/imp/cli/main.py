@@ -622,11 +622,12 @@ async def _read_opening_message(
     width: int, editing_mode: str,
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
-    """Print the run header, then read the opening message — header first so the
-    layout stays put when erase_when_done erases and the turn is reprinted."""
-    if banner_shown:
+    """Lead with the run header, then the splash (when interactive), then read the
+    opening message — so the change identity is the first thing on screen.
+    `banner_shown` is True on an interactive entry that should render the splash."""
+    shown = _print_opening(change, leave_mode, interactive=banner_shown, color=color)
+    if shown:
         print()
-    _print_run_header(change.id, change.title, leave_mode, color=color)
     make = _prompt_factory or (
         lambda: Prompt(editing_mode=editing_mode, color=color))
     prompt = make()
@@ -928,7 +929,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
     opening_intent = seed.opening_intent
-    banner_shown = _print_splash_banner(interactive=interactive)
     color = should_use_color(sys.stdout)
 
     change_id = new_change_id()
@@ -955,7 +955,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         try:
             reply = await _read_opening_message(
-                change, leave_mode=leave_mode, banner_shown=banner_shown,
+                change, leave_mode=leave_mode, banner_shown=interactive,
                 color=color, width=_term_width(),
                 editing_mode=_editing_mode(control))
         except (EOFError, KeyboardInterrupt):
@@ -990,8 +990,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     if _tui_requested(args):
         if not header_printed:
-            _print_run_header(
-                change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+            _print_opening(change, leave_mode, interactive=interactive, color=color)
 
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
@@ -1002,8 +1001,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await _clear_loop(control, tui=True, first=_first_tui)
 
     if not header_printed:
-        _print_run_header(
-            change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+        _print_opening(change, leave_mode, interactive=interactive, color=color)
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
