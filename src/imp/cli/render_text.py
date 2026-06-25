@@ -540,7 +540,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
             # something the human typed, so it never renders as a `>` turn.
             return
-        # A bright-blue `>` caret marks the human turn on the first line only; it
+        # A brand-orange `>` caret marks the human turn on the first line only; it
         # sits OUTSIDE the slate. The separating space + the wrapped text sit ON the
         # slate so the band hugs the text. Continuation lines carry a blank caret
         # column (no repeated caret) and align under the first line's text (two
@@ -552,7 +552,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # full-width fill → clean copy/paste). Blank separator lines stay unpainted.
         # The live input field is painted by prompt.py, not here.
         indent = _gutter_indent(depth, gutters, color)
-        caret = pal.ansi(">", "bright_blue", enabled=color)
+        caret = pal.ansi(">", "wordmark", enabled=color)
         bg = pal.user_bg_open(enabled=color)
         end = "\x1b[0m" if bg else ""
         avail = max(8, width - _INDENT_W * depth - 2)
