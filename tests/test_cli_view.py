@@ -73,15 +73,15 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
     assert called == ["mb-test"]    # passed to the thin client, not rejected early
 
 
-def test_resume_accepts_crashed_running_status(tmp_path, monkeypatch) -> None:
-    """A hard-killed run leaves status='running' on disk; the thin client gets it."""
+def test_resume_accepts_crashed_at_rest_status(tmp_path, monkeypatch) -> None:
+    """A crashed/at-rest run is resumable; the resume guard must not refuse it."""
     import argparse
 
     import anyio
 
     import imp.cli.main as m
 
-    _make_change_worktree(tmp_path, "crashed", "crashed", status="running")
+    _make_change_worktree(tmp_path, "crashed", "crashed", status="new")
 
     called: list[str] = []
 

@@ -17,7 +17,7 @@ from tests.conftest import _seed_control
 def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="Draft", change_id="d1", base_branch="main")
-    assert State.load(ch.state_dir).status == "running"
+    assert State.load(ch.state_dir).status == "new"
 
     save_to_backlog(ch)
 

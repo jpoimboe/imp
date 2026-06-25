@@ -74,7 +74,7 @@ def test_show_plan_live_shows_newest(
 def test_show_status_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     _seed_with_artifacts(tmp_path, _ID, "Feat")
-    assert "running" in _run(monkeypatch, tmp_path, "show", _ID, "status")
+    assert "new" in _run(monkeypatch, tmp_path, "show", _ID, "status")
 
 
 def test_show_events_and_review_live(
@@ -305,7 +305,7 @@ def test_show_live_default_renders_card(
     _seed_with_artifacts(tmp_path, _ID, "Feat")
     out = _run(monkeypatch, tmp_path, "show", _ID)
     assert "Feat" in out
-    assert "running" in out
+    assert "new" in out
 
 
 def test_show_step_line_prints_raw_step_name_not_label(

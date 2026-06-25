@@ -40,7 +40,7 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     assert ch.workflow_dir == wtpath / "imp" / "workflows" / "imp"
     assert (ch.workflow_dir / "workflow.yaml").exists()
     state = State.load(ch.change_dir / "state")
-    assert state.id == "abc123" and state.step == "s" and state.status == "running"
+    assert state.id == "abc123" and state.step == "s" and state.status == "new"
 
 
 def test_change_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> None:
@@ -223,7 +223,7 @@ def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
     assert not (tmp_path / ".imp" / "worktrees" / "drf1").exists()
     assert "imp/drf1" not in _git(tmp_path, "branch", "--list", "imp/drf1").stdout
     state = State.load(ch.change_dir / "state")
-    assert state.step == "s" and state.status == "running"   # seeded at the first step
+    assert state.step == "s" and state.status == "new"   # seeded at the first step
     events_text = (ch.change_dir / "events.jsonl").read_text()
     events = [json.loads(line) for line in events_text.splitlines() if line.strip()]
     assert any(e["type"] == "change_created" for e in events)

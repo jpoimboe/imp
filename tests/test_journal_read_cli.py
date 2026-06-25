@@ -242,8 +242,8 @@ def test_status_column_alignment_short_ids(
     lines = capsys.readouterr().out.splitlines()
     status_col = lines[0].index("STATUS")
     for data_line in lines[1:]:
-        # Slice the STATUS column range and confirm it starts with "running".
-        assert data_line[status_col:status_col + len("running")] == "running", (
+        # Slice the STATUS column range and confirm it starts with "new".
+        assert data_line[status_col:status_col + len("new")] == "new", (
             f"STATUS column misaligned at offset {status_col}: {data_line!r}"
         )
 
@@ -372,7 +372,7 @@ def test_status_default_inflight_columns_and_color(
     assert "NAME" in plain_header
     assert "STATUS" in plain_header
     assert "Add version flag" in out
-    assert "\x1b[32mrunning\x1b[0m" in out
+    assert "\x1b[36mnew\x1b[0m" in out
     # id leads the row
     assert lines[1].startswith("yaitd7")
 
