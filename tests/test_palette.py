@@ -131,9 +131,9 @@ def test_user_color_is_bright_blue_foreground() -> None:
     assert pal._ANSI["bright_blue"] == "\x1b[94m"
 
 
-def test_caret_constant_and_helper_are_the_blue_arrow() -> None:
+def test_caret_constant_and_helper_are_the_gold_arrow() -> None:
     assert pal.CARET == "> "
-    assert pal.caret(enabled=True) == "\x1b[94m> \x1b[0m"   # ansi theme bright_blue
+    assert pal.caret(enabled=True) == "\x1b[33m> \x1b[0m"   # ansi theme wordmark gold
     assert pal.caret(enabled=False) == "> "
     assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
     assert pal.rule(4, enabled=False) == "────"
@@ -241,7 +241,7 @@ def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
 
 
 def test_change_id_role_wears_imp_gold_wordmark() -> None:
-    assert pal.NODE_COLORS["change_id"] == ("bold", "wordmark")
+    assert pal.NODE_COLORS["change_id"] == ("wordmark",)
 
 
 def test_yellow_accent_retuned_to_warm_gold_family() -> None:

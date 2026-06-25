@@ -60,14 +60,14 @@ def test_build_session_has_no_app_background_and_reserves_no_menu_space() -> Non
     assert s.reserve_space_for_menu == 0
 
 
-def test_default_caret_is_the_blue_arrow() -> None:
-    """The default caret is the `> ` arrow: bright-blue under color, plain `> `
+def test_default_caret_is_the_gold_arrow() -> None:
+    """The default caret is the `> ` arrow: gold (wordmark) under color, plain `> `
     otherwise. _message(None) emits it; an explicit prompt_text is still styled."""
     from prompt_toolkit.formatted_text import ANSI
 
     on = Prompt(color=True)._message(None)
     assert isinstance(on, ANSI)
-    assert "\x1b[94m" in on.value and "> " in on.value
+    assert "\x1b[33m" in on.value and "> " in on.value
     assert Prompt(color=False)._message(None) == "> "
 
 
@@ -116,7 +116,7 @@ def test_message_renders_markdown_question_above_the_caret() -> None:
     msg = _prompt_message_text("Reply **merge** to merge.", color=True, width=80)
     assert "\x1b[1m" in msg                          # bold for **merge**
     assert "**" not in msg                           # asterisks consumed
-    assert msg.endswith("\x1b[94m> \x1b[0m")          # styled `> ` caret line last
+    assert msg.endswith("\x1b[33m> \x1b[0m")          # styled `> ` caret line last
 
 
 def test_message_no_color_renders_markdown_without_ansi() -> None:

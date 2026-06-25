@@ -126,7 +126,7 @@ def ansi(text: str, *codes: str, enabled: bool = True) -> str:
 def sgr(*codes: str, enabled: bool) -> str:
     """Just the OPENING escape for `codes` — no text, no trailing reset. For
     composing a line where an outer attribute (a background) must survive an
-    inner fg change: the caret sets bright_blue then returns to default fg with
+    inner fg change: the caret sets wordmark then returns to default fg with
     `\\x1b[39m` (fg-only reset) so the line's background keeps painting under the
     typed text. `ansi()`'s full reset would clear the background mid-line."""
     if not enabled or not codes:
@@ -134,16 +134,17 @@ def sgr(*codes: str, enabled: bool) -> str:
     return "".join(_ANSI[c] for c in codes)
 
 
-# The interactive input field. A bright-blue `> ` caret marks the user's turn —
-# the same render-safe two-byte sequence the init picker cursor emits. CARET is
-# styled bright_blue (NODE_COLORS["user"]) to keep the "user = blue" identity, and
-# carries its own trailing space so callers can use it as a one-piece prefix.
+# The interactive input field. A gold `> ` caret marks the user's turn — the same
+# render-safe two-byte sequence the init picker cursor emits. CARET is styled
+# wordmark (imp's brand gold, matching the working spinner) so the live prompt the
+# user types at matches the spinner, and carries its own trailing space so callers
+# can use it as a one-piece prefix.
 CARET = "> "
 
 
 def caret(*, enabled: bool) -> str:
-    """The styled prompt caret: the bright-blue `> ` when color is on, plain `> ` when off."""
-    return ansi(CARET, "bright_blue", enabled=enabled)
+    """The styled prompt caret: the gold `> ` when color is on, plain `> ` when off."""
+    return ansi(CARET, "wordmark", enabled=enabled)
 
 
 # Subtle "entered input" background, per truecolor theme — the quiet highlight
@@ -248,7 +249,7 @@ def action_text(action: Any) -> str:
 # calmest; weight + color are reserved for speaker identity and structure.
 NODE_COLORS: dict[str, tuple[str, ...]] = {
     "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
-    "change_id": ("bold", "wordmark"),  # the change's own identity handle wears imp's brand gold
+    "change_id": ("wordmark",),         # the change's identity handle: imp's brand gold, no bold
     "phase": ("bold", "blue"),         # structure stands out: bold blue
     "step": ("bold", "step"),          # a bold darker-blue "mini-phase" label
     "breadcrumb": ("gray",),           # per-step completion line — recede entirely
