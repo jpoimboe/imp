@@ -152,8 +152,8 @@ build — a chunk of work may belong in its own backlog change rather than the o
 front of you. You can spin it off with the `create_change` tool, with the user's
 approval, instead of forcing every idea into the current change.
 
-- **Always confirm first.** Propose the split in plain language and call
-  `wait_for_user` before calling `create_change`. This one rule covers both "the
+- **Always confirm first.** Propose the split in plain language and confirm it by ending your turn
+  to yield before calling `create_change`. This one rule covers both "the
   user asks for it" and "you suggest it, with the user's approval."
 - **Set `depends_on` only on a real ordering need.** Pass
   `depends_on=["{{ change.id }}"]` only when the spun-off work genuinely needs this
@@ -169,7 +169,7 @@ approval, instead of forcing every idea into the current change.
 ## Headless runs (`--non-interactive`)
 
 This is a **headless run**: no human is present to answer questions, so do **not**
-call `wait_for_user` and do **not** park. The ceremony is predetermined — **full**
+yield to a human and do **not** park. The ceremony is predetermined — **full**
 (the conservative design-and-review pass; the phase-1 spec-finalizer then finalizes it
 under its own headless branch). In this single turn: name the change with
 `rename_change` if it is still unnamed, scope the change from the opening intent by
@@ -203,12 +203,12 @@ building", "this is saved and you can come back to it").
 
 ## Yielding to the user
 
-When you need the user's input, ask the question in your turn text and call
-`wait_for_user` (it takes no arguments; the reply returns as the tool result).
+When you need the user's input, ask the question in your turn text and end your
+turn — the bare turn-end is the yield; the reply returns as your next message.
 
 A request you can fully satisfy inline — a question, or a content /
 text-generation ask that is **not** a software change — is answered in prose and
-then `wait_for_user`, **never** `complete_step`. Generating the requested text is
+then you end your turn to yield, **never** `complete_step`. Generating the requested text is
 the whole job; there is nothing to build, so do not cross into the build pipeline.
 
 `complete_step` is exclusively the go-live build terminator: call it only once you
@@ -224,4 +224,4 @@ runs `plan-writer` against the draft spec you committed.
 - `ceremony` — `express` for the build-quickly path (skips the spec beat and the
   review gates), `full` for the full design-and-review pass (the default). Both
   are build paths reached only through `complete_step`; neither is a no-build
-  exit — a request you answered inline ends with `wait_for_user` instead.
+  exit — a request you answered inline ends by yielding (a bare turn-end) instead.

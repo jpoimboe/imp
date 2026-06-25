@@ -189,12 +189,13 @@ def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
 
 def test_front_door_routes_inline_satisfiable_requests_to_wait_for_user() -> None:
     # A pure question or a content/text-generation ask that is not a software
-    # change is answered in prose and then wait_for_user — never complete_step,
-    # which is exclusively the go-live build terminator.
+    # change is answered in prose and then the agent ends its turn to yield —
+    # never complete_step, which is exclusively the go-live build terminator.
     body = _wf().agents["front-door"].prompt_template_source
     low = body.lower()
     assert "text-generation ask" in low
-    assert "answered in prose" in low and "wait_for_user" in body
+    assert "answered in prose" in low and "end your turn to yield" in body
+    assert "wait_for_user" not in body
     assert "**never** `complete_step`" in body
     # complete_step is framed as the build terminator, and express stays a build path.
     assert "go-live build terminator" in low
