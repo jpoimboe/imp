@@ -54,7 +54,7 @@ async def run_session_client(
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 change_id=change.id, control_root=change.control_root,
-                leave_state=leave_state, title=title)
+                leave_state=leave_state, leave_mode=leave_mode, title=title)
         except TimeoutError:
             startup_failed = True
             # attach raised before run_terminal_client's teardown finally runs.
@@ -67,10 +67,10 @@ async def run_session_client(
             file=sys.stderr)
         return 3
     from imp.cli.main import (
-        _maybe_apply_leave_disposition,
+        _print_leave_disposition,
         _session_exit_code,
     )
-    disposition_rc = await _maybe_apply_leave_disposition(change, leave_mode, leave_state)
+    disposition_rc = _print_leave_disposition(change, leave_state)
     if disposition_rc is not None:
         return disposition_rc
     return _session_exit_code(change, coord)

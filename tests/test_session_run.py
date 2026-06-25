@@ -411,7 +411,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
 
 
 @pytest.mark.anyio
-async def test_run_session_client_saves_unmaterialized_new_leave_to_backlog(
+async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
@@ -421,47 +421,51 @@ async def test_run_session_client_saves_unmaterialized_new_leave_to_backlog(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
 
-    async def _noop(**_kwargs: Any) -> None:
-        pass
+    captured: dict[str, object] = {}
 
-    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+    async def _capture(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
         change, driver=_NullDriver(), coord=coord,
         solicit=lambda _p: _never(), leave_mode="new")
 
-    assert rc == 0
-    assert State.load(change.state_dir).status == "paused"          # Backlog, home kept
+    assert captured["leave_mode"] == "new"
+    # The foreground does NOT apply the disposition — the daemon owns it.
     assert (tmp_path / ".imp" / "changes" / "d1").exists()
+    assert rc == 0
 
 
 @pytest.mark.anyio
-async def test_run_session_client_archives_unmaterialized_chat_leave(
+async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from imp.engine.archive import record, records_root
-
     _seed_control(tmp_path)
     change = Change.create_draft(
         tmp_path, title="Draft", change_id="c1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="opening_intent", payload={"text": "a question"})
 
-    async def _noop(**_kwargs: Any) -> None:
-        pass
+    captured: dict[str, object] = {}
 
-    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+    async def _capture(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
         change, driver=_NullDriver(), coord=coord,
         solicit=lambda _p: _never(), leave_mode="chat")
 
+    assert captured["leave_mode"] == "chat"
+    assert (tmp_path / ".imp" / "changes" / "c1").exists()
     assert rc == 0
-    assert not (tmp_path / ".imp" / "changes" / "c1").exists()     # archived, home dropped
-    rec = record.read_record(records_root(tmp_path), "c1")
-    assert rec is not None and rec["resumable"] is True
 
 
 @pytest.mark.anyio
@@ -575,14 +579,13 @@ async def test_run_session_client_threads_provided_leave_state(
 
     seen: dict[str, object] = {}
 
-    async def _fake_disposition(change: object, leave_mode: object,
-                                leave_state: object) -> None:
+    def _fake_disposition(change: object, leave_state: object) -> None:
         seen["leave_state"] = leave_state
         return None
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
     monkeypatch.setattr(
-        "imp.cli.main._maybe_apply_leave_disposition", _fake_disposition)
+        "imp.cli.main._print_leave_disposition", _fake_disposition)
     monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
 
     coord = InterruptCoordinator()

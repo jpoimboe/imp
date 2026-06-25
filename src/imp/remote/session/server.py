@@ -11,7 +11,9 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
+    CONTROL_ARCHIVE,
     CONTROL_DETACH,
+    CONTROL_DISCARD,
     CONTROL_INTERRUPT,
     CONTROL_SAVE,
 )
@@ -45,8 +47,12 @@ class SessionServer:
         self._first_attach_fired: bool = False
         self.abandoned = False
         self.saved = False
+        self.archived = False
+        self.discarded = False
         self._abandon_requested = False
         self._save_requested = False
+        self._archive_requested = False
+        self._discard_requested = False
         self._serve_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         self._last_gate_event: dict[str, Any] | None = None
@@ -207,6 +213,16 @@ class SessionServer:
             with contextlib.suppress(anyio.WouldBlock):
                 self._control_send.send_nowait(action)
             return
+        if action == CONTROL_ARCHIVE:
+            self._archive_requested = True
+            with contextlib.suppress(anyio.WouldBlock):
+                self._control_send.send_nowait(action)
+            return
+        if action == CONTROL_DISCARD:
+            self._discard_requested = True
+            with contextlib.suppress(anyio.WouldBlock):
+                self._control_send.send_nowait(action)
+            return
         try:
             self._control_send.send_nowait(action)
         except anyio.WouldBlock:
@@ -220,6 +236,12 @@ class SessionServer:
                 return
             if self._save_requested:
                 await self._dispatch_control(CONTROL_SAVE)
+                return
+            if self._archive_requested:
+                await self._dispatch_control(CONTROL_ARCHIVE)
+                return
+            if self._discard_requested:
+                await self._dispatch_control(CONTROL_DISCARD)
                 return
             await self._dispatch_control(action)
 
@@ -239,4 +261,14 @@ class SessionServer:
             self.saved = True
             if self._serve_scope is None:
                 raise RuntimeError("save dispatched outside serve()")
+            self._serve_scope.cancel()
+        elif action == CONTROL_ARCHIVE:
+            self.archived = True
+            if self._serve_scope is None:
+                raise RuntimeError("archive dispatched outside serve()")
+            self._serve_scope.cancel()
+        elif action == CONTROL_DISCARD:
+            self.discarded = True
+            if self._serve_scope is None:
+                raise RuntimeError("discard dispatched outside serve()")
             self._serve_scope.cancel()

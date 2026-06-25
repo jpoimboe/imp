@@ -231,7 +231,8 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
             captured.append(self)
 
     async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", control_root=None, leave_state=None
+        *, attach, driver, coord, solicit, change_id: str = "",
+        control_root=None, leave_state=None, leave_mode=None,
     ) -> None:
         driver.on_event({"id": "1", "agent_id": None, "type": "change_created",
                          "payload": {"slug": "s", "title": "t"}})
@@ -256,7 +257,8 @@ async def test_run_tui_session_renders_events_and_handles_outcome(
 @pytest.mark.anyio
 async def test_run_tui_session_paused_returns_130(monkeypatch, capsys) -> None:
     async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", control_root=None, leave_state=None
+        *, attach, driver, coord, solicit, change_id: str = "",
+        control_root=None, leave_state=None, leave_mode=None,
     ) -> None:
         await coord.signal_pause(reason="ctrl-c")     # sets should_pause + reason
 
@@ -281,7 +283,8 @@ async def test_run_tui_session_solicit_routes_to_app_solicit(monkeypatch) -> Non
             return "the reply"
 
     async def _fake_terminal_client(
-        *, attach, driver, coord, solicit, change_id: str = "", control_root=None, leave_state=None
+        *, attach, driver, coord, solicit, change_id: str = "",
+        control_root=None, leave_state=None, leave_mode=None,
     ) -> None:
         replies.append(await solicit("prompt?"))
 
@@ -332,7 +335,7 @@ def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
 async def test_run_tui_session_threads_provided_leave_state(monkeypatch) -> None:
     async def _fake_terminal_client(
         *, attach, driver, coord, solicit, change_id: str = "",
-        control_root=None, leave_state=None,
+        control_root=None, leave_state=None, leave_mode=None,
     ) -> None:
         leave_state["intent"] = "clear"
 

@@ -2,9 +2,10 @@
 
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
 "attach" (the opening handshake), "input" (a gate reply), or "control" (an
-interrupt/detach/abandon/save action). The daemon -> client frame is "event", wrapping
-one curated engine event. Encoders return a line WITHOUT a trailing newline; the
-caller frames it (matching remote/daemon/protocol.py:make_hello)."""
+interrupt/detach/abandon/save/archive/discard action). The daemon -> client
+frame is "event", wrapping one curated engine event. Encoders return a line
+WITHOUT a trailing newline; the caller frames it (matching
+remote/daemon/protocol.py:make_hello)."""
 from __future__ import annotations
 
 import json
@@ -17,7 +18,12 @@ CONTROL_INTERRUPT = "interrupt"
 CONTROL_DETACH = "detach"
 CONTROL_ABANDON = "abandon"
 CONTROL_SAVE = "save"
-_CONTROL_ACTIONS = frozenset({CONTROL_INTERRUPT, CONTROL_DETACH, CONTROL_ABANDON, CONTROL_SAVE})
+CONTROL_ARCHIVE = "archive"
+CONTROL_DISCARD = "discard"
+_CONTROL_ACTIONS = frozenset({
+    CONTROL_INTERRUPT, CONTROL_DETACH, CONTROL_ABANDON, CONTROL_SAVE,
+    CONTROL_ARCHIVE, CONTROL_DISCARD,
+})
 
 
 @dataclass(frozen=True, slots=True)

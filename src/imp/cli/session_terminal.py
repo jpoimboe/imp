@@ -21,6 +21,7 @@ from typing import Any
 
 import anyio
 
+from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
@@ -40,6 +41,7 @@ async def run_terminal_client(
     change_id: str = "",
     control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,
+    leave_mode: str | None = None,
     title: TerminalTitle | None = None,
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
@@ -150,4 +152,25 @@ async def run_terminal_client(
             driver.finish()
             if title is not None:
                 title.reset()
+            # Deliberate leave (ctrl-d / /save / /clear / Ctrl-\ / headless): decide
+            # the disposition lock-free and flush the control frame BEFORE aclose so
+            # the daemon observes it ahead of the detach (spec "Sequencing"). Abandon
+            # has its own frame path and never sets the escalation event, so it is
+            # skipped here; a natural completion leaves the event unset too.
+            if (leave_state is not None and control_root is not None
+                    and coord.escalation_event is not None
+                    and coord.escalation_event.is_set()):
+                action = resolve_leave_action(
+                    control_root, change_id, leave_mode, leave_state.get("intent"))
+                if action is not None:
+                    _sent = False
+                    with contextlib.suppress(
+                        RuntimeError, anyio.BrokenResourceError,
+                        anyio.ClosedResourceError,
+                    ):
+                        await client.send_control(action)
+                        leave_state["disposition"] = action
+                        _sent = True
+                    if not _sent:
+                        leave_state["send_failed"] = "1"
             await client.aclose()
