@@ -420,29 +420,30 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
 
 # ── _v_subagent_forbidden_tools ───────────────────────────────────────────────
 
-_WAITER_SUBAGENT = """\
----
-name: waiter
-tools: [wait_for_user, complete_step]
-output:
-  status: {type: enum, values: [Success, Error]}
----
-prompt body
-"""
-
-_LEAD_WITH_WAITER_SUB = """\
----
-name: lead
-tools: [task, complete_step]
-subagents: [waiter]
-output:
-  status: {type: enum, values: [Success, Error]}
----
-prompt body
-"""
+def test_top_level_rename_change_agent_not_dispatched_is_allowed(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/renamer.md
+        """, agents={"renamer": _RENAMER_SUBAGENT})
+    load_workflow(wf)  # must not raise
 
 
-def test_parallel_dispatchable_subagent_with_wait_for_user_is_error(tmp_path: Path) -> None:
+def test_subagent_declaring_wait_for_user_no_longer_rejected(tmp_path: Path) -> None:
+    # wait_for_user is no longer in _SUBAGENT_FORBIDDEN_TOOLS, so a dispatchable
+    # subagent that declares it loads without error.
+    sub = (
+        "---\nname: waiter\ntools: [wait_for_user, complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
+    )
+    lead = (
+        "---\nname: lead\ntools: [task, complete_step]\nsubagents: [waiter]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
+    )
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -451,29 +452,11 @@ def test_parallel_dispatchable_subagent_with_wait_for_user_is_error(tmp_path: Pa
             steps:
               - name: s
                 file: agents/lead.md
-        """, agents={"lead": _LEAD_WITH_WAITER_SUB, "waiter": _WAITER_SUBAGENT})
-    with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf)
-    assert any(
-        "waiter" in str(e) and "wait_for_user" in str(e)
-        for e in ei.value.errors
-    )
-
-
-def test_top_level_wait_for_user_agent_not_dispatched_is_allowed(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/waiter.md
-        """, agents={"waiter": _WAITER_SUBAGENT})
+        """, agents={"lead": lead, "waiter": sub})
     load_workflow(wf)  # must not raise
 
 
-def test_dual_role_agent_as_step_and_subagent_with_wait_for_user_is_error(tmp_path: Path) -> None:
+def test_dual_role_agent_as_step_and_subagent_with_rename_change_is_error(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -481,14 +464,14 @@ def test_dual_role_agent_as_step_and_subagent_with_wait_for_user_is_error(tmp_pa
           - name: p
             steps:
               - name: s1
-                file: agents/waiter.md
+                file: agents/renamer.md
               - name: s2
                 file: agents/lead.md
-        """, agents={"lead": _LEAD_WITH_WAITER_SUB, "waiter": _WAITER_SUBAGENT})
+        """, agents={"lead": _LEAD_WITH_RENAMER_SUB, "renamer": _RENAMER_SUBAGENT})
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any(
-        "waiter" in str(e) and "wait_for_user" in str(e)
+        "renamer" in str(e) and "rename_change" in str(e)
         for e in ei.value.errors
     )
 

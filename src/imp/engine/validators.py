@@ -282,7 +282,7 @@ def _v_differ_from_targets_exist(
             )
 
 
-_SUBAGENT_FORBIDDEN_TOOLS = ("wait_for_user", "task", "rename_change")
+_SUBAGENT_FORBIDDEN_TOOLS = ("task", "rename_change")
 
 
 def _v_subagent_forbidden_tools(
