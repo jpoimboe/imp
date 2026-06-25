@@ -1,12 +1,14 @@
 """The front-door live-status phrase pool.
 
-One in-character phrase is drawn per front-door turn (selected at step start
-and recorded into the step_started event, so it holds steady for the turn)
-to replace the static `ideating` label. Exposed to label templates as the
-Jinja global `front_door_status_phrase`."""
+The engine draws one phrase for the step's frozen display label whenever a step
+declares the reserved `"<imp>"` label sentinel, and the live renderer rotates a
+fresh phrase per work segment within the turn. The pool stays imp-owned here; the
+generic renderer is told only "rotate this step's phrase" via a payload flag."""
 from __future__ import annotations
 
 import random
+
+STATUS_PHRASE_LABEL = "<imp>"
 
 FRONT_DOOR_STATUS_PHRASES: tuple[str, ...] = (
     "scheming", "plotting", "brooding", "hatching plans", "laying groundwork",

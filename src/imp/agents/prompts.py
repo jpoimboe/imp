@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import jinja2
 
-from imp.agents.front_door_status import front_door_status_phrase
+from imp.agents.front_door_status import STATUS_PHRASE_LABEL, front_door_status_phrase
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
@@ -150,6 +150,8 @@ def render_label(
     label: str | None, change: Change | None, log: EventLog | None,
     state: State | None = None,
 ) -> str | None:
+    if label == STATUS_PHRASE_LABEL:
+        return front_door_status_phrase()
     if label is None or "{{" not in label:
         return label
     if change is None or log is None:
