@@ -26,42 +26,42 @@ def test_default_glyphs_match_spec() -> None:
 
 def test_init_sets_working_title_on_tty() -> None:
     s = _TTY()
-    TerminalTitle(s, "My Change")
-    assert s.getvalue() == "\x1b]2;✦ imp · My Change\x07"
+    TerminalTitle(s, "nagi22", "My Change")
+    assert s.getvalue() == "\x1b]2;✦ imp · nagi22 · My Change\x07"
 
 
 def test_waiting_emits_waiting_glyph_with_full_name() -> None:
     s = _TTY()
-    title = TerminalTitle(s, "My Change")
+    title = TerminalTitle(s, "nagi22", "My Change")
     s.truncate(0)
     s.seek(0)
     title.waiting()
-    assert s.getvalue() == f"\x1b]2;{GLYPH_WAITING} imp · My Change\x07"
+    assert s.getvalue() == f"\x1b]2;{GLYPH_WAITING} imp · nagi22 · My Change\x07"
 
 
 def test_working_overwrites_waiting() -> None:
     s = _TTY()
-    title = TerminalTitle(s, "My Change")
+    title = TerminalTitle(s, "nagi22", "My Change")
     title.waiting()
     s.truncate(0)
     s.seek(0)
     title.working()
-    assert s.getvalue() == "\x1b]2;✦ imp · My Change\x07"
+    assert s.getvalue() == "\x1b]2;✦ imp · nagi22 · My Change\x07"
 
 
 def test_empty_name_drops_separator() -> None:
     s = _TTY()
-    title = TerminalTitle(s, "")
-    assert s.getvalue() == "\x1b]2;✦ imp\x07"
+    title = TerminalTitle(s, "nagi22", "")
+    assert s.getvalue() == "\x1b]2;✦ imp · nagi22\x07"
     s.truncate(0)
     s.seek(0)
     title.waiting()
-    assert s.getvalue() == f"\x1b]2;{GLYPH_WAITING} imp\x07"
+    assert s.getvalue() == f"\x1b]2;{GLYPH_WAITING} imp · nagi22\x07"
 
 
 def test_reset_clears_title() -> None:
     s = _TTY()
-    title = TerminalTitle(s, "My Change")
+    title = TerminalTitle(s, "nagi22", "My Change")
     s.truncate(0)
     s.seek(0)
     title.reset()
@@ -70,7 +70,7 @@ def test_reset_clears_title() -> None:
 
 def test_inert_on_non_tty_stream() -> None:
     s = _Pipe()
-    title = TerminalTitle(s, "My Change")
+    title = TerminalTitle(s, "nagi22", "My Change")
     title.working()
     title.waiting()
     title.reset()

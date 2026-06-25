@@ -490,6 +490,7 @@ async def test_run_session_client_passes_terminal_title_from_change_title(
     title = captured["title"]
     assert isinstance(title, TerminalTitle)
     assert title._name == "T"
+    assert title._change_id == "2026-06-15-title"
     assert rc == 0
 
 
@@ -532,7 +533,8 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
     reset_calls: list[str] = []
 
     class _FakeTitle:
-        def __init__(self, stream: object, change_name: str) -> None:
+        def __init__(self, stream: object, change_id: str, change_name: str) -> None:
+            self._change_id = change_id
             self._name = change_name
 
         def working(self) -> None: ...

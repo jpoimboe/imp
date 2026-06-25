@@ -597,7 +597,7 @@ async def test_title_flips_working_waiting_back_to_working_and_resets(
         return "imp"
 
     s = _TTYStream()
-    title = TerminalTitle(s, "My Change")
+    title = TerminalTitle(s, "term1", "My Change")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -612,8 +612,8 @@ async def test_title_flips_working_waiting_back_to_working_and_resets(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    working = "\x1b]2;✦ imp · My Change\x07"
-    waiting = f"\x1b]2;{GLYPH_WAITING} imp · My Change\x07"
+    working = "\x1b]2;✦ imp · term1 · My Change\x07"
+    waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
     reset = "\x1b]2;\x07"
     assert working in out
     assert waiting in out
@@ -654,7 +654,7 @@ async def test_replayed_awaiting_does_not_flip_to_waiting(
         raise AssertionError("a replayed gate must not solicit")
 
     s = _TTYStream()
-    title = TerminalTitle(s, "My Change")
+    title = TerminalTitle(s, "term1", "My Change")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -668,7 +668,7 @@ async def test_replayed_awaiting_does_not_flip_to_waiting(
 
             tg.start_soon(_client)
 
-    waiting = f"\x1b]2;{GLYPH_WAITING} imp · My Change\x07"
+    waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
     assert waiting not in s.getvalue()
 
 
