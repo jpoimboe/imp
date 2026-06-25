@@ -1,48 +1,30 @@
 # imp
 
-Project-local development lifecycle tool. A deterministic Python engine drives a declarative YAML workflow; the LLM is summoned per step with a fresh, tightly-scoped context.
+Coding agents are becoming **loops** — systems that run themselves, deciding what
+to do next and when they're done. Most loops trend toward something you can't see
+into: code written, reviewed, and maintained by a machine, in a form no human still
+understands. The loop works until the day it doesn't, and then no one can say why.
 
-See `docs/superpowers/specs/2026-05-24-imp-v0-design.md` for V0 design.
+**imp is the loop made legible.** A deterministic engine drives a declarative
+workflow; the model is summoned one step at a time with fresh, tightly-scoped
+context. The path is written down, every byte is logged, and the human stays at the
+controls — approving, redirecting, or stopping the work at gates that are part of
+the design, not bolted on.
 
-## Remote drivers
+You work at the level of **intent**. imp owns the mechanism: spec, plan, implement,
+review, integrate — each step isolated, auditable, and resumable, in its own git
+worktree, until it reaches you for a decision. It's the difference between software
+as a machine you understand and software as an organism you can only treat the
+symptoms of.
 
-imp can stream a run's events to an external chat surface and accept replies back —
-so you can watch and drive `imp new` from your phone. Enable exactly one built-in
-driver by name in your machine's `~/.config/imp/config.yaml`:
+## Intent-driven development
 
-```yaml
-remote:
-  driver: telegram          # bare name; or a mapping with knob overrides:
-  # driver:
-  #   name: telegram
-  #   events: [all]             # or an explicit event-type allowlist
-  #   startup_timeout: 10
-```
+You describe *what* you want changed and *why*. imp owns the *how* — the mechanism
+of turning that intent into a reviewed, integrated change. You are not prompting a
+chat window and hoping; you state intent and approve the result at points you
+control.
 
-Credentials stay in the environment (never in config). Built-ins:
-
-| Driver | Description | Required env |
-|--------|-------------|--------------|
-| `telegram` | Drive an imp run from a Telegram chat (outbound getUpdates; stdlib-only). | `IMP_TELEGRAM_TOKEN`, `IMP_TELEGRAM_CHAT_ID` |
-
-Run `imp config` to see the available drivers and which one is enabled.
-
-### Telegram setup
-
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token. A bot
-   token has the form `<id>:<auth>` — exactly **one** colon. Pasting any extra
-   suffix makes every API call fail.
-2. Open your new bot in Telegram and send it `/start` (or any message). A bot can
-   only message a chat that has messaged it first.
-3. Find your numeric chat id (e.g. message [@userinfobot](https://t.me/userinfobot)),
-   then export both credentials:
-
-   ```bash
-   export IMP_TELEGRAM_TOKEN=123456789:AA...      # <id>:<auth>, one colon
-   export IMP_TELEGRAM_CHAT_ID=987654321          # your numeric chat id
-   ```
-
-A run validates these once at startup (a `getMe` / `getChat` self-check). A rejected
-token or unreachable chat is reported at **WARNING** with a fix hint — otherwise a
-broken credential fails silently and no notifications arrive. The driver's other
-diagnostics stay quiet unless you enable debug logging for the `imp.remote` logger.
+The distinction is the whole stance. The alternative is software as an organism:
+grown rather than built, understood by no one, kept alive by treating symptoms.
+Intent-driven development keeps software a machine — something you direct, inspect,
+and can still reason about after the agent has done its work.
