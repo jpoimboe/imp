@@ -2062,43 +2062,66 @@ def _backlog_rows(control: Path) -> list[_Row]:
     return rows
 
 
+_HISTORY_CAP = 10
+
+# Display-only disposition word for the overview history block.
+_DISPOSITION = {"completed": "merged", "abandoned": "abandoned"}
+
+
+def _history_rows(control: Path, *, show_all: bool) -> list[_Row]:
+    """Terminal-disposition (completed/abandoned) rows for the history block."""
+    rows = [r for r in _completed_rows(control) if r[1] in _DISPOSITION]
+    if not show_all:
+        rows = [r for r in rows if r[1] == "completed"]
+    rows = _sort_rows_newest_first(rows)
+    return rows if show_all else rows[:_HISTORY_CAP]
+
+
+def _overview_lines(control: Path, *, show_all: bool, now: datetime,
+                    color: bool) -> list[str]:
+    """Build the overview as lines: in-flight, Backlog, then the history block."""
+    name_w = change_row.name_budget()
+    inflight = _sort_rows_newest_first(_status_rows(control))
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
+    history = _history_rows(control, show_all=show_all)
+    if not inflight and not backlog_rows and not history:
+        return [_NO_CHANGES_MESSAGE]
+    lines = [change_row.header_line(color=color)]
+    for r in inflight:
+        intent = None
+        if not r[4].strip():
+            intent = _resolve_intent(_load_events_for_id(control, r[0]) or [])
+        lines.append(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+            last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
+    if backlog_rows:
+        lines.append("")
+        lines.append(pal.ansi("Backlog", "dim", enabled=color))
+        for r in backlog_rows:
+            lines.append(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+                last_iso=r[3], now=now, color=color, name_width=name_w))
+    if history:
+        lines.append("")
+        label = "history" if show_all else "recently merged"
+        lines.append(pal.ansi(label, "dim", enabled=color))
+        for r in history:
+            lines.append(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
+                last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
+    return lines
+
+
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     try:
         control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
         print(_NO_CHANGES_MESSAGE)
         return 0
-    now = datetime.now(UTC)
-    inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
-    past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
-    if not inflight and not backlog_rows and not past:
-        print(_NO_CHANGES_MESSAGE)
-        return 0
-    color = should_use_color(sys.stdout)
-    name_w = change_row.name_budget()
-    print(change_row.header_line(color=color))
-    for r in inflight:
-        intent = None
-        if not r[4].strip():
-            intent = _resolve_intent(_load_events_for_id(control, r[0]) or [])
-        print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
-    if backlog_rows:
-        print()
-        print(pal.ansi("Backlog", "dim", enabled=color))
-        for r in backlog_rows:
-            print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-                last_iso=r[3], now=now, color=color, name_width=name_w))
-    if past:
-        if inflight or backlog_rows:
-            print()
-        for r in past:
-            print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-                last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
+    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
+                            color=should_use_color(sys.stdout))
+    for line in lines:
+        print(line)
     return 0
 
 
