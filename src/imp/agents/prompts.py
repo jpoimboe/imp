@@ -155,10 +155,10 @@ def render_label(
     if label is None or "{{" not in label:
         return label
     if change is None or log is None:
-        # No change/log context (the State.step_label seed path): render
-        # template GLOBALS only — e.g. {{ front_door_status_phrase() }}. A label
-        # that needs vars/change raises UndefinedError under StrictUndefined and
-        # falls back to the raw template text (unchanged behavior).
+        # No change/log context (the State.step_label seed path): render with no
+        # template context. A label that needs vars/change raises UndefinedError
+        # under StrictUndefined and falls back to the raw template text. (The
+        # "<imp>" sentinel is resolved above, before this template path.)
         try:
             return _env_for(None).from_string(label).render()
         except jinja2.exceptions.TemplateError:
@@ -184,20 +184,15 @@ _ENV_KWARGS: dict[str, Any] = dict(
 )
 
 
-def _register_globals(env: jinja2.Environment) -> jinja2.Environment:
-    env.globals["front_door_status_phrase"] = front_door_status_phrase
-    return env
-
-
-_env = _register_globals(jinja2.Environment(**_ENV_KWARGS))
+_env = jinja2.Environment(**_ENV_KWARGS)
 
 
 def _env_for(workflow_dir: Path | None) -> jinja2.Environment:
     # FileSystemLoader lets {% include %} resolve partials; loader-less env is the default.
     if workflow_dir is None:
         return _env
-    return _register_globals(jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(workflow_dir)), **_ENV_KWARGS))
+    return jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(workflow_dir)), **_ENV_KWARGS)
 
 
 def render_prompt(

@@ -30,7 +30,7 @@ def test_front_door_is_first_phase_with_chrome_none() -> None:
     assert step.name == "front-door"
     assert step.kind == "agent"
     assert step.chrome == "none"          # bare-conversation render (Part 1 mechanism)
-    assert step.label == "{{ front_door_status_phrase() }}"
+    assert step.label == "<imp>"
 
 
 def test_front_door_express_routes_to_plan_writer_and_sets_fast_path() -> None:
