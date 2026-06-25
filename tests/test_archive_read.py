@@ -173,3 +173,83 @@ def test_read_change_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
     assert meta["base_branch"] == "main"
     assert meta["materialized"] is True
     assert "change_meta" not in meta
+
+
+def test_read_step_blobs_returns_relpath_to_bytes(tmp_path: Path) -> None:
+    from imp.engine import archive
+    from imp.engine.archive.read import read_step_blobs
+
+    events = tmp_path / "e.jsonl"
+    events.write_bytes(b"")
+    change_json = tmp_path / "c.json"
+    change_json.write_text(json.dumps(
+        {"id": "conv", "title": "C", "base_branch": "main"}))
+    state_json = tmp_path / "st.json"
+    state_json.write_text(json.dumps({"id": "conv", "status": "paused"}))
+    steps = tmp_path / "steps"
+    (steps / "p" / "s").mkdir(parents=True)
+    (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
+
+    archive.archive_change(
+        tmp_path, "conv", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        steps_dir=steps, resumable=True)
+
+    assert read_step_blobs(tmp_path, "conv") == {"p/s/transcript.jsonl": b"LINE\n"}
+
+
+def test_read_step_blobs_empty_when_no_record(tmp_path: Path) -> None:
+    from imp.engine.archive.read import read_step_blobs
+
+    assert read_step_blobs(tmp_path, "ghost") == {}
+
+
+def test_read_step_blobs_skips_missing_blob(tmp_path: Path) -> None:
+    from imp.engine import archive
+    from imp.engine.archive import record, records_root
+    from imp.engine.archive.read import read_step_blobs
+
+    events = tmp_path / "e.jsonl"
+    events.write_bytes(b"")
+    change_json = tmp_path / "c.json"
+    change_json.write_text(json.dumps(
+        {"id": "conv", "title": "C", "base_branch": "main"}))
+    state_json = tmp_path / "st.json"
+    state_json.write_text(json.dumps({"id": "conv", "status": "paused"}))
+    steps = tmp_path / "steps"
+    (steps / "p" / "s").mkdir(parents=True)
+    (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
+
+    archive.archive_change(
+        tmp_path, "conv", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        steps_dir=steps, resumable=True)
+
+    rec = record.read_record(records_root(tmp_path), "conv")
+    rec["step_blobs"] = {"p/s/transcript.jsonl": "0" * 64}
+    record.write_record(records_root(tmp_path), rec)
+
+    assert read_step_blobs(tmp_path, "conv") == {}
+
+
+def test_read_step_blobs_empty_when_not_resumable(tmp_path: Path) -> None:
+    from imp.engine import archive
+    from imp.engine.archive.read import read_step_blobs
+
+    events = tmp_path / "e.jsonl"
+    events.write_bytes(b"")
+    change_json = tmp_path / "c.json"
+    change_json.write_text(json.dumps(
+        {"id": "conv", "title": "C", "base_branch": "main"}))
+    state_json = tmp_path / "st.json"
+    state_json.write_text(json.dumps({"id": "conv", "status": "paused"}))
+    steps = tmp_path / "steps"
+    (steps / "p" / "s").mkdir(parents=True)
+    (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
+
+    archive.archive_change(
+        tmp_path, "conv", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        steps_dir=steps, resumable=False)
+
+    assert read_step_blobs(tmp_path, "conv") == {}
