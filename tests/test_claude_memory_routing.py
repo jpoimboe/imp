@@ -69,3 +69,21 @@ def test_imp_operator_notes_has_unblocking_section() -> None:
     assert "snapshot" in body
     assert "cherry-pick" in body
     assert "skew deadlock" in body.lower()
+
+
+def test_memory_code_comments_present_at_sites() -> None:
+    drift = pathlib.Path("tests/test_cc_builtins_drift.py").read_text()
+    assert "Do NOT skip on CLAUDECODE=1" in drift
+
+    openai = pathlib.Path("src/imp/providers/openai.py").read_text()
+    assert "no encrypted" in openai
+    assert "the latter 400s" in openai
+
+    cc = pathlib.Path("src/imp/providers/claude_code.py").read_text()
+    assert "blocks servers sourced from .mcp.json" in cc
+
+    codex = pathlib.Path("src/imp/providers/codex_mcp.py").read_text()
+    assert "not a posture reversal" in codex
+
+    makefile = pathlib.Path("Makefile").read_text()
+    assert "PYTEST_ARGS is NOT wired in" in makefile

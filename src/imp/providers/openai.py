@@ -199,6 +199,12 @@ def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
                 out.append({"type": "message", "role": "assistant",
                             "content": [{"type": "output_text", "text": text}]})
             for b in m.content:
+                # Plain function_call / function_call_output replay — no encrypted
+                # reasoning items threaded back — is accepted by the Responses API
+                # (live-verified, GPT-5 family). Do NOT add
+                # include=["reasoning.encrypted_content"] or echo raw reasoning
+                # output items into input[] (the latter 400s). This was the #1
+                # risk of the Responses migration.
                 if isinstance(b, ToolUseBlock):
                     out.append({"type": "function_call", "call_id": b.id,
                                 "name": b.name, "arguments": json.dumps(b.input)})

@@ -1043,6 +1043,10 @@ class ClaudeCodeAgentRunner:
             ),
             disallowed_tools=disallowed,
             setting_sources=[],
+            # strict_mcp_config=True blocks servers sourced from .mcp.json / user
+            # settings, NOT servers imp adds to mcp_servers. Adding a first-party
+            # server (dict entry + mcp__<name>__* allowlist + codex mirror) is not
+            # a posture reversal.
             strict_mcp_config=True,
             extra_args=extra_args,
             session_store=session_store,
