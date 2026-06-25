@@ -1737,7 +1737,7 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
     change.json are schema-identical to the in-flight ones (both written by
     State.save / Change.create), so the two sections can't silently drift.
     Returns None on malformed/incomplete JSON so a single corrupt entry can't
-    crash the whole `imp list` listing (callers skip None)."""
+    crash the whole `imp show` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)

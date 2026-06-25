@@ -120,3 +120,16 @@ def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
     main(["show", "liveid"])
     main(["show", "liveid", "--no-pager"])
     assert captured == [False, True]
+
+
+def test_no_live_imp_list_references() -> None:
+    """No source under src/imp may still reference the removed `imp list` verb
+    (docs/superpowers historical specs and tests/playbooks are out of scope)."""
+    root = Path(__file__).resolve().parents[1] / "src" / "imp"
+    offenders = [
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix in (".py", ".md")
+        and "imp list" in p.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert offenders == [], offenders
