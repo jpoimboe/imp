@@ -65,3 +65,20 @@ def test_brainstorm_dialogue_bare_open_does_not_freeze_concierge_or_scout() -> N
     # The bare open is reframed as front-door's open, three-hat invitation.
     assert "take stock of existing work" in low
     assert "their reply picks the hat" in low
+
+
+def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
+    text = (PARTIALS / "live-gate-dialogue.md").read_text()
+    # Door-agnostic posture present.
+    assert "Converse until ready" in text
+    assert "recommendation-anchored" in text
+    assert "no co-equal dangling alternative" in text
+    assert "One question at a time" in text
+    assert "closing summary" in text
+    assert "wait_for_user" in text
+    # The two finalize-only postures must NOT live in the shared partial.
+    assert "Clarifying questions are first-class" not in text
+    assert "Engage a concern straight" not in text
+    assert "within normal noise" not in text
+    # No superpowers attribution line.
+    assert "superpowers" not in text.lower()
