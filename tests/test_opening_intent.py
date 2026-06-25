@@ -9,7 +9,7 @@ from imp.cli.main import (
 
 
 def _ns(**kw):
-    base = dict(title=None, opening=None, spec_file=None, message=None)
+    base = dict(title=None, opening=None, message=None)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -19,14 +19,6 @@ def test_typed_message_sets_opening_intent_to_the_intent_text() -> None:
     assert isinstance(res, SeedResolution)
     assert res.seed_text == "add a --json flag"
     assert res.opening_intent == "add a --json flag"
-
-
-def test_spec_file_suppresses_opening_intent(tmp_path) -> None:
-    f = tmp_path / "draft.md"
-    f.write_text("Implement this spec\n...")
-    res = resolve_spec_seed(_ns(spec_file=str(f)))
-    assert res.seed_text is not None
-    assert res.opening_intent is None
 
 
 def test_unseeded_suppresses_opening_intent() -> None:
@@ -45,11 +37,6 @@ def test_no_prompt_when_opening_message_given() -> None:
 
 def test_no_prompt_when_non_interactive() -> None:
     assert _should_prompt_opening(seed_text=None, interactive=False) is False
-
-
-def test_no_prompt_when_seeded_from_spec_file() -> None:
-    assert _should_prompt_opening(
-        seed_text="Implement this spec\n...", interactive=True) is False
 
 
 def test_opening_question_helpers_are_removed() -> None:

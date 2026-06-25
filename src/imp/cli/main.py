@@ -120,8 +120,6 @@ class ReplyInterjectRouter:
             self._coord.enqueue_interject(line)
 
 
-SPEC_SEED_MARKER = "Implement this spec"
-
 OPENING_HINT = "type a message, or /help for commands"
 
 
@@ -172,8 +170,7 @@ def _print_splash_banner(
 
 
 class SeedError(Exception):
-    """A bad spec-seed source: a missing/unreadable --spec-file, or two seed
-    sources combined."""
+    """A bad seed source: e.g. an unknown playbook, or a misused flag combination."""
 
 
 class SeedResolution(NamedTuple):
@@ -182,43 +179,14 @@ class SeedResolution(NamedTuple):
     opening_intent: str | None = None
 
 
-def _read_seed_file(path: str) -> str:
-    p = Path(path)
-    if not p.is_file():
-        raise SeedError(
-            f"spec file {path!r} does not exist or is not a regular file")
-    try:
-        return p.read_text(encoding="utf-8")
-    except (OSError, ValueError) as e:
-        raise SeedError(f"cannot read spec file {path!r}: {e}") from e
-
-
-def _build_seed(path: str, content: str) -> str:
-    return (f"{SPEC_SEED_MARKER} (the user provided it as a draft at "
-            f"`{path}`):\n\n{content}")
-
-
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     """Resolve the first-turn seed source for `imp new`.
 
-    A positional MESSAGE is the user's verbatim opening intent (delivered
-    unwrapped); --spec-file delivers a wrapped draft. The two are mutually
-    exclusive. Raises SeedError on a missing/unreadable --spec-file or combined
-    seed sources."""
+    A non-empty positional MESSAGE becomes the user's verbatim opening intent
+    (delivered unwrapped); otherwise there is no seed. A spec is named in the
+    positional MESSAGE and read by front-door itself, never inlined here."""
     title = getattr(args, "title", None)
     opening = getattr(args, "opening", None)
-    spec_file = getattr(args, "spec_file", None)
-    message = getattr(args, "message", None)
-
-    if spec_file is not None:
-        if opening is not None:
-            raise SeedError(
-                "a positional MESSAGE and --spec-file are mutually exclusive")
-        if message is not None:
-            raise SeedError("--spec-file and --message are mutually exclusive")
-        return SeedResolution(
-            title, _build_seed(spec_file, _read_seed_file(spec_file)),
-            opening_intent=None)
 
     if opening is not None and opening.strip():
         return SeedResolution(title, opening, opening_intent=opening)
@@ -903,8 +871,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     else:
         try:
             playbook_name = getattr(args, "playbook", None)
-            if playbook_name and getattr(args, "spec_file", None):
-                raise SeedError("--playbook and --spec-file are mutually exclusive")
             if getattr(args, "findings_only", False) and not playbook_name:
                 raise SeedError("--findings-only requires --playbook")
             seed = resolve_spec_seed(args)
@@ -1054,7 +1020,6 @@ async def _async_cmd_run(args: argparse.Namespace) -> int:
         return 2
     args.playbook = name
     args.opening = args.playbook_args
-    args.spec_file = None
     return await _async_cmd_new(args)
 
 
@@ -2371,11 +2336,6 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
-    p_new.add_argument("--spec-file", metavar="PATH", default=None,
-                       help="Seed the change from a draft spec file: its content "
-                            "becomes front-door's opening intent. A missing or "
-                            "unreadable PATH is a hard error (rc 2). Mutually "
-                            "exclusive with a positional MESSAGE and with --message.")
     p_new.add_argument("--playbook", metavar="NAME", default=None,
                        help="Seed the change from imp/playbooks/<NAME>.md, "
                             "rendering {{ args }} from the positional MESSAGE.")

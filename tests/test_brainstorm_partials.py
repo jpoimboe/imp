@@ -25,7 +25,7 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     text = (PARTIALS / "brainstorm-dialogue.md").read_text()
     # opening-message taxonomy
     assert "<imp:begin/>" in text
-    assert "Implement this spec" in text
+    assert "names a spec file" in text
     # one question at a time — relocated into the shared live-gate partial
     assert "One question at a time" not in text
     assert "One question at a time" in (PARTIALS / "live-gate-dialogue.md").read_text()

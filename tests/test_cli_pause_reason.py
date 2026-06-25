@@ -107,7 +107,7 @@ def test_new_interactive_routes_through_session_client(
     try:
         rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
             title=None, opening="add a thing", non_interactive=False,
-            message=None, tui=False, spec_file=None))
+            message=None, tui=False))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]

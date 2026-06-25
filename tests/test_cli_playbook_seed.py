@@ -59,18 +59,3 @@ async def test_findings_only_without_playbook_exits_2(
     rc = await m._async_cmd_new(ns)
     assert rc == 2
     assert "--findings-only requires --playbook" in capsys.readouterr().err
-
-
-@pytest.mark.anyio
-async def test_playbook_and_spec_file_are_exclusive(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m.worktree, "check_preconditions", lambda control: None)
-    monkeypatch.setattr(m.worktree, "ensure_imp_ignored", lambda control: None)
-    monkeypatch.setattr(m.worktree, "current_branch", lambda control: "main")
-    ns = m._build_parser().parse_args(
-        ["new", "--playbook", "ux", "--spec-file", "spec.md", "intent"])
-    rc = await m._async_cmd_new(ns)
-    assert rc == 2
-    assert "--playbook and --spec-file are mutually exclusive" in capsys.readouterr().err

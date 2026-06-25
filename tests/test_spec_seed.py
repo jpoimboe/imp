@@ -35,19 +35,14 @@ def test_build_parser_new_positional_and_title_flag() -> None:
     assert ns.title == "dark mode"
 
 
-def test_build_parser_new_accepts_spec_file() -> None:
-    ns = cli_main._build_parser().parse_args(["new", "--spec-file", "draft.md"])
-    assert ns.spec_file == "draft.md"
-
-
-def test_build_parser_new_spec_file_defaults_none() -> None:
-    ns = cli_main._build_parser().parse_args(["new"])
-    assert ns.spec_file is None
+def test_build_parser_new_rejects_spec_file() -> None:
+    with pytest.raises(SystemExit):
+        cli_main._build_parser().parse_args(["new", "--spec-file", "draft.md"])
 
 
 def _new_args(**kw: object) -> argparse.Namespace:
     base = {"opening": None, "title": None, "non_interactive": False,
-            "message": None, "tui": False, "spec_file": None}
+            "message": None, "tui": False}
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -57,7 +52,6 @@ def test_resolve_positional_is_verbatim_seed() -> None:
     assert res == cli_main.SeedResolution(
         title=None, seed_text="add a dark-mode toggle",
         opening_intent="add a dark-mode toggle")
-    assert cli_main.SPEC_SEED_MARKER not in res.seed_text
 
 
 def test_resolve_positional_file_path_is_literal_text(tmp_path: Path) -> None:
@@ -66,7 +60,6 @@ def test_resolve_positional_file_path_is_literal_text(tmp_path: Path) -> None:
     res = cli_main.resolve_spec_seed(_new_args(opening=str(draft)))
     assert res.title is None
     assert res.seed_text == str(draft)
-    assert cli_main.SPEC_SEED_MARKER not in res.seed_text
 
 
 def test_resolve_title_flag_sets_title_no_seed() -> None:
@@ -84,49 +77,14 @@ def test_resolve_whitespace_only_positional_is_empty() -> None:
     assert res == cli_main.SeedResolution(title=None, seed_text=None)
 
 
-def test_resolve_positional_and_spec_file_mutually_exclusive(
-        tmp_path: Path) -> None:
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: x\n")
-    with pytest.raises(cli_main.SeedError):
-        cli_main.resolve_spec_seed(
-            _new_args(opening="add dark mode", spec_file=str(draft)))
-
-
-def test_resolve_spec_file_wraps_seed(tmp_path: Path) -> None:
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: ship it\n")
-    res = cli_main.resolve_spec_seed(_new_args(spec_file=str(draft)))
-    assert res.title is None
-    assert res.seed_text is not None
-    assert res.seed_text.startswith(cli_main.SPEC_SEED_MARKER)
-    assert str(draft) in res.seed_text
-    assert "Goal: ship it" in res.seed_text
-
-
-def test_resolve_title_flag_with_spec_file(tmp_path: Path) -> None:
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: ship it\n")
+def test_resolve_ignores_spec_file_attribute() -> None:
+    # The --spec-file seed path is gone: a stray spec_file attr is never read,
+    # so it neither raises a mutual-exclusion error nor wraps the seed.
     res = cli_main.resolve_spec_seed(
-        _new_args(title="my-name", spec_file=str(draft)))
-    assert res.title == "my-name"
-    assert res.seed_text is not None
-    assert str(draft) in res.seed_text
-    assert "Goal: ship it" in res.seed_text
-
-
-def test_resolve_missing_spec_file_errors(tmp_path: Path) -> None:
-    with pytest.raises(cli_main.SeedError):
-        cli_main.resolve_spec_seed(
-            _new_args(spec_file=str(tmp_path / "nope.md")))
-
-
-def test_resolve_spec_file_and_message_mutually_exclusive(tmp_path: Path) -> None:
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: x\n")
-    with pytest.raises(cli_main.SeedError):
-        cli_main.resolve_spec_seed(
-            _new_args(spec_file=str(draft), message="hi"))
+        argparse.Namespace(opening="add a flag", title=None, message=None,
+                           spec_file="/some/draft.md"))
+    assert res.seed_text == "add a flag"
+    assert res.opening_intent == "add a flag"
 
 
 def test_new_positional_delivers_verbatim_seed(
@@ -151,7 +109,6 @@ def test_new_positional_delivers_verbatim_seed(
 
     assert rc == 0
     assert captured["seed_opening"] == "add a dark-mode toggle"
-    assert cli_main.SPEC_SEED_MARKER not in captured["seed_opening"]  # type: ignore[operator]
     assert captured["change"].title == ""  # type: ignore[union-attr]
 
 
@@ -179,82 +136,6 @@ def test_new_title_flag_sets_change_title(
     assert captured["seed_opening"] is None
     assert captured["change"].title == "dark mode"  # type: ignore[union-attr]
 
-
-def test_new_spec_file_delivers_wrapped_seed(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    draft = tmp_path / "draft.md"
-    draft.write_text("# My draft\nGoal: do X\n")
-
-    captured: dict[str, object] = {}
-
-    async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object,
-                           status: object = None,
-                           opening_intent: object = None) -> int:
-        captured["change"] = change
-        captured["seed_opening"] = seed_opening
-        return 0
-
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
-
-    args = _new_args(spec_file=str(draft), non_interactive=True)
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 0
-    seed = captured["seed_opening"]
-    assert isinstance(seed, str)
-    assert seed.startswith(cli_main.SPEC_SEED_MARKER)
-    assert str(draft) in seed
-    assert "# My draft" in seed
-    assert captured["change"].title == ""  # type: ignore[union-attr]
-
-
-def test_new_positional_and_spec_file_rc2(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: x\n")
-
-    args = _new_args(opening="add dark mode", spec_file=str(draft),
-                     non_interactive=True)
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 2
-    assert "mutually exclusive" in capsys.readouterr().err
-
-
-def test_new_missing_spec_file_rc2_no_change(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    args = _new_args(spec_file=str(tmp_path / "nope.md"), non_interactive=True)
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 2
-    assert "nope.md" in capsys.readouterr().err
-    worktrees = tmp_path / ".imp" / "worktrees"
-    assert not worktrees.exists() or not any(worktrees.iterdir())
-
-
-def test_new_spec_file_and_message_rc2(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: x\n")
-
-    args = _new_args(spec_file=str(draft), message="hi", non_interactive=True)
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 2
-    assert "mutually exclusive" in capsys.readouterr().err
 
 
 def test_new_positional_with_message_legal(
@@ -287,8 +168,6 @@ def test_new_tui_delivers_seed(
         capsys: pytest.CaptureFixture[str]) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    draft = tmp_path / "draft.md"
-    draft.write_text("Goal: x\n")
 
     captured: dict[str, object] = {}
 
@@ -303,43 +182,13 @@ def test_new_tui_delivers_seed(
     monkeypatch.setattr(cli_main, "_run_tui_session", _fake_tui)
     monkeypatch.setattr(cli_main, "_tui_requested", lambda _a: True)
 
-    args = _new_args(spec_file=str(draft), tui=True)
+    args = _new_args(opening="add dark mode", tui=True)
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    seed = captured["seed_opening"]
-    assert isinstance(seed, str)
-    assert seed.startswith(cli_main.SPEC_SEED_MARKER)
-    assert "Goal: x" in seed
+    assert captured["seed_opening"] == "add dark mode"
     assert "--tui does not deliver" not in capsys.readouterr().err
 
-
-def test_new_non_interactive_spec_seed_via_session_client(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    draft = tmp_path / "draft.md"
-    draft.write_text("# My draft\nGoal: do X\n")
-
-    captured: dict[str, object] = {}
-
-    async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object,
-                           status: object = None,
-                           opening_intent: object = None) -> int:
-        captured["seed_opening"] = seed_opening
-        return 0
-
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
-
-    args = _new_args(spec_file=str(draft), non_interactive=True)
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 0
-    seed = captured["seed_opening"]
-    assert isinstance(seed, str)
-    assert seed.startswith(cli_main.SPEC_SEED_MARKER)
-    assert str(draft) in seed
 
 
 def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
@@ -351,7 +200,7 @@ def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     # Opening behavior must branch on the opening message: the unseeded branch
-    # keys on the begin token, the seeded branch on the seed marker.
+    # keys on the begin token; a plain-prose open carries the verbatim intent.
     assert "<imp:begin/>" in out
 
 
@@ -364,12 +213,12 @@ def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "verbatim opening intent" in out
-    # The bare positional no longer delivers a spec-seed FILE; only --spec-file does.
+    # No spec is inlined into the prompt; the user names a spec file front-door reads.
     assert "imp new <draft>" not in out
     assert "imp new <file>" not in out
 
 
-def test_front_door_prompt_has_seed_branch(tmp_path) -> None:
+def test_front_door_prompt_has_read_and_verify_section(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
@@ -377,9 +226,9 @@ def test_front_door_prompt_has_seed_branch(tmp_path) -> None:
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
-    # Seed-marker invariant: the adopt branch must key on the SAME phrase the CLI
-    # prefixes (_build_seed).
-    assert cli_main.SPEC_SEED_MARKER in out
+    # The seeded/adopt marker is gone; a named spec is read and verified instead.
+    assert "Reading a referenced spec file" in out
+    assert "Implement this spec" not in out
 
 
 def test_opening_prompt_reply_wires_to_seed_opening(

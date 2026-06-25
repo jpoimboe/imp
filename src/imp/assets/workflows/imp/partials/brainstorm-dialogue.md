@@ -1,21 +1,17 @@
 How you open depends on your **opening message**:
 
-- **Seeded** — the opening message begins with `Implement this spec` (the user
-  ran `imp new --spec-file <file>`, and the engine delivers the draft as your
-  opening message). The intent is already in hand: explore only to validate the
-  draft fits the codebase — do **not** re-brainstorm or redesign — then adopt it
-  near-silently. Front-door's **Going live** section owns naming,
-  `create_and_enter_worktree`, the draft write, `imp artifact-commit spec`, and
-  `complete_step`. Do **not** open with a contentless "what do you want?" question.
-- **Opening intent in hand** — the opening message is plain prose that is
-  neither `Implement this spec` nor `<imp:begin/>`. The user ran
-  `imp new "<message>"`, so the message **is** their verbatim opening intent —
-  the opening question is already answered. Do **not** call the opening
-  `wait_for_user` to re-ask "what do you want to build?". Explore the codebase,
-  then proceed with **normal brainstorm discipline** (propose 2–3 approaches,
-  ask follow-ups, design-then-approve, then write the spec). This is full
-  brainstorming — a one-line intent is not a draft, so it is **not** the
-  seeded-draft light-review path.
+- **Opening intent in hand** — the opening message is plain prose (anything that
+  is not `<imp:begin/>`). The user ran `imp new "<message>"`, so the message
+  **is** their verbatim opening intent — the opening question is already answered.
+  Do **not** call the opening `wait_for_user` to re-ask "what do you want to
+  build?". Explore the codebase, then proceed with **normal brainstorm
+  discipline** (propose 2–3 approaches, ask follow-ups, design-then-approve, then
+  write the spec). A one-line intent is not a draft, so this is full brainstorming.
+  When the message **names a spec file** that exists in the tree (e.g. "implement
+  docs/specs/foo.md"), do **not** re-brainstorm it from scratch — read the file
+  and run the staleness/verify pass per front-door's **Reading a referenced spec
+  file** section, which decides whether to proceed or to surface concerns and
+  yield.
 - **Unseeded** — the opening message is `<imp:begin/>`. You do not yet know what
   the user wants, and you cannot yet tell which hat applies. Open by asking, in
   your turn text, an inviting question about what they'd like to do — answer a
@@ -36,12 +32,11 @@ only cares about the question, not the mechanism. The tool takes no arguments:
 the question lives in your prose, not a tool field, so the prose itself must
 carry it. With no intent yet, there is nothing to act on until they reply — so
 just ask first; once they reply, the selected hat reads as needed. Ask the
-question directly. When instead the opening message begins with
-`Implement this spec`, skip this entirely — you are on the seeded path and the
-intent is already in hand. When the opening message is plain prose (neither
-`<imp:begin/>` nor `Implement this spec`), the opening question is likewise
-skipped — you have the user's verbatim intent in hand; explore the codebase and
-proceed directly into brainstorming.
+question directly. When the opening message is plain prose (anything other than
+`<imp:begin/>`), the opening question is skipped — you have the user's verbatim
+intent in hand; explore the codebase (reading and verifying a named spec file per
+front-door's **Reading a referenced spec file** section when the message names
+one) and proceed directly into brainstorming.
 
 **If the user hands you context instead of intent.** Sometimes the opening reply
 is a pasted log, a design-doc path, an error, or other material rather than a
@@ -73,8 +68,8 @@ decisions made, and the acceptance criteria in brief — and call
 `wait_for_user` once asking whether it all sounds right. Incorporate any
 correction, then write and commit. This is a single final confirmation,
 not another round of section-by-section design. **Skip this readback
-entirely** on the seeded / adopt-with-light-review path, on a `trivial`
-change (it asked no questions and made no design choices). In a headless
+entirely** on a `trivial` change (it asked no questions and made no design
+choices). In a headless
 run there is no human to confirm, so skip the readback there too and
 write + commit directly — the standing rule that `wait_for_user` is only
 for when you genuinely need a human applies here as everywhere.
@@ -155,11 +150,6 @@ the brainstorm. Surface the question in your turn text and confirm via `wait_for
   saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
   resume you re-offer this same build question.
 {% endif %}
-
-On the **seeded** path (your opening message begins with `Implement this spec`), the user
-has already chosen to build it: set up the workspace as part of adopt-and-commit (call
-`create_and_enter_worktree`, re-ground if `head_changed=true`) — there is no separate
-question.
 
 Calling `create_and_enter_worktree` a second time on an already-set-up change is a
 harmless no-op, so a resumed build is safe.

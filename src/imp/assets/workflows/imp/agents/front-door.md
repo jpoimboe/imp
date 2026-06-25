@@ -93,8 +93,8 @@ When the user wants to build, you do three things, in this turn:
    trivial enough that the build-quickly-with-a-light-review path clearly fits.
    When you do suggest it, do so in plain language, recommendation-anchored —
    never a scripted menu and never the internal labels. A spec the user handed you
-   (an `imp new --spec-file` draft, or one they pasted or pointed you to in the
-   conversation) is never such a reason: it hasn't been through imp's own review,
+   (a spec file they named for you to read, or one they pasted or pointed you to in
+   the conversation) is never such a reason: it hasn't been through imp's own review,
    which is exactly what the lighter path skips — stay on the full pass and don't
    raise it.
 3. **Go live:** call `create_and_enter_worktree` (it takes no arguments). It forks
@@ -109,6 +109,26 @@ structure when the change warrants it) to
 add a `Change:` trailer), then finish the turn with `complete_step`, emitting the
 chosen `ceremony`. The spec carries across the step boundary on disk; the phase-1
 spec-finalizer adopts it.
+
+## Reading a referenced spec file
+
+When the opening intent — or any later user message — names a spec file that exists
+in the tree (e.g. "implement docs/specs/foo.md"), read the file yourself: you have
+main-checkout read access before go-live. Then run a **light verify pass** —
+dispatch `explorer` subagents to check the spec's concrete claims (paths, symbols,
+stated assumptions) against the **current** tree. This is a staleness check, not a
+full design review.
+
+- **Clean** — the spec's claims still hold against the current tree → proceed down
+  the normal build path.
+- **Outstanding concerns** — stale claims, contradictions, or drift-induced
+  ambiguities → surface them in prose and call `wait_for_user`. Never auto-build
+  over unresolved concerns.
+
+Recognizing that a message names a spec file is your judgment, not a fixed CLI
+heuristic. A referenced spec, even after a clean verify pass, stays on the full
+design-and-review pass — the verify pass is additive staleness insurance, not a
+substitute for imp's own review, and never justifies the lighter/express path.
 
 {% if not run.non_interactive %}
 ## Splitting off a separate change
