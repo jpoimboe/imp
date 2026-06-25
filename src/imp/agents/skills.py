@@ -1,14 +1,19 @@
 """Skill resolution shared by the load_skill tool (agent path, spec §3) and the
 interactive slash dispatcher (human path, spec §4).
 
-A skill is a flat markdown file at <workflow_dir>/skills/<name>.md. The name is
-untrusted input: reject empty / dot / traversal / separator names, confine the
-resolved real path to skills/, and fail closed. A missing skills/ dir reads as
-not-found, never a bare OSError (a Change created before skills landed).
+Skills live in two audience-scoped subdirectories of <workflow_dir>/skills/:
+  agent/  — disciplines loaded by subagents (load_agent_skill)
+  user/   — skills surfaced to the human (load_user_skill / list_user_skills)
+
+Agent path: resolves skills/agent/<name>.md, falling back to skills/user/<name>.md.
+Human path: reads skills/user/ only; agent disciplines are never reachable here.
+Each subdir applies the same name sanitization (reject empty / dot / traversal /
+separator names). A missing subdir reads as not-found/empty, never a bare OSError.
 """
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 
@@ -40,17 +45,73 @@ def _safe_skill_path(skills_dir: Path, name: str) -> Path:
     return candidate
 
 
-def load_skill_body(skills_dir: Path, name: str) -> str:
-    """Return the markdown body of skill <name>. Raises SkillNameError for a bad
-    name, SkillNotFound if the file (or skills_dir) is missing."""
-    path = _safe_skill_path(skills_dir, name)
+def _split_frontmatter(text: str) -> tuple[str | None, str]:
+    """If `text` opens with a `---\n … \n---\n` block, return (description, body)
+    with the block removed; otherwise (None, text). Only `description:` is read;
+    every other field is ignored. The body is what reaches the conversation, so
+    the metadata block must never survive in it."""
+    if not text.startswith("---\n"):
+        return None, text
+    end = text.find("\n---\n", len("---\n"))
+    if end == -1:
+        return None, text  # unterminated block: treat the whole file as body
+    block = text[len("---\n"):end]
+    body = text[end + len("\n---\n"):]
+    description: str | None = None
+    for line in block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("description:"):
+            description = stripped[len("description:"):].strip()
+            break
+    return description, body
+
+
+def load_agent_skill(skills_dir: Path, name: str) -> str:
+    """Agent path: resolve <skills_dir>/agent/<name>.md, falling back to
+    <skills_dir>/user/<name>.md. Strip any leading frontmatter from the body.
+    Raises SkillNameError for a bad name, SkillNotFound if neither file exists."""
+    for audience in ("agent", "user"):
+        path = _safe_skill_path(skills_dir / audience, name)
+        if path.is_file():
+            return _split_frontmatter(path.read_text())[1]
+    raise SkillNotFound(f"no such skill {name!r}")
+
+
+def load_user_skill(skills_dir: Path, name: str) -> str:
+    """Human path: resolve <skills_dir>/user/<name>.md ONLY (agent disciplines
+    are never reachable here). Strip any leading frontmatter from the body."""
+    path = _safe_skill_path(skills_dir / "user", name)
     if not path.is_file():
         raise SkillNotFound(f"no such skill {name!r}")
-    return path.read_text()
+    return _split_frontmatter(path.read_text())[1]
 
 
-def list_skill_names(skills_dir: Path) -> list[str]:
-    """Sorted stems of <skills_dir>/*.md. Empty list if the dir is absent."""
-    if not skills_dir.is_dir():
+def overlay_project_skills(project_root: Path, dest_user_dir: Path) -> None:
+    """Overlay <project_root>/imp/skills/*.md into `dest_user_dir` (a snapshot's
+    skills/user/), so a bundled-workflow user drops skills there without forking.
+    On a name collision the project file shadows the workflow's user skill. A
+    missing imp/skills/ source is a no-op. Only user/ is ever written — agent
+    disciplines are never overlaid."""
+    src = project_root / "imp" / "skills"
+    if not src.is_dir():
+        return
+    dest_user_dir.mkdir(parents=True, exist_ok=True)
+    for md in sorted(src.glob("*.md")):
+        if md.is_file():
+            shutil.copy2(md, dest_user_dir / md.name)
+
+
+def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
+    """Sorted (stem, description) pairs for <skills_dir>/user/*.md. description is
+    None when the file carries no frontmatter description. Empty list if user/ is
+    absent (a Change created before user skills existed)."""
+    user = skills_dir / "user"
+    if not user.is_dir():
         return []
-    return sorted(p.stem for p in skills_dir.glob("*.md") if p.is_file())
+    out: list[tuple[str, str | None]] = []
+    for p in sorted(user.glob("*.md")):
+        if p.is_file():
+            description = _split_frontmatter(p.read_text())[0]
+            out.append((p.stem, description))
+    return out
+

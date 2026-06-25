@@ -4,7 +4,7 @@ supercycle back-edges, and the discipline skills present. No live providers."""
 
 from __future__ import annotations
 
-from imp.agents.skills import list_skill_names
+from imp.agents.skills import load_agent_skill
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
@@ -42,9 +42,10 @@ def test_supercycle_back_edges_present() -> None:
 
 
 def test_skills_shipped() -> None:
-    names = set(list_skill_names(bundled_workflow_dir("imp") / "skills"))
-    assert {"test-driven-development", "systematic-debugging",
-            "verification-before-completion", "receiving-code-review"} <= names
+    skills = bundled_workflow_dir("imp") / "skills"
+    for name in ("test-driven-development", "systematic-debugging",
+                 "verification-before-completion", "receiving-code-review"):
+        assert load_agent_skill(skills, name).strip(), f"{name} missing/empty"
 
 
 def test_every_declared_tool_is_real() -> None:

@@ -15,8 +15,9 @@ from imp.engine.state import JsonlEventLog
 
 def _ctx(tmp_path: Path) -> ToolContext:
     wf = tmp_path / ".imp" / "change" / "workflow"
-    (wf / "skills").mkdir(parents=True)
-    (wf / "skills" / "refactor.md").write_text("# Refactor\ndo the thing\n")
+    (wf / "skills" / "agent").mkdir(parents=True)
+    (wf / "skills" / "user").mkdir(parents=True)
+    (wf / "skills" / "agent" / "refactor.md").write_text("# Refactor\ndo the thing\n")
     ctx = ToolContext(
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
@@ -69,3 +70,20 @@ def test_load_skill_schema_declares_name(tmp_path: Path) -> None:
     tool = make_load_skill_tool()
     assert tool.name == "load_skill"
     assert tool.input_schema["required"] == ["name"]
+
+
+def test_load_skill_falls_back_to_user_dir(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    wf = ctx.change_context.workflow_dir
+    (wf / "skills" / "user" / "shared.md").write_text(
+        "---\ndescription: shared\n---\n# Shared\nuser body\n"
+    )
+    out = make_load_skill_tool().invoke(ctx, {"name": "shared"})
+    assert out == "# Shared\nuser body\n"
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "events.jsonl").read_text().splitlines()
+    ]
+    loads = [e for e in events if e["type"] == "skill_load"]
+    assert len(loads) == 1
+    assert loads[0]["payload"] == {"name": "shared", "source": "agent"}

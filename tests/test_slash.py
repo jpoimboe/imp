@@ -17,10 +17,10 @@ class _FakeChange:
 
     def __init__(self, tmp_path: Path) -> None:
         self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
-        skills = self.workflow_dir / "skills"
-        skills.mkdir(parents=True)
-        (skills / "refactor.md").write_text("# Refactor\nstep one\n")
-        (skills / "debug.md").write_text("# Debug\n")
+        user = self.workflow_dir / "skills" / "user"
+        user.mkdir(parents=True)
+        (user / "refactor.md").write_text("# Refactor\nstep one\n")
+        (user / "debug.md").write_text("# Debug\n")
         self._events = tmp_path / "events.jsonl"
 
     def event_log(self):
@@ -61,6 +61,21 @@ def test_skills_lists_names(tmp_path: Path) -> None:
     assert "refactor" in joined and "debug" in joined
 
 
+def test_skills_listing_shows_description_when_present(tmp_path: Path) -> None:
+    change = _FakeChange(tmp_path)
+    (change.workflow_dir / "skills" / "user" / "refactor.md").write_text(
+        "---\ndescription: Refactor helper\n---\n# Refactor\nstep one\n"
+    )
+    out: list[str] = []
+    assert handle_slash_line("/skills", change=change, output_fn=out.append) is REPROMPT
+    joined = "\n".join(out)
+    assert "Refactor helper" in joined          # description shown for refactor
+    refactor_line = next(line for line in out if "/refactor" in line)
+    assert "Refactor helper" in refactor_line
+    debug_line = next(line for line in out if "/debug" in line)
+    assert debug_line.strip() == "/debug"        # bare name when no description
+
+
 def test_unknown_command_reprompts(tmp_path: Path) -> None:
     change = _FakeChange(tmp_path)
     out: list[str] = []
@@ -70,7 +85,7 @@ def test_unknown_command_reprompts(tmp_path: Path) -> None:
 
 def test_skills_builtin_cannot_be_shadowed(tmp_path: Path) -> None:
     change = _FakeChange(tmp_path)
-    (change.workflow_dir / "skills" / "skills.md").write_text("SHADOW\n")
+    (change.workflow_dir / "skills" / "user" / "skills.md").write_text("SHADOW\n")
     out: list[str] = []
     # /skills resolves to the builtin listing, never the skill body.
     result = handle_slash_line("/skills", change=change, output_fn=out.append)

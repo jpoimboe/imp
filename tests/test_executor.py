@@ -2514,3 +2514,24 @@ async def test_goto_renders_templated_target_label(tmp_path: Path) -> None:
     state = State.load(change.state_dir)
     assert state.step == "dst"
     assert state.step_label == "arrived at 5"
+
+
+@pytest.mark.anyio
+async def test_first_run_overlays_project_skills_into_snapshot_user(
+    tmp_path: Path,
+) -> None:
+    """At snapshot creation, project_root/imp/skills/*.md land in the snapshot's
+    skills/user/; resume does not re-run the overlay."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    (tmp_path / "imp" / "skills").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv1\n")
+
+    assert await run_change(change, on_event=lambda _e: None) is RunResult.COMPLETED
+    overlaid = change.change_dir / "workflow" / "skills" / "user" / "mine.md"
+    assert overlaid.read_text() == "# Mine\nv1\n"
+
+    # Resume must not re-overlay: change the source, run again, snapshot unchanged.
+    (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
+    await run_change(change, on_event=lambda _e: None)
+    assert overlaid.read_text() == "# Mine\nv1\n"
