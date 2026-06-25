@@ -194,3 +194,12 @@ def test_narrowing_from_visible_abandons_without_cursor_up() -> None:
     s.update(lambda f, e: "second")                 # width now 4 → narrowing
     assert "\x1b[1A" not in out.getvalue()          # no cursor-up on narrowing
     assert "\n" in out.getvalue()                   # fresh redraw: new blank + status below
+
+
+def test_elapsed_zero_before_session_starts_and_tracks_after() -> None:
+    clock = {"t": 100.0}
+    ls = LiveStatus(_TTY(), now=lambda: clock["t"])
+    assert ls.elapsed() == 0.0                      # no session yet
+    ls.update(lambda f, e: "x")                     # session starts at 100.0
+    clock["t"] = 104.0
+    assert ls.elapsed() == 4.0

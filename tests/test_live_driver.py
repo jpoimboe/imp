@@ -1387,7 +1387,9 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    assert line.split(" ", 1)[1] == "reviewing plan · 18s"   # no thinking verb
+    # toolbar spine: title · model · step · elapsed (no phase_label here -> no phase
+    # field; no thinking verb). change_created sets title "x"; the step carries model "m".
+    assert line.split(" ", 1)[1] == "x · m · reviewing plan · 18s"
 
     # quiet/unlabeled script step: no display label, no command -> bare timer.
     q = nv.NarrativeBuilder()
@@ -1398,7 +1400,8 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
-    assert qline.split(" ", 1)[1] == "4s"
+    # quiet/unlabeled script step: title · elapsed (no model, no step, no phase field).
+    assert qline.split(" ", 1)[1] == "x · 4s"
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
@@ -1662,7 +1665,9 @@ def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
             b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
             line = compose_activity_status(b, frame=0, elapsed=1.0, color=True)
             assert line is not None
-            assert line.startswith(pal._ANSI["wordmark"])   # spinner painted gold
+            # The toolbar opens with the user-message slate (empty under ansi), then the
+            # gold wordmark spinner — never cyan.
+            assert line.startswith(pal.user_bg_open(enabled=True) + pal._ANSI["wordmark"])
             assert pal._ANSI["cyan"] not in line             # no longer cyan
     finally:
         pal.set_theme("ansi")
@@ -1774,3 +1779,35 @@ def test_compose_toolbar_step_segment_uses_label_when_no_count() -> None:
                            prompt_tokens=26000, elapsed=5.0, frame=0, color=False)
     assert "task-lead" in line          # step label still present
     assert "reviewing plan" in line     # fallback label used when count is None
+
+
+def test_compose_activity_status_now_includes_change_id_and_title() -> None:
+    from imp.cli.live_driver import compose_activity_status
+    builder = nv.NarrativeBuilder()
+    builder.add(ev("1", "change_created", id="z9gixx", title="streaming toolbar"))
+    # phase_label= populates Activity.phase_label and label= the step field — the
+    # `phase=` key is the phase NAME (PhaseNode.name), NOT the rendered phase label.
+    builder.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+                   model="sonnet", phase_label="implement", label="task-lead"))
+    line = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
+    assert line is not None
+    assert "z9gixx" in line and "streaming toolbar" in line
+    assert "implement" in line and "task-lead" in line   # phase + step fields render
+
+
+def test_compose_toolbar_static_uses_frame_zero_and_status_elapsed() -> None:
+    out = _Pipe()
+    status = LiveStatus(out, now=lambda: 7.0)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p", model="sonnet"))
+    # update() starts the span at now()=7.0; elapsed stays 0 with a frozen clock.
+    static = drv.compose_toolbar_static()
+    assert static is not None
+    assert static[0] == "⠋"            # frame 0 spinner glyph
+    assert "0s" in static              # status.elapsed() == 0 under the frozen clock
+
+
+def test_compose_toolbar_static_none_when_idle() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    assert drv.compose_toolbar_static() is None    # no activity -> no toolbar

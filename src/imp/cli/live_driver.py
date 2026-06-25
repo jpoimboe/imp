@@ -129,20 +129,11 @@ def compose_activity_status(
     activity = builder.current_activity()
     if activity is None:
         return None
-    spin = pal.ansi(pal.spinner_frame(frame), "wordmark", enabled=color)
-    parts: list[str] = []
-    if activity.phase_label:
-        parts.append(pal.ansi(activity.phase_label, enabled=color))
-    if activity.step_label:
-        parts.append(pal.ansi(activity.step_label, enabled=color))
-    if activity.count is not None:
-        parts.append(pal.ansi(activity.count, enabled=color))
-        if activity.detail:
-            parts.append(pal.ansi(activity.detail, "gray", enabled=color))
-    elif activity.label:
-        parts.append(pal.ansi(activity.label, enabled=color))
-    parts.append(pal.ansi(rt.fmt_seconds(elapsed), "dim", enabled=color))
-    return f"{spin} " + rt.compose_label(parts)
+    root = builder.tree.root
+    return compose_toolbar(
+        activity=activity, change_id=root.id, title=root.title,
+        prompt_tokens=builder.latest_prompt_tokens, elapsed=elapsed,
+        frame=frame, color=color)
 
 
 @dataclass
@@ -242,6 +233,13 @@ class LiveDriver:
         # narration, not as a bullet child).
         return compose_activity_status(
             self._builder, frame=frame, elapsed=elapsed, color=self._color)
+
+    def compose_toolbar_static(self) -> str | None:
+        # The prompt-mode toolbar: the same composed content with a STATIC spinner
+        # (frame 0) and the work span's current elapsed, so prompt_toolkit's native
+        # bottom_toolbar renders identically to the work-mode line.
+        return compose_activity_status(
+            self._builder, frame=0, elapsed=self._status.elapsed(), color=self._color)
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:

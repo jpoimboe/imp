@@ -86,6 +86,12 @@ class LiveStatus:
         self._session_start = self._now()
         self._draw()
 
+    def elapsed(self) -> float:
+        """Current span elapsed in seconds; 0.0 before the timer starts."""
+        if self._session_start is None:
+            return 0.0
+        return self._now() - self._session_start
+
     async def tick(self, interval: float = 0.1) -> None:
         """Background spinner: advance the frame and redraw on an interval so the
         line animates during long LLM/tool waits with no events."""
