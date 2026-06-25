@@ -43,13 +43,14 @@ help: ## Print this help.
 install: ## Editable install of imp + dev deps (pytest, ruff, mypy).
 	$(PYTHON) -m pip install -e '.[dev]' 2>/dev/null || $(PYTHON) -m pip install -e .
 
+# Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
 test: ## Fast test suite (skips live-API tests). What CI runs.
-	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q
+	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
 
 .PHONY: test-verbose
 test-verbose: ## Same as `test` but with -v.
-	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v
+	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
 
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
