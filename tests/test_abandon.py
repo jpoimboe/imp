@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _status_rows
+from imp.cli.main import _abandon, _build_parser, _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
@@ -97,6 +97,33 @@ def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> 
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # reaped
 
 
+def test_abandon_never_reads_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    # Force the interactive condition that USED to gate the prompt; abandon must
+    # still not read stdin.
+    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _p: (_ for _ in ()).throw(AssertionError("abandon must not read stdin")))
+    rc = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_rejects_yes_flag() -> None:
+    parser = _build_parser()
+    # The bare token form still parses.
+    assert parser.parse_args(["abandon", "feat"]).token == "feat"
+    # -y / --yes is no longer a recognized flag.
+    with pytest.raises(SystemExit):
+        parser.parse_args(["abandon", "-y", "feat"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["abandon", "--yes", "feat"])
+
+
 def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
@@ -109,77 +136,6 @@ def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:
     assert worktree.commit_count(tmp_path, "feat", "main") == 1
 
 
-def test_abandon_prompts_and_cancels_on_decline(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "n")
-    assert rc == 1                                              # declined
-    assert (tmp_path / ".imp" / "worktrees" / "feat").exists()  # nothing removed
-
-
-def test_abandon_prompts_and_proceeds_on_confirm(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "y")
-    assert rc == 0
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
-
-
-def test_abandon_accepts_yes_spelled_out(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "yes")
-    assert rc == 0
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
-
-
-def test_abandon_non_interactive_skips_prompt(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    rc = _abandon(tmp_path, "feat", interactive=False,
-                  input_fn=lambda _p: (_ for _ in ()).throw(AssertionError("should not prompt")))
-    assert rc == 0
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
-
-
-def test_abandon_yes_skips_prompt(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    asked: list[int] = []
-    rc = _abandon(tmp_path, "feat", assume_yes=True, interactive=True,
-                  input_fn=lambda _p: (asked.append(1), "n")[1])
-    assert rc == 0 and not asked                                # prompt skipped
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
-
-
-def test_abandon_prompt_and_cancel_use_handle(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="My feature", change_id="yaitd7",
-                  base_branch="main")
-    rc = _abandon(tmp_path, "yaitd7",
-                  interactive=True, input_fn=lambda _p: "n")
-    out = capsys.readouterr().out
-    assert rc == 1
-    assert "Abandon yaitd7: 'My feature' (status" in out
-    assert "Abandon cancelled; yaitd7 left intact." in out
-
-
-def test_abandon_confirmation_uses_handle(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="My feature", change_id="yaitd7",
-                  base_branch="main")
-    rc = _abandon(tmp_path, "yaitd7",
-                  interactive=True, input_fn=lambda _p: "y")
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "Abandoned yaitd7." in out
-    assert "2026-06-13-yaitd7" not in out
-
-
 def test_abandon_resident_routes_through_daemon(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import imp.cli.main as _m
@@ -189,7 +145,7 @@ def test_abandon_resident_routes_through_daemon(
     monkeypatch.setattr(_m, "session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(_m, "_deliver_abandon_resident",
                         lambda _ctrl, cid: delivered.append(cid))
-    rc = _abandon(tmp_path, "feat", assume_yes=True)
+    rc = _abandon(tmp_path, "feat")
     assert rc == 0
     assert delivered == ["feat"]
 
@@ -211,7 +167,7 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
     monkeypatch.setattr(main_mod, "_deliver_abandon_resident", _hang)
     monkeypatch.setattr(main_mod, "tear_down_change", lambda ch: torn.append(ch.id))
 
-    rc = main_mod._abandon(tmp_path, "feat", assume_yes=True)
+    rc = main_mod._abandon(tmp_path, "feat")
     assert rc == 0
     assert torn == ["feat"]  # fell through to direct teardown
 
@@ -239,7 +195,7 @@ def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
     Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief\n\ndo a thing")
-    rc = _abandon(tmp_path, "bk1", assume_yes=True)
+    rc = _abandon(tmp_path, "bk1")
     assert rc == 0
     assert not (tmp_path / ".imp" / "changes" / "bk1").exists()
 
@@ -251,48 +207,14 @@ def test_abandon_backlog_reports_message(
     Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief")
-    _abandon(tmp_path, "bk1", assume_yes=True)
+    _abandon(tmp_path, "bk1")
     assert "Abandoned bk1." in capsys.readouterr().out
-
-
-def test_abandon_backlog_decline_leaves_home_intact(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
-                        base_branch="main", origin="followup",
-                        seed_opening="Backlog brief")
-    rc = _abandon(tmp_path, "bk1", interactive=True, input_fn=lambda _p: "n")
-    assert rc == 1
-    assert (tmp_path / ".imp" / "changes" / "bk1").exists()
-
-
-def test_abandon_backlog_non_interactive_skips_prompt(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
-                        base_branch="main", origin="followup",
-                        seed_opening="Backlog brief")
-    rc = _abandon(
-        tmp_path, "bk1", interactive=False,
-        input_fn=lambda _p: (_ for _ in ()).throw(AssertionError("should not prompt")))
-    assert rc == 0
-    assert not (tmp_path / ".imp" / "changes" / "bk1").exists()
 
 
 def test_abandon_unknown_id_reaps_branch_and_exits_zero(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _seed_control(tmp_path)
-    rc = _abandon(tmp_path, "ghost", assume_yes=True)
+    rc = _abandon(tmp_path, "ghost")
     assert rc == 0
     assert "already gone" in capsys.readouterr().out
-
-
-def test_abandon_backlog_eoferror_at_confirm_cancels(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
-                        base_branch="main", origin="followup",
-                        seed_opening="Backlog brief")
-    rc = _abandon(
-        tmp_path, "bk1", interactive=True,
-        input_fn=lambda _p: (_ for _ in ()).throw(EOFError()))
-    assert rc == 1
-    assert (tmp_path / ".imp" / "changes" / "bk1").exists()
