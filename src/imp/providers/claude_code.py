@@ -74,7 +74,7 @@ from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, change_home_path, kill_process_group
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.agents.transcript import (
     RESUME_MANIFEST_HEADER,
     Transcript,
@@ -377,7 +377,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             # Auto-injected below; tolerate a redundant explicit declaration.
             continue
         if name == "wait_for_user":
-            # Synthesized below when declared; tolerate the explicit declaration.
+            # No longer a registered tool — a bare turn-end is the yield. A stale
+            # or resume-transcript declaration is tolerated (silently not
+            # registered) rather than rejected as an unknown tool.
             continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
@@ -386,8 +388,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
-    if "wait_for_user" in invocation.agent_def.tools:
-        out["wait_for_user"] = make_wait_for_user_tool()
     if "bash" in invocation.agent_def.tools:
         # Auto-granted with bash (same block as anthropic/openai
         # _build_tools): run_in_background is a bash PARAMETER, so an agent
