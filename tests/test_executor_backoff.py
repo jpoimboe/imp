@@ -1,4 +1,4 @@
-"""Tests for §10 executor backoff helpers: interruptible sleep + headless ceiling."""
+"""§10 executor backoff helpers: interruptible sleep; headless-ceiling constant removed."""
 
 from __future__ import annotations
 
@@ -36,3 +36,9 @@ def test_interruptible_sleep_with_none_coordinator() -> None:
             await _interruptible_sleep(0.05, None, tick=0.02)
 
     anyio.run(main)
+
+
+def test_headless_ceiling_constant_removed_but_sleep_retained() -> None:
+    import imp.engine.backoff as backoff
+    assert not hasattr(backoff, "HEADLESS_RETRY_CEILING_SECONDS")
+    assert hasattr(backoff, "interruptible_sleep")

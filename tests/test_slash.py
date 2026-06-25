@@ -277,6 +277,25 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
     assert status.suspend_calls == 1   # hoisted: still just one suspend
 
 
+def test_continue_is_no_longer_a_verb(tmp_path: Path) -> None:
+    # /continue is removed: it now falls through to the skill resolver and is
+    # reported as an unknown command (resume by typing an ordinary line instead).
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/continue", change=change, output_fn=out.append)
+    assert result is REPROMPT
+    joined = "\n".join(out)
+    assert "no such skill" in joined
+    assert "resumes a paused run" not in joined
+
+
+def test_help_does_not_mention_continue(tmp_path: Path) -> None:
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    handle_slash_line("/help", change=change, output_fn=out.append)
+    assert not any("/continue" in line for line in out)
+
+
 def test_hint_and_help_describe_ctrlc_pause_without_esc(tmp_path: Path) -> None:
     change = _FakeChange(tmp_path)
     out: list[str] = []

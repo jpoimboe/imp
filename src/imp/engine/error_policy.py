@@ -36,24 +36,41 @@ class RetryWithBackoff:
 ErrorDecision = Pause | RetryNow | RetryWithBackoff
 
 
-_POLICY: dict[
-    Category,
-    tuple[type[Pause] | type[RetryNow] | type[RetryWithBackoff], int | None],
-] = {
-    "auth":                 (RetryWithBackoff, 7),
-    "config":               (Pause, None),
-    "quota":                (Pause, None),
-    "content_filter":       (Pause, None),
-    "context_window":       (Pause, None),
-    "rate_limit":           (RetryWithBackoff, None),
-    "network":              (RetryWithBackoff, None),
-    "api":                  (Pause, None),
-    "loop":                 (Pause, None),
-    "agent_output_missing": (RetryNow, None),
-    "agent_incomplete":     (Pause, None),
-    "terminated":           (Pause, None),
-    "unknown":              (Pause, None),
+@dataclass(frozen=True)
+class _Policy:
+    decision: type[Pause] | type[RetryNow] | type[RetryWithBackoff]
+    budget_seconds: float | None
+
+
+# One give-up concept: a per-category wall-clock budget (seconds), identical in
+# interactive and headless runs. RetryWithBackoff categories carry a budget; the
+# executor/subagent loop pauses once cumulative backoff would exceed it. Pause and
+# RetryNow categories have no budget (None).
+_POLICY: dict[str, _Policy] = {
+    "auth":                 _Policy(RetryWithBackoff, 120.0),
+    "config":               _Policy(Pause, None),
+    "quota":                _Policy(Pause, None),
+    "content_filter":       _Policy(Pause, None),
+    "context_window":       _Policy(Pause, None),
+    "rate_limit":           _Policy(RetryWithBackoff, 1800.0),
+    "network":              _Policy(RetryWithBackoff, 1800.0),
+    "api":                  _Policy(Pause, None),
+    "loop":                 _Policy(Pause, None),
+    "agent_output_missing": _Policy(RetryNow, None),
+    "agent_incomplete":     _Policy(Pause, None),
+    "terminated":           _Policy(Pause, None),
+    "unknown":              _Policy(Pause, None),
 }
+
+
+def budget_for(category: str) -> float | None:
+    """The per-category retry wall-clock budget in seconds, or None for
+    categories that never retry-with-backoff. Read by the executor and subagent
+    backoff loops to decide when to pause. Accepts the plumbed-out
+    ``ErrorInfo.category`` (a plain str); an unrecognized category yields None."""
+    policy = _POLICY.get(category)
+    return policy.budget_seconds if policy is not None else None
+
 
 def decide(
     category: Category,
@@ -63,19 +80,16 @@ def decide(
 ) -> ErrorDecision:
     """Map a category + prior-attempts count to a decision.
 
-    Most RetryWithBackoff categories retry forever: delay = 1·2^n, unbounded.
-    `auth` is capped at 7 attempts — beyond that it Pauses for human attention.
-    `hint_delay_seconds` (a server Retry-After) is honored as max(hint, our delay),
-    capped at 60s so a misbehaving upstream header can't strand us.
+    One delay formula for every backoff category, always 60s-capped:
+    ``min(60, max(2 ** prior_backoff_attempts, hint_delay_seconds or 0))`` →
+    schedule 1, 2, 4, 8, 16, 32, 60, 60, …. A server Retry-After hint is just
+    another term inside the same min/max — there is no separate hint-only branch
+    and no attempt cap (give-up is the per-category budget, owned by the caller).
     """
-    cls, cap = _POLICY.get(category, (Pause, None))
-    if cls is Pause:
+    policy = _POLICY.get(category)
+    if policy is None or policy.decision is Pause:
         return Pause()
-    if cls is RetryNow:
+    if policy.decision is RetryNow:
         return RetryNow()
-    if cap is not None and prior_backoff_attempts >= cap:
-        return Pause()
-    delay = 1.0 * (2 ** prior_backoff_attempts)
-    if hint_delay_seconds is not None:
-        delay = min(60.0, max(delay, hint_delay_seconds))
+    delay = min(60.0, max(2.0 ** prior_backoff_attempts, hint_delay_seconds or 0.0))
     return RetryWithBackoff(delay)

@@ -124,11 +124,6 @@ _QUOTA_PATTERNS = (
 # wrong nudge loop.
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
-_TRANSIENT_PHRASES = (
-    "Internal server error",
-    "Overloaded",
-)
-
 
 def _classify_agent_text(text: str) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
@@ -171,12 +166,15 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
         if 500 <= code < 600:
             # §10: 5xx (529 Overloaded et al.) is transient — route to the
             # `network` category, which maps to RetryWithBackoff (same routing the
-            # SDK providers use for an InternalServerError). Previously fell through
-            # to `return None` → treated as agent text → wrong nudge loop.
+            # SDK providers use for an InternalServerError).
             return perr.NetworkError(f"claude CLI: {text[:200]}")
-    for line in text.splitlines():
-        if "API Error:" in line and any(p in line for p in _TRANSIENT_PHRASES):
-            return perr.NetworkError(f"claude CLI: {text[:200]}")
+    elif "API Error:" in text:
+        # A statusless `API Error:` — no routable HTTP code — means the request
+        # never reached the server (ConnectionRefused, reset, EOF, transport
+        # timeout). Broad transport stance: transient -> retry, not pause. A
+        # 3xx/unrouted code that matched the regex above is NOT statusless, so
+        # it falls through to None (Pause) here.
+        return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
 
 

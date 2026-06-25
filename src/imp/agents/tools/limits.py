@@ -33,8 +33,8 @@ OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 # _iter_files); the 30-min wall-clock deadline is the ultimate backstop for both.
 EXTERNAL_WALK_FILE_CAP = 20_000
 
-# --- Watchdog / teardown timing (distinct from HEADLESS_RETRY_CEILING_SECONDS,
-# backoff.py:17, which is also 1800s but a cumulative-backoff cap) -----------
+# --- Watchdog / teardown timing (a per-tool-call deadline, distinct from the
+# per-category retry-backoff budgets in error_policy.py) ---------------------
 TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
 # F4 coupling: AGENT_INACTIVITY_TIMEOUT_S must stay > TOOL_WALLCLOCK_TIMEOUT_S
 # with >= 300 s margin. Post-heartbeat, a tool's watchdog window opens at the
