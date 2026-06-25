@@ -134,3 +134,79 @@ def test_archive_change_defaults_not_resumable(tmp_path: Path) -> None:
         change_json_path=change_json, state_json_path=state_json)
     rec = record.read_record(archive.records_root(tmp_path), "alpha")
     assert rec is not None and rec["resumable"] is False
+
+
+def test_archive_change_resumable_captures_steps_subtree(tmp_path: Path) -> None:
+    events, change_json, state_json = _setup_change(tmp_path)
+    steps = tmp_path / "steps"
+    (steps / "p" / "s").mkdir(parents=True)
+    (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"m":1}\n')
+    (steps / "p" / "s" / "claude_session" / "x").mkdir(parents=True)
+    (steps / "p" / "s" / "claude_session" / "x" / "sess.jsonl").write_bytes(b"SESSION")
+
+    archive.archive_change(
+        tmp_path, "alpha", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        steps_dir=steps, resumable=True)
+
+    rec = record.read_record(archive.records_root(tmp_path), "alpha")
+    assert rec is not None
+    manifest = rec["step_blobs"]
+    assert set(manifest) == {
+        "p/s/transcript.jsonl", "p/s/claude_session/x/sess.jsonl"}
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    assert store.get(manifest["p/s/transcript.jsonl"]) == b'{"m":1}\n'
+    assert store.get(manifest["p/s/claude_session/x/sess.jsonl"]) == b"SESSION"
+
+
+def test_archive_change_non_resumable_captures_no_steps(tmp_path: Path) -> None:
+    events, change_json, state_json = _setup_change(tmp_path)
+    steps = tmp_path / "steps"
+    (steps / "p" / "s").mkdir(parents=True)
+    (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"m":1}\n')
+
+    archive.archive_change(
+        tmp_path, "alpha", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        steps_dir=steps, resumable=False)
+
+    rec = record.read_record(archive.records_root(tmp_path), "alpha")
+    assert rec is not None and rec["step_blobs"] == {}
+    # Only the events blob is stored; no step blobs.
+    blobs = [p for p in archive.blobs_root(tmp_path).rglob("*") if p.is_file()]
+    assert len(blobs) == 1
+
+
+def test_archive_change_resumable_missing_steps_dir_captures_nothing(tmp_path: Path) -> None:
+    events, change_json, state_json = _setup_change(tmp_path)
+    missing = tmp_path / "nonexistent-steps"
+
+    archive.archive_change(
+        tmp_path, "alpha", events_path=events,
+        change_json_path=change_json, state_json_path=state_json,
+        steps_dir=missing, resumable=True)
+
+    rec = record.read_record(archive.records_root(tmp_path), "alpha")
+    assert rec is not None and rec["step_blobs"] == {}
+
+
+def test_archive_change_resumable_steps_idempotent(tmp_path: Path) -> None:
+    events, change_json, state_json = _setup_change(tmp_path)
+    steps = tmp_path / "steps"
+    (steps / "p" / "s").mkdir(parents=True)
+    (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"m":1}\n')
+
+    for _ in range(2):
+        archive.archive_change(
+            tmp_path, "alpha", events_path=events,
+            change_json_path=change_json, state_json_path=state_json,
+            steps_dir=steps, resumable=True)
+
+    # events blob + one step blob, content-addressed dedup -> exactly 2 files.
+    blobs = [p for p in archive.blobs_root(tmp_path).rglob("*") if p.is_file()]
+    assert len(blobs) == 2
+    conn = index.connect(archive.index_path(tmp_path))
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
+    finally:
+        conn.close()
