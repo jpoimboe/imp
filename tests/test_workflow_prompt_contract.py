@@ -31,9 +31,9 @@ FALSIFIABILITY_MARKERS = [
     (AGENTS_DIR / "plan-code-reviewer.md", "falsifiab"),                  # C: whole-change backstop
     (AGENTS_DIR / "code-reviewer.md", "falsifiab"),                      # C: per-task tripwire
     (AGENTS_DIR / "plan-writer.md", "falsifiab"),                        # B: anti-transcription
-    (SKILLS_DIR / "test-driven-development.md", "plan-echo"),            # A: anti-pattern 6
-    (SKILLS_DIR / "test-driven-development.md", "authoritative oracle"), # D: oracle note
-    (SKILLS_DIR / "test-driven-development.md", "xfail"),                # E: xfail convention
+    (SKILLS_DIR / "agent" / "test-driven-development.md", "plan-echo"),        # A: anti-pattern 6
+    (SKILLS_DIR / "agent" / "test-driven-development.md", "authoritative oracle"), # D: oracle note
+    (SKILLS_DIR / "agent" / "test-driven-development.md", "xfail"),          # E: xfail convention
 ]
 
 
