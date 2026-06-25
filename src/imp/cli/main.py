@@ -1339,6 +1339,16 @@ def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
+    if args.token is None:
+        try:
+            control = _control_root()
+        except worktree.PreconditionError:
+            print(_NO_CHANGES_MESSAGE)
+            return 0
+        lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
+                                color=should_use_color(sys.stdout))
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
     control = _control_root()
     try:
         change_id = _resolve_id(control, args.token)
@@ -2161,7 +2171,7 @@ _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
     ("new", "Scope a new change in conversation (optional opening message)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
-    ("list", "List your changes (-a also shows completed and abandoned)."),
+    ("show", "Show your changes; `imp show <id>` for one change's detail."),
     ("log", "Show a Change's narrative as plain text."),
     ("abandon", "Tear down a Change's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
@@ -2307,33 +2317,29 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser(
         "show",
-        help="Show a Change's spec, plan, review, events, or status.",
+        help="Show your changes, or one change's detail/artifact.",
         description=(
-            "Print one artifact of a Change. Reads the live worktree files while "
-            "the Change is in flight, and falls back to the archive once it is "
-            "merged and the worktree is gone."),
+            "With no argument, show an overview of your changes — in-flight, the "
+            "Backlog, and recently merged. With an id, print that change's detail "
+            "card, or name an artifact (spec/plan/review/events/status/summary) "
+            "to print just that. Reads the live worktree files while a change is "
+            "in flight and falls back to the archive once it is merged."),
     )
-    p_show.add_argument("token", help="Change id or its short token.")
+    p_show.add_argument(
+        "token", nargs="?", default=None,
+        help="Change id or its short token (omit for an overview of all changes).")
     p_show.add_argument(
         "resource", nargs="?", default=None,
         choices=["spec", "plan", "review", "events", "status", "summary"],
         help="Which artifact to print (default: a detail card).")
-    p_show.set_defaults(func=_cmd_show)
-
-    p_list = sub.add_parser(
-        "list",
-        help="List your changes (use -a for completed and abandoned).",
-        description=(
-            "List your in-progress changes and the Backlog (saved-for-later "
-            "changes). Use -a/--all to also show completed and abandoned changes."
-        ),
-    )
-    p_list.add_argument(
+    p_show.add_argument(
         "-a", "--all", action="store_true",
-        help="Also list completed and abandoned changes "
-             "(default: in-progress + Backlog).",
-    )
-    p_list.set_defaults(func=_cmd_status)
+        help="In the overview, lift the 10-cap and include abandoned changes "
+             "(the block is then labelled `history`).")
+    p_show.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
+    p_show.set_defaults(func=_cmd_show)
 
     p_search = sub.add_parser(
         "search",

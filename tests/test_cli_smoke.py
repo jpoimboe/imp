@@ -11,7 +11,7 @@ def test_imp_status_runs(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / ".imp").mkdir()
     # Run via -m so we exercise the entrypoint
     r = subprocess.run(
-        [sys.executable, "-m", "imp", "list"],
+        [sys.executable, "-m", "imp", "show"],
         capture_output=True, text=True, check=False,
     )
     # Either prints empty status or an "no changes" message — either is fine

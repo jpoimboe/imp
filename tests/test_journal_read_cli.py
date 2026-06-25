@@ -687,7 +687,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
     with redirect_stdout(buf):
-        assert m.main(["list", "--all"]) == 0
+        assert m.main(["show", "--all"]) == 0
     out = buf.getvalue()
     assert "arch01" in out
     assert "Archived One" in out

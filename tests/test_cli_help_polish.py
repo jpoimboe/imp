@@ -20,18 +20,19 @@ def test_abandon_documents_token_positional() -> None:
     assert "which Change to abandon" in help_text
 
 
-def test_list_has_description() -> None:
-    sp = _subparser("list")
-    assert "Backlog" in sp.format_help()
+def test_show_documents_overview_and_detail() -> None:
+    sp = _subparser("show")
+    help_text = sp.format_help()
+    assert "Backlog" in help_text
     assert sp.description is not None
 
 
-def test_list_resolves_and_ls_is_gone() -> None:
-    from imp.cli.main import _build_parser, _cmd_status
+def test_show_resolves_and_list_is_gone() -> None:
+    from imp.cli.main import _build_parser, _cmd_show
     parser = _build_parser()
-    assert parser.parse_args(["list"]).func is _cmd_status
+    assert parser.parse_args(["show"]).func is _cmd_show
     with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["ls"])
+        parser.parse_args(["list"])
     assert exc.value.code == 2
 
 

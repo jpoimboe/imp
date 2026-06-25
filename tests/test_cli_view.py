@@ -258,11 +258,11 @@ def test_main_swallows_broken_pipe(monkeypatch) -> None:
     def boom(_ns: object) -> int:
         raise BrokenPipeError(32, "Broken pipe")
 
-    monkeypatch.setattr(m, "_cmd_status", boom)
+    monkeypatch.setattr(m, "_cmd_show", boom)
     monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
     monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
 
-    rc = m.main(["list"])
+    rc = m.main(["show"])
     assert rc == 128 + signal.SIGPIPE
 
 
@@ -285,12 +285,12 @@ def test_main_swallows_broken_pipe_on_buffered_flush(monkeypatch) -> None:
         def fileno(self) -> int:
             return 1
 
-    monkeypatch.setattr(m, "_cmd_status", quiet)
+    monkeypatch.setattr(m, "_cmd_show", quiet)
     monkeypatch.setattr(m.sys, "stdout", FakeStdout())
     monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
     monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
 
-    rc = m.main(["list"])
+    rc = m.main(["show"])
     assert rc == 128 + signal.SIGPIPE
 
 
