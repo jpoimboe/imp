@@ -12,8 +12,8 @@ from typing import Any
 
 from imp.agents.skills import (
     SkillError,
-    list_skill_names,
-    load_skill_body,
+    list_user_skills,
+    load_user_skill,
 )
 
 # Sentinel: the line was a builtin / unknown / not-found command that printed
@@ -107,7 +107,7 @@ def handle_slash_line(
         return REPROMPT
 
     try:
-        body = load_skill_body(change.workflow_dir / "skills", cmd)
+        body = load_user_skill(change.workflow_dir / "skills", cmd)
     except SkillError:
         output_fn(f"no such skill: /{cmd}")
         _help(output_fn)
@@ -121,13 +121,13 @@ def handle_slash_line(
 
 
 def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
-    names = list_skill_names(skills_dir)
-    if not names:
+    skills = list_user_skills(skills_dir)
+    if not skills:
         out("No skills available in this workflow.")
         return
     out("Available skills (load with /<name>):")
-    for n in names:
-        out(f"  /{n}")
+    for name, description in skills:
+        out(f"  /{name}    {description}" if description else f"  /{name}")
 
 
 def _help(out: Callable[[str], None]) -> None:
