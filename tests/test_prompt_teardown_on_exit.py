@@ -1,6 +1,6 @@
 # tests/test_prompt_teardown_on_exit.py
 """Task D3 — an OPEN prompt tears down when the coordinator exit event fires
-(SIGTERM / escalation / out-of-band SIGINT), and a wait_for_user solicit
+(SIGTERM / escalation / out-of-band SIGINT), and a bare-turn-end solicit
 cancellation converts into AwaitingUserInput (its existing headless path).
 
 The M2 verification tests (test_real_prompt_* and test_solicit_cancel_*) drive a
@@ -185,23 +185,14 @@ async def test_real_prompt_normal_submit_returns_line() -> None:
 # ── M2 (b): REAL solicit cancellation → AwaitingUserInput, clean state ───────
 
 
-class _Ctx:
-    def __init__(self, user_input_fn) -> None:
-        self.user_input_fn = user_input_fn
-        self.event_log = None
-        self.agent_id = None
-        self.coordinator = None
-
-
 @pytest.mark.anyio
 async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
     """M2 (b): a REAL prompt_async-backed user_input_fn is cancelled mid-solicit
-    (the exit-event race tears down the prompt scope); the wait_for_user tool
-    converts the cancellation into AwaitingUserInput, leaving a clean resumable
-    state with NO 'cancel scope not exited in order' warning."""
-    from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+    (the exit-event race tears down the prompt scope); build_continuation_fn's
+    solicit converts the cancellation into AwaitingUserInput, leaving a clean
+    resumable state with NO 'cancel scope not exited in order' warning."""
+    from imp.engine.completion import build_continuation_fn
 
-    tool = make_wait_for_user_tool()
     buf = io.StringIO()
 
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
@@ -214,15 +205,17 @@ async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
         async def user_input_fn(_prompt: str) -> str:
             return await _ask_or_exit(prompt, exit_event)
 
-        ctx = _Ctx(user_input_fn)
+        cont = build_continuation_fn(
+            instruction="finish.", user_input_fn=user_input_fn,
+            coordinator=None, event_log=None, agent_id=None)
         _fire_soon(exit_event)
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             with redirect_stderr(buf), pytest.raises(AwaitingUserInput) as ei:
-                await tool.fn(ctx)
+                await cont("")
 
-    # The cancellation converts cleanly; prompt arg is dropped, prompt is always "".
+    # The cancellation converts cleanly; the pause carries no prompt.
     assert ei.value.prompt == ""
     _no_cancel_scope_warning(buf.getvalue())
 
@@ -230,10 +223,9 @@ async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
 @pytest.mark.anyio
 async def test_solicit_normal_reply_unchanged() -> None:
     """Regression: the normal attended-reply path is untouched — a submitted
-    line is returned as the tool result, no AwaitingUserInput."""
-    from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+    line is returned as the next-message reply, no AwaitingUserInput."""
+    from imp.engine.completion import build_continuation_fn
 
-    tool = make_wait_for_user_tool()
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         prompt = Prompt()
         exit_event = anyio.Event()
@@ -241,7 +233,9 @@ async def test_solicit_normal_reply_unchanged() -> None:
         async def user_input_fn(_prompt: str) -> str:
             return await _ask_or_exit(prompt, exit_event)
 
-        ctx = _Ctx(user_input_fn)
+        cont = build_continuation_fn(
+            instruction="finish.", user_input_fn=user_input_fn,
+            coordinator=None, event_log=None, agent_id=None)
         pipe.send_text("do the thing\r")
-        reply = await tool.fn(ctx)
+        reply = await cont("")
     assert reply == "do the thing"
