@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from imp.engine.change_id import new_change_id
+from imp.engine.change_id import _DENYLIST, _is_clean_stem, new_change_id
 
 _ID_RE = re.compile(r"^[bdfghjklmnprstvz][aeiou][bdfghjklmnprstvz][aeiou][0-9]{2}$")
 
@@ -25,3 +25,18 @@ def test_new_change_id_unique_small_n() -> None:
 
 def test_new_change_id_has_no_date_prefix() -> None:
     assert not re.match(r"^\d{4}-\d{2}-\d{2}", new_change_id())
+
+
+def test_screening_rejects_every_denylisted_stem() -> None:
+    assert _DENYLIST  # guard: an empty denylist would make this test vacuous
+    for stem in _DENYLIST:
+        assert _is_clean_stem(stem) is False
+
+
+def test_screening_accepts_a_clean_stem() -> None:
+    assert _is_clean_stem("kobe") is True
+
+
+def test_new_change_id_never_emits_a_denylisted_stem() -> None:
+    for _ in range(5000):
+        assert new_change_id()[:4] not in _DENYLIST
