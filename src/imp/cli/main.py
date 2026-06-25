@@ -733,21 +733,21 @@ async def _run_cleared_session(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
-    banner_shown = _print_splash_banner(interactive=True)
-    if banner_shown:
+    change = Change.create_draft(
+        control, title="", change_id=new_change_id(),
+        base_branch=base, origin="draft")
+    print(_run_header_line(change.id, change.title, "new", color=color))
+    if _print_splash_banner(interactive=True):
         print()
     prompt = Prompt(editing_mode=_editing_mode(control), color=color)
     try:
         reply = (await prompt.ask_async(
             width=_term_width(), hint=OPENING_HINT)).strip()
     except (EOFError, KeyboardInterrupt):
+        discard_conversation(change)
         print("imp: cancelled", file=sys.stderr)
         return 130
     opening_text = _normalize_opening_reply(reply)
-    change = Change.create_draft(
-        control, title="", change_id=new_change_id(),
-        base_branch=base, origin="draft")
-    _print_run_header(change.id, change.title, "new", color=color)
     if tui:
         return await _run_tui_session(
             change, seed_opening=opening_text, opening_intent=opening_text,

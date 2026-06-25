@@ -372,6 +372,42 @@ def test_new_tui_routes_through_clear_loop(
     assert seen["tui"] is True        # TUI arm → tui modality
 
 
+@pytest.mark.anyio
+async def test_run_cleared_session_leads_with_header_before_splash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    def _fake_splash(*, interactive: bool) -> bool:
+        print("SCENE")
+        return True
+
+    monkeypatch.setattr(m, "_print_splash_banner", _fake_splash)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+
+    class _FakePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    async def _fake_client(change: object, **kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    rc = await m._run_cleared_session(tmp_path, "main", tui=False, leave_state={})
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert " · new" in out                       # the run header (minted id · new)
+    assert out.index(" · new") < out.index("SCENE")   # header precedes the splash
+
+
 def test_resume_interactive_routes_through_clear_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
