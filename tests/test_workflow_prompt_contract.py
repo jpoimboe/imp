@@ -106,7 +106,7 @@ def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "context instead of intent" in out
-    assert "wait_for_user" in out
+    assert "ending your turn" in out
     assert "infer" in out.lower()
 
 
