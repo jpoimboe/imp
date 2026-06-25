@@ -15,8 +15,8 @@ def anyio_backend() -> str:
 
 def _new_args() -> Namespace:
     return Namespace(
-        description=None, idea=None, workflow=None, playbook=None,
-        findings_only=False, non_interactive=False,
+        description=None, idea=None, workflow=None,
+        non_interactive=False,
         title=None, opening=None, message=None, tui=False)
 
 

@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+import pytest
+
 from imp.cli import main
 from imp.engine.change import Change
 from tests.conftest import _seed_control
@@ -76,8 +78,7 @@ def test_new_idea_with_title_flag_is_error(
         argparse.Namespace(idea="A title", opening=None, depends_on=[],
                            title="conflicting", base_branch=None,
                            non_interactive=True, message=None, tui=False,
-                           playbook=None,
-                           findings_only=False, workflow=None)))
+                           workflow=None)))
     assert rc == 2
     assert not (tmp_path / ".imp" / "changes").exists()
     assert "--backlog" in capsys.readouterr().err
@@ -91,6 +92,20 @@ def test_new_backlog_argparse_wiring(tmp_path: Path) -> None:
     assert args.idea == "My title"
     assert args.opening == "longer brief"
     assert args.depends_on == ["2026-06-16-dep001"]
+
+
+def test_run_subcommand_is_unknown() -> None:
+    parser = main._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "ux"])
+
+
+def test_new_rejects_playbook_flags() -> None:
+    parser = main._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["new", "--playbook", "ux"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["new", "--findings-only"])
 
 
 def test_interactive_backlog_seeds_session_and_sets_origin(
