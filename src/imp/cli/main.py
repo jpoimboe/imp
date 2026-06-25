@@ -1146,10 +1146,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     _warn_if_tui_unavailable(args, sys.stdout)
-    _print_splash_banner(interactive=_is_interactive(
-        non_interactive=bool(getattr(args, "non_interactive", False))))
-    print(_run_header_line(
-        change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
+    color = should_use_color(sys.stdout)
+    print(_run_header_line(change.id, change.title, "resuming", color=color))
+    if _print_splash_banner(interactive=_is_interactive(
+            non_interactive=bool(getattr(args, "non_interactive", False)))):
+        print()
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
