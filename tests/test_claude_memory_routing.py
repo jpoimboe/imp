@@ -50,3 +50,14 @@ def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
     assert "## Plain-speak copy" in body
     assert "imp-native" in body
     assert '"express"' in body
+
+
+def test_imp_invariants_has_layering_and_future_sections() -> None:
+    body = pathlib.Path("docs/imp-invariants.md").read_text()
+    assert "## Layering invariants" in body
+    assert "## Future / unbuilt" in body
+    assert "$IMP_TEST_COMMAND" in body
+    assert "$IMP_LINT_COMMAND" in body
+    assert "generic primitives" in body
+    assert "Memory retention" in body
+    assert "user-level" in body
