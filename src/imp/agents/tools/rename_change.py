@@ -16,9 +16,11 @@ from imp.engine.state import JsonlEventLog
     name="rename_change",
     description=(
         "Rename this Change to a meaningful title once you understand the work. "
-        "Applies immediately and returns this Change's id; use that id to write "
-        "and commit the spec at the change-home's artifacts/spec/<id>.md this "
-        "same turn."
+        "A title is a short human-readable phrase — a few words with spaces, "
+        "sentence case, like a PR title — not a branch-name slug (no kebab-case "
+        "hyphens). Applies immediately and returns this Change's id; use that id "
+        "to write and commit the spec at the change-home's artifacts/spec/<id>.md "
+        "this same turn."
     ),
 )
 def rename_change(ctx: Any, name: str) -> str:
