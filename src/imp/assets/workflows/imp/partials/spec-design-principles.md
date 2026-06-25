@@ -8,3 +8,7 @@ imp's four-part contract (Goal / Scope / Decisions summary / Acceptance
 criteria) and its emphasis on concrete, testable Acceptance criteria.
 
 **YAGNI ruthlessly.** Remove unnecessary features from all proposals. Flag scope that looks like over-engineering.
+
+**Make illegal states unrepresentable.** Prefer a design where the type or
+structure rules out the bad case over one that admits it and then validates or
+falls back. Push correctness into the shape of the data, not into runtime guards.
