@@ -29,9 +29,6 @@ from imp.engine.agent_run import (
     drive_invocation,
 )
 from imp.engine.backoff import (
-    HEADLESS_RETRY_CEILING_SECONDS as _HEADLESS_RETRY_CEILING_SECONDS,
-)
-from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
 from imp.engine.state import JsonlEventLog
@@ -294,9 +291,9 @@ async def dispatch_task(
     # _route_agent in executor.py:
     #   1. Interruptible sleep — each tick checks should_pause so Ctrl-C returns
     #      within one tick (100 ms default) instead of blocking for the full delay.
-    #   2. Headless ceiling — when ctx.non_interactive is True and cumulative
-    #      backoff would exceed _HEADLESS_RETRY_CEILING_SECONDS, stop retrying
-    #      and raise SubagentSuspended (unwinds as a clean pause).
+    #   2. Per-category budget — when cumulative backoff would exceed
+    #      budget_for(category), stop retrying and raise SubagentSuspended
+    #      (unwinds as a clean pause), identical in interactive and headless runs.
 
     # Width cap (design Decision 5): acquire THIS invocation's CapacityLimiter
     # around the whole drive loop — the single drift-proof site that bounds all
@@ -305,6 +302,11 @@ async def dispatch_task(
     # dispatch is sequential, so there is only ever one borrower; the limiter is
     # a no-op for behavior until the concurrency core lands. The startup clamp
     # warning fires here, once, on the first dispatch.
+
+    # Lazy import: error_policy pulls providers/__init__, and this module is
+    # in that cold-import chain — a top-level import would cycle.
+    from imp.engine.error_policy import budget_for
+
     limiter = ctx.get_parallel_limiter()
     emit_parallelism_warning_once(ctx.event_log, ctx.agent_id)
     async with limiter:
@@ -317,10 +319,15 @@ async def dispatch_task(
                 log=ctx.event_log, emit_events=False, prior_backoff_attempts=backoff)
             if result.delay is None:
                 break
-            # §10/§12 headless ceiling (checked BEFORE sleeping, matching executor).
-            if (ctx.non_interactive
-                    and cumulative_backoff + result.delay > _HEADLESS_RETRY_CEILING_SECONDS):
-                raise SubagentSuspended("retry ceiling reached during subagent backoff")
+            # Per-category wall-clock budget (checked BEFORE sleeping, matching
+            # executor). category comes from the plumbed ErrorInfo, defaulting to
+            # "unknown" when absent. On exhaustion raise SubagentSuspended — this
+            # path's own clean-pause unwind (it cannot return an executor Pause).
+            category = result.error.category if result.error else "unknown"
+            budget = budget_for(category)
+            if budget is not None and cumulative_backoff + result.delay > budget:
+                raise SubagentSuspended(
+                    "retry ceiling reached during subagent backoff")
             backoff += 1
             await _interruptible_sleep(result.delay, ctx.coordinator)
             cumulative_backoff += result.delay

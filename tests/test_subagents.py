@@ -711,17 +711,19 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_subagent_headless_backoff_hits_ceiling(tmp_path: Path,
-                                                      monkeypatch) -> None:
-    """§12 fix: headless (non_interactive=True) subagent backoff stops at the
-    ceiling and raises SubagentSuspended rather than looping forever."""
+async def test_subagent_backoff_hits_per_category_budget(tmp_path: Path,
+                                                         monkeypatch) -> None:
+    """Per-category budget: subagent backoff stops at the budget and raises
+    SubagentSuspended — in interactive runs too (mode-independent)."""
     import imp.agents.subagents as subagents_mod
+    import imp.engine.error_policy as ep_mod
     from imp.agents.subagents import SubagentSuspended
 
-    # Monkeypatch the ceiling to a tiny value so the test is fast and deterministic.
-    monkeypatch.setattr(subagents_mod, "_HEADLESS_RETRY_CEILING_SECONDS", 10.0)
+    # dispatch_task lazily does `from imp.engine.error_policy import budget_for`,
+    # which reads the attribute off the module at call time, so patching it here
+    # is seen by the loop. Tiny budget so delay=15 exceeds it on attempt 1.
+    monkeypatch.setattr(ep_mod, "budget_for", lambda category: 10.0)
 
-    # Also patch _interruptible_sleep so we don't actually sleep.
     async def _no_sleep(delay, coordinator, *, tick=0.1):
         pass
 
@@ -731,7 +733,8 @@ async def test_subagent_headless_backoff_hits_ceiling(tmp_path: Path,
 
     async def _spawn(_inv):
         calls["n"] += 1
-        # Always return a rate_limit with delay=15 > ceiling=10.
+        # rate_limit error carrying a 15s server hint: decide() yields
+        # delay = min(60, max(2^0, 15)) = 15.0 > budget=10 -> suspend on attempt 1.
         return _FakeRunner([{"type": "error", "payload": {
             "category": "rate_limit", "kind": "429", "message": "slow",
             "detail": {"retry_after_seconds": 15.0}}}])
@@ -744,14 +747,14 @@ async def test_subagent_headless_backoff_hits_ceiling(tmp_path: Path,
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
-    ctx.non_interactive = True  # headless
+    ctx.non_interactive = False  # interactive: the budget still fires
     ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     with pytest.raises(SubagentSuspended, match="retry ceiling"):
         await dispatch_task(ctx, "reviewer", "review it")
 
-    # The ceiling check fires BEFORE the sleep on the first retry, so only 1 spawn.
+    # The budget check fires BEFORE the sleep on the first retry, so only 1 spawn.
     assert calls["n"] == 1
 
 
