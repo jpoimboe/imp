@@ -84,7 +84,7 @@ Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed s
 of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`
 (including tolerations the `verify` / `sweep-verify` gates recorded there) — and
 nothing else. Do not add an item here from something you noticed while reading the
-diff. For EACH item, in its own `wait_for_user` turn (one item per turn):
+diff. For EACH item, ending your turn after each (one item per turn):
 
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.
@@ -119,16 +119,16 @@ affirmative (e.g. "Ready to merge?"); if you recommend rework, the rework is the
 affirmative (e.g. "Send this back to fix X?"). No co-equal "…, or rework?" pairing
 and no scripted reply tokens. When there are no needs-decision items, present the
 prose summary and end with this question; otherwise ask it last, after the per-item walk.
-Then call `wait_for_user`. The human reads only your prose (`wait_for_user` shows no
-prompt), so ask the question — never announce it ("I'll solicit the merge
-decision"). Applies to every `wait_for_user` here, including the per-item walk above.
+Then end your turn to yield — the human reads only your prose (a bare turn-end shows no
+separate prompt), so ask the question — never announce it ("I'll solicit the merge
+decision"). Applies to every yield here, including the per-item walk above.
 
 When a human-requested rework is underspecified, settle the details first (a
-brainstorming-like posture) — use `wait_for_user` to clarify the desired outcome and scope before returning a rework decision — then hand a crisp brief to the
+brainstorming-like posture) — end your turn with your question to clarify the desired outcome and scope before returning a rework decision — then hand a crisp brief to the
 plan-writer. An agent-detected `review` rework does NOT ask the human here. Separate
-sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). Do not end your turn with plain text and no tool call. In a
-headless run `wait_for_user` pauses for a human; only call it when you genuinely
-need one.
+sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). In a
+headless run a bare turn-end with no human attached pauses the run; yield this way
+only when you genuinely need a human.
 
 Then route on the dispositions:
 - At least one **fix now** -> `complete_step(status="Success", decision="rework", comments="<ONLY
@@ -144,8 +144,8 @@ Then route on the dispositions:
   no past-tense merge claim — because the real merge happens later, at the queue head.
   Close with a short summary listing any follow-ups created, each with its
   `imp resume <id>` command.
-- Cannot proceed without a human and none is available, or an unrecoverable
-  problem -> `complete_step(status="Success", decision="pause", comments="<why>",
+- An unrecoverable problem (e.g. the non-converging verify-triage case)
+  -> `complete_step(status="Success", decision="pause", comments="<why>",
   verify_status=…, open_items=…, next_steps=…)`.
 
 Always emit the audit fields (`verify_status` / `open_items` / `next_steps`) on
