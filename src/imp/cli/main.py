@@ -1451,6 +1451,8 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return 0
     if resource == "spec":
         data = _show_artifact(control, change_id, f"spec/{change_id}.md")
+    elif resource == "summary":
+        data = _show_artifact(control, change_id, f"summary/{change_id}.md")
     elif resource == "plan":
         rel = _show_newest_plan_rel(control, change_id)
         data = _show_artifact(control, change_id, rel) if rel else None
@@ -2460,7 +2462,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument("token", help="Change id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec", "plan", "review", "events", "status"],
+        choices=["spec", "plan", "review", "events", "status", "summary"],
         help="Which artifact to print (default: a detail card).")
     p_show.set_defaults(func=_cmd_show)
 
