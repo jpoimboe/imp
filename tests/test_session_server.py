@@ -766,3 +766,107 @@ async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -
         assert result["r"] == "done"           # reply flows back through the blocking gate
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_archive_control_cancels_run_and_sets_archived_flag(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    started = anyio.Event()
+    server = SessionServer(sock)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        started.set()
+        await anyio.sleep_forever()
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await started.wait()
+        await client.send((encode_control("archive") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert server.archived is True
+        assert server.discarded is False
+        assert server.saved is False
+        assert server.abandoned is False
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_discard_control_cancels_run_and_sets_discarded_flag(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    started = anyio.Event()
+    server = SessionServer(sock)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        started.set()
+        await anyio.sleep_forever()
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await started.wait()
+        await client.send((encode_control("discard") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert server.discarded is True
+        assert server.archived is False
+        assert server.saved is False
+        assert server.abandoned is False
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_archive_is_delivered_even_when_the_control_queue_is_full() -> None:
+    server = SessionServer("/unused.sock")
+    from imp.remote.session.server import _CONTROL_QUEUE_DEPTH
+    for _ in range(_CONTROL_QUEUE_DEPTH):
+        server._enqueue_control("interrupt")
+    server._enqueue_control("archive")
+    assert server._archive_requested is True  # signal set regardless of queue state
+    async with anyio.create_task_group() as tg:
+        server._serve_scope = tg.cancel_scope
+        tg.start_soon(server._control_loop)
+    assert server.archived is True
+
+
+@pytest.mark.anyio
+async def test_discard_is_delivered_even_when_the_control_queue_is_full() -> None:
+    server = SessionServer("/unused.sock")
+    from imp.remote.session.server import _CONTROL_QUEUE_DEPTH
+    for _ in range(_CONTROL_QUEUE_DEPTH):
+        server._enqueue_control("interrupt")
+    server._enqueue_control("discard")
+    assert server._discard_requested is True  # signal set regardless of queue state
+    async with anyio.create_task_group() as tg:
+        server._serve_scope = tg.cancel_scope
+        tg.start_soon(server._control_loop)
+    assert server.discarded is True
