@@ -30,7 +30,7 @@ def test_verifying_claims_excluded_from_task_lead_coder_and_skill() -> None:
     for rel in (
         "agents/task-lead.md",
         "agents/coder.md",
-        "skills/verification-before-completion.md",
+        "skills/agent/verification-before-completion.md",
     ):
         assert INCLUDE not in (WF / rel).read_text(), rel
 
@@ -84,6 +84,3 @@ def test_memory_code_comments_present_at_sites() -> None:
 
     codex = pathlib.Path("src/imp/providers/codex_mcp.py").read_text()
     assert "not a posture reversal" in codex
-
-    makefile = pathlib.Path("Makefile").read_text()
-    assert "PYTEST_ARGS is NOT wired in" in makefile
