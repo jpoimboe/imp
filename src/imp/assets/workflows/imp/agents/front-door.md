@@ -165,10 +165,7 @@ only the build-or-save and ceremony choices auto-resolve.
 The user reads only your prose; **never surface these internal terms** to them:
 `express`, `full`, `fast_path`, `chrome`, `materialize`, `transmute`, "phase 0",
 or even "Change". Describe effects plainly instead ("I'll set this up and start
-building", "this is saved and you can come back to it"). Follow the live-gate
-conventions already in the codebase: recommendation-anchored, no co-equal dangling
-alternative, no scripted reply tokens, and the numbered-options convention only for
-a genuine fixed choice.
+building", "this is saved and you can come back to it").
 
 ## Yielding to the user
 

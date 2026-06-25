@@ -208,3 +208,19 @@ def test_front_door_status_label_resolves_to_a_pool_member() -> None:
     step = _wf().phases[0].steps[0]
     rendered = render_label(step.label, change=None, log=None)
     assert rendered in FRONT_DOOR_STATUS_PHRASES
+
+
+def test_front_door_live_gate_conventions_relocated_to_partial(tmp_path) -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    # The inline convention list is gone from front-door's own raw body...
+    # (guard on the sentence's lead-in, which — unlike the line-wrapped phrase —
+    # is a contiguous string that a revert would reintroduce).
+    assert "Follow the live-gate" not in body
+    # ...but resolves through the included partial chain in the rendered prompt.
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    out = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", non_interactive=False,
+        project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "no co-equal dangling alternative" in out
