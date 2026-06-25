@@ -10,7 +10,12 @@ from typing import Any
 
 import anyio
 
-from imp.engine.abandon import archive_conversation, save_to_backlog, tear_down_change
+from imp.engine.abandon import (
+    archive_conversation,
+    discard_conversation,
+    save_to_backlog,
+    tear_down_change,
+)
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -82,6 +87,7 @@ async def serve_change_session(
     tear_down: Callable[[Change], None] = tear_down_change,
     archive_left: Callable[[Change], None] = archive_conversation,
     save_left: Callable[[Change], None] = save_to_backlog,
+    discard_left: Callable[[Change], None] = discard_conversation,
     seed_opening: str | None = None,
     resume: bool = False,
     opening_intent: str | None = None,
@@ -181,6 +187,10 @@ async def serve_change_session(
             await anyio.to_thread.run_sync(archive_left, change)
     elif server.saved:
         await anyio.to_thread.run_sync(save_left, change)
+    elif server.archived:
+        await anyio.to_thread.run_sync(archive_left, change)
+    elif server.discarded:
+        await anyio.to_thread.run_sync(discard_left, change)
     elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(change.event_log()):
         await anyio.to_thread.run_sync(
             ensure_head_driven, change.control_root, change.base_branch)

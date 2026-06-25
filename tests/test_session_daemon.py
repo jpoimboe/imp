@@ -12,7 +12,12 @@ from imp.engine.executor import RunResult
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
 from imp.remote.session.discover import session_socket_path
-from imp.remote.session.protocol import CONTROL_ABANDON, CONTROL_SAVE
+from imp.remote.session.protocol import (
+    CONTROL_ABANDON,
+    CONTROL_ARCHIVE,
+    CONTROL_DISCARD,
+    CONTROL_SAVE,
+)
 
 
 @pytest.fixture
@@ -1332,5 +1337,75 @@ async def test_scope_only_forwarded_to_run_fn_on_hold_loop_rerun(tmp_path: Path)
         assert len(calls) == 2
         assert calls[0] is True
         assert calls[1] is True
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-arc")
+    sock = str(session_socket_path(change.control_root, change.id))
+    archived: list[Change] = []
+    discarded: list[Change] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> None:
+        await anyio.sleep_forever()
+
+    async with anyio.create_task_group() as tg:
+        async def _serve() -> None:
+            await serve_change_session(
+                change, run_fn=fake_run, hibernate=False,
+                archive_left=lambda ch: archived.append(ch),
+                discard_left=lambda ch: discarded.append(ch))
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        await client.send_control(CONTROL_ARCHIVE)
+        with anyio.fail_after(5):
+            while not archived:
+                await anyio.sleep(0.02)
+        assert archived == [change]
+        assert discarded == []
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-dis")
+    sock = str(session_socket_path(change.control_root, change.id))
+    archived: list[Change] = []
+    discarded: list[Change] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> None:
+        await anyio.sleep_forever()
+
+    async with anyio.create_task_group() as tg:
+        async def _serve() -> None:
+            await serve_change_session(
+                change, run_fn=fake_run, hibernate=False,
+                archive_left=lambda ch: archived.append(ch),
+                discard_left=lambda ch: discarded.append(ch))
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        await client.send_control(CONTROL_DISCARD)
+        with anyio.fail_after(5):
+            while not discarded:
+                await anyio.sleep(0.02)
+        assert discarded == [change]
+        assert archived == []
         await client.aclose()
         tg.cancel_scope.cancel()
