@@ -341,8 +341,7 @@ def test_build_resume_manifest_none_without_tool_calls() -> None:
 
 def test_build_resume_manifest_skips_control_tools() -> None:
     messages = [Message(role="assistant", content=(
-        ToolUseBlock(id="c", name="mcp__imp__complete_step", input={}),
-        ToolUseBlock(id="w", name="mcp__imp__wait_for_user", input={}),))]
+        ToolUseBlock(id="c", name="mcp__imp__complete_step", input={}),))]
     assert build_resume_manifest(messages) is None
 
 
