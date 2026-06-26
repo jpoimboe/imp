@@ -1358,7 +1358,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     if burst is not None:
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                # Non-wfu pairing: this turn actually ran → advance the clock.
+                # This turn actually ran → advance the clock.
                 burst.end_ts = ts
                 call.result = summary
                 call.citations_footer = footer

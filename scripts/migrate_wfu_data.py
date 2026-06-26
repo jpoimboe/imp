@@ -108,7 +108,10 @@ def migrate_transcript_lines(msgs: list[Event]) -> tuple[list[Event], int]:
             kept = [b for b in content if not _is_wfu_use(b)]
             removed += sum(1 for b in content if _is_wfu_use(b))
             if not kept:
-                continue  # empty turn — prior assistant text carries the question
+                # Dropping the empty turn is safe: no resumable transcript carries wfu
+                # (all wfu transcripts are terminal/non-replayed), so the potential for
+                # two consecutive user messages — which Anthropic replay rejects — is inert.
+                continue
             nm = dict(m)
             nm["content"] = kept
             out.append(nm)
