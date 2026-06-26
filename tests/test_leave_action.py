@@ -114,31 +114,28 @@ def test_had_exchange_false_for_only_system_events() -> None:
     log = _Log([
         {"type": "step_context", "payload": {}},
         {"type": "llm_response", "payload": {}},
-        {"type": "tool_call",
-         "payload": {"id": "w1", "name": "wait_for_user", "input": {}}},
         {"type": "awaiting_user_input", "payload": {}},
     ])
     assert _had_exchange(log) is False
 
 
-def test_had_exchange_true_for_an_answered_wait_for_user() -> None:
+def test_had_exchange_true_for_answered_awaiting_user_input() -> None:
+    # Migrated shape: awaiting_user_input + user_message (no wfu tool_call/tool_result).
     log = _Log([
-        {"type": "tool_call",
-         "payload": {"id": "w1", "name": "wait_for_user", "input": {}}},
-        {"type": "tool_result",
-         "payload": {"id": "w1", "content": "tell me more", "error": False}},
+        {"type": "awaiting_user_input", "payload": {"prompt": ""}},
+        {"type": "user_message",
+         "payload": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
     ])
     assert _had_exchange(log) is True
 
 
-def test_had_exchange_false_for_an_unrelated_tool_result() -> None:
+def test_had_exchange_false_for_tool_results_only() -> None:
+    # tool_call/tool_result events without any user-originated event → False.
     log = _Log([
         {"type": "tool_call",
          "payload": {"id": "g1", "name": "grep", "input": {}}},
         {"type": "tool_result",
          "payload": {"id": "g1", "content": "...", "error": False}},
-        {"type": "tool_call",
-         "payload": {"id": "w1", "name": "wait_for_user", "input": {}}},
     ])
     assert _had_exchange(log) is False
 

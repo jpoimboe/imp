@@ -19,19 +19,8 @@ from imp.remote.session.protocol import (
 
 def _had_exchange(log: object) -> bool:
     """True if the user contributed at least one message to a conversation."""
-    events = list(log.read())  # type: ignore[attr-defined]
-    waited = {
-        ev.get("payload", {}).get("id")
-        for ev in events
-        if ev.get("type") == "tool_call"
-        and ev.get("payload", {}).get("name") == "wait_for_user"
-        and ev.get("payload", {}).get("id") is not None
-    }
-    for ev in events:
-        etype = ev.get("type")
-        if etype in ("opening_intent", "user_message", "user_interjected"):
-            return True
-        if etype == "tool_result" and ev.get("payload", {}).get("id") in waited:
+    for ev in log.read():  # type: ignore[attr-defined]
+        if ev.get("type") in ("opening_intent", "user_message", "user_interjected"):
             return True
     return False
 
