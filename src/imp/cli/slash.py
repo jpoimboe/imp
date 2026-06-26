@@ -148,7 +148,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
     KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
 
     The cancellation originates in THIS function's own inner task group, which
-    cancels itself; by the time anything downstream (e.g. a wait_for_user
+    cancels itself; by the time anything downstream (e.g. a bare-turn-end
     solicit) observes a cancellation, it is the prompt's LOCAL scope unwinding,
     not an ancestor scope. We do NOT swallow CancelledError here — we let the
     scope unwind cleanly and synthesize KeyboardInterrupt only when the read

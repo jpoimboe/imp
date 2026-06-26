@@ -749,10 +749,9 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     (the heads-down interval between agent outputs), falling back to the
     first-call → last-result tool span when a burst has no surrounding prose, so
     the recap equals what the live timer read the instant the burst closed.
-    Three names are omitted: `load_skill` (it renders as its own
-    `loading skill …` line, so counting it here would double up), the bare `tool`
-    placeholder (the sentinel name for an orphan/unnamed result — no real tool
-    info), and `wait_for_user` (a gate call, not a user-visible tool action).
+    Two names are omitted: `load_skill` (it renders as its own
+    `loading skill …` line, so counting it here would double up) and the bare `tool`
+    placeholder (the sentinel name for an orphan/unnamed result — no real tool info).
     Returns None when nothing renderable remains."""
     calls = nv.visible_calls(burst)
     if not calls:

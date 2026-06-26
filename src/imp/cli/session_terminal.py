@@ -4,7 +4,7 @@ Composes the Plan 1-7 primitives into the client half of the per-change session
 daemon. `run_terminal_client` attaches to a change's session daemon (via an
 injected attach thunk), streams the daemon's events into a live event renderer
 (LiveDriver), forwards a local interrupt gesture as a control frame
-(SessionControls, without killing the client), and answers each wait_for_user
+(SessionControls, without killing the client), and answers each bare-turn-end
 gate by soliciting one reply and sending it back as an input frame. It returns
 when the daemon's run reaches a terminal state and drops the socket. The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,

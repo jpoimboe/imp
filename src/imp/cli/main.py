@@ -69,8 +69,8 @@ class ReplyInterjectRouter:
     """Routes each human-typed line by the agent's state AT SUBMIT TIME (F7/R6).
 
     `route(line)` is the pure decision:
-      - solicit ACTIVE (the engine is blocked in a `wait_for_user`,
-        a prompt is up) → the line is the REPLY → delivered to `reply_sink`;
+      - solicit ACTIVE (the engine is blocked at a bare-turn-end prompt)
+        → the line is the REPLY → delivered to `reply_sink`;
       - solicit INACTIVE (the agent is running) → the line is an INTERJECT →
         queued on the coordinator, delivered at the next agent turn boundary.
 
@@ -202,8 +202,8 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     """Headless reply channel: yield the single --message once, then pause.
 
-    The first wait_for_user solicit (live opener OR the dangling wait_for_user
-    resolved on resume) consumes `message`; any later solicit in the same
+    The first bare-turn-end solicit (live opener OR the awaiting_user_input
+    resume) consumes `message`; any later solicit in the same
     invocation raises AwaitingUserInput, unwinding to a clean pause the operator
     continues with another `imp resume <id> --message "..."`."""
     delivered = False
@@ -2323,7 +2323,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
-                       help="Headless reply consumed by the first wait_for_user; "
+                       help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
     p_new.add_argument("--tui", action="store_true",
@@ -2357,7 +2357,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--non-interactive", action="store_true",
                         help="Headless: no live prompt; supply the reply via --message.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
-                        help="Headless reply consumed by the first wait_for_user; "
+                        help="Headless reply consumed by the first bare-turn-end prompt; "
                              "requires --non-interactive.")
     p_chat.add_argument("--tui", action="store_true",
                         help="Render the conversation in a full-screen, scrollable "
@@ -2372,7 +2372,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
-                          help="Headless reply consumed by the first wait_for_user; "
+                          help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
     p_resume.add_argument("--tui", action="store_true",

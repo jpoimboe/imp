@@ -147,7 +147,7 @@ class TuiApp:
         not_prompt = Condition(lambda: not self._prompt_visible)
 
         # eager=True guarantees these reach the viewport even while the
-        # wait_for_user prompt buffer is focused — navigation/verbosity belong to
+        # solicit prompt buffer is focused — navigation/verbosity belong to
         # the viewer, not the input line. On today's prompt_toolkit a single-line
         # Buffer happens not to bind PgUp/PgDn and filters emacs `open-line`
         # (Ctrl-O) out, so the global bindings already fire during a solicit (see
@@ -279,7 +279,7 @@ class TuiApp:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
 
-    # -- in-app prompt (wait_for_user) ---------------------------------------
+    # -- in-app prompt (bare-turn-end) ---------------------------------------
     async def solicit(self, change: Any) -> str:
         self._change = change
         self._slash_lines = []

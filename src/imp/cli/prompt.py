@@ -181,9 +181,8 @@ class Prompt:
         handle_sigint only governs OS-signal handling. With the default
         handle_sigint=True, prompt_toolkit installs its OWN SIGINT handler for
         the prompt's duration and raises KeyboardInterrupt inside the prompt app
-        coroutine on an out-of-band SIGINT; across the claude_code in-process MCP
-        task boundary (a wait_for_user solicit runs inside the SDK's MCP handler
-        task) that KeyboardInterrupt escapes imp's except arms and crashes
+        coroutine on an out-of-band SIGINT; across the attended-solicit coroutine boundary that KeyboardInterrupt
+        escapes imp's except arms and crashes
         anyio.run, leaving the change status="running". Setting it False lets
         imp's InterruptCoordinator SIGINT handler stay installed during the
         prompt and route an out-of-band SIGINT through the coordinator exit path

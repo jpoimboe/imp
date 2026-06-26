@@ -108,12 +108,10 @@ class LiveStatus:
 
         On exit the span timer is RESET (§7): the suspend block only ever wraps the
         interactive solicit loop, so the suspended interval was a human at the
-        prompt — the agent was not working. A wait_for_user reply returns as a
-        tool_result, not a user_message, so the driver's restart_span never fires
-        for it; resetting here is what makes the resumed `thinking` line count from
-        the reply rather than from before the prompt (which would fold in the
-        human's read/type time — the `imp new` first-turn "thinking 26s" bug). An
-        unstarted timer is left unstarted (update() owns first-start)."""
+        prompt — the agent was not working. Resetting here ensures the `thinking`
+        timer counts from the reply rather than from before the prompt (which would
+        fold in the human's read/type time — the `imp new` first-turn "thinking 26s" bug).
+        An unstarted timer is left unstarted (update() owns first-start)."""
         self._suspended = True
         self._erase()
         try:
