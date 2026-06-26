@@ -28,6 +28,11 @@ from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, resume_select, splash
 from imp.cli import palette as pal
+from imp.cli.inert_resume import (
+    bare_turn_end_question,
+    make_buffered_solicit,
+    run_inert_resume,
+)
 from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -1038,6 +1043,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
         return await _clear_loop(change.control_root, tui=True, first=_first_tui)
 
+    if not getattr(args, "message", None):
+        question = bare_turn_end_question(change)
+        if question is not None:
+            return await _resume_inert(change, question)
+
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     _warn_if_tui_unavailable(args, sys.stdout)
@@ -1065,6 +1075,49 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
+
+
+async def _inert_ask_line(change: Change) -> str | None:
+    """Read one prompt-toolkit line at inert resume; EOF / Ctrl-C maps to None."""
+    prompt = Prompt(
+        skills_dir=change.workflow_dir / "skills",
+        editing_mode=_editing_mode(change.control_root),
+        color=should_use_color(sys.stdout))
+    try:
+        return await prompt.ask_async(width=_term_width())
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+async def _resume_inert(
+    change: Change, question: str,
+) -> int:
+    """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
+    from imp.cli.signals import InterruptCoordinator
+
+    color = should_use_color(sys.stdout)
+    print(_run_header_line(change.id, change.title, "resuming", color=color))
+
+    async def _launch(line: str) -> int:
+        async def _first(leave_state: dict[str, str]) -> int:
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout, color=color,
+                                width=_term_width(), status=status,
+                                suppress_replay=True)
+            coord = InterruptCoordinator()
+            inner = make_interactive_solicit(
+                change, status=status, driver=driver, coord=coord)
+            solicit = make_buffered_solicit(line, inner)
+            return await run_session_client(
+                change, driver=driver, coord=coord, solicit=solicit,
+                resume=True, status=status, leave_state=leave_state)
+
+        return await _clear_loop(change.control_root, tui=False, first=_first)
+
+    return await run_inert_resume(
+        question=question,
+        ask_line=lambda: _inert_ask_line(change),
+        launch=_launch)
 
 
 def _editing_mode(control_root: Path) -> str:

@@ -5,7 +5,8 @@ natural bare-turn-end gate, then:
 
   reach gate (awaiting_user_input + daemon holds flock)
   -> SIGQUIT detach (daemon pid gone, flock released, state paused)
-  -> imp resume (workflow_resumed + a FRESH daemon re-holds the flock).
+  -> imp resume idles at the pending question; typing the first line
+     re-engages (workflow_resumed + a FRESH daemon re-holds the flock).
 
 Unconditional in the default suite: no IMP_LIVE_PROVIDERS / opted_in skip. The
 pty is required — a non-tty would exercise the Part A headless path, not the tty
@@ -179,13 +180,22 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
     finally:
         s.close()
 
-    # imp resume -> a FRESH daemon re-acquires the flock and appends
-    # workflow_resumed; its pid differs from the original holder.
+    # Under AC8, imp resume prints the pending question and idles; only
+    # after the human types the first line does a FRESH daemon re-acquire
+    # the flock and append workflow_resumed (pid != original holder).
     r = TerminalSession(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     )
     try:
+        # The inert branch prints the pending question and blocks at the prompt.
+        # Poll until the question renders, then send a line to re-engage.
+        assert _poll(
+            lambda: any("waiting for you" in ln for ln in r.lines()), timeout=30.0
+        ), "inert resume never rendered the pending question"
+        r.wait_idle()
+        r.send("continue\r")
+
         assert _poll(
             lambda: "workflow_resumed" in _event_types(events), timeout=60.0
         ), "resume never appended workflow_resumed"
