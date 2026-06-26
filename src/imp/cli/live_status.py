@@ -24,7 +24,7 @@ _RESET_SGR = "\x1b[0m"  # SGR 0 (reset all attributes)
 _ACK_MAX_WIDTH = 120    # clip the transient ack line so it never wraps
 
 
-def _term_width() -> int:
+def term_width() -> int:
     try:
         return shutil.get_terminal_size().columns
     except OSError:
@@ -47,7 +47,7 @@ class LiveStatus:
         self._suspended = False
         self._frame = 0
         self._prev_width: int | None = None     # display width of the last drawn frame
-        self._width_fn: Callable[[], int] = _term_width
+        self._width_fn: Callable[[], int] = term_width
 
     def update(self, compose: Callable[[int, float], str | None]) -> None:
         """Set/refresh the compose fn and redraw. Starts the session timer on the

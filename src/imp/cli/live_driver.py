@@ -30,7 +30,7 @@ from typing import Any
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
-from imp.cli.live_status import LiveStatus, _term_width
+from imp.cli.live_status import LiveStatus, term_width
 
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
@@ -134,7 +134,7 @@ def compose_activity_status(
         activity=activity, change_id=root.id, title=root.title,
         prompt_tokens=builder.latest_prompt_tokens, elapsed=elapsed,
         frame=frame, color=color,
-        width=_term_width() if width is None else width,
+        width=term_width() if width is None else width,
         context_pct=builder.latest_context_pct)
 
 
