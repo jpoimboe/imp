@@ -663,12 +663,17 @@ class _TTYPipe(io.StringIO):
         return True
 
 
-def test_tty_chrome_steps_no_committed_status_no_double_blanks() -> None:
+def test_tty_chrome_steps_no_committed_status_no_double_blanks(monkeypatch) -> None:
     """Regression (live-TTY): a chrome step's transient `· working` status line
     must NOT survive into scroll-back above its breadcrumb, and no two blank lines
     ever stack. Feed the byte stream through pyte (a faithful terminal) and assert
     the final screen: no `working` line committed, and no adjacent blank rows."""
+    import os
+    import shutil
+
     import pyte
+    monkeypatch.setattr(shutil, "get_terminal_size",
+                        lambda *a, **k: os.terminal_size((60, 30)))
     out = _TTYPipe()
     drv = LiveDriver(stream=out, color=False, width=60, status=LiveStatus(out))
     for e in [
@@ -1386,10 +1391,12 @@ def test_status_spine_label_activity_elapsed() -> None:
         ev("3", "thinking", agent_id="step:plan/plan-reviewer", content="hmm"),
     ]:
         b.add(e)
-    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
-    # toolbar spine: title · model · step · elapsed (no phase_label here -> no phase
-    # field; no thinking verb). change_created sets title "x"; the step carries model "m".
-    assert line.split(" ", 1)[1] == "x · m · reviewing plan · 18s"
+    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False, width=80)
+    # Right-align layout: the activity group (step · elapsed) leads flush-left and the
+    # identity group (title · model) is padded flush-right. No phase_label here -> no
+    # phase field; no thinking verb. change_created sets title "x"; the step carries "m".
+    assert line.startswith("⠋ reviewing plan · 18s")   # activity group (step · elapsed) leads
+    assert line.endswith("x · m")                      # identity group (title · model) flush right
 
     # quiet/unlabeled script step: no display label, no command -> bare timer.
     q = nv.NarrativeBuilder()
@@ -1399,9 +1406,11 @@ def test_status_spine_label_activity_elapsed() -> None:
            quiet=True),
     ]:
         q.add(e)
-    qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False)
-    # quiet/unlabeled script step: title · elapsed (no model, no step, no phase field).
-    assert qline.split(" ", 1)[1] == "x · 4s"
+    qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False, width=80)
+    # quiet/unlabeled script step: a bare timer leads (no model, step, or phase field);
+    # only the title sits in the right group, flush right.
+    assert qline.startswith("⠋ 4s")                    # bare timer leads
+    assert qline.endswith("x")                         # title flush right
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
@@ -1808,7 +1817,7 @@ def test_compose_toolbar_shows_all_seven_fields_plain() -> None:
     from imp.cli.live_driver import compose_toolbar
     line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
                            title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=False)
+                           elapsed=5.0, frame=0, color=False, width=80)
     assert line[0] == "⠋"                       # spinner glyph leads (no bg when plain)
     assert "z9gixx" in line                      # change id
     assert "streaming toolbar" in line           # title
@@ -1824,7 +1833,7 @@ def test_compose_toolbar_paints_field_accents_under_ansi_theme() -> None:
     from imp.cli.live_driver import compose_toolbar
     line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
                            title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=True)
+                           elapsed=5.0, frame=0, color=True, width=80)
     assert "\x1b[90m" in line          # change id gray (also the detail track)
     assert "\x1b[35m" in line          # model magenta
     assert "\x1b[34m" in line          # phase blue (and step `step` blue)
@@ -1838,7 +1847,7 @@ def test_compose_toolbar_wears_user_slate_background_under_dark_theme() -> None:
         pal.set_theme("dark")
         line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
                                title="streaming toolbar", prompt_tokens=26000,
-                               elapsed=5.0, frame=0, color=True)
+                               elapsed=5.0, frame=0, color=True, width=80)
         assert line.startswith("\x1b[48;2;43;47;58m")   # opens with the user-message slate
         assert line.endswith("\x1b[0m")                  # closes the bar with a full reset
         # The dim elapsed segment (SGR 2) must close with SGR 22, not a bare \x1b[39m, or
@@ -1853,7 +1862,7 @@ def test_compose_toolbar_omits_bar_for_unknown_model() -> None:
     from imp.cli.live_driver import compose_toolbar
     act = nv.Activity(step_label="s", phase_label="p", model="unlisted-model")
     line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
-                           prompt_tokens=99, elapsed=1.0, frame=0, color=False)
+                           prompt_tokens=99, elapsed=1.0, frame=0, color=False, width=80)
     assert "%" not in line             # bar omitted
     assert "z9gixx" in line and "p" in line and "s" in line   # rest still renders
 
@@ -1864,7 +1873,7 @@ def test_compose_toolbar_step_segment_uses_label_when_no_count() -> None:
     act = nv.Activity(step_label="task-lead", label="reviewing plan",
                       phase_label="implement", model="claude-sonnet-4-5")
     line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
-                           prompt_tokens=26000, elapsed=5.0, frame=0, color=False)
+                           prompt_tokens=26000, elapsed=5.0, frame=0, color=False, width=80)
     assert "task-lead" in line          # step label still present
     assert "reviewing plan" in line     # fallback label used when count is None
 
@@ -1899,3 +1908,42 @@ def test_compose_toolbar_static_none_when_idle() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     assert drv.compose_toolbar_static() is None    # no activity -> no toolbar
+
+
+def test_compose_toolbar_right_aligns_identity_group_flush_right() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_toolbar
+    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                           title="streaming toolbar", prompt_tokens=26000,
+                           elapsed=5.0, frame=0, color=False, width=140)
+    # left group (phase/step/elapsed) precedes the right group (id/title/model/bar)
+    assert line.index("implement") < line.index("z9gixx")    # phase (left) before id (right)
+    assert line.index("5s") < line.index("z9gixx")           # elapsed (left) before id (right)
+    assert line.endswith("13%")                              # context bar is flush right
+    assert pal.display_width(line) == 138                    # padded to width-2
+    assert pal.clip_display(line, 139) == line               # survives the width-1 clip intact
+
+
+def test_compose_toolbar_narrow_falls_back_to_single_line_order() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                           title="streaming toolbar", prompt_tokens=26000,
+                           elapsed=5.0, frame=0, color=False, width=80)
+    # too narrow to right-align: today's single left-to-right order (id before phase)
+    assert line.index("z9gixx") < line.index("implement")
+    assert " · " in line
+
+
+def test_compose_toolbar_slate_background_covers_full_padded_line() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_toolbar
+    try:
+        pal.set_theme("dark")
+        line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                               title="streaming toolbar", prompt_tokens=26000,
+                               elapsed=5.0, frame=0, color=True, width=140)
+        assert line.startswith("\x1b[48;2;43;47;58m")        # slate opens the line
+        assert line.endswith("\x1b[0m")                      # full reset closes it
+        assert pal.display_width(line) == 138                # padding included under the bg
+    finally:
+        pal.set_theme("ansi")

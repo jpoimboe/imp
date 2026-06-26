@@ -40,7 +40,8 @@ class TuiDriver:
 
     def status_text(self, frame: int, elapsed: float) -> str | None:
         return compose_activity_status(
-            self._builder, frame=frame, elapsed=elapsed, color=self._color)
+            self._builder, frame=frame, elapsed=elapsed, color=self._color,
+            width=self._width)
 
     def print_collapsed_transcript(self, stream: Any) -> None:
         for line in rt.render_tree(

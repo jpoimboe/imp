@@ -30,7 +30,7 @@ from typing import Any
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
-from imp.cli.live_status import LiveStatus
+from imp.cli.live_status import LiveStatus, _term_width
 
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
@@ -86,36 +86,43 @@ def _toolbar_step_segment(activity: nv.Activity, *, color: bool, over_bg: bool) 
 
 def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
                     prompt_tokens: int | None, elapsed: float, frame: int,
-                    color: bool, context_pct: float | None = None) -> str:
-    """The single pure toolbar composer: builds the seven-field bar from plain values —
-    change id, title, model, phase, step (+ transient detail), elapsed, context bar —
-    wrapped in the user-message slate background when the active theme supplies one."""
+                    color: bool, width: int, context_pct: float | None = None) -> str:
+    """The single pure toolbar composer. Live-activity fields (spinner · phase · step ·
+    elapsed) sit left; identity/usage fields (id · name · model · context bar) are
+    padded flush-right within `width - 2` columns so they survive the status-line's
+    `clip_display(_, width - 1)`. Below a fit threshold the bar degrades to a single
+    left-to-right line and lets the clip handle overflow. The slate background, when
+    present, wraps the whole padded line."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
     spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=over)
-    segments: list[str] = []
-    if change_id:
-        segments.append(_paint(change_id, "gray", color=color, over_bg=over))
-    if title:
-        segments.append(title)
-    if activity.model:
-        segments.append(_paint(activity.model, "magenta", color=color, over_bg=over))
-    if activity.phase_label:
-        segments.append(_paint(activity.phase_label, "blue", color=color, over_bg=over))
-    step = _toolbar_step_segment(activity, color=color, over_bg=over)
-    if step:
-        segments.append(step)
-    segments.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over))
+    id_seg = _paint(change_id, "gray", color=color, over_bg=over) if change_id else None
+    title_seg = title if title else None
+    model_seg = (_paint(activity.model, "magenta", color=color, over_bg=over)
+                 if activity.model else None)
+    phase_seg = (_paint(activity.phase_label, "blue", color=color, over_bg=over)
+                 if activity.phase_label else None)
+    step_seg = _toolbar_step_segment(activity, color=color, over_bg=over)
+    elapsed_seg = _paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over)
     bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                       color=color, over_bg=over)
-    if bar:
-        segments.append(bar)
-    body = f"{spin} " + rt.compose_label(segments)
+
+    left = f"{spin} " + rt.compose_label([phase_seg, step_seg, elapsed_seg])
+    right = rt.compose_label([id_seg, title_seg, model_seg, bar])
+    target = width - 2          # largest width clip_display(_, width-1) returns intact
+    left_w = pal.display_width(left)
+    right_w = pal.display_width(right)
+    if right and left_w + right_w + 1 <= target:
+        body = f"{left}{' ' * (target - left_w - right_w)}{right}"
+    else:
+        body = f"{spin} " + rt.compose_label(
+            [id_seg, title_seg, model_seg, phase_seg, step_seg, elapsed_seg, bar])
     return f"{bg}{body}{_RESET}" if bg else body
 
 
 def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
+    width: int | None = None,
 ) -> str | None:
     activity = builder.current_activity()
     if activity is None:
@@ -124,7 +131,9 @@ def compose_activity_status(
     return compose_toolbar(
         activity=activity, change_id=root.id, title=root.title,
         prompt_tokens=builder.latest_prompt_tokens, elapsed=elapsed,
-        frame=frame, color=color, context_pct=builder.latest_context_pct)
+        frame=frame, color=color,
+        width=_term_width() if width is None else width,
+        context_pct=builder.latest_context_pct)
 
 
 @dataclass
