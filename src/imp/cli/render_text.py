@@ -668,7 +668,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             tag = f"[{node.category}] " if node.category else ""
             yield _line(f"error: {tag}{_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["error"], gutters=gutters)
-            if full and node.detail and node.detail not in node.message:
+            is_script = node.category == "script"
+            if (full or is_script) and node.detail and node.detail not in node.message:
                 yield from _wrap(_caret_escape(node.detail), width, depth + 1, color,
                                  *pal.NODE_COLORS["error"], gutters=gutters)
         return

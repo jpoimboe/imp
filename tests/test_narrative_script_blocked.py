@@ -83,3 +83,33 @@ def test_script_blocked_renders_error_above_paused_line() -> None:
                       if "fixup! commit still present" in ln)
     paused_idx = next(i for i, ln in enumerate(out) if "paused (" in ln)
     assert err_idx < detail_idx < paused_idx
+
+
+def test_lean_script_block_shows_detail() -> None:
+    tree = nv.build_tree([
+        {"type": "script_blocked",
+         "payload": {"step": "build-filing", "exit": 2,
+                     "stdout": "", "stderr": "DeploymentException: bootstrap failed"}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "error: [script] build-filing blocked (exit 2)" in out
+    assert "DeploymentException: bootstrap failed" in out
+
+
+def test_lean_non_script_error_hides_detail() -> None:
+    tree = nv.build_tree([
+        {"type": "error",
+         "payload": {"message": "boom", "category": None,
+                     "detail": {"full_summary": "stack trace details"}}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "error: boom" in out
+    assert "stack trace details" not in out
+
+
+def test_lean_warning_with_detail_hides_detail() -> None:
+    nb = NarrativeBuilder()
+    nb._append(nv.ErrorNode(message="heads up", is_warning=True, detail="hidden body"))
+    out = "\n".join(render_tree(nb.tree, full=False, color=False, width=80))
+    assert "warning: heads up" in out
+    assert "hidden body" not in out
