@@ -142,3 +142,41 @@ def test_consecutive_prompt_less_awaits_reuse_last_narration() -> None:
     loud = [text for text, silent in sent if not silent]
     assert len(loud) == 2
     assert all("Proceed with the merge?" in text for text in loud)
+
+
+def _step_started(
+    change_id: str, *, phase: str | None = None, label: str = "scoping",
+    quiet: bool = False,
+) -> dict:
+    payload: dict = {"label": label}
+    if phase is not None:
+        payload["phase_label"] = phase
+    if quiet:
+        payload["quiet"] = True
+    return {"type": "step_started",
+            "change": {"id": change_id, "title": "t"}, "payload": payload}
+
+
+def test_step_started_renders_silent_header_less_divider_for_focused_change() -> None:
+    focus = Focus()
+    focus.focus_on("k3f9qa")
+    sent: list = []
+    _adapter(sent, focus=focus).on_event(
+        _step_started("k3f9qa", phase="Brainstorm", label="scoping"))
+    assert sent == [("— Brainstorm › scoping —", True)]
+
+
+def test_step_started_divider_dropped_for_unfocused_change() -> None:
+    focus = Focus()
+    focus.focus_on("other")
+    sent: list = []
+    _adapter(sent, focus=focus).on_event(_step_started("k3f9qa"))
+    assert sent == []
+
+
+def test_quiet_step_started_renders_no_divider() -> None:
+    focus = Focus()
+    focus.focus_on("k3f9qa")
+    sent: list = []
+    _adapter(sent, focus=focus).on_event(_step_started("k3f9qa", quiet=True))
+    assert sent == []

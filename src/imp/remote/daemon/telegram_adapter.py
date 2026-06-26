@@ -18,6 +18,7 @@ from imp.remote.drivers.telegram import (
     load_config,
     make_get_updates,
     send_message_params,
+    step_divider,
 )
 
 
@@ -168,6 +169,15 @@ class TelegramNorthAdapter:
         etype = event.get("type")
         kind = curate(etype, event.get("payload") or {})
         if kind is None:
+            return
+        if etype == "step_started":
+            change = event.get("change") or {}
+            change_id = change.get("id")
+            if not change_id or self._focus.current() != change_id:
+                return
+            divider = step_divider(event)
+            if divider is not None:
+                self._send(divider, True)
             return
         body = event_body(etype, event.get("payload") or {})
         override: str | None = None
