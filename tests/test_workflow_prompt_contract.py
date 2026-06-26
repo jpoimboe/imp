@@ -636,6 +636,67 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     assert "do **not** call `wait_for_user`" in headless_moved
 
 
+HUMAN_DECISION_PARTIAL = Path(
+    "src/imp/assets/workflows/imp/partials/human-decision.md")
+
+
+def test_human_decision_partial_holds_canonical_bar() -> None:
+    text = HUMAN_DECISION_PARTIAL.read_text()
+    # The two conjoined conditions.
+    assert "intent-level" in text
+    assert "costly to reverse" in text
+    assert "Both conditions must hold" in text
+    # Observable-behavior / public-contract is NOT a standalone trigger; the
+    # suite is the backstop for a covered behavior change.
+    assert "test suite is the backstop" in text
+    assert "not on its own a reason to escalate" in text.lower()
+    # The decide-yourself-and-log directive.
+    assert "decide yourself and log" in text
+    # The "make it the right call, not the cheap one" quality clause. The
+    # canonical sentence wraps across a newline in the partial, and read_text()
+    # preserves that raw newline, so a continuous-string assert spanning the
+    # break would never match — assert within-line substrings instead.
+    assert "Reversibility lowers the bar for bothering" in text
+    assert "never the bar for code quality." in text
+    assert "not the smallest diff" in text
+    # Partials carry no superpowers attribution line.
+    assert "superpowers" not in text.lower()
+
+
+def test_deferred_sweep_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "deferred-sweep.md").read_text()
+    # Sources the shared bar.
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The standalone observable-behavior trigger and the risk-paragraph bar
+    # definition are gone (no longer its own prose definition of the bar).
+    assert "observable/external behavior" not in text
+    assert "alters observable behavior" not in text
+    assert "preserves observable behavior" not in text
+    # Agent-specific framing survives: the fail-fast guard under `fixed`, the
+    # `dismissed` disposition, and the fix-it-or-dismiss nuance.
+    assert "fail-fast" in text
+    assert "**dismissed**" in text
+    assert '"is this cheap change worth it?"' in text
+
+
+def test_spec_finalizer_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "spec-finalizer.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The inline bar prose is gone.
+    assert "an ambiguity you had to assume past" not in text
+    # Mechanics preserved: reader-form line + fast_path note.
+    assert "DEFERRED spec-finalizer:" in text
+    assert "fast_path" in text
+
+
+def test_reconciler_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "reconciler.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # Reader-form line + asynchronous-triage framing preserved.
+    assert "DEFERRED reconciler:" in text
+    assert "asynchronous human triage" in text
+
+
 def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source
@@ -652,3 +713,68 @@ def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     assert 'depends_on=["abc"]' in out
     # Plain-language resume hint for the spun-off change.
     assert "imp resume" in out
+
+
+def test_task_lead_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "task-lead.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The needs-decision note-type row and its routing semantics survive.
+    assert "**needs-decision**" in text
+    assert "gate's needs-decision walk" in text
+    # The include must not reintroduce the removed backward-jump vocabulary.
+    assert "deviation" not in text.lower()
+
+
+def test_plan_writer_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "plan-writer.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The inline "Surfacing a decision you cannot resolve" bar prose is gone.
+    assert "an ambiguity you had to assume past" not in text
+    # Mechanics preserved: reader-form line + fast_path note.
+    assert "DEFERRED plan-writer:" in text
+    assert "fast_path" in text
+    # The distinct higher-bar Ask-vs-decide / wait_for_user framing stays.
+    assert "When to ask — all three must hold" in text
+
+
+HUMAN_DECISION_AGENTS = [
+    "deferred-sweep.md", "spec-finalizer.md", "reconciler.md",
+    "task-lead.md", "plan-writer.md",
+]
+
+
+@pytest.mark.parametrize("name", HUMAN_DECISION_AGENTS)
+def test_authoring_agent_includes_human_decision_once(name: str) -> None:
+    text = (AGENTS_DIR / name).read_text()
+    assert text.count('{% include "partials/human-decision.md" %}') == 1, (
+        f"{name}: must source the shared human-decision bar exactly once")
+
+
+@pytest.mark.parametrize("name", [Path(n).stem for n in HUMAN_DECISION_AGENTS])
+def test_authoring_agent_renders_human_decision_partial(
+    name: str, tmp_path: Path,
+) -> None:
+    body = load_workflow(
+        bundled_workflow_dir("imp")).agents[name].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    rendered = render_prompt(
+        body,
+        build_context(
+            change_title="t", event_log=log, change_id="abc",
+            change_home=".imp/changes/abc",
+            cur_base_head="X", orig_base_head="X",
+            vars={"fast_path": False, "plan_total": 1, "task_total": 1,
+                  "integration_fork": "P"},
+            project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    # Sentinel lives entirely on one partial line (the canonical sentence wraps
+    # across a newline, so assert a within-line substring that survives the wrap).
+    assert "never the bar for code quality." in rendered, (
+        f"{name}: the human-decision include did not resolve into the prompt")
+
+
+def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
+    for md in AGENTS_DIR.glob("*.md"):
+        assert "observable/external behavior" not in md.read_text(), (
+            f"{md.name}: still carries the removed standalone "
+            "'observable/external behavior' escalation trigger")

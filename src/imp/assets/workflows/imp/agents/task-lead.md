@@ -196,6 +196,11 @@ unimplemented task, or the re-opened task from injected feedback):
    | **needs-decision** | A genuine human call, no code action taken; recorded as a `— needs-decision:` Deferred Followup. | `finalize` gate's needs-decision walk; suppresses the `plan-cycle-check` backstop for its scope. |
    | **needs-replan** | You couldn't fix forward; a corrective plan is required. | `plan-cycle-check` → `more_plans: true` → `plan-writer` authors `N+1`. |
 
+   What makes a finding a **needs-decision** (a genuine human call) rather than a
+   **resolved-forward** you should just make and log is the shared bar:
+
+{% include "partials/human-decision.md" %}
+
    - **Local + bounded + tree-stays-green** → make the forward fix (dispatch the
      coder), record a **resolved-forward** note, continue. If the fix crosses a spec
      scope/AC boundary, add a `— needs-decision:` line so the human ratifies it at the
