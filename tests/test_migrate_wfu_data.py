@@ -106,3 +106,19 @@ def test_transcript_without_wfu_untouched():
     msgs = [_assistant({"type": "text", "text": "hi"}, _tool_use("X", name="bash"))]
     out, n = mig.migrate_transcript_lines(msgs)
     assert n == 0 and out == msgs
+
+
+def test_migrate_transcripts_under_walks_and_rewrites(tmp_path):
+    steps = tmp_path / "steps" / "plan" / "plan-writer"
+    steps.mkdir(parents=True)
+    t = steps / "transcript.jsonl"
+    t.write_text(json.dumps(_assistant({"type": "text", "text": "q"}, _tool_use("X"))) + "\n")
+    assert mig.migrate_transcripts_under(tmp_path / "steps", apply=False) == 1
+    assert "wait_for_user" in t.read_text()  # dry-run untouched
+    assert mig.migrate_transcripts_under(tmp_path / "steps", apply=True) == 1
+    assert "wait_for_user" not in t.read_text()
+    assert mig.migrate_transcripts_under(tmp_path / "steps", apply=True) == 0
+
+
+def test_migrate_transcripts_under_missing_dir_is_zero(tmp_path):
+    assert mig.migrate_transcripts_under(tmp_path / "nope", apply=True) == 0

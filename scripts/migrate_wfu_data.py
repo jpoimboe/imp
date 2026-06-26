@@ -128,3 +128,19 @@ def migrate_transcript_lines(msgs: list[Event]) -> tuple[list[Event], int]:
         else:
             out.append(m)
     return out, removed
+
+
+def migrate_transcripts_under(steps_dir: Path, *, apply: bool) -> int:
+    """Walk steps_dir.rglob("transcript.jsonl") and rewrite each in place using
+    migrate_transcript_lines. Returns total blocks removed. Dry-run when apply=False;
+    missing dir returns 0."""
+    if not steps_dir.is_dir():
+        return 0
+    total = 0
+    for tpath in steps_dir.rglob("transcript.jsonl"):
+        new_msgs, n = migrate_transcript_lines(_read_jsonl(tpath))
+        if n:
+            total += n
+            if apply:
+                _write_jsonl(tpath, new_msgs)
+    return total
