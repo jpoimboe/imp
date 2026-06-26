@@ -195,8 +195,8 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
     assert rc == 0
-    # The working escape (unnamed draft → "✦ imp · <id>") is already on stdout.
-    assert "\x1b]2;✦ imp · z9y8x7\x07" in at_prompt["value"]
+    # The working escape (unnamed draft → "• imp · <id>") is already on stdout.
+    assert "\x1b]2;• imp · z9y8x7\x07" in at_prompt["value"]
     # The same instance is threaded into run_session_client.
     assert captured["title"]._change_id == "z9y8x7"
 
