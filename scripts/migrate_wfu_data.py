@@ -15,9 +15,18 @@ from typing import Any
 Event = dict[str, Any]
 
 
+def _is_legacy_wfu_name(name: str | None) -> bool:
+    # The tool was recorded either bare ("wait_for_user", as in events.jsonl) or
+    # under its MCP-server name ("mcp__imp__wait_for_user", as in the LLM-message
+    # transcripts). Match both, exactly as the resume tripwire does
+    # (imp.agents.classify._is_legacy_wfu_name) — else the prefixed transcript
+    # form is silently skipped and resume trips on the un-migrated tool_use.
+    return name == "wait_for_user" or (name or "").endswith("__wait_for_user")
+
+
 def _is_wfu_call(e: Event) -> bool:
     return (e.get("type") == "tool_call"
-            and (e.get("payload") or {}).get("name") == "wait_for_user")
+            and _is_legacy_wfu_name((e.get("payload") or {}).get("name")))
 
 
 def _wfu_call_ids(events: list[Event]) -> set[str | None]:
@@ -91,7 +100,7 @@ def migrate_change_events_file(path: Path, *, apply: bool) -> int:
 
 def _is_wfu_use(b: Any) -> bool:
     return (isinstance(b, dict) and b.get("type") == "tool_use"
-            and b.get("name") == "wait_for_user")
+            and _is_legacy_wfu_name(b.get("name")))
 
 
 def migrate_transcript_lines(msgs: list[Event]) -> tuple[list[Event], int]:

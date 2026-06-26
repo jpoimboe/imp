@@ -196,3 +196,33 @@ def test_migrate_skips_live_change(tmp_path, monkeypatch):
     assert rep["skipped_live"] == ["live1"]
     assert rep["live_events"] == 0
     assert (cdir / "events.jsonl").read_text() == before  # untouched, no race
+
+
+# The tool is recorded bare ("wait_for_user") in events.jsonl but under its
+# MCP-server name ("mcp__imp__wait_for_user") in the LLM-message transcripts.
+# The migration must match both forms, or the prefixed transcript tool_use is
+# silently skipped and resume trips the tripwire.
+
+def test_event_gate_with_mcp_prefix_migrates():
+    call = {"id": "X", "agent_id": "a", "timestamp": "t1", "type": "tool_call",
+            "payload": {"name": "mcp__imp__wait_for_user", "id": "X"}}
+    out, n = mig.migrate_event_lines([call, _result("X", "yes")])
+    assert n == 1
+    assert out[0]["type"] == "awaiting_user_input"
+    assert out[1]["type"] == "user_message"
+
+
+def test_transcript_mcp_prefixed_tool_use_migrates():
+    msgs = [{"role": "assistant", "content": [
+        {"type": "text", "text": "q?"},
+        {"type": "tool_use", "id": "X", "name": "mcp__imp__wait_for_user", "input": {}}]}]
+    out, n = mig.migrate_transcript_lines(msgs)
+    assert n == 1
+    assert out == [{"role": "assistant", "content": [{"type": "text", "text": "q?"}]}]
+
+
+def test_is_legacy_wfu_name_matches_both_forms():
+    assert mig._is_legacy_wfu_name("wait_for_user")
+    assert mig._is_legacy_wfu_name("mcp__imp__wait_for_user")
+    assert not mig._is_legacy_wfu_name("complete_step")
+    assert not mig._is_legacy_wfu_name(None)
