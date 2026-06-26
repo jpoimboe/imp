@@ -73,8 +73,10 @@ async def test_first_client_input_satisfies_the_gate_and_returns(
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock)
     received: list[str] = []
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        gate_reached.set()
         reply = await user_chat_input_fn("")
         received.append(reply)
         return reply
@@ -91,7 +93,7 @@ async def test_first_client_input_satisfies_the_gate_and_returns(
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let run_fn reach the gate (open next_input)
+        await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
         with anyio.fail_after(5):
             while "r" not in result:
@@ -246,11 +248,13 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
     received: list[str] = []
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
+        gate_reached.set()
         reply = await user_chat_input_fn("")
         received.append(reply)
         return reply
@@ -267,7 +271,7 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let run_fn reach the gate (open next_input)
+        await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
         with anyio.fail_after(5):
             while "r" not in result:
@@ -284,12 +288,14 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
         try:
+            gate_reached.set()
             await user_chat_input_fn("")
         except AwaitingUserInput:
             return "hibernated"
@@ -307,7 +313,7 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the gate open while resident
+        await gate_reached.wait()
         await client.aclose()
         with anyio.fail_after(5):
             while "r" not in result:
@@ -341,12 +347,14 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 2:
                 await anyio.sleep(0.02)
         try:
+            gate_reached.set()
             await user_chat_input_fn("")
         except AwaitingUserInput:
             return "hibernated"
@@ -365,7 +373,7 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while server.attached_count != 2:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the gate open while both are attached
+        await gate_reached.wait()
         await client1.aclose()
         await anyio.sleep(0.05)  # first detach alone must not trigger hibernation
         await client2.aclose()
@@ -877,11 +885,13 @@ async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> N
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
     received: list[str] = []
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
+        gate_reached.set()
         received.append(await user_chat_input_fn(""))   # exchange 1
         received.append(await user_chat_input_fn(""))   # exchange 2 (follow-up)
         return "completed"                              # control returns only now
@@ -898,7 +908,7 @@ async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> N
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let run_fn reach the first gate (open next_input)
+        await gate_reached.wait()
         await client.send((encode_input("answer one") + "\n").encode())
         with anyio.fail_after(5):
             while len(received) < 1:
@@ -927,12 +937,14 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
     # the run pauses.
     sock1 = str(tmp_path / "s1.sock")
     server1 = SessionServer(sock1, hibernate=True)
+    gate_reached1 = anyio.Event()
 
     async def run_fn1(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server1.attached_count < 1:
                 await anyio.sleep(0.02)
         try:
+            gate_reached1.set()
             await user_chat_input_fn("")
         except AwaitingUserInput:
             return "paused"
@@ -950,7 +962,7 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
         with anyio.fail_after(5):
             while server1.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the gate open while attended
+        await gate_reached1.wait()
         await client1.aclose()   # detach mid-turn
         with anyio.fail_after(5):
             while "r" not in result1:
@@ -963,11 +975,13 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
     sock2 = str(tmp_path / "s2.sock")
     server2 = SessionServer(sock2, hibernate=True)
     delivered: list[str] = []
+    gate_reached2 = anyio.Event()
 
     async def run_fn2(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server2.attached_count < 1:
                 await anyio.sleep(0.02)
+        gate_reached2.set()
         reply = await user_chat_input_fn("")
         delivered.append(reply)
         return reply
@@ -984,7 +998,7 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
         with anyio.fail_after(5):
             while server2.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let run_fn2 reach the gate
+        await gate_reached2.wait()
         await client2.send((encode_input("here is my answer") + "\n").encode())
         with anyio.fail_after(5):
             while "r" not in result2:
