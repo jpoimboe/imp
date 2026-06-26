@@ -28,13 +28,17 @@ _BUZZ = frozenset({
 })
 _SILENT = frozenset({"llm_response", "agent_output", "notice", "step_started"})
 
-# Human-readable headers for loud events. The phone-buzzing notifications read as
-# plain English, not imp's internal snake_case event types. An unmapped type
-# falls back to its raw name (defensive — every loud type is mapped today).
+# Human-readable labels for buzz events — phone notifications read as plain English,
+# not imp's internal snake_case types. An unmapped type falls back to its raw name.
 _EVENT_LABELS = {
     "awaiting_user_input": "needs your input",
     "merge_blocked": "merge blocked",
-    "completed": "done",
+    "script_blocked": "script blocked",
+    "change_merged": "done",
+    "change_abandoned": "abandoned",
+    "workflow_paused": "paused",
+    "workflow_resumed": "resumed",
+    "error": "error",
 }
 
 _API_BASE = "https://api.telegram.org"

@@ -49,7 +49,7 @@ def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
 
 
 def test_format_falls_back_to_change_id_then_header_only() -> None:
-    event = {"type": "completed", "change": {"id": "2026-06-11-abc"}, "payload": {}}
+    event = {"type": "change_merged", "change": {"id": "2026-06-11-abc"}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] done"
 
 
@@ -68,17 +68,17 @@ def test_clamp_text_truncates_overflow_and_marks_it() -> None:
 
 
 def test_format_falls_back_to_imp_when_no_title_and_no_id() -> None:
-    event = {"type": "completed", "change": {}, "payload": {}}
+    event = {"type": "change_merged", "change": {}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "[imp] done"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
     event = {
-        "type": "completed",
+        "type": "change_merged",
         "change": {"title": "T"},
-        "payload": {"message": "something went wrong"},
+        "payload": {"message": "wrapped up"},
     }
-    assert imp_telegram.format_event_message(event) == "[T] done\nsomething went wrong"
+    assert imp_telegram.format_event_message(event) == "[T] done\nwrapped up"
 
 
 def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
@@ -159,3 +159,17 @@ def test_step_divider_none_when_quiet() -> None:
     assert step_divider(
         {"type": "step_started",
          "payload": {"label": "internal setup", "quiet": True}}) is None
+
+
+def test_event_labels_humanize_every_buzz_type() -> None:
+    assert imp_telegram._EVENT_LABELS == {
+        "awaiting_user_input": "needs your input",
+        "merge_blocked": "merge blocked",
+        "script_blocked": "script blocked",
+        "change_merged": "done",
+        "change_abandoned": "abandoned",
+        "workflow_paused": "paused",
+        "workflow_resumed": "resumed",
+        "error": "error",
+    }
+    assert "completed" not in imp_telegram._EVENT_LABELS
