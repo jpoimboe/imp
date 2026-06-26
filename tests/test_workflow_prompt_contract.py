@@ -679,6 +679,16 @@ def test_deferred_sweep_sources_human_decision_bar() -> None:
     assert '"is this cheap change worth it?"' in text
 
 
+def test_spec_finalizer_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "spec-finalizer.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The inline bar prose is gone.
+    assert "an ambiguity you had to assume past" not in text
+    # Mechanics preserved: reader-form line + fast_path note.
+    assert "DEFERRED spec-finalizer:" in text
+    assert "fast_path" in text
+
+
 def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source
