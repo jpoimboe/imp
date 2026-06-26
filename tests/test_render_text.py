@@ -2143,11 +2143,16 @@ def test_markdown_hr_capped_to_display_width_and_gray() -> None:
 
 
 def test_markdown_hr_capped_to_console_width_when_smaller_than_display() -> None:
-    # rule_width = min(display_width, console width): a narrow console wins.
-    rendered = rt._markdown_to_ansi("before\n\n---\n\nafter", 30, True, display_width=200)
-    hr_lines = [ln for ln in rendered.splitlines() if "─" in ln]
-    assert hr_lines, "expected a horizontal-rule line"
-    assert hr_lines[0].count("─") == 30
+    # rule_width = min(display_width, console_width): narrow console wins.
+    # Test _CappedHR directly so rich's own console-width clipping cannot mask a missing min().
+    hr_cls = rt._capped_hr_cls(200)
+    hr = hr_cls()
+
+    class _Opts:
+        max_width = 30
+
+    (text,) = hr.__rich_console__(None, _Opts())
+    assert text.plain == "─" * 30  # min(200, 30); would be "─" * 200 without min()
 
 
 def test_render_tree_caps_hr_while_prose_stays_unwrapped() -> None:
