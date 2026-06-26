@@ -123,6 +123,8 @@ def build_continuation_fn(
         if user_input_fn is not None:
             _emit_awaiting()
             return _solicit()
+        # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
+        _emit_awaiting()
         raise AwaitingUserInput(last_text)
 
     return _cont

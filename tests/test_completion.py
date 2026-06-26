@@ -108,6 +108,26 @@ def test_top_level_no_channel_pauses_after_nudges() -> None:
     assert exc_info.value.prompt == "the final question"
 
 
+def test_top_level_no_channel_pause_emits_awaiting_user_input() -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        instruction=_instruction(), event_log=log, agent_id="a1",
+        subagent=False)
+    # Nudge phase: no channel, so the nudge backstop fires first and emits nothing.
+    for _ in range(NUDGE_LIMIT):
+        assert isinstance(fn("prose"), str)
+    assert not any(e["type"] == "awaiting_user_input" for e in log.events)
+    # Exhausted with no channel: pause carrying the last text AND emit the marker.
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("the final question")
+    assert exc_info.value.prompt == "the final question"
+    awaiting = [e for e in log.events if e["type"] == "awaiting_user_input"]
+    assert len(awaiting) == 1
+    assert awaiting[0]["agent_id"] == "a1"
+    assert awaiting[0]["payload"] == {"prompt": ""}
+
+
 def test_pending_interject_satisfies_without_soliciting() -> None:
     coord = InterruptCoordinator()
     coord.enqueue_interject("actually, stop and reconsider")
