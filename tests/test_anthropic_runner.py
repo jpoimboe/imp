@@ -880,3 +880,15 @@ async def test_resume_preserves_tool_result_and_omits_manifest(tmp_path: Path) -
     assert "GROUNDED" in sent
     # …and the claude_code-only manifest framing never reaches anthropic.
     assert "replay artifact" not in sent
+
+
+def test_anthropic_has_no_wait_for_user_result_handling() -> None:
+    """No wait_for_user result handling; the _build_tools carve-out is kept."""
+    import inspect
+
+    import imp.providers.anthropic as anthropic_mod
+
+    src = inspect.getsource(anthropic_mod)
+    assert '_tu.name == "wait_for_user"' not in src
+    # The non-registration carve-out is intentionally retained.
+    assert 'if name == "wait_for_user"' in src
