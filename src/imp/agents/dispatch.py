@@ -119,10 +119,10 @@ async def dispatch_one_tool_use(
             "message": str(fte),
         }}
     except AwaitingUserInput:
-        # Headless wait_for_user pause: must unwind out of run() (like
-        # SubagentSuspended), not become an is_error tool_result. The
-        # assistant message bearing this tool_use was already appended, so the
-        # transcript ends at the dangling wait_for_user tool_use.
+        # Headless bare-turn-end yield: must unwind out of run() (like
+        # SubagentSuspended), not become an is_error tool_result. The assistant
+        # message has already been appended, so the transcript ends at the
+        # agent's last text — the bare turn-end that is the yield.
         raise
     except Exception as e:
         err_text = f"{type(e).__name__}: {e}"

@@ -881,10 +881,10 @@ async def _route_agent(
 
     if result.paused:
         if result.awaiting_user:
-            # Headless wait_for_user: mark THIS step resumable so the reload
-            # keeps the transcript (the dangling wait_for_user tool_use is what
-            # the AWAITING_USER resume resolves). Mirrors the resume: edge's
-            # marker; cleared on the next forward Continue.
+            # Headless bare-turn-end yield: mark THIS step resumable so the
+            # reload keeps the transcript (the agent's last text is what the
+            # AWAITING_USER resume delivers a reply to). Mirrors the resume:
+            # edge's marker; cleared on the next forward Continue.
             state.resume_pending = state.step
             state.save(change.state_dir)
         return Pause(), None, {}
