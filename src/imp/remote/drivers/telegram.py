@@ -17,6 +17,7 @@ import os
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 # Curation map (spec Decisions §"Default curation"). Curation classifies an event
@@ -52,6 +53,14 @@ def clamp_text(text: str) -> str:
         return text
     keep = TELEGRAM_MAX_TEXT - len(_TRUNCATION_MARKER)
     return text[:keep] + _TRUNCATION_MARKER
+
+
+def format_time_of_day(iso: str) -> str:
+    """Event's UTC timestamp as lower-case am/pm in daemon-local time (its original send time)."""
+    dt = datetime.fromisoformat(iso).astimezone()
+    hour = dt.hour % 12 or 12
+    suffix = "am" if dt.hour < 12 else "pm"
+    return f"{hour}:{dt.minute:02d}{suffix}"
 
 
 def curate(event_type: Any) -> str | None:

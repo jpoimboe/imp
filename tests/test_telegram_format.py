@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+import time
+
+import pytest
+
 from imp.remote.drivers import telegram as imp_telegram
 
 
@@ -80,3 +85,37 @@ def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
     from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
     text = "x" * TELEGRAM_MAX_TEXT
     assert clamp_text(text) == text
+
+
+@pytest.fixture
+def set_tz():
+    saved = os.environ.get("TZ")
+
+    def _apply(name: str) -> None:
+        os.environ["TZ"] = name
+        time.tzset()
+
+    yield _apply
+    if saved is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = saved
+    time.tzset()
+
+
+def test_format_time_of_day_pins_ampm_lowercase_no_leading_zero(set_tz) -> None:
+    from imp.remote.drivers.telegram import format_time_of_day
+
+    set_tz("UTC")
+    assert format_time_of_day("2026-06-25T14:32:05+00:00") == "2:32pm"
+    assert format_time_of_day("2026-06-25T11:05:00+00:00") == "11:05am"
+    assert format_time_of_day("2026-06-25T00:15:00+00:00") == "12:15am"
+    assert format_time_of_day("2026-06-25T12:00:00+00:00") == "12:00pm"
+
+
+def test_format_time_of_day_converts_utc_to_daemon_local_zone(set_tz) -> None:
+    # EDT = UTC-4: 14:32 UTC → 10:32am, proving daemon-local conversion (not raw UTC).
+    from imp.remote.drivers.telegram import format_time_of_day
+
+    set_tz("America/New_York")
+    assert format_time_of_day("2026-06-25T14:32:05+00:00") == "10:32am"
