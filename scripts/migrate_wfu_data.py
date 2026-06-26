@@ -7,9 +7,6 @@ zaba25). Usage: `python scripts/migrate_wfu_data.py [CONTROL_ROOT] [--apply]`
 (defaults to the current working directory; dry-run unless --apply)."""
 from __future__ import annotations
 
-import argparse
-import json
-from pathlib import Path
 from typing import Any
 
 Event = dict[str, Any]
@@ -20,7 +17,7 @@ def _is_wfu_call(e: Event) -> bool:
             and (e.get("payload") or {}).get("name") == "wait_for_user")
 
 
-def _wfu_call_ids(events: list[Event]) -> set[str]:
+def _wfu_call_ids(events: list[Event]) -> set[str | None]:
     return {(e.get("payload") or {}).get("id") for e in events if _is_wfu_call(e)}
 
 
