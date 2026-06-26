@@ -247,7 +247,7 @@ async def test_ask_async_passes_plain_bottom_toolbar_through() -> None:
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     line = await prompt.ask_async(bottom_toolbar="z9gixx · 13%")
     assert line == "ok"
-    assert captured["bottom_toolbar"] == "z9gixx · 13%"   # plain str when color is off
+    assert captured["bottom_toolbar"] == "\nz9gixx · 13%"  # blank line separates prompt from bar
     from prompt_toolkit.styles import Style
     assert "style" in captured
     assert isinstance(captured["style"], Style)
@@ -266,6 +266,8 @@ async def test_ask_async_wraps_colored_bottom_toolbar_as_ansi_with_style() -> No
     prompt = Prompt(color=True, _session_factory=lambda: _SpySession())
     await prompt.ask_async(bottom_toolbar="\x1b[35mmodel\x1b[39m")
     assert isinstance(captured["bottom_toolbar"], ANSI)   # parsed so the SGR survives
+    # the spaced value (with its leading newline) is wrapped, not the original
+    assert captured["bottom_toolbar"].value == "\n\x1b[35mmodel\x1b[39m"
     assert "style" in captured                            # neutralizes default reverse
 
 

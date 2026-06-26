@@ -207,7 +207,8 @@ class Prompt:
         extra: dict[str, Any] = {}
         if bottom_toolbar is not None:
             from prompt_toolkit.styles import Style
-            extra["bottom_toolbar"] = ANSI(bottom_toolbar) if self._color else bottom_toolbar
+            spaced = f"\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
+            extra["bottom_toolbar"] = ANSI(spaced) if self._color else spaced
             extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
