@@ -68,7 +68,8 @@ questions.
 
 Normalize the draft just enough to imp's structure (ensure a **Goal** and
 **Acceptance criteria** are present), run the same pre-commit self-review as in
-"Writing the Spec", commit with `imp artifact-commit spec`, and finish with
+"Writing the Spec", then **author the plan outline** (see **Author the plan outline**
+below), commit with `imp artifact-commit spec`, and finish with
 `complete_step(phase="written", …)`. Pin `complexity` from the draft's shape (see **Pinning complexity** below).
 
 ## Writing the Spec (the `phase: written` turn)
