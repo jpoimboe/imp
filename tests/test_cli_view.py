@@ -490,3 +490,43 @@ def test_display_width_falls_back_to_80_when_no_terminal(monkeypatch) -> None:
     monkeypatch.setattr(cli_main.sys, "stdout", _Out())
     monkeypatch.setattr(os, "get_terminal_size", _raise)
     assert cli_main._display_width() == 80
+
+
+def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    import imp.cli.main as m
+
+    slug = "wide-demo"
+    change_dir = tmp_path / ".imp" / "changes" / slug
+    change_dir.mkdir(parents=True)
+    (change_dir / "change.json").write_text(json.dumps(
+        {"id": slug, "title": "demo", "base_branch": "main",
+         "layout_version": LAYOUT_VERSION}))
+    long_line = "X" * 200  # no spaces: only wraps if the wrap width forces it
+    (change_dir / "events.jsonl").write_text(
+        json.dumps({"id": "e1", "agent_id": None,
+                    "timestamp": "2026-06-25T10:00:00+00:00",
+                    "type": "step_started",
+                    "payload": {"step": "s", "kind": "agent", "phase": "p",
+                                "model": "m", "provider": "anthropic"}}) + "\n"
+        + json.dumps({"id": "e2", "agent_id": "step:p/s",
+                      "timestamp": "2026-06-25T10:00:01+00:00",
+                      "type": "llm_response",
+                      "payload": {"provider": "anthropic", "model": "m",
+                                  "stop_reason": "end_turn", "usage": {},
+                                  "raw": {"content": [{"type": "text",
+                                          "text": long_line + "\n\n---\n\nafter"}]}}}) + "\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    # Wrap width huge (no prose wrap); physical/display width small (HR caps there).
+    monkeypatch.setattr(m, "_term_width", lambda: 10000)
+    monkeypatch.setattr(m, "_display_width", lambda: 40)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    rc = main(["log", slug])
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(long_line in ln for ln in lines)        # prose unwrapped (wrap width)
+    assert any(ln.count("─") == 40 for ln in lines)    # HR capped to the display width
+    assert not any(ln.count("─") > 40 for ln in lines)

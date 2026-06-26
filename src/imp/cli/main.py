@@ -1624,7 +1624,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
 
     tree = narrative.build_tree(events)
-    lines = render_tree(tree, full=args.full, color=color, width=width)
+    lines = render_tree(tree, full=args.full, color=color, width=width,
+                        display_width=_display_width())
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
