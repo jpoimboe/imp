@@ -63,3 +63,46 @@ def test_migrate_change_events_file_dry_run_then_apply(tmp_path):
     lines = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
     assert [line["type"] for line in lines] == ["awaiting_user_input", "user_message"]
     assert mig.migrate_change_events_file(p, apply=True) == 0  # idempotent
+
+
+def _assistant(*blocks):
+    return {"role": "assistant", "content": list(blocks)}
+
+
+def _tool_use(tid, name="wait_for_user"):
+    return {"type": "tool_use", "id": tid, "name": name, "input": {}}
+
+
+def _user_result(tid, reply):
+    return {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid,
+         "content": [{"type": "text", "text": reply}]}]}
+
+
+def test_transcript_dangling_drops_tool_use_keeps_text():
+    msgs = [_assistant({"type": "text", "text": "what now?"}, _tool_use("X"))]
+    out, n = mig.migrate_transcript_lines(msgs)
+    assert n == 1
+    assert out == [_assistant({"type": "text", "text": "what now?"})]
+
+
+def test_transcript_empty_assistant_turn_is_dropped():
+    msgs = [_assistant({"type": "text", "text": "ask"}), _assistant(_tool_use("X"))]
+    out, n = mig.migrate_transcript_lines(msgs)
+    assert n == 1
+    assert out == [_assistant({"type": "text", "text": "ask"})]
+
+
+def test_transcript_resolved_rewrites_result_to_user_text():
+    msgs = [_assistant({"type": "text", "text": "q"}, _tool_use("X")),
+            _user_result("X", "the reply")]
+    out, n = mig.migrate_transcript_lines(msgs)
+    assert n == 1
+    assert out[0] == _assistant({"type": "text", "text": "q"})
+    assert out[1] == {"role": "user", "content": [{"type": "text", "text": "the reply"}]}
+
+
+def test_transcript_without_wfu_untouched():
+    msgs = [_assistant({"type": "text", "text": "hi"}, _tool_use("X", name="bash"))]
+    out, n = mig.migrate_transcript_lines(msgs)
+    assert n == 0 and out == msgs

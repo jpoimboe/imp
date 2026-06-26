@@ -86,3 +86,45 @@ def migrate_change_events_file(path: Path, *, apply: bool) -> int:
     if gates and apply:
         _write_jsonl(path, new_events)
     return gates
+
+
+def _is_wfu_use(b: Any) -> bool:
+    return (isinstance(b, dict) and b.get("type") == "tool_use"
+            and b.get("name") == "wait_for_user")
+
+
+def migrate_transcript_lines(msgs: list[Event]) -> tuple[list[Event], int]:
+    """Drop wait_for_user tool_use blocks from assistant messages (dropping empty
+    turns); rewrite tool_result blocks paired to wfu ids into the reply's text blocks.
+    Returns (new_msgs, n_blocks_removed)."""
+    wfu_ids = {b.get("id") for m in msgs if m.get("role") == "assistant"
+               for b in (m.get("content") or []) if _is_wfu_use(b)}
+    out: list[Event] = []
+    removed = 0
+    for m in msgs:
+        role, content = m.get("role"), m.get("content") or []
+        if role == "assistant" and any(_is_wfu_use(b) for b in content):
+            kept = [b for b in content if not _is_wfu_use(b)]
+            removed += sum(1 for b in content if _is_wfu_use(b))
+            if not kept:
+                continue  # empty turn — prior assistant text carries the question
+            nm = dict(m)
+            nm["content"] = kept
+            out.append(nm)
+        elif role == "user" and any(
+            isinstance(b, dict) and b.get("type") == "tool_result"
+            and (b.get("tool_use_id") or b.get("id")) in wfu_ids for b in content
+        ):
+            new_content: list[Any] = []
+            for b in content:
+                if (isinstance(b, dict) and b.get("type") == "tool_result"
+                        and (b.get("tool_use_id") or b.get("id")) in wfu_ids):
+                    new_content.extend(b.get("content") or [])
+                else:
+                    new_content.append(b)
+            nm = dict(m)
+            nm["content"] = new_content
+            out.append(nm)
+        else:
+            out.append(m)
+    return out, removed
