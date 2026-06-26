@@ -327,3 +327,27 @@ def test_imp_flat_code_reviewer_keeps_severity_partial_and_no_preamble_clean() -
     low = text.lower()
     for banned in ("no preamble", "output only the tool", "go straight to the tool"):
         assert banned not in low
+
+
+def test_imp_flat_gap_check_is_end_of_change_backstop() -> None:
+    text = _read_agent("gap-check.md")
+    low = text.lower()
+    assert "name: gap-check" in text
+    assert "end-of-change" in low or "end of change" in low
+    assert "once" in low
+    assert "outline" in low                 # the outline drives the loop, not gap-check
+    assert "plan-cycle-check" not in low     # no residual old name in the body
+    assert "task-lead" not in low            # the deleted agent is not referenced
+    # Coverage remit + the independent uncovered-scope backstop survive.
+    assert "sole" in low and "completeness" in low
+    assert "uncovered" in low
+    assert "needs-decision" in low and "suppress" in low  # a parked decision suppresses a replan
+    assert "more_plans" in low
+
+
+def test_imp_flat_gap_check_keeps_clamp_rules() -> None:
+    text = _read_agent("gap-check.md")
+    low = text.lower()
+    assert "the current plan number" in low   # plan_total >= plan_index
+    assert "strictly greater" in low          # more_plans true => plan_total > plan_index
+    assert "coverage complete" in low         # more_plans false => plan_total == plan_index
