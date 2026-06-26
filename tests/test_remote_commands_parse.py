@@ -34,12 +34,12 @@ def fake_resolve(text: str, reply_to: int | None) -> tuple[str | None, str]:
     return (None, text)
 
 
-def test_slash_list_is_listchanges() -> None:
-    assert parse("/list", None, fake_resolve) == ListChanges()
+def test_slash_show_is_listchanges() -> None:
+    assert parse("/show", None, fake_resolve) == ListChanges()
 
 
 def test_leading_whitespace_still_selects_the_command_path() -> None:
-    assert parse("   /list", None, fake_resolve) == ListChanges()
+    assert parse("   /show", None, fake_resolve) == ListChanges()
 
 
 def test_slash_help_is_help() -> None:

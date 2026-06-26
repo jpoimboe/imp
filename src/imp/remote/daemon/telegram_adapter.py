@@ -38,6 +38,12 @@ def parse_handle(text: str) -> tuple[str | None, str]:
     return None, text
 
 
+def parse_subscribe_handle(text: str) -> str | None:
+    """Resolve a /subscribe arg to a change id by @handle only — handle_for is identity."""
+    handle, _ = parse_handle(f"{text.strip()} .")
+    return handle or None
+
+
 @dataclass(frozen=True)
 class Inbound:
     text: str
@@ -236,4 +242,6 @@ class TelegramNorthAdapter:
         response = self._get_updates(self._offset)
         items, self._offset = extract_inbound(response, self._chat_id, self._offset)
         for item in items:
-            self._submit(parse(item.text, item.reply_to_message_id, self._resolve_text))
+            self._submit(parse(
+                item.text, item.reply_to_message_id, self._resolve_text,
+                parse_subscribe_handle))

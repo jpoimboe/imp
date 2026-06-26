@@ -94,7 +94,7 @@ async def test_e2e_chat_commands_round_trip(
             await _wait(lambda: created == ["add a foo() helper"])
             await _wait(lambda: _text_in_outbox(fake, "Spawning"))
 
-            fake.inject("/list")
+            fake.inject("/show")
             await _wait(lambda: _text_in_outbox(fake, "@q1w2e3  Listed — running · plan"))
 
             # A threaded reply is delivered into the change's session (attach + inject).

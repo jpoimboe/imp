@@ -184,7 +184,7 @@ async def test_unsubscribe_clears_focus_and_confirms() -> None:
     control = FakeControl()
     control.focus.focus_on("k3f9qa")
     responses: queue.Queue = queue.Queue()
-    await _handle_command(Unsubscribe(), control, responses)
+    await _handle_command(Unsubscribe("k3f9qa"), control, responses)
     assert control.focus.current() is None
     assert responses.get_nowait() == Notice("Muted — lifecycle alerts still on.")
 
