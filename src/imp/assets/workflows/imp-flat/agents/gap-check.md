@@ -1,7 +1,7 @@
 ---
 name: gap-check
 label: checking plan coverage
-description: Decide whether the spec needs another plan (supercycle) or is fully covered by the plans implemented so far.
+description: Run once at end-of-change to decide whether the implemented plans fully cover the spec, or a corrective plan is needed.
 output:
   status: {type: enum, values: [Success, Error]}
   more_plans: {type: bool}
