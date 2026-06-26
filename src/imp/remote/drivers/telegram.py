@@ -20,10 +20,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-# Curation map (spec Decisions §"Default curation"). Curation classifies an event
-# type as loud / silent / dropped; imp only streams event *types*.
-_LOUD = frozenset({"awaiting_user_input", "merge_blocked", "completed"})
-_SILENT = frozenset({"agent_output", "llm_response"})
+# Delivery tiers (spec §2). buzz = input prompts + status transitions (phone buzzes);
+# silent = narrative / notices / step dividers (streams quietly); everything else drops.
+_BUZZ = frozenset({
+    "awaiting_user_input", "merge_blocked", "script_blocked", "change_merged",
+    "change_abandoned", "workflow_paused", "workflow_resumed", "error",
+})
+_SILENT = frozenset({"llm_response", "agent_output", "notice", "step_started"})
 
 # Human-readable headers for loud events. The phone-buzzing notifications read as
 # plain English, not imp's internal snake_case event types. An unmapped type
@@ -76,12 +79,17 @@ def step_divider(event: Mapping[str, Any]) -> str | None:
     return f"— {inner} —"
 
 
-def curate(event_type: Any) -> str | None:
-    """Classify an imp event type: 'loud' (notify), 'silent' (quiet narrative),
-    or None (dropped). Anything not loud/silent is dropped, including tool_call,
-    tool_result, thinking, step_context and workflow_paused."""
-    if event_type in _LOUD:
-        return "loud"
+def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
+    """Classify an event into a delivery tier: 'buzz' (notify), 'silent' (quiet
+    stream), or None (dropped). Buzz = input prompts + status transitions; silent =
+    narrative / notices / step dividers; everything else (tool plumbing) drops. The
+    one payload-aware case: a nonterminal interrupt 'error' is dropped to match the
+    summary builder — only terminal errors buzz."""
+    if event_type == "error":
+        from imp.cli.render_summary import _is_nonterminal_error
+        return None if _is_nonterminal_error(dict(payload)) else "buzz"
+    if event_type in _BUZZ:
+        return "buzz"
     if event_type in _SILENT:
         return "silent"
     return None

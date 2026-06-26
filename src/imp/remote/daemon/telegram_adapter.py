@@ -166,7 +166,7 @@ class TelegramNorthAdapter:
         the last thing imp said as the body. last_narration is sender-thread-only,
         like _offset, so it needs no lock."""
         etype = event.get("type")
-        kind = curate(etype)
+        kind = curate(etype, event.get("payload") or {})
         if kind is None:
             return
         body = event_body(etype, event.get("payload") or {})
