@@ -363,11 +363,61 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
 
 def test_term_width_floors_to_80_when_columns_nonpositive(monkeypatch) -> None:
     from imp.cli import main as cli_main
+
+    class _Tty:
+        def isatty(self) -> bool:
+            return True
+
+        def fileno(self) -> int:
+            return 1
+
     monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(cli_main.sys, "stdout", _Tty())
     # Inner query reports 0 columns (winsize-0 PTY); shutil's `or fallback[0]`
     # must substitute 80.
     monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((0, 24)))
     assert cli_main._term_width() == 80
+
+
+def test_term_width_honors_explicit_columns_even_when_piped(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Pipe:
+        def isatty(self) -> bool:
+            return False
+
+    monkeypatch.setenv("COLUMNS", "10000")
+    monkeypatch.setattr(cli_main.sys, "stdout", _Pipe())
+    assert cli_main._term_width() == 10000
+
+
+def test_term_width_no_wrap_sentinel_when_piped_and_columns_unset(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Pipe:
+        def isatty(self) -> bool:
+            return False
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(cli_main.sys, "stdout", _Pipe())
+    # Piped, no explicit COLUMNS => a large no-wrap width, well above any real terminal.
+    assert cli_main._term_width() >= 10000
+
+
+def test_term_width_uses_real_columns_on_tty_when_columns_unset(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Tty:
+        def isatty(self) -> bool:
+            return True
+
+        def fileno(self) -> int:
+            return 1
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(cli_main.sys, "stdout", _Tty())
+    monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((123, 24)))
+    assert cli_main._term_width() == 123
 
 
 def test_log_backlog_id_renders_card(
@@ -411,3 +461,72 @@ def test_log_picker_rows_include_backlog(
     import anyio
     anyio.run(m._pick_log_target, tmp_path)
     assert any(r[0] == "2026-06-16-bkg111" for r in captured["rows"])
+
+
+def test_display_width_uses_kernel_winsize_ignoring_columns(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Out:
+        def fileno(self) -> int:
+            return 1
+
+    # An inflated COLUMNS must be ignored: _display_width asks the kernel.
+    monkeypatch.setenv("COLUMNS", "10000")
+    monkeypatch.setattr(cli_main.sys, "stdout", _Out())
+    monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((137, 40)))
+    assert cli_main._display_width() == 137
+
+
+def test_display_width_falls_back_to_80_when_no_terminal(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Out:
+        def fileno(self) -> int:
+            return 1
+
+    def _raise(fd):
+        raise OSError("not a terminal")
+
+    monkeypatch.setattr(cli_main.sys, "stdout", _Out())
+    monkeypatch.setattr(os, "get_terminal_size", _raise)
+    assert cli_main._display_width() == 80
+
+
+def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    import imp.cli.main as m
+
+    slug = "wide-demo"
+    change_dir = tmp_path / ".imp" / "changes" / slug
+    change_dir.mkdir(parents=True)
+    (change_dir / "change.json").write_text(json.dumps(
+        {"id": slug, "title": "demo", "base_branch": "main",
+         "layout_version": LAYOUT_VERSION}))
+    long_line = "X" * 200  # no spaces: only wraps if the wrap width forces it
+    (change_dir / "events.jsonl").write_text(
+        json.dumps({"id": "e1", "agent_id": None,
+                    "timestamp": "2026-06-25T10:00:00+00:00",
+                    "type": "step_started",
+                    "payload": {"step": "s", "kind": "agent", "phase": "p",
+                                "model": "m", "provider": "anthropic"}}) + "\n"
+        + json.dumps({"id": "e2", "agent_id": "step:p/s",
+                      "timestamp": "2026-06-25T10:00:01+00:00",
+                      "type": "llm_response",
+                      "payload": {"provider": "anthropic", "model": "m",
+                                  "stop_reason": "end_turn", "usage": {},
+                                  "raw": {"content": [{"type": "text",
+                                          "text": long_line + "\n\n---\n\nafter"}]}}}) + "\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    # Wrap width huge (no prose wrap); physical/display width small (HR caps there).
+    monkeypatch.setattr(m, "_term_width", lambda: 10000)
+    monkeypatch.setattr(m, "_display_width", lambda: 40)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    rc = main(["log", slug])
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(long_line in ln for ln in lines)        # prose unwrapped (wrap width)
+    assert any(ln.count("─") == 40 for ln in lines)    # HR capped to the display width
+    assert not any(ln.count("─") > 40 for ln in lines)

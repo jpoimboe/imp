@@ -165,12 +165,13 @@ def _container_closed(container: Any) -> bool:
 
 class LiveDriver:
     def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
-                 suppress_replay: bool = False,
+                 display_width: int = 80, suppress_replay: bool = False,
                  preceded_by_blank: bool = False) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
         self._width = width
+        self._display_width = display_width
         self._status = status
         self._suppressing = suppress_replay
         # Snapshot of every tree-node id present when the first live (un-marked)
@@ -395,13 +396,15 @@ class LiveDriver:
             # (offline capture / `imp run | tee` / the snap-ui mockup), so live and
             # `imp log` show the user's turn identically.
             lines = rt._render(node, depth=depth, full=False, color=self._color,
-                               width=self._width, gutters=gutters)
+                               width=self._width, display_width=self._display_width,
+                               gutters=gutters)
             self._print_lines(
                 list(lines), prose=True,
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
         lines = rt._render(node, depth=depth, full=False, color=self._color,
-                           width=self._width, gutters=gutters)
+                           width=self._width, display_width=self._display_width,
+                           gutters=gutters)
         prose = rt.spaces_after(node, full=False)
         self._print_lines(
             list(lines), prose=prose,

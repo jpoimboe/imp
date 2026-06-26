@@ -546,7 +546,8 @@ async def _read_opening_message(
     make = _prompt_factory or (
         lambda: Prompt(editing_mode=editing_mode, color=color))
     prompt = make()
-    reply = await prompt.ask_async(width=width, hint=OPENING_HINT)
+    reply = await prompt.ask_async(width=width, display_width=_display_width(),
+                                   hint=OPENING_HINT)
     return _normalize_opening_reply(reply)
 
 
@@ -608,7 +609,7 @@ async def _run_tui_session(
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width(),
-                 opening_intent=opening_intent)
+                 opening_intent=opening_intent, display_width=_display_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only)
@@ -661,7 +662,8 @@ async def _run_cleared_session(
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(
-                width=_term_width(), hint=OPENING_HINT)).strip()
+                width=_term_width(), display_width=_display_width(),
+                hint=OPENING_HINT)).strip()
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -675,7 +677,8 @@ async def _run_cleared_session(
                 leave_mode="new", leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
-            stream=sys.stdout, color=color, width=_term_width(), status=status)
+            stream=sys.stdout, color=color, width=_term_width(),
+            display_width=_display_width(), status=status)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -760,7 +763,7 @@ async def _run_fresh_session(
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status)
+                            width=_term_width(), display_width=_display_width(), status=status)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -777,7 +780,7 @@ async def _run_fresh_session(
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status)
+                            width=_term_width(), display_width=_display_width(), status=status)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -900,7 +903,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status)
+                            width=_term_width(), display_width=_display_width(), status=status)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -927,7 +930,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status)
+                            width=_term_width(), display_width=_display_width(), status=status)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -1017,7 +1020,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status,
+                            width=_term_width(), display_width=_display_width(), status=status,
                             suppress_replay=True)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
@@ -1046,7 +1049,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), status=status,
+                            width=_term_width(), display_width=_display_width(), status=status,
                             suppress_replay=True,
                             preceded_by_blank=splash_shown)
         coord = InterruptCoordinator()
@@ -1076,12 +1079,30 @@ def _editing_mode(control_root: Path) -> str:
         return "emacs"
 
 
+_NO_WRAP_WIDTH = 10_000  # piped stdout, no explicit $COLUMNS => effectively no wrap
+
+
 def _term_width() -> int:
-    # shutil.get_terminal_size honors $COLUMNS and substitutes the fallback when
-    # the OS reports columns <= 0 (e.g. a winsize-0 PTY), unlike
-    # os.get_terminal_size which returns a literal 0 and floors wrapping to 8
-    # chars (issue 2). Defense-in-depth with the dogfood PTY winsize fix.
+    # WRAP width (not rule width _display_width): $COLUMNS overrides the piped no-wrap default.
+    cols = os.environ.get("COLUMNS")
+    if cols is not None:
+        try:
+            explicit = int(cols)
+        except ValueError:
+            explicit = 0
+        if explicit > 0:
+            return explicit
+    if not sys.stdout.isatty():
+        return _NO_WRAP_WIDTH
     return shutil.get_terminal_size((80, 24)).columns
+
+
+def _display_width() -> int:
+    # Physical terminal width via kernel winsize; ignores $COLUMNS (inverse of _term_width).
+    try:
+        return os.get_terminal_size(sys.stdout.fileno()).columns
+    except OSError:
+        return 80
 
 
 def _list_change_homes(control: Path) -> list[str]:
@@ -1604,7 +1625,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
 
     tree = narrative.build_tree(events)
-    lines = render_tree(tree, full=args.full, color=color, width=width)
+    lines = render_tree(tree, full=args.full, color=color, width=width,
+                        display_width=_display_width())
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
 

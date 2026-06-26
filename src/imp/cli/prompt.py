@@ -18,13 +18,13 @@ from typing import Any
 
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,
-                         indent: str = "") -> str:
+                         display_width: int = 80, indent: str = "") -> str:
     from imp.cli import palette as pal
     from imp.cli.render_text import render_question_block
     q = question.strip()
     if not q:
         return indent + pal.caret(enabled=color)
-    lines = render_question_block(q, width, 0, color)
+    lines = render_question_block(q, width, 0, color, display_width)
     body = "\n".join(indent + ln for ln in lines)
     return body + "\n\n" + indent + pal.caret(enabled=color)
 
@@ -169,8 +169,9 @@ class Prompt:
         return str(result) if result is not None else ""
 
     async def ask_async(self, prompt_text: str | None = None, *,
-                        question: str = "", width: int = 80, indent: str = "",
-                        hint: str | None = None, bottom_toolbar: Any = None) -> str:
+                        question: str = "", width: int = 80, display_width: int = 80,
+                        indent: str = "", hint: str | None = None,
+                        bottom_toolbar: Any = None) -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run()).
@@ -196,7 +197,8 @@ class Prompt:
 
         if question.strip():
             rendered = _prompt_message_text(
-                question, color=self._color, width=width, indent=indent)
+                question, color=self._color, width=width,
+                display_width=display_width, indent=indent)
             msg: Any = ANSI(rendered) if self._color else rendered
         else:
             msg = self._message(prompt_text, indent=indent)
