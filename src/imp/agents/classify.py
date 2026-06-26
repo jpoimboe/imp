@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
+from imp.agents.runner import Message, ToolUseBlock
 
 
 class ResumeState(Enum):
@@ -17,24 +17,6 @@ class ResumeState(Enum):
     AWAITING_USER = "awaiting_user"            # bare turn-end: assistant text, no complete_step
     MISSING_COMPLETE_STEP = "missing_complete" # agent stopped without complete_step; replay+nudge
     DANGLING_TOOL_USE = "dangling_tool_use"    # other dangling tool_use; repaired with placeholder
-
-
-def unresolved_wait_for_user(messages: list[Message]) -> tuple[int, str] | None:
-    """Return (assistant_index, tool_use_id) of an unresolved wait_for_user, or None."""
-    resolved = {
-        b.tool_use_id
-        for m in messages if m.role == "user"
-        for b in m.content
-        if isinstance(b, ToolResultBlock) and not b.is_error
-    }
-    for i, m in enumerate(messages):
-        if m.role != "assistant":
-            continue
-        for b in m.content:
-            if (isinstance(b, ToolUseBlock) and b.name == "wait_for_user"
-                    and b.id not in resolved):
-                return i, b.id
-    return None
 
 
 def classify_resume(messages: list[Message]) -> ResumeState:
@@ -73,5 +55,4 @@ def count_tool_uses(messages: list[Message]) -> int:
     )
 
 
-__all__ = ["ResumeState", "classify_resume", "count_tool_uses",
-           "unresolved_wait_for_user"]
+__all__ = ["ResumeState", "classify_resume", "count_tool_uses"]

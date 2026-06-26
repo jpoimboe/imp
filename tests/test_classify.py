@@ -59,3 +59,12 @@ def test_count_tool_uses_across_assistant_messages() -> None:
         Message(role="assistant", content=(ToolUseBlock(id="t3", name="bash", input={}),)),
     ]
     assert count_tool_uses(msgs) == 3
+
+
+def test_wait_for_user_resume_fill_helpers_removed() -> None:
+    import imp.agents.classify as classify_mod
+    import imp.agents.transcript as transcript_mod
+
+    assert not hasattr(classify_mod, "unresolved_wait_for_user")
+    assert "unresolved_wait_for_user" not in classify_mod.__all__
+    assert not hasattr(transcript_mod, "resolve_wait_for_user_on_resume")

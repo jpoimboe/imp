@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 from imp.agents.classify import (
     ResumeState,
     classify_resume,
-    unresolved_wait_for_user,
 )
 from imp.agents.runner import (
     Message,
@@ -201,7 +200,7 @@ def repair_dangling_tool_use_on_resume(
     if last.role == "assistant":
         tool_uses = [
             b for b in last.content
-            if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"
+            if isinstance(b, ToolUseBlock)
         ]
         if not tool_uses:
             return None
@@ -223,7 +222,7 @@ def repair_dangling_tool_use_on_resume(
     if last.role == "user" and len(messages) >= 2 and messages[-2].role == "assistant":
         tool_uses = [
             b for b in messages[-2].content
-            if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"
+            if isinstance(b, ToolUseBlock)
         ]
         if not tool_uses:
             return None
@@ -280,7 +279,7 @@ def balance_success_on_resume(
     last = messages[-1] if messages else None
     tool_uses = (
         [b for b in last.content
-         if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"]
+         if isinstance(b, ToolUseBlock)]
         if last is not None and last.role == "assistant" else []
     )
     result_blocks: list[ToolResultBlock] = []
@@ -309,50 +308,6 @@ def balance_success_on_resume(
     transcript.append(injected)
     elog.append_user_message(agent_id=agent_id, message=injected)
     return injected
-
-
-def resolve_wait_for_user_on_resume(
-    messages: list[Message], transcript: Transcript, elog: EventLog,
-    agent_id: str, reply: str,
-) -> Message | None:
-    """Resolve a paused wait_for_user with the REAL human reply (C1).
-
-    Locate the unresolved ask exactly as classify_resume does
-    (unresolved_wait_for_user → (assistant_index, id)), so the two seams never
-    disagree: any ask classify routes to AWAITING_USER is balanced here, no
-    matter how many user turns already trail it. When the ask is the LAST message
-    (no trailing turn yet), append a new user message carrying a SUCCESS-shaped
-    tool_result (is_error=False). Otherwise inject that result at the HEAD of the
-    user turn immediately following the ask's assistant turn (Anthropic requires
-    the result in the turn directly after the tool_use — the FIRST trailing turn,
-    not the last), dropping any pre-existing placeholder result for the same id so
-    the ask is never double-resolved. Returns the injected/repaired Message, or
-    None when no unresolved wait_for_user is present.
-    """
-    located = unresolved_wait_for_user(messages)
-    if located is None:
-        return None
-    idx, wfu_id = located
-    block = ToolResultBlock(tool_use_id=wfu_id, content=reply, is_error=False)
-
-    # The ask is the last message: append a new user turn carrying the reply.
-    if idx == len(messages) - 1:
-        injected = Message(role="user", content=(block,))
-        messages.append(injected)
-        transcript.append(injected)
-        elog.append_user_message(agent_id=agent_id, message=injected)
-        return injected
-
-    # A user turn already trails the ask: balance it at the head of the FIRST
-    # following turn, dropping any placeholder result for this id.
-    follow = messages[idx + 1]
-    kept = [b for b in follow.content
-            if not (isinstance(b, ToolResultBlock) and b.tool_use_id == wfu_id)]
-    repaired = Message(role="user", content=(block, *kept))
-    messages[idx + 1] = repaired
-    transcript.rewrite(messages)
-    elog.append_user_message(agent_id=agent_id, message=repaired)
-    return repaired
 
 
 def deliver_reply_on_resume(
