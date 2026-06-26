@@ -324,7 +324,6 @@ async def test_run_session_client_threads_resume_into_attach(
         pass
 
     monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
-    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -596,4 +595,48 @@ async def test_run_session_client_threads_provided_leave_state(
 
     assert ls["intent"] == "clear"        # the caller's dict surfaced the signal
     assert seen["leave_state"] is ls      # same dict fed to the disposition
+    assert rc == 0
+
+
+@pytest.mark.anyio
+async def test_run_session_client_reuses_passed_in_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A completed change with no worktree → infer_session_result COMPLETED, rc 0.
+    change = _make_change(tmp_path, "2026-06-15-reuse")
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    # If run_session_client builds its own title despite one being passed, this fires.
+    def _no_construct(*_a: object, **_k: object) -> object:
+        raise AssertionError(
+            "run_session_client must not construct a title when one is passed")
+
+    monkeypatch.setattr("imp.cli.session_run.TerminalTitle", _no_construct)
+
+    captured: dict[str, object] = {}
+
+    async def _capture(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
+
+    class _SentinelTitle:
+        def __init__(self) -> None:
+            self._change_id = "sentinel"
+            self._name = "sentinel"
+
+        def working(self) -> None: ...
+        def waiting(self) -> None: ...
+        def reset(self) -> None: ...
+
+    sentinel = _SentinelTitle()
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_NullDriver(), coord=coord,
+        solicit=lambda _p: _never(), title=sentinel)
+
+    assert captured["title"] is sentinel   # the exact instance flowed through
     assert rc == 0

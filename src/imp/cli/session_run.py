@@ -38,10 +38,11 @@ async def run_session_client(
     leave_mode: str | None = None,
     scope_only: bool = False,
     leave_state: dict[str, str] | None = None,
+    title: TerminalTitle | None = None,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
-    title = TerminalTitle(sys.stdout, change.id, change.title)
+    title = title if title is not None else TerminalTitle(sys.stdout, change.id, change.title)
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only)
