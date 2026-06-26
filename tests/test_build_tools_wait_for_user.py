@@ -7,6 +7,9 @@ import pytest
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers import anthropic, claude_code, openai, scripted
 
+# wait_for_user is no longer a registered tool on ANY provider: a bare turn-end
+# is the yield. Even the offline scripted provider routes its bare turn-end
+# through the shared continuation handler instead of a wait_for_user tool_use.
 PROVIDERS = [anthropic, openai, claude_code, scripted]
 
 
@@ -34,12 +37,17 @@ class _Inv:
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
-def test_wait_for_user_injected_when_declared(provider):
+def test_wait_for_user_not_a_registered_tool(provider):
     tools = provider._build_tools(_Inv(["complete_step", "wait_for_user"]))
-    assert "wait_for_user" in tools
+    assert "wait_for_user" not in tools
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_wait_for_user_absent_when_not_declared(provider):
     tools = provider._build_tools(_Inv(["complete_step"]))
     assert "wait_for_user" not in tools
+
+
+def test_make_wait_for_user_tool_no_longer_exists():
+    import imp.agents.tools.wait_for_user as wfu
+    assert not hasattr(wfu, "make_wait_for_user_tool")

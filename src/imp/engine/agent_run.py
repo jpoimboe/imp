@@ -192,10 +192,10 @@ class AgentRunResult:
     fatal: bool
     delay: float | None
     error: ErrorInfo | None = None
-    # Headless wait_for_user pause: paused=True drives normal pause handling;
+    # Bare-turn-end yield pause: paused=True drives normal pause handling;
     # awaiting_user=True additionally tells the executor to mark THIS step
-    # resumable (Task 3 Step 5) so the dangling wait_for_user tool_use survives
-    # the reload. Stays False for every other pause (coordinator, subagent).
+    # resumable so the paused step survives the reload. Stays False for every
+    # other pause (coordinator, subagent).
     awaiting_user: bool = False
 
 
@@ -293,8 +293,8 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
 
 def _join_pending_interjects(coordinator: Any) -> str | None:
     """Drain ALL queued interjects and join them newline-separated into ONE
-    string, or None if the queue is empty. Used to satisfy a dangling
-    wait_for_user on resume (§2 dangling-wait routing)."""
+    string, or None if the queue is empty. Used to satisfy a bare-turn-end
+    yield on resume (§2 resume-reply routing)."""
     if coordinator is None:
         return None
     parts: list[str] = []
@@ -310,7 +310,7 @@ async def _resolve_wait_reply(
     coordinator: Any,
     user_input_fn: Callable[[str], str | Awaitable[str]],
 ) -> str:
-    """Satisfy a dangling wait_for_user on resume (§2 F5, R6 pending-satisfies-
+    """Satisfy a bare-turn-end yield on resume (§2 F5, pending-satisfies-
     solicit): if the interject queue is non-empty, drain+join it as the reply;
     otherwise solicit via user_input_fn. Returns the reply string the caller
     then journals + replays."""
@@ -321,9 +321,9 @@ async def _resolve_wait_reply(
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
         # Resume-side blocked solicit (all four providers route here): freeze the
-        # inactivity watchdog for the duration of the await, symmetrical with
-        # wait_for_user. The finally ALWAYS restores it. Guard for legacy/test
-        # coordinators (None) with no watchdog to suspend.
+        # inactivity watchdog for the duration of the await. The finally ALWAYS
+        # restores it. Guard for legacy/test coordinators (None) with no
+        # watchdog to suspend.
         if coordinator is not None:
             coordinator.begin_solicit_watchdog()
         try:
@@ -341,7 +341,7 @@ def drain_all_interjects_at_resume(
     messages, folded into the first request, and CLEAR the queue so the
     following turn-boundary drain is a no-op (no double-delivery). Returns the
     count delivered. Mid-turn shape (messages-list providers: anthropic/openai).
-    The dangling-wait join is handled separately by the resume classifier (F5)."""
+    The resume-reply join is handled separately by the resume classifier (F5)."""
     if coordinator is None:
         return 0
     from imp.agents.runner import Message, TextBlock
@@ -439,7 +439,15 @@ def build_agent_invocation(
         body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
         body = reflow_markdown(body)
         system_prompt = f"{body}\n\n{instruction}"
-    continuation_fn = build_continuation_fn(instruction=instruction)
+    continuation_fn = build_continuation_fn(
+        instruction=instruction,
+        user_input_fn=user_chat_input_fn,
+        coordinator=coordinator,
+        event_log=event_log,
+        agent_id=agent_id,
+        non_interactive=non_interactive,
+        subagent=subagent_depth > 0,
+    )
     return AgentInvocation(
         agent_def=agent_def,
         provider_name=provider_name,
@@ -578,10 +586,9 @@ async def drive_invocation(
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)
     except AwaitingUserInput:
-        # A headless/subagent wait_for_user yielded with no human attached.
+        # A headless/subagent bare-turn-end yield with no human attached.
         # paused=True drives normal pause handling; awaiting_user=True tells the
-        # executor to mark the step resumable (Step 5) so the dangling
-        # wait_for_user tool_use survives reload.
+        # executor to mark the step resumable so the paused step survives reload.
         return AgentRunResult(None, False, True, False, None, awaiting_user=True)
 
     if stall["hit"]:

@@ -336,20 +336,15 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
 
 
 @pytest.mark.anyio
-async def test_awaiting_user_resume_fills_tool_result_then_continues(
+async def test_bare_turn_end_resume_delivers_reply_then_continues(
     tmp_path: Path,
 ) -> None:
-    """AWAITING_USER resume: a paused transcript ends on a `wait_for_user`
-    tool_use; the runner solicits the human and fills a SUCCESS-shaped
-    tool_result (not a TextBlock) before driving the next LLM call."""
+    """AWAITING_USER resume (openai): a paused transcript ends on a bare assistant
+    turn; the runner solicits the human and delivers the reply as a plain user
+    TextBlock message (not a tool_result) before driving the next LLM call."""
     from dataclasses import replace
 
-    from imp.agents.runner import (
-        Message,
-        TextBlock,
-        ToolResultBlock,
-        ToolUseBlock,
-    )
+    from imp.agents.runner import Message, TextBlock, ToolResultBlock
     from imp.agents.transcript import Transcript
 
     (tmp_path / "art").mkdir()
@@ -358,14 +353,7 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    t.append(Message(
-        role="assistant",
-        content=(
-            TextBlock(text="need a decision"),
-            ToolUseBlock(id="wfu1", name="wait_for_user",
-                         input={"prompt": "merge?"}),
-        ),
-    ))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
 
     fake = FakeResponsesClient([
         resp_response(
@@ -373,7 +361,7 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
             resp_function_call("c1", "complete_step", '{"status": "Success"}'),
         ),
     ])
-    user_inputs = iter(["nothing, proceed"])
+    user_inputs = iter(["blue"])
     log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
@@ -395,10 +383,9 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
     assert len(loaded) == 4
     assert loaded[2].role == "user"
     block = loaded[2].content[0]
-    assert isinstance(block, ToolResultBlock)
-    assert block.tool_use_id == "wfu1"
-    assert block.content == "nothing, proceed"
-    assert block.is_error is False
+    assert isinstance(block, TextBlock)
+    assert not isinstance(block, ToolResultBlock)
+    assert block.text == "blue"
 
 
 @pytest.mark.anyio
@@ -730,35 +717,6 @@ async def test_request_carries_parallel_tool_calls_true(tmp_path: Path) -> None:
     assert only_call["parallel_tool_calls"] is True
 
 
-@pytest.mark.anyio
-async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
-    from dataclasses import replace
-
-    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
-    (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path)
-    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    t = Transcript(inv.transcript_dir / "transcript.jsonl")
-    # MISSING_COMPLETE_STEP shape: a bare assistant turn (no tool_use, e.g. quota).
-    t.append(Message(role="user", content=(TextBlock(text="begin"),)))
-    t.append(Message(role="assistant",
-                     content=(TextBlock(text="You've hit your monthly spend limit"),)))
-
-    fake = FakeResponsesClient([
-        resp_response(
-            resp_message("resumed"),
-            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
-        ),
-    ])
-    inv = replace(inv, balance_on_resume=True)
-    runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
-
-    events = [ev async for ev in runner.run(inv)]
-
-    assert [e["type"] for e in control_events(events)] == ["agent_output"]
-    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
-               for m in t.load() for b in m.content)
-
 
 @pytest.mark.anyio
 async def test_resume_preserves_tool_output_and_omits_manifest(tmp_path: Path) -> None:
@@ -786,3 +744,15 @@ async def test_resume_preserves_tool_output_and_omits_manifest(tmp_path: Path) -
     sent = json.dumps(fake.responses.calls[0]["input"])
     assert "GROUNDED" in sent
     assert "replay artifact" not in sent
+
+
+def test_openai_has_no_wait_for_user_result_handling() -> None:
+    """No wait_for_user result handling; the _build_tools carve-out is kept."""
+    import inspect
+
+    import imp.providers.openai as openai_mod
+
+    src = inspect.getsource(openai_mod)
+    assert '_tu.name == "wait_for_user"' not in src
+    # The non-registration carve-out is intentionally retained.
+    assert 'if name == "wait_for_user"' in src

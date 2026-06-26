@@ -6,13 +6,12 @@ from pathlib import Path
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
-    RESUME_CONTINUE_NUDGE,
     RESUME_DURABILITY_NOTE,
     RESUME_SUPERSEDED_NOTE,
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
-    inject_continue_nudge_on_resume,
+    deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.state import InMemoryEventLog
@@ -287,36 +286,6 @@ def test_repair_returns_only_synthesized_blocks_on_partial_match(tmp_path: Path)
     assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
 
 
-def test_inject_continue_nudge_turns_bare_assistant_into_send_to_llm(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=(TextBlock(text="You've hit your monthly spend limit"),)),
-    ]
-    for m in msgs:
-        t.append(m)
-    assert classify_resume(msgs) is ResumeState.MISSING_COMPLETE_STEP
-    elog = InMemoryEventLog()
-
-    injected = inject_continue_nudge_on_resume(msgs, t, elog, "step:p/s")
-
-    assert injected is msgs[-1]
-    assert injected.role == "user"
-    assert [b.text for b in injected.content if isinstance(b, TextBlock)] == [RESUME_CONTINUE_NUDGE]
-    # Now replayable as the ordinary SEND_TO_LLM case, on disk too.
-    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
-    on_disk = Transcript(tmp_path / "transcript.jsonl").load()
-    assert classify_resume(on_disk) is ResumeState.SEND_TO_LLM
-    assert [e["type"] for e in elog.read()] == ["user_message"]
-
-
-def test_inject_continue_nudge_noop_when_not_missing(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]   # already SEND_TO_LLM
-    t.append(msgs[0])
-    assert inject_continue_nudge_on_resume(msgs, t, InMemoryEventLog(), "x") is None
-    assert len(msgs) == 1                       # untouched
-
 
 def test_repair_noop_when_trailing_user_already_balanced(tmp_path: Path) -> None:
     """A trailing user turn that already carries the matching tool_result needs no
@@ -363,8 +332,7 @@ def test_build_resume_manifest_none_without_tool_calls() -> None:
 
 def test_build_resume_manifest_skips_control_tools() -> None:
     messages = [Message(role="assistant", content=(
-        ToolUseBlock(id="c", name="mcp__imp__complete_step", input={}),
-        ToolUseBlock(id="w", name="mcp__imp__wait_for_user", input={}),))]
+        ToolUseBlock(id="c", name="mcp__imp__complete_step", input={}),))]
     assert build_resume_manifest(messages) is None
 
 
@@ -402,3 +370,32 @@ def test_build_resume_manifest_echoes_edit_file_new_body() -> None:
     assert "edit_file — succeeded" in out
     assert "x.py" in out
     assert "NEWBODY" in out
+
+
+def test_deliver_reply_on_resume_appends_user_text_message(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "t.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="what color?"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    log = InMemoryEventLog()
+
+    injected = deliver_reply_on_resume(msgs, t, log, "step:p/s", "blue")
+
+    # Delivered as a plain user TextBlock turn — NOT a tool_result fill.
+    assert injected.role == "user"
+    assert len(injected.content) == 1
+    block = injected.content[0]
+    assert isinstance(block, TextBlock)
+    assert block.text == "blue"
+    assert msgs[-1] is injected
+
+    # Persisted to disk: the transcript now ends on the user reply.
+    reloaded = Transcript(tmp_path / "t.jsonl").load()
+    assert reloaded[-1].role == "user"
+    assert reloaded[-1].content[0].text == "blue"
+
+    # Journaled as a user_message event.
+    assert [e["type"] for e in log.read()] == ["user_message"]

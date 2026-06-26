@@ -172,6 +172,7 @@ async def test_build_session_attach_threads_seed_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
+            non_interactive: bool = False,
         ) -> None:
             captured["change"] = ch
             captured["seed_opening"] = seed_opening
@@ -298,6 +299,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
+            non_interactive: bool = False,
         ) -> None:
             captured["resume"] = resume
             tg.start_soon(_start_server)
@@ -360,6 +362,7 @@ async def test_build_session_attach_threads_opening_intent_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
+            non_interactive: bool = False,
         ) -> None:
             captured["opening_intent"] = opening_intent
             tg.start_soon(_start_server)
@@ -421,6 +424,7 @@ async def test_build_session_attach_threads_scope_only_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
+            non_interactive: bool = False,
         ) -> None:
             captured["scope_only"] = scope_only
             tg.start_soon(_start_server)

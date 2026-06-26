@@ -106,7 +106,7 @@ def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "context instead of intent" in out
-    assert "wait_for_user" in out
+    assert "ending your turn" in out
     assert "infer" in out.lower()
 
 
@@ -321,7 +321,8 @@ def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
     # The needs-replan note is a durable checkbox in the pinned reader shape.
     assert "- [ ] NEEDS-REPLAN task-lead:" in text
     # task-lead never escalates to the human mid-implementation.
-    assert "never** call `wait_for_user`" in low
+    assert "never** yield to the human" in low
+    assert "wait_for_user" not in low
     # It always returns a green tree, reverting forward through the coder.
     assert "revert it forward" in low
     assert "green tree" in low
@@ -633,7 +634,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
     assert "the base branch advanced since the draft started" in headless_moved
-    assert "do **not** call `wait_for_user`" in headless_moved
+    assert "do **not** yield to a human" in headless_moved
 
 
 HUMAN_DECISION_PARTIAL = Path(

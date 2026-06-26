@@ -1,18 +1,19 @@
 """Deterministic relay-hibernation gate invariant (u8rfr8).
 
 Drives a real `imp new` over a pty against the offline scripted provider to a
-natural wait_for_user gate, then:
+natural bare-turn-end gate, then:
 
   reach gate (awaiting_user_input + daemon holds flock)
   -> SIGQUIT detach (daemon pid gone, flock released, state paused)
-  -> imp resume (workflow_resumed + a FRESH daemon re-holds the flock).
+  -> imp resume idles at the pending question; typing the first line
+     re-engages (workflow_resumed + a FRESH daemon re-holds the flock).
 
 Unconditional in the default suite: no IMP_LIVE_PROVIDERS / opted_in skip. The
 pty is required — a non-tty would exercise the Part A headless path, not the tty
 gate-render path this invariant guards.
 
 The script polls the change's events.jsonl for the daemon-emitted `cli_attached`
-event before `wait_for_user`, so the scripted provider blocks until the CLI has
+event before the bare-turn-end yield, so the scripted provider blocks until the CLI has
 actually attached to the daemon socket (attached_count > 0) before
 _hibernation_gate checks it. The daemon writes `cli_attached` on the 0 -> 1
 attach transition; gating on that real signal — instead of a fixed sleep that
@@ -78,7 +79,8 @@ pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 def _seed_scripted_gate_project(root: Path) -> Path:
     """Seed a scripted-provider repo whose single workflow step is an agent that
-    calls bash (polling for the cli_attached marker) then wait_for_user. Returns script.json."""
+    calls bash (polling for the cli_attached marker) then ends its turn to yield.
+    Returns script.json."""
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
@@ -87,10 +89,10 @@ def _seed_scripted_gate_project(root: Path) -> Path:
     agents = root / "imp" / "workflows" / "imp" / "agents"
     agents.mkdir(parents=True)
     (agents / "gate.md").write_text(
-        "---\nname: gate\ndescription: calls wait_for_user.\n"
-        "tools: [bash, wait_for_user, complete_step, create_and_enter_worktree]\n"
+        "---\nname: gate\ndescription: yields to the human at a bare turn-end.\n"
+        "tools: [bash, complete_step, create_and_enter_worktree]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nAsk the human something, then wait.\n")
+        "---\nAsk the human something, then end your turn to yield.\n")
     (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
@@ -101,12 +103,12 @@ def _seed_scripted_gate_project(root: Path) -> Path:
     script_path = root / "script.json"
     script_path.write_text(json.dumps(
         {"default": [
-            {"text": "waiting for you",
+            {"text": "setting up",
              "tools": [
                  {"name": "create_and_enter_worktree", "input": {}},
                  {"name": "bash", "input": {"command": _ATTACH_POLL}},
-                 {"name": "wait_for_user", "input": {}},
              ]},
+            {"text": "waiting for you"},
         ]}))
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
@@ -145,14 +147,14 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
 
         # The daemon journals cli_attached on the 0 -> 1 attach; the scripted
         # bash step blocks on that marker, so the provider only reaches
-        # wait_for_user once attached_count > 0 (no fixed-sleep race).
+        # the bare-turn-end yield once attached_count > 0 (no fixed-sleep race).
         assert _wait_for_event(events, "cli_attached", timeout=30.0), (
             "daemon never journaled cli_attached after the CLI attached"
         )
-        # The run reaches the natural wait_for_user gate while attended: the
+        # The run reaches the natural bare-turn-end gate while attended: the
         # daemon emits awaiting_user_input and holds the change flock there.
         assert _wait_for_event(events, "awaiting_user_input", timeout=30.0), (
-            "never reached the wait_for_user gate"
+            "never reached the bare-turn-end gate"
         )
         assert _poll(lambda: not _flock_free(lock_path), timeout=10.0), (
             "daemon never held the change flock at the gate"
@@ -178,13 +180,22 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
     finally:
         s.close()
 
-    # imp resume -> a FRESH daemon re-acquires the flock and appends
-    # workflow_resumed; its pid differs from the original holder.
+    # Under AC8, imp resume prints the pending question and idles; only
+    # after the human types the first line does a FRESH daemon re-acquire
+    # the flock and append workflow_resumed (pid != original holder).
     r = TerminalSession(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     )
     try:
+        # The inert branch prints the pending question and blocks at the prompt.
+        # Poll until the question renders, then send a line to re-engage.
+        assert _poll(
+            lambda: any("waiting for you" in ln for ln in r.lines()), timeout=30.0
+        ), "inert resume never rendered the pending question"
+        r.wait_idle()
+        r.send("continue\r")
+
         assert _poll(
             lambda: "workflow_resumed" in _event_types(events), timeout=60.0
         ), "resume never appended workflow_resumed"

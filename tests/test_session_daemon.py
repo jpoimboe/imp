@@ -1409,3 +1409,161 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
         assert archived == []
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_serve_forwards_non_interactive_to_run_change(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-nint")
+    captured: dict[str, Any] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+        non_interactive: bool = False,
+    ) -> str:
+        captured["non_interactive"] = non_interactive
+        return "done"
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, non_interactive=True)
+    assert result == "done"
+    assert captured["non_interactive"] is True
+
+
+def test_spawn_session_daemon_emits_non_interactive_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import imp.remote.session.attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-spwn")
+    captured: dict[str, Any] = {}
+
+    class _FakePopen:
+        def __init__(self, argv: list[str], **_kw: Any) -> None:
+            captured["argv"] = argv
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    attach_mod.spawn_session_daemon(change, non_interactive=True)
+    assert "--non-interactive" in captured["argv"]
+
+
+def test_spawn_session_daemon_omits_flag_when_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    import imp.remote.session.attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-spwi")
+    captured: dict[str, Any] = {}
+
+    class _FakePopen:
+        def __init__(self, argv: list[str], **_kw: Any) -> None:
+            captured["argv"] = argv
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    attach_mod.spawn_session_daemon(change)
+    assert "--non-interactive" not in captured["argv"]
+
+
+def test_main_parses_non_interactive_into_serve_kwargs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    calls: dict[str, Any] = {}
+    monkeypatch.setattr(daemon.Change, "load",
+                        staticmethod(lambda cr, cid: loaded))
+
+    def fake_run(fn: Any) -> None:
+        calls["fn"] = fn
+
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-mnint", "--non-interactive"])
+    assert rc == 0
+    fn = calls["fn"]
+    assert fn.func is daemon.serve_change_session
+    assert fn.keywords == {"non_interactive": True}
+
+
+def test_build_session_attach_forwards_non_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-bsa")
+    captured: dict[str, Any] = {}
+
+    def fake_spawn(change: Change, **kw: Any) -> None:
+        captured.update(kw)
+
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
+
+    holder: dict[str, Any] = {}
+
+    async def fake_attach_or_spawn(
+        change: Change, *, on_event: Any, spawn_fn: Any,
+        connect_timeout: float = 10.0,
+    ) -> object:
+        holder["spawn_fn"] = spawn_fn
+        return object()
+
+    monkeypatch.setattr(attach_mod, "attach_or_spawn", fake_attach_or_spawn)
+
+    attach = attach_mod.build_session_attach(change, non_interactive=True)
+    anyio.run(attach, lambda _e: None)
+    holder["spawn_fn"](change)
+    assert captured["non_interactive"] is True
+
+
+@pytest.mark.anyio
+async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-nirl")
+    sock = str(session_socket_path(change.control_root, change.id))
+    received_flags: list[bool] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+        non_interactive: bool = False,
+    ) -> RunResult:
+        received_flags.append(non_interactive)
+        if len(received_flags) == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False, non_interactive=True)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let the resume gate open (user_chat_input_fn is awaiting)
+        await client.send_input("redirect")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert received_flags == [True, True]
+        await client.aclose()
+        tg.cancel_scope.cancel()

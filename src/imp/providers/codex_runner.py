@@ -207,7 +207,7 @@ class CodexAgentRunner:
                 yield perr.make_error_event(exc)
                 return
             except AwaitingUserInput:
-                raise  # headless wait_for_user pause unwinds, not classified
+                raise  # bare-turn-end / resume-solicit pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
                 if self._cancel:
@@ -510,7 +510,7 @@ class CodexAgentRunner:
         rstate = None
         # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
         # parsed message list, so derive the resume state from imp's own
-        # events.jsonl. An AWAITING_USER turn (a paused wait_for_user, detected
+        # events.jsonl. An AWAITING_USER turn (a bare-turn-end yield, detected
         # via the journaled awaiting_user_input event) solicits the human reply
         # via user_input_fn and injects it as the FIRST resumed prompt instead of
         # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
@@ -532,9 +532,9 @@ class CodexAgentRunner:
                 # rendered in the narrative, so an empty prompt loses nothing.
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": ""})
-                # §2 dangling-wait join (F5): queued interjects satisfy the wait
-                # directly (mirrors wait_for_user.py R6). Fall back to
-                # user_input_fn only when the queue is empty.
+                # §2 resume-reply join (F5): queued interjects satisfy the
+                # bare-turn-end yield directly. Fall back to user_input_fn only
+                # when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn)
                 user_msg = Message(
@@ -632,15 +632,6 @@ class CodexAgentRunner:
                             f"codex tool dispatch cap ({state.cap}) "
                             f"exceeded"}}
                     return
-
-                # A headless wait_for_user pause captured in the MCP handler must
-                # unwind the whole codex run cleanly. Raises AwaitingUserInput so
-                # drive_invocation marks the step resumable (awaiting_user=True).
-                if state.awaiting_user:
-                    if self._abort_controller is not None:
-                        with contextlib.suppress(Exception):
-                            self._abort_controller.abort()
-                    raise AwaitingUserInput(state.awaiting_prompt)
 
                 if state.fatal_tool_error is not None:
                     if self._abort_controller is not None:
@@ -745,14 +736,6 @@ class CodexAgentRunner:
                                     "complete_step"),
                         "detail": {"last_agent_text": last_text[:500]}}}
                     return
-            # Stream-end fallback: a headless wait_for_user pause captured in the
-            # MCP handler with the in-loop raise never having fired (e.g. a silent
-            # stream death) — re-raise so run() pauses before returning.
-            if state.awaiting_user:
-                if self._abort_controller is not None:
-                    with contextlib.suppress(Exception):
-                        self._abort_controller.abort()
-                raise AwaitingUserInput(state.awaiting_prompt)
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
             if self._is_cancelled():
@@ -772,6 +755,8 @@ class CodexAgentRunner:
                 nxt = cont(last_text)
                 if _inspect.isawaitable(nxt):
                     nxt = await nxt
+            except AwaitingUserInput:
+                raise  # headless bare-turn-end pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)  # a subagent-origin pause must unwind
                 if self._is_cancelled():

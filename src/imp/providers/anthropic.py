@@ -42,13 +42,12 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, change_home_path
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
-    inject_continue_nudge_on_resume,
+    deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
-    resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import (
     _resolve_wait_reply,
@@ -145,7 +144,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             # Auto-injected below; tolerate a redundant explicit declaration.
             continue
         if name == "wait_for_user":
-            # Synthesized below when declared; tolerate the explicit declaration.
+            # No longer a registered tool — a bare turn-end is the yield. A stale
+            # or resume-transcript declaration is tolerated (silently not
+            # registered) rather than rejected as an unknown tool.
             continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
@@ -158,8 +159,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
-    if "wait_for_user" in invocation.agent_def.tools:
-        out["wait_for_user"] = make_wait_for_user_tool()
     if "bash" in invocation.agent_def.tools:
         # Auto-granted with bash (precedent: load_skill injection):
         # run_in_background is a bash PARAMETER, so an agent with bash but no
@@ -419,7 +418,7 @@ class AnthropicAgentRunner:
                 yield perr.make_error_event(exc)
                 return
             except AwaitingUserInput:
-                raise  # headless wait_for_user pause unwinds, not classified
+                raise  # bare-turn-end / resume-solicit pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
                 if self._cancel:
@@ -500,7 +499,6 @@ class AnthropicAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
-            inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             state = classify_resume(messages)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
@@ -520,20 +518,19 @@ class AnthropicAgentRunner:
                         ),
                     }}
                     return
-                # wait_for_user carries no prompt arg (the schema dropped it),
-                # so the gate has no question payload: the agent's prose IS the
-                # question, already journaled and rendered. Emit an empty prompt.
+                # A bare turn-end carries no separate question payload: the
+                # agent's prose IS the question, already journaled and rendered.
+                # Emit an empty prompt.
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": ""})
-                # §2 dangling-wait join (F5): queued interjects satisfy the wait
-                # directly (mirrors wait_for_user.py R6). Fall back to
-                # user_input_fn only when the queue is empty.
+                # Queued interjects satisfy the pending yield directly; fall back
+                # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn)
-                resolve_wait_for_user_on_resume(
+                deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
-                # Fall through (do NOT return): the now-balanced transcript
-                # drives the next LLM turn with the human's reply.
+                # Fall through (do NOT return): the reply drives the next LLM
+                # turn as the transcript's trailing user message.
             # §2 resume-entry drain: mid-turn pending texts fold into the first
             # request. (The AWAITING_USER dangling-wait join is handled above.)
             if state is not ResumeState.AWAITING_USER:

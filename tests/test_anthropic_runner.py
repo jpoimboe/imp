@@ -443,21 +443,16 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
 
 
 @pytest.mark.anyio
-async def test_awaiting_user_resume_fills_tool_result_then_continues(
+async def test_bare_turn_end_resume_delivers_reply_then_continues(
     tmp_path: Path,
 ) -> None:
-    """AWAITING_USER resume: a paused transcript ends with an assistant message
-    whose last tool_use is `wait_for_user`. On resume the runner solicits the
-    human, appends a SUCCESS-shaped tool_result carrying the real reply against
-    the dangling id (NOT a TextBlock), then drives the next LLM call."""
+    """AWAITING_USER resume: a paused transcript ends on a BARE assistant turn
+    (text, no complete_step). On resume the runner solicits the human and
+    delivers the reply as a plain user TextBlock message (NOT a tool_result),
+    then drives the next LLM call to completion."""
     from dataclasses import replace
 
-    from imp.agents.runner import (
-        Message,
-        TextBlock,
-        ToolResultBlock,
-        ToolUseBlock,
-    )
+    from imp.agents.runner import Message, TextBlock, ToolResultBlock
     from imp.agents.transcript import Transcript
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
 
@@ -465,56 +460,42 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
     inv = _inv(tmp_path)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pre-populate transcript: user said "go", assistant paused on wait_for_user.
+    # user said "go", assistant asked a question and ended its turn.
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    t.append(Message(
-        role="assistant",
-        content=(
-            TextBlock(text="need a decision"),
-            ToolUseBlock(id="wfu1", name="wait_for_user",
-                         input={"prompt": "merge?"}),
-        ),
-    ))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
 
-    # After the resume solicit, the user replies "do X"; the runner sends one LLM
-    # call which completes the step.
     fake = FakeAsyncAnthropic([
         response(
             tool_use("c1", "complete_step", {"status": "Success"}),
             stop_reason="tool_use",
         ),
     ])
-
-    user_inputs = iter(["do X"])
+    user_inputs = iter(["blue"])
     log = InMemoryEventLog()
-
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
     runner._user_input_fn = lambda _prompt: next(user_inputs)
 
-    # balance_on_resume=True mirrors the executor re-entry into a paused step.
     async for _ in runner.run(
         replace(inv, event_log=log, balance_on_resume=True)
     ):
         pass
 
     types = [e["type"] for e in log.read()]
-    # awaiting_user_input re-surfaced, then the reply, before the next LLM call.
     assert "awaiting_user_input" in types
     assert types.index("user_message") < types.index("llm_response")
 
-    # Transcript now has 4 messages: user("go") / assistant(wait_for_user)
-    # / user(tool_result "do X") / assistant(complete_step). Original two kept.
+    # Transcript: user("go") / assistant(question) / user(TextBlock "blue") /
+    # assistant(complete_step). The reply is a plain text turn, not a tool_result.
     loaded = t.load()
     assert len(loaded) == 4
     assert loaded[2].role == "user"
     block = loaded[2].content[0]
-    assert isinstance(block, ToolResultBlock)
-    assert block.tool_use_id == "wfu1"
-    assert block.content == "do X"
-    assert block.is_error is False
+    assert isinstance(block, TextBlock)
+    assert not isinstance(block, ToolResultBlock)
+    assert block.text == "blue"
 
 
 @pytest.mark.anyio
@@ -683,6 +664,49 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
 
 
 @pytest.mark.anyio
+async def test_headless_top_level_nudges_then_pauses(tmp_path: Path) -> None:
+    """A headless top-level run (non_interactive=True) nudges NUDGE_LIMIT times,
+    then the channel (no client attached) pauses via AwaitingUserInput — a pause,
+    not an agent_incomplete error."""
+    from dataclasses import replace
+
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.completion import NUDGE_LIMIT, build_continuation_fn
+
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic(
+        [], default_response=response(
+            text("still prose, no tool call"), stop_reason="end_turn"),
+    )
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+
+    def channel(_q: str) -> str:
+        # No client attached: the channel pauses the headless run.
+        raise AwaitingUserInput()
+
+    cont = build_continuation_fn(
+        instruction="CALL complete_step with: done (bool).",
+        user_input_fn=channel, event_log=log, agent_id="root",
+        non_interactive=True, subagent=False)
+    inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
+
+    with pytest.raises(AwaitingUserInput):
+        [e async for e in runner.run(inv)]
+
+    assert not any(
+        e["type"] == "error"
+        and e["payload"].get("category") == "agent_incomplete"
+        for e in log.read()
+    )
+    # The nudges happened before the pause: NUDGE_LIMIT nudge user messages were
+    # appended on top of the initial "go" message.
+    user_msgs = [e for e in log.read() if e["type"] == "user_message"]
+    assert len(user_msgs) == 1 + NUDGE_LIMIT
+
+
+@pytest.mark.anyio
 async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
     """Full provider path: the model emits a `task` call carrying
     tier='high'; the runner must forward it so the subagent spawns on
@@ -830,44 +854,6 @@ async def test_request_carries_disable_parallel_tool_use_false(tmp_path: Path) -
     }
 
 
-@pytest.mark.anyio
-async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
-    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
-    (tmp_path / "art").mkdir()
-    inv_dir = tmp_path / "step"
-    transcript = Transcript(inv_dir / "transcript.jsonl")
-    # MISSING_COMPLETE_STEP shape: a bare assistant turn (no tool_use, e.g. quota).
-    transcript.append(Message(role="user", content=(TextBlock(text="begin"),)))
-    transcript.append(Message(role="assistant",
-                              content=(TextBlock(text="You've hit your monthly spend limit"),)))
-
-    fake = FakeAsyncAnthropic([response(
-        tool_use("c1", "complete_step", {"status": "Success", "note": "resumed"}),
-    )])
-    log = InMemoryEventLog()
-    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
-                                  client_factory=lambda: fake)
-    inv = AgentInvocation(
-        agent_def=_agent_def(), provider_name="anthropic",
-        model_name="claude-sonnet-4-6", system_prompt="be terse",
-        initial_messages=(),
-        change_context=ChangeContext(
-            title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
-        transcript_dir=inv_dir,
-        events_path=tmp_path / "events.jsonl",
-        agent_id="step:p/s", event_log=log,
-        balance_on_resume=True,
-    )
-
-    yielded = [ev async for ev in runner.run(inv)]
-
-    # No missing_complete_step error; the agent continued and completed.
-    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
-    # The injected user turn carries the continue nudge.
-    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
-               for m in transcript.load() for b in m.content)
-
 
 @pytest.mark.anyio
 async def test_resume_preserves_tool_result_and_omits_manifest(tmp_path: Path) -> None:
@@ -894,3 +880,15 @@ async def test_resume_preserves_tool_result_and_omits_manifest(tmp_path: Path) -
     assert "GROUNDED" in sent
     # …and the claude_code-only manifest framing never reaches anthropic.
     assert "replay artifact" not in sent
+
+
+def test_anthropic_has_no_wait_for_user_result_handling() -> None:
+    """No wait_for_user result handling; the _build_tools carve-out is kept."""
+    import inspect
+
+    import imp.providers.anthropic as anthropic_mod
+
+    src = inspect.getsource(anthropic_mod)
+    assert '_tu.name == "wait_for_user"' not in src
+    # The non-registration carve-out is intentionally retained.
+    assert 'if name == "wait_for_user"' in src

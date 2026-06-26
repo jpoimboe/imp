@@ -92,6 +92,7 @@ async def serve_change_session(
     resume: bool = False,
     opening_intent: str | None = None,
     scope_only: bool = False,
+    non_interactive: bool = False,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -129,6 +130,8 @@ async def serve_change_session(
         run_kwargs: dict[str, Any] = {}
         if scope_only:
             run_kwargs["scope_only"] = True
+        if non_interactive:
+            run_kwargs["non_interactive"] = True
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:
             first_kwargs["seed_opening"] = seed_opening
@@ -205,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--opening-intent", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--scope-only", action="store_true")
+    parser.add_argument("--non-interactive", action="store_true")
     ns = parser.parse_args(argv)
     try:
         change = Change.load(Path(ns.control_root), ns.change_id)
@@ -220,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["resume"] = True
     if ns.scope_only:
         kwargs["scope_only"] = True
+    if ns.non_interactive:
+        kwargs["non_interactive"] = True
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_change_session, change, **kwargs))

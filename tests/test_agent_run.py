@@ -809,17 +809,16 @@ async def test_resolve_wait_reply_restores_watchdog_on_exception() -> None:
 
 
 @pytest.mark.anyio
-async def test_real_wait_for_user_solicit_is_not_torn_down_by_watchdog(
+async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
     tmp_path, monkeypatch,
 ) -> None:
-    """Regression for the live ~35-min loop: an attended agent blocked at the
-    REAL wait_for_user tool for far longer than the inactivity window is NOT
-    killed by the watchdog. Once the human replies the turn continues. Drives the
-    real drive_invocation -> _pull_with_inactivity_watchdog -> wait_for_user
-    bracket -> coordinator freeze, deterministically (no LLM)."""
+    """Regression for the live ~35-min loop: an attended agent blocked at a
+    bare-turn-end solicit for far longer than the inactivity window is NOT killed
+    by the watchdog. Once the human replies the turn continues. Drives the real
+    drive_invocation -> _pull_with_inactivity_watchdog -> build_continuation_fn
+    solicit bracket -> coordinator freeze, deterministically (no LLM)."""
     import imp.engine.agent_run as ar
-    from imp.agents.tools.context import ToolContext
-    from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+    from imp.engine.completion import build_continuation_fn
 
     monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
     coord = InterruptCoordinator()
@@ -846,13 +845,11 @@ async def test_real_wait_for_user_solicit_is_not_torn_down_by_watchdog(
             interrupted["called"] = True
 
         async def run(self, invocation):
-            tool = make_wait_for_user_tool()
-            ctx = ToolContext(
-                project_root=tmp_path,
-                events_path=tmp_path / "e.jsonl",
-                user_input_fn=_blocking_input, non_interactive=False,
-                event_log=log, agent_id="step:p/s", coordinator=coord)
-            captured["reply"] = await tool.async_invoke(ctx, {"prompt": "merge?"})
+            cont = build_continuation_fn(
+                instruction="Call complete_step to finish.",
+                user_input_fn=_blocking_input, coordinator=coord,
+                event_log=log, agent_id="step:p/s")
+            captured["reply"] = await cont("merge?")
             yield {"type": "agent_output", "payload": {"status": "Success"}}
 
     result_holder = {}

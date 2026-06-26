@@ -22,3 +22,11 @@ def test_finalize_forbids_premature_merge_claim() -> None:
     assert 'no "Merged"' in body
     assert "is now on master" in body
     assert "at the queue head" in body
+
+
+def test_finalize_pause_route_drops_human_availability_reasoning() -> None:
+    body = (WF / "agents" / "finalize.md").read_text()
+    assert "wait_for_user" not in body
+    assert "and none is available" not in body
+    assert 'decision="pause"' in body
+    assert "non-converging verify-triage" in body

@@ -48,6 +48,7 @@ def test_new_non_interactive_routes_through_session_client(
         seed_opening: object = None, status: object = None,
         opening_intent: object = None, leave_mode: object = None,
         title: object = None,
+        non_interactive: object = False,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening

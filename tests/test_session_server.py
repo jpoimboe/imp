@@ -73,8 +73,10 @@ async def test_first_client_input_satisfies_the_gate_and_returns(
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock)
     received: list[str] = []
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        gate_reached.set()
         reply = await user_chat_input_fn("")
         received.append(reply)
         return reply
@@ -91,7 +93,7 @@ async def test_first_client_input_satisfies_the_gate_and_returns(
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let run_fn reach the gate (open next_input)
+        await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
         with anyio.fail_after(5):
             while "r" not in result:
@@ -246,11 +248,13 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
     received: list[str] = []
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
+        gate_reached.set()
         reply = await user_chat_input_fn("")
         received.append(reply)
         return reply
@@ -267,7 +271,7 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let run_fn reach the gate (open next_input)
+        await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
         with anyio.fail_after(5):
             while "r" not in result:
@@ -284,12 +288,14 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
         try:
+            gate_reached.set()
             await user_chat_input_fn("")
         except AwaitingUserInput:
             return "hibernated"
@@ -307,7 +313,7 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the gate open while resident
+        await gate_reached.wait()
         await client.aclose()
         with anyio.fail_after(5):
             while "r" not in result:
@@ -341,12 +347,14 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
+    gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count < 2:
                 await anyio.sleep(0.02)
         try:
+            gate_reached.set()
             await user_chat_input_fn("")
         except AwaitingUserInput:
             return "hibernated"
@@ -365,7 +373,7 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while server.attached_count != 2:
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the gate open while both are attached
+        await gate_reached.wait()
         await client1.aclose()
         await anyio.sleep(0.05)  # first detach alone must not trigger hibernation
         await client2.aclose()
@@ -870,3 +878,132 @@ async def test_discard_is_delivered_even_when_the_control_queue_is_full() -> Non
         server._serve_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
     assert server.discarded is True
+
+
+@pytest.mark.anyio
+async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+    received: list[str] = []
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        gate_reached.set()
+        received.append(await user_chat_input_fn(""))   # exchange 1
+        received.append(await user_chat_input_fn(""))   # exchange 2 (follow-up)
+        return "completed"                              # control returns only now
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached.wait()
+        await client.send((encode_input("answer one") + "\n").encode())
+        with anyio.fail_after(5):
+            while len(received) < 1:
+                await anyio.sleep(0.02)
+        # The run is blocked on the SECOND gate: serve() has NOT returned between
+        # exchanges (the AC7 invariant).
+        assert "r" not in result
+        await client.send((encode_input("answer two") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert received == ["answer one", "answer two"]
+        assert result["r"] == "completed"   # control returns to the shell at completion
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    # Leg 1: the client detaches before the bare-turn-end gate gets an input.
+    # Attendance resolves at end-of-turn -> the gate raises AwaitingUserInput and
+    # the run pauses.
+    sock1 = str(tmp_path / "s1.sock")
+    server1 = SessionServer(sock1, hibernate=True)
+    gate_reached1 = anyio.Event()
+
+    async def run_fn1(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server1.attached_count < 1:
+                await anyio.sleep(0.02)
+        try:
+            gate_reached1.set()
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "paused"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server1.open()
+        result1: dict[str, Any] = {}
+
+        async def _serve1() -> None:
+            result1["r"] = await server1.serve(run_fn1)
+
+        tg.start_soon(_serve1)
+        client1 = await _attach(sock1, "c1")
+        with anyio.fail_after(5):
+            while server1.attached_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached1.wait()
+        await client1.aclose()   # detach mid-turn
+        with anyio.fail_after(5):
+            while "r" not in result1:
+                await anyio.sleep(0.02)
+        assert result1["r"] == "paused"   # detach resolved at end-of-turn -> pause
+        tg.cancel_scope.cancel()
+
+    # Leg 2: resume. A FRESH server; the human reattaches and replies, and the
+    # run continues by delivering the reply through the now-open gate.
+    sock2 = str(tmp_path / "s2.sock")
+    server2 = SessionServer(sock2, hibernate=True)
+    delivered: list[str] = []
+    gate_reached2 = anyio.Event()
+
+    async def run_fn2(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server2.attached_count < 1:
+                await anyio.sleep(0.02)
+        gate_reached2.set()
+        reply = await user_chat_input_fn("")
+        delivered.append(reply)
+        return reply
+
+    async with anyio.create_task_group() as tg:
+        await server2.open()
+        result2: dict[str, Any] = {}
+
+        async def _serve2() -> None:
+            result2["r"] = await server2.serve(run_fn2)
+
+        tg.start_soon(_serve2)
+        client2 = await _attach(sock2, "c1")
+        with anyio.fail_after(5):
+            while server2.attached_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached2.wait()
+        await client2.send((encode_input("here is my answer") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result2:
+                await anyio.sleep(0.02)
+        assert delivered == ["here is my answer"]
+        assert result2["r"] == "here is my answer"   # run continued on reattach+reply
+        await client2.aclose()
+        tg.cancel_scope.cancel()

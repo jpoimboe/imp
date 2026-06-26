@@ -21,7 +21,7 @@ from typing import Any, ClassVar
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
-# (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
+# (`tool`); `wait_for_user` is retained for backward-compat replay of old transcripts.
 # emit_notice renders as a verbatim block elsewhere; showing it here too would
 # double-print as a clipped `text=…` in the recap.
 # update_step_label would register as activity in the very status line it exists to
@@ -443,7 +443,7 @@ class NarrativeBuilder:
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `> …`) rather than a synthetic engine prompt (dropped).
         self._awaiting_reply = False
-        # Unresolved wait_for_user calls: id → that call's input.prompt. Drives
+        # Pending wait_for_user tool calls from old transcripts: id → prompt. Drives
         # the §1 orphan-result net.
         self._pending_wfu: dict[str, str] = {}
         self._opening_intent_node: UserMessageNode | None = None
@@ -999,8 +999,7 @@ def _h_awaiting_user_input(
         self._step_stack[-1].interactive = True
     self._awaiting_reply = True
     # Un-hold any held narration in the current container: the prose carried by
-    # the llm_response that called wait_for_user is the context the human must
-    # read to answer, and the agent is now blocked for that reply — so it is
+    # the llm_response context the human must read to answer, and the agent is now blocked
     # settled, NOT a trailing narration that could still fold into a step
     # conclusion. Without this the live _walk blocks on the held node
     # (_is_final is False for a held AgentTextNode) and the message surfaces only

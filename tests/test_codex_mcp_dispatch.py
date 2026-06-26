@@ -342,21 +342,26 @@ def test_dispatch_sweeps_bg_before_tool(
     assert calls["n"] == 2
 
 
-def test_awaiting_capture_text_carries_stop_guidance(tmp_path: Path) -> None:
-    """A headless wait captured from a non-task tool returns the named awaiting
-    constant carrying the same stop guidance (§2)."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-    from imp.providers.codex_mcp import CODEX_AWAIT_CAPTURE_TEXT
+def test_codex_has_no_wait_for_user_pause_intercept() -> None:
+    """The dead live-run wait_for_user pause intercept is gone from codex: the
+    RunState capture fields and CODEX_AWAIT_CAPTURE_TEXT constant are removed,
+    the runner no longer reads state.awaiting_user, and the stale wait_for_user
+    comment framing is refreshed (only the AwaitingUserInput import path keeps
+    the module name). The live AWAITING_USER resume path is unaffected."""
+    import dataclasses
+    import inspect
 
-    async def _afn(ctx: Any) -> str:
-        raise AwaitingUserInput("answer me")
+    import imp.providers.codex_mcp as mcp_mod
+    import imp.providers.codex_runner as runner_mod
+    from imp.providers.codex_mcp import RunState
 
-    tool = Tool(name="wait_for_user", description="",
-                input_schema={"type": "object", "properties": {}}, fn=_afn)
-    state = RunState(cap=10)
-    ctx = _ctx(tmp_path)
-    out = asyncio.run(dispatch_tool(tool=tool, args={}, ctx=ctx, state=state))
-    assert out == CODEX_AWAIT_CAPTURE_TEXT
-    assert out.endswith("; do not dispatch further tasks")
-    assert state.awaiting_user is True
-    assert state.awaiting_prompt == "answer me"
+    names = {f.name for f in dataclasses.fields(RunState)}
+    assert "awaiting_user" not in names
+    assert "awaiting_prompt" not in names
+    assert not hasattr(mcp_mod, "CODEX_AWAIT_CAPTURE_TEXT")
+
+    runner_src = inspect.getsource(runner_mod)
+    assert "state.awaiting_user" not in runner_src
+    # Only the AwaitingUserInput import path keeps the module name.
+    assert runner_src.count("wait_for_user") == 1
+    assert inspect.getsource(mcp_mod).count("wait_for_user") == 0

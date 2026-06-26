@@ -20,7 +20,6 @@ from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.claude_code_session_store import (
     ImpSessionStore,
     resume_session_id,
-    session_key,
     session_store_for,
 )
 from tests.cc_fakes import (
@@ -476,20 +475,22 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
 
 
 @pytest.mark.anyio
-async def test_awaiting_user_resume_fills_tool_result_then_continues(
+async def test_bare_turn_end_resume_delivers_reply_then_continues(
     tmp_path: Path,
 ) -> None:
-    """AWAITING_USER resume: a paused transcript ends on a `wait_for_user`
-    tool_use; the runner solicits the human and fills a SUCCESS-shaped
-    tool_result (not a TextBlock) before driving the next LLM call."""
-    from imp.agents.runner import (
-        Message,
-        TextBlock,
-        ToolResultBlock,
-        ToolUseBlock,
-    )
+    """AWAITING_USER resume (claude_code): a paused transcript ends on a bare
+    assistant turn; the runner solicits the human and delivers the reply as a
+    plain user TextBlock message (NOT a tool_result) before driving the next LLM
+    call."""
+    from imp.agents.runner import Message, TextBlock, ToolResultBlock
     from imp.agents.transcript import Transcript
-    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+    from tests.cc_fakes import (
+        FakeClaudeSDKClient,
+        assistant,
+        result,
+        text,
+        tool_use,
+    )
 
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
@@ -499,20 +500,15 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    t.append(Message(
-        role="assistant",
-        content=(
-            TextBlock(text="need a decision"),
-            ToolUseBlock(id="wfu1", name="wait_for_user",
-                         input={"prompt": "merge?"}),
-        ),
-    ))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
 
     scripted = [
-        assistant(text("done"), tool_use("c1", "complete_step", {"status": "Success"})),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
         result(),
     ]
-    user_inputs = iter(["yes, proceed"])
+    user_inputs = iter(["blue"])
+
     def factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
@@ -526,123 +522,53 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
     async for ev in runner.run(inv):
         events.append(ev)
 
-    # After the flip: user_input is NO LONGER yielded; it's appended to the log.
-    # The runner should yield only agent_output.
     kinds = [e["type"] for e in events]
     assert kinds[-1] == "agent_output"
 
-    # Verify ordering in the event log: awaiting_user_input + user_message
-    # before llm_response.
-    log_events = list(log.read())
-    log_types = [e["type"] for e in log_events]
+    log_types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" in log_types
-    user_idx = log_types.index("user_message")
-    llm_idx = log_types.index("llm_response")
-    assert user_idx < llm_idx, (
-        f"user_message (idx={user_idx}) must precede llm_response (idx={llm_idx})"
-    )
+    assert log_types.index("user_message") < log_types.index("llm_response")
 
     loaded = t.load()
-    assert len(loaded) >= 3
     assert loaded[2].role == "user"
     block = loaded[2].content[0]
-    assert isinstance(block, ToolResultBlock)
-    assert block.tool_use_id == "wfu1"
-    assert block.content == "yes, proceed"
-    assert block.is_error is False
+    assert isinstance(block, TextBlock)
+    assert not isinstance(block, ToolResultBlock)
+    assert block.text == "blue"
 
 
 @pytest.mark.anyio
-async def test_headless_message_does_not_pause_on_first_wait_for_user(
-    tmp_path: Path,
-) -> None:
-    """Regression: under a headless `--message` run the invocation is
-    non_interactive=True AND has a one-shot reply user_input_fn attached. The
-    runner-level dual-write must treat that as ATTENDED (attended iff a
-    user_input_fn exists; non_interactive no longer participates), so it does
-    NOT mark awaiting_user on the first wait_for_user. The run consumes the
-    reply and proceeds to complete_step rather than pausing immediately.
+async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
+    """A headless resume (no user_input_fn) of a bare-turn-end AWAITING_USER
+    transcript yields a clean no_user_input_fn error and never queries the SDK.
+    (The inert-resume CLI that idles for a human instead is a later change.)"""
+    from imp.agents.transcript import Transcript
 
-    Guards the stale `and not invocation.non_interactive` rule that killed
-    `--message` on the production claude_code provider."""
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
-    inv = _inv(
-        tmp_path,
-        tools=frozenset({"complete_step", "wait_for_user"}),
-        event_log=log,
-    )
-    inv = replace(inv, non_interactive=True)
+    inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    scripted = [
-        assistant(
-            text("need a decision"),
-            tool_use("wfu1", "wait_for_user", {"prompt": "merge?"}),
-        ),
-        assistant(
-            text("proceeding"),
-            tool_use("c1", "complete_step", {"status": "Success"}),
-        ),
-        result(),
-    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
+
+    queried = {"hit": False}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        queried["hit"] = True
+        return FakeClaudeSDKClient(opts, scripted_messages=[result()])
 
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5",
-        client_factory=factory,
-        # One-shot reply channel installed by a headless --message run.
-        user_input_fn=lambda _prompt: "go ahead",
-    )
+    runner = ClaudeCodeAgentRunner(  # no user_input_fn -> no reply channel
+        model_name="claude-sonnet-4-5", client_factory=factory)
 
-    events = []
-    async for ev in runner.run(inv):
-        events.append(ev)
-
-    # With the stale rule the runner would have raised AwaitingUserInput on the
-    # first wait_for_user (awaiting_user=True) and never reached complete_step.
+    events = [ev async for ev in runner.run(inv)]
     kinds = [e["type"] for e in events]
-    assert kinds[-1] == "agent_output", f"expected agent_output, got {kinds}"
-    assert events[-1]["payload"] == {"status": "Success"}
 
-
-@pytest.mark.anyio
-async def test_no_channel_wait_for_user_marks_pause(tmp_path: Path) -> None:
-    """The dual-write's ONLY remaining job: when NO reply channel is attached
-    (user_input_fn is None — subagent / no-channel run), the first
-    wait_for_user marks the pause and run() unwinds with AwaitingUserInput."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-
-    (tmp_path / "art").mkdir()
-    log = InMemoryEventLog()
-    inv = _inv(
-        tmp_path,
-        tools=frozenset({"complete_step", "wait_for_user"}),
-        event_log=log,
-    )
-
-    scripted = [
-        assistant(
-            text("need a decision"),
-            tool_use("wfu1", "wait_for_user", {"prompt": "merge?"}),
-        ),
-        result(),
-    ]
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5",
-        client_factory=factory,
-        user_input_fn=None,
-    )
-
-    with pytest.raises(AwaitingUserInput) as ei:
-        async for _ev in runner.run(inv):
-            pass
-    assert ei.value.prompt == "merge?"
+    assert "agent_output" not in kinds
+    assert queried["hit"] is False, "no transcript may be streamed to the provider"
+    errors = [e for e in events if e["type"] == "error"]
+    assert errors and errors[0]["payload"]["kind"] == "no_user_input_fn"
 
 
 @pytest.mark.anyio
@@ -1327,34 +1253,6 @@ async def test_clean_no_complete_step_still_nudges(tmp_path: Path) -> None:
     assert payload["kind"] == "no_complete_step_after_nudges"
 
 
-@pytest.mark.anyio
-async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
-    from imp.agents.runner import Message, TextBlock
-    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
-    inv = _inv(tmp_path)
-    # MISSING_COMPLETE_STEP shape on disk at the step's transcript dir.
-    t = Transcript(inv.transcript_dir / "transcript.jsonl")
-    t.append(Message(role="user", content=(TextBlock(text="begin"),)))
-    t.append(Message(role="assistant",
-                     content=(TextBlock(text="You've hit your monthly spend limit"),)))
-
-    scripted = [
-        assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
-    ]
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    inv = replace(inv, balance_on_resume=True)
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
-    events = [e async for e in runner.run(inv)]
-
-    assert events[-1]["type"] == "agent_output"
-    assert not any(e.get("type") == "error" for e in events)
-    msgs = t.load()
-    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
-               for m in msgs for b in m.content)
-
 
 def test_termination_from_result_nonzero_exit_is_terminated() -> None:
     """Nonzero subprocess exit triggers TerminatedError independent of is_error."""
@@ -1748,7 +1646,7 @@ async def test_resume_injects_succeeded_manifest_into_replay(tmp_path: Path) -> 
     )))
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
-    # Ends on assistant prose, no complete_step → MISSING_COMPLETE_STEP (ckx9f5).
+    # Ends on a bare turn-end → AWAITING_USER; the attended resume delivers the reply.
     t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
 
     scripted = [
@@ -1764,6 +1662,7 @@ async def test_resume_injects_succeeded_manifest_into_replay(tmp_path: Path) -> 
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "keep going",
     )
     [ev async for ev in runner.run(inv)]
 
@@ -1939,7 +1838,6 @@ def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
 async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import (
-        RESUME_CONTINUE_NUDGE,
         RESUME_MANIFEST_HEADER,
         Transcript,
     )
@@ -1965,9 +1863,9 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     )))
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
-    # Ends on assistant prose, no complete_step → MISSING_COMPLETE_STEP, whose
-    # inject_continue_nudge_on_resume APPENDS RESUME_CONTINUE_NUDGE (one new turn).
-    # The loaded session ends on this assistant prose, so native resume is valid.
+    # Ends on a bare turn-end → AWAITING_USER. The attended resume delivers the
+    # user's reply as the next user message; native resume is valid (the store has
+    # the session body flushed at the previous result boundary).
     t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
 
     scripted = [
@@ -1982,18 +1880,19 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
         return c
 
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
-    # Native resume sends ONLY the post-resume nudge turn, not replayed history.
+    # Native resume sends ONLY the post-resume reply turn, not replayed history.
     first_query = created[0].queries[0]
     assert len(first_query) == 1
     blob = _user_text_blob(first_query)
-    assert RESUME_CONTINUE_NUDGE in blob
+    assert "keep going" in blob
     assert "reading" not in blob
     # The faithful native path injects no fallback manifest.
     assert RESUME_MANIFEST_HEADER not in blob
@@ -2032,7 +1931,8 @@ async def test_resume_without_stored_session_falls_back(tmp_path: Path) -> None:
         return c
 
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
@@ -2229,67 +2129,6 @@ async def test_native_resume_downgrades_on_dangling_tool_use(
     assert blob.count("read_file — succeeded") == 1
 
 
-@pytest.mark.anyio
-async def test_native_resume_downgrades_on_awaiting_user(
-    tmp_path: Path,
-) -> None:
-    from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
-
-    (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path, agent_id="step:p/s")
-    inv = replace(inv, balance_on_resume=True)
-    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-
-    store = session_store_for(inv.transcript_dir)
-    await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
-        [{"type": "user", "uuid": "m0",
-          "message": {"role": "user", "content": "go"}}])
-
-    t = Transcript(inv.transcript_dir / "transcript.jsonl")
-    t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    # Completed tool round-trip.
-    t.append(Message(role="assistant", content=(
-        ToolUseBlock(id="t0", name="mcp__imp__read_file",
-                     input={"path": "a.txt"}),)))
-    t.append(Message(role="user", content=(
-        ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
-    # AWAITING_USER final turn: unanswered wait_for_user tool_use with no
-    # tool_result — the SDK batcher never flushed this turn.
-    t.append(Message(
-        role="assistant",
-        content=(
-            TextBlock(text="need a decision"),
-            ToolUseBlock(id="wfu1", name="wait_for_user",
-                         input={"prompt": "merge?"}),
-        ),
-    ))
-
-    scripted = [
-        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
-        result(),
-    ]
-    created: list[FakeClaudeSDKClient] = []
-    user_inputs = iter(["yes, proceed"])
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
-        created.append(c)
-        return c
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5",
-        client_factory=factory,
-        user_input_fn=lambda _prompt: next(user_inputs),
-    )
-    [ev async for ev in runner.run(inv)]
-
-    opts = created[0].opts
-    # Downgraded to the stream-json fallback despite a populated store.
-    assert opts.resume is None
-    assert opts.session_store is None
-
 
 @pytest.mark.anyio
 async def test_fresh_run_isolates_config_dir_and_cleans_up(
@@ -2423,3 +2262,21 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
     assert "context_window" not in resp["payload"]
     assert "context_pct" not in resp["payload"]
     assert "context_tokens" not in resp["payload"]
+
+
+def test_run_state_has_no_wait_for_user_pause_fields() -> None:
+    """No live-run wait_for_user pause intercept; the _build_tools carve-out is retained."""
+    import dataclasses
+    import inspect
+
+    import imp.providers.claude_code as cc_mod
+    from imp.providers.claude_code import _RunState
+
+    names = {f.name for f in dataclasses.fields(_RunState)}
+    assert "awaiting_user" not in names
+    assert "awaiting_prompt" not in names
+
+    src = inspect.getsource(cc_mod)
+    assert 'b.name == "wait_for_user"' not in src
+    # The non-registration carve-out is intentionally retained.
+    assert 'if name == "wait_for_user"' in src

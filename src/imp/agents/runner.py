@@ -90,12 +90,12 @@ class AgentInvocation:
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)
     max_tool_calls: int | None = None
-    # The wait_for_user / AWAITING_USER resume input channel. Wired for attended
-    # top-level agents; None for subagents (their wait_for_user pauses headless).
+    # The bare-turn-end / AWAITING_USER resume input channel. Wired for attended
+    # top-level agents; None for subagents (their bare-turn-end pause is headless).
     # May return either a `str` or an `Awaitable[str]`; call-sites await-if-awaitable.
     user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
     # Set by the executor for the END-OF-TURN nudge — distinct from
-    # user_input_fn, which serves the wait_for_user / AWAITING_USER resume path.
+    # user_input_fn, which serves the bare-turn-end / AWAITING_USER resume path.
     # Called with the agent's last text; returns the next user-message text to
     # inject and continue, or None to stop (→ agent_incomplete). None means
     # "no end-of-turn nudge wired" (legacy/test); providers then emit the

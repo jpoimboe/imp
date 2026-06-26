@@ -61,7 +61,7 @@ Subtleties:
   something resolved-forward), never downward: it never suppresses a plan that an open
   needs-replan note demands.
 
-You still never call `wait_for_user` and never author a `— needs-decision:` item;
+You still never yield to the human and never author a `— needs-decision:` item;
 your sole lever is `more_plans`.
 
 ## Anticipated plan total — `plan_total`

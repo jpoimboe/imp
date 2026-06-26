@@ -501,7 +501,6 @@ async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
     ctx.event_log = elog
     state = _RunState()
     state.agent_id = "step:p/s"
-    state.awaiting_user = True   # would FREEZE membership in the old code
 
     monkey = cc_mod.dispatch_task
     cc_mod.dispatch_task = _fake  # type: ignore[assignment]

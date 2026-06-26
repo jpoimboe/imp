@@ -28,6 +28,11 @@ from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, resume_select, splash
 from imp.cli import palette as pal
+from imp.cli.inert_resume import (
+    bare_turn_end_question,
+    make_buffered_solicit,
+    run_inert_resume,
+)
 from imp.cli.init import GitSetupDeclined, run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -64,8 +69,8 @@ class ReplyInterjectRouter:
     """Routes each human-typed line by the agent's state AT SUBMIT TIME (F7/R6).
 
     `route(line)` is the pure decision:
-      - solicit ACTIVE (the engine is blocked in a `wait_for_user`,
-        a prompt is up) → the line is the REPLY → delivered to `reply_sink`;
+      - solicit ACTIVE (the engine is blocked at a bare-turn-end prompt)
+        → the line is the REPLY → delivered to `reply_sink`;
       - solicit INACTIVE (the agent is running) → the line is an INTERJECT →
         queued on the coordinator, delivered at the next agent turn boundary.
 
@@ -197,8 +202,8 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     """Headless reply channel: yield the single --message once, then pause.
 
-    The first wait_for_user solicit (live opener OR the dangling wait_for_user
-    resolved on resume) consumes `message`; any later solicit in the same
+    The first bare-turn-end solicit (live opener OR the awaiting_user_input
+    resume) consumes `message`; any later solicit in the same
     invocation raises AwaitingUserInput, unwinding to a clean pause the operator
     continues with another `imp resume <id> --message "..."`."""
     delivered = False
@@ -768,7 +773,7 @@ async def _run_fresh_session(
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=seed_opening, status=status)
+            seed_opening=seed_opening, status=status, non_interactive=True)
     if _tui_requested(args):
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
@@ -909,7 +914,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, title=term_title, **_scope_kw)
+            opening_intent=opening_intent, title=term_title,
+            non_interactive=True, **_scope_kw)
 
     if _tui_requested(args):
         if not header_printed:
@@ -1026,7 +1032,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            resume=True, status=status)
+            resume=True, status=status, non_interactive=True)
     if _tui_requested(args):
         print(_run_header_line(
             change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
@@ -1036,6 +1042,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 change, resume=True, leave_state=leave_state)
 
         return await _clear_loop(change.control_root, tui=True, first=_first_tui)
+
+    if not getattr(args, "message", None):
+        question = bare_turn_end_question(change)
+        if question is not None:
+            return await _resume_inert(change, question)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
@@ -1064,6 +1075,49 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
+
+
+async def _inert_ask_line(change: Change) -> str | None:
+    """Read one prompt-toolkit line at inert resume; EOF / Ctrl-C maps to None."""
+    prompt = Prompt(
+        skills_dir=change.workflow_dir / "skills",
+        editing_mode=_editing_mode(change.control_root),
+        color=should_use_color(sys.stdout))
+    try:
+        return await prompt.ask_async(width=_term_width())
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+async def _resume_inert(
+    change: Change, question: str,
+) -> int:
+    """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
+    from imp.cli.signals import InterruptCoordinator
+
+    color = should_use_color(sys.stdout)
+    print(_run_header_line(change.id, change.title, "resuming", color=color))
+
+    async def _launch(line: str) -> int:
+        async def _first(leave_state: dict[str, str]) -> int:
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout, color=color,
+                                width=_term_width(), status=status,
+                                suppress_replay=True)
+            coord = InterruptCoordinator()
+            inner = make_interactive_solicit(
+                change, status=status, driver=driver, coord=coord)
+            solicit = make_buffered_solicit(line, inner)
+            return await run_session_client(
+                change, driver=driver, coord=coord, solicit=solicit,
+                resume=True, status=status, leave_state=leave_state)
+
+        return await _clear_loop(change.control_root, tui=False, first=_first)
+
+    return await run_inert_resume(
+        question=question,
+        ask_line=lambda: _inert_ask_line(change),
+        launch=_launch)
 
 
 def _editing_mode(control_root: Path) -> str:
@@ -2269,7 +2323,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
-                       help="Headless reply consumed by the first wait_for_user; "
+                       help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
     p_new.add_argument("--tui", action="store_true",
@@ -2303,7 +2357,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--non-interactive", action="store_true",
                         help="Headless: no live prompt; supply the reply via --message.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
-                        help="Headless reply consumed by the first wait_for_user; "
+                        help="Headless reply consumed by the first bare-turn-end prompt; "
                              "requires --non-interactive.")
     p_chat.add_argument("--tui", action="store_true",
                         help="Render the conversation in a full-screen, scrollable "
@@ -2318,7 +2372,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
-                          help="Headless reply consumed by the first wait_for_user; "
+                          help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
     p_resume.add_argument("--tui", action="store_true",

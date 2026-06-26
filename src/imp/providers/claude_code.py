@@ -74,15 +74,14 @@ from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, change_home_path, kill_process_group
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.agents.transcript import (
     RESUME_MANIFEST_HEADER,
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
-    inject_continue_nudge_on_resume,
+    deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
-    resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
 from imp.engine.drivers import driver_allowed_tools
@@ -338,14 +337,6 @@ class _RunState:
     # kind="fatal_tool_error" and bail out instead of letting Claude keep
     # going.
     fatal_tool_error: tuple[str, str] | None = None
-    # Headless wait_for_user pause. Set EITHER by the MCP wrapper (_impl, real
-    # SDK) OR dual-written at the runner level when a wait_for_user tool_use is
-    # observed on a headless turn (mirrors the complete_step dual-write so test
-    # fakes need not drive the wrapper). The receive loop raises AwaitingUserInput
-    # to unwind run() into a clean pause, stopping BEFORE the tool_result is
-    # appended so the transcript ends at the dangling wait_for_user tool_use.
-    awaiting_user: bool = False
-    awaiting_prompt: str = ""
     # Set once at runner entry; read by the MCP wrapper to append the spawning
     # task tool_call on the parent's agent chain.
     agent_id: str = ""
@@ -377,7 +368,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             # Auto-injected below; tolerate a redundant explicit declaration.
             continue
         if name == "wait_for_user":
-            # Synthesized below when declared; tolerate the explicit declaration.
+            # No longer a registered tool — a bare turn-end is the yield. A stale
+            # or resume-transcript declaration is tolerated (silently not
+            # registered) rather than rejected as an unknown tool.
             continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
@@ -386,8 +379,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
-    if "wait_for_user" in invocation.agent_def.tools:
-        out["wait_for_user"] = make_wait_for_user_tool()
     if "bash" in invocation.agent_def.tools:
         # Auto-granted with bash (same block as anthropic/openai
         # _build_tools): run_in_background is a bash PARAMETER, so an agent
@@ -599,15 +590,6 @@ def _wrap_one(
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
             return _tool_response(str(fte), is_error=True)
-        except AwaitingUserInput as au:
-            # Headless wait_for_user: the SDK owns the conversation, so a raise
-            # can't unwind _run_loop. Capture onto state; the receive loop detects
-            # awaiting_user after the next yielded message and raises
-            # AwaitingUserInput out of run() into a clean pause. Returning isError
-            # keeps the SDK call well-formed in the meantime.
-            state.awaiting_user = True
-            state.awaiting_prompt = au.prompt
-            return _tool_response("awaiting user", is_error=True)
         except Exception as exc:
             # Decision #6: re-raise a subagent-origin pause for honesty, but a
             # clean synchronous unwind through the claude_agent_sdk loop is NOT
@@ -1096,7 +1078,7 @@ class ClaudeCodeAgentRunner:
                 yield perr.make_error_event(exc)
                 return
             except AwaitingUserInput:
-                raise  # headless wait_for_user pause unwinds, not classified
+                raise  # bare-turn-end / resume-solicit pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)
                 if self._cancel or _is_terminated_process_teardown(exc):
@@ -1221,19 +1203,19 @@ class ClaudeCodeAgentRunner:
         # Native resume is sound ONLY when existing's final turn was actually
         # flushed to the store. The SDK mirror batcher flushes solely at a `result`
         # boundary, so the only resume shape whose final turn carries a result is
-        # MISSING_COMPLETE_STEP (the agent stopped on assistant prose — the ckx9f5
-        # target). Every other shape leaves its final turn UNflushed and outside
-        # the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
-        # AWAITING_USER and DANGLING_TOOL_USE (and the balance_on_resume flag's path)
-        # end on an unflushed, interrupted assistant tool_use whose id lives in neither
-        # claude-p's loaded session nor the slice — so the surgery's tool_result would be
-        # orphaned (the unmatched-tool_use 400 this change targets). Those
+        # AWAITING_USER (the agent ended its turn on assistant prose — a bare
+        # turn-end yield). Every other shape leaves its final turn UNflushed and
+        # outside the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
+        # DANGLING_TOOL_USE (and the balance_on_resume flag's path) ends on an
+        # unflushed, interrupted assistant tool_use whose id lives in neither
+        # claude-p's loaded session nor the slice — so the surgery's tool_result
+        # would be orphaned (the unmatched-tool_use 400 this change targets). Those
         # downgrade to stream-json replay, which re-streams the whole balanced
         # history in position.
         native_resume = (
             (not is_fresh)
             and store_has_conversation_body(await store.load(skey))
-            and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
+            and classify_resume(existing) is ResumeState.AWAITING_USER
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
@@ -1279,7 +1261,6 @@ class ClaudeCodeAgentRunner:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
-            inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
@@ -1299,20 +1280,19 @@ class ClaudeCodeAgentRunner:
                         ),
                     }}
                     return
-                # wait_for_user carries no prompt arg (the schema dropped it),
-                # so the gate has no question payload: the agent's prose IS the
-                # question, already journaled and rendered. Emit an empty prompt.
+                # A bare turn-end carries no separate question payload: the
+                # agent's prose IS the question, already journaled and rendered.
+                # Emit an empty prompt.
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": ""})
-                # §2 dangling-wait join (F5): queued interjects satisfy the wait
-                # directly (mirrors wait_for_user.py R6). Fall back to
-                # user_input_fn only when the queue is empty.
+                # Queued interjects satisfy the pending yield directly; fall back
+                # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn)
-                resolve_wait_for_user_on_resume(
+                deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
-                # Fall through (do NOT return): the now-balanced transcript
-                # drives the next LLM turn with the human's reply.
+                # Fall through (do NOT return): the reply drives the next LLM
+                # turn as the transcript's trailing user message.
             # §2 resume-entry drain: fold pending interjects into the history
             # that feeds _stream_history(messages) on the first query. The SDK
             # is queried with the WHOLE transcript as a stream, so appending
@@ -1474,33 +1454,6 @@ class ClaudeCodeAgentRunner:
                                     if b.name == "complete_step":
                                         state.complete_step_called = True
                                         state.complete_step_args = b.input
-                                    # Dual-write the wait_for_user pause at the
-                                    # runner level (same reasoning as complete_step
-                                    # above). Attended is the tool's own rule:
-                                    # attended iff a user_input_fn (reply channel)
-                                    # is attached; non_interactive no longer
-                                    # participates. A headless run sets a one-shot
-                                    # --message reply fn AND keeps
-                                    # non_interactive=True, so it is attended here
-                                    # and consumes --message on the first solicit;
-                                    # the pause then comes from that reply fn
-                                    # raising AwaitingUserInput on a later solicit,
-                                    # marked by the MCP wrapper's except (see
-                                    # ~line 384). This dual-write only marks the
-                                    # subagent / no-channel case (user_input_fn is
-                                    # None). When unattended, mark the pause; the
-                                    # receive loop raises AwaitingUserInput out of
-                                    # run() before any tool_result for this block
-                                    # is appended, so the transcript ends at this
-                                    # dangling wait_for_user tool_use. (In
-                                    # production _impl also sets these — idempotent.)
-                                    if b.name == "wait_for_user":
-                                        attended = self._user_input_fn is not None
-                                        if not attended:
-                                            state.awaiting_user = True
-                                            state.awaiting_prompt = (
-                                                b.input.get("prompt", "")
-                                                if isinstance(b.input, dict) else "")
                                     # Ceiling guard: observational here. With
                                     # Claude Code we can't prevent the (K+1)th
                                     # tool dispatch — MCP invocation is async
@@ -1588,17 +1541,6 @@ class ClaudeCodeAgentRunner:
                             "message": msg,
                         }}
                         return
-
-                    # Headless wait_for_user pause: raise out of run() so
-                    # drive_invocation pauses with awaiting_user=True. This fires
-                    # in the SAME iteration that processed the assistant message
-                    # bearing the wait_for_user tool_use — BEFORE the SDK's
-                    # tool_result UserMessage is ever consumed/appended — so the
-                    # persisted transcript ends at the dangling wait_for_user
-                    # tool_use with NO following tool_result (the real human reply
-                    # on an attended resume resolves it).
-                    if state.awaiting_user:
-                        raise AwaitingUserInput(state.awaiting_prompt)
 
                     if cls_name == "ResultMessage":
                         # Loop guard: ResultMessage is the true end-of-turn

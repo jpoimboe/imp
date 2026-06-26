@@ -7,14 +7,12 @@ never as the close of every turn.
 no scripted reply tokens, and the numbered-options convention only for a genuine fixed
 choice.
 
-**Yielding mechanics.** When you need the human's input or a decision, ask the question
-itself in your turn text, then call `wait_for_user`. The tool takes no arguments — the
-human reads only your prose, so the prose must contain the actual question; do not
-announce a question you never ask ("I'll get your call on this" then a silent gate),
-and do not just end your turn with plain text and no tool call (a bare turn-end is
-treated as a bug and will nudge you). The reply comes back as the tool result; continue
-from there, and call `wait_for_user` again if you need another round. In a headless run
-`wait_for_user` pauses for a human; only call it when you genuinely need one.
+**Yielding mechanics.** End your turn with your question to yield to the human — the
+bare turn-end **is** the yield; the reply returns as your next message. The human reads
+only your prose, so the prose must contain the actual question; do not announce a
+question you never ask ("I'll get your call on this" then a silent close). Loop as many
+rounds as needed. In a headless run a bare turn-end with no human attached pauses the
+run carrying your last text, so yield this way only when a human is genuinely needed.
 
 **One question at a time; one closing summary.** Do not stack multiple questions in a
 single message, and emit a single closing summary — no near-duplicate restatements of

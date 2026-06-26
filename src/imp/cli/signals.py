@@ -129,7 +129,7 @@ class InterruptCoordinator:
         # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
         self._activity_listeners: list[Any] = []
         # Suspend-during-solicit (this Change): True ONLY while an attended agent
-        # is blocked awaiting a human reply at wait_for_user / _resolve_wait_reply.
+        # is blocked awaiting a human reply at the bare-turn-end gate.
         # While True the per-pull inactivity watchdog freezes its deadline to inf
         # (see agent_run._pull_with_inactivity_watchdog). Name-identical to the
         # unrelated ReplyInterjectRouter.solicit_active (reply routing) — distinct.

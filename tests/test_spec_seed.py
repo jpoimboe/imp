@@ -98,7 +98,8 @@ def test_new_positional_delivers_verbatim_seed(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -124,7 +125,8 @@ def test_new_title_flag_sets_change_title(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -139,7 +141,6 @@ def test_new_title_flag_sets_change_title(
     assert captured["change"].title == "dark mode"  # type: ignore[union-attr]
 
 
-
 def test_new_positional_with_message_legal(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
@@ -151,7 +152,8 @@ def test_new_positional_with_message_legal(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
@@ -191,7 +193,6 @@ def test_new_tui_delivers_seed(
     assert rc == 0
     assert captured["seed_opening"] == "add dark mode"
     assert "--tui does not deliver" not in capsys.readouterr().err
-
 
 
 def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
@@ -246,7 +247,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
                            status: object = None, opening_intent: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -288,7 +290,8 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
                            status: object = None, opening_intent: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -329,7 +332,8 @@ def test_new_creates_unmaterialized_draft(
                            solicit: object, seed_opening: object,
                            status: object = None,
                            opening_intent: object = None,
-                           title: object = None) -> int:
+                           title: object = None,
+                           non_interactive: object = False) -> int:
         captured["change"] = change
         return 0
 
