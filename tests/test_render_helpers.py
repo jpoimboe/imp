@@ -68,3 +68,13 @@ def test_question_block_respects_depth_indent() -> None:
     # Each line is prefixed by the depth-1 gutter indent.
     for line in lines:
         assert len(line) <= 40
+
+
+def test_prompt_message_caps_hr_at_display_width() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.prompt import _prompt_message_text
+
+    # Wrap width huge, display width small: the rendered question's HR caps at 18.
+    msg = _prompt_message_text("Pick one\n\n---", color=True, width=10000,
+                               display_width=18)
+    assert pal.rule(18, enabled=True) in msg

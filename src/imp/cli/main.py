@@ -546,7 +546,8 @@ async def _read_opening_message(
     make = _prompt_factory or (
         lambda: Prompt(editing_mode=editing_mode, color=color))
     prompt = make()
-    reply = await prompt.ask_async(width=width, hint=OPENING_HINT)
+    reply = await prompt.ask_async(width=width, display_width=_display_width(),
+                                   hint=OPENING_HINT)
     return _normalize_opening_reply(reply)
 
 
@@ -661,7 +662,8 @@ async def _run_cleared_session(
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(
-                width=_term_width(), hint=OPENING_HINT)).strip()
+                width=_term_width(), display_width=_display_width(),
+                hint=OPENING_HINT)).strip()
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()

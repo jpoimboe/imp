@@ -244,11 +244,12 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
 
 
 def render_question_block(text: str, width: int, depth: int, color: bool,
+                          display_width: int = 80,
                           gutters: tuple[int, ...] = ()) -> list[str]:
     inner = max(8, width - _INDENT_W * depth)
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []
-    for raw in _markdown_to_ansi(text, inner, color).splitlines():
+    for raw in _markdown_to_ansi(text, inner, color, display_width).splitlines():
         stripped = raw.rstrip()
         out.append(indent + stripped if stripped else indent)
     return out or [indent]
