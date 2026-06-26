@@ -136,7 +136,7 @@ full design review.
 - **Clean** — the spec's claims still hold against the current tree → proceed down
   the normal build path.
 - **Outstanding concerns** — stale claims, contradictions, or drift-induced
-  ambiguities → surface them in prose and call `wait_for_user`. Never auto-build
+  ambiguities → surface them in prose and end your turn to yield. Never auto-build
   over unresolved concerns.
 
 Recognizing that a message names a spec file is your judgment, not a fixed CLI
