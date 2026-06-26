@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import os
 from collections.abc import AsyncGenerator
@@ -163,6 +164,26 @@ class ScriptedAgentRunner:
                     user_msg = Message(role="user", content=tuple(tool_results))
                     messages.append(user_msg)
                     transcript.append(user_msg)
+
+                if not tool_uses and invocation.continuation_fn is not None:
+                    # Bare turn-end (assistant text, no tool call) IS the yield:
+                    # route through the shared end-of-turn handler like the real
+                    # providers (solicit / nudge / pause), then continue the script.
+                    nxt = invocation.continuation_fn(text)
+                    if inspect.isawaitable(nxt):
+                        nxt = await nxt
+                    if nxt is None:
+                        yield {"type": "error", "payload": {
+                            "category": "agent_incomplete",
+                            "kind": "no_complete_step_after_nudges",
+                            "message": "scripted agent did not call complete_step after nudges",
+                            "detail": {"last_agent_text": text[:500]},
+                        }}
+                        return
+                    reply_msg = Message(
+                        role="user", content=(TextBlock(text=str(nxt)),))
+                    messages.append(reply_msg)
+                    transcript.append(reply_msg)
 
             yield {"type": "error", "payload": {
                 "category": "agent_output_missing",
