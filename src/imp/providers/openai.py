@@ -448,7 +448,7 @@ class OpenAIAgentRunner:
                 yield perr.make_error_event(exc)
                 return
             except AwaitingUserInput:
-                raise  # headless wait_for_user pause unwinds, not classified
+                raise  # bare-turn-end / resume-solicit pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)
                 if self._cancel:
@@ -699,12 +699,6 @@ class OpenAIAgentRunner:
                     "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
-
-            for _tu in tool_uses:
-                if _tu.name == "wait_for_user":
-                    # Not registered (not advertised to the LLM), but raised
-                    # inline so stale/resume transcripts still park correctly.
-                    raise AwaitingUserInput()
 
             tool_results: list[ToolResultBlock] = []
             turn = TurnState(tool_calls_used=tool_calls_used)
