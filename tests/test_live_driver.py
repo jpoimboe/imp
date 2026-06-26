@@ -1773,6 +1773,18 @@ def test_context_bar_color_thresholds_green_yellow_red() -> None:
     assert "\x1b[31m" in boundary_red and "\x1b[33m" not in boundary_red
 
 
+def test_context_bar_midrange_fill_is_wordmark_under_dark_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import context_bar
+    try:
+        pal.set_theme("dark")
+        bar = context_bar("sonnet", 140000, color=True, over_bg=False)  # 70% -> mid-range
+        assert pal.sgr("wordmark", enabled=True) in bar   # \x1b[38;2;255;154;60m
+        assert pal.sgr("yellow", enabled=True) not in bar  # not the muted yellow role
+    finally:
+        pal.set_theme("ansi")
+
+
 def test_context_bar_falls_back_to_catalog_window() -> None:
     from imp.cli.live_driver import context_bar
     from imp.providers.catalog import window_for_model

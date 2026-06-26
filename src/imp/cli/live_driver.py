@@ -64,7 +64,7 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
     filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
     pct = round(frac * 100)
     hue = ("green" if frac < _BAR_GREEN_MAX
-           else "yellow" if frac < _BAR_YELLOW_MAX else "red")
+           else "wordmark" if frac < _BAR_YELLOW_MAX else "red")
     fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
     track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
              if filled < _CONTEXT_WIDTH else "")
