@@ -538,99 +538,6 @@ async def test_bare_turn_end_resume_delivers_reply_then_continues(
 
 
 @pytest.mark.anyio
-async def test_headless_message_does_not_pause_on_first_wait_for_user(
-    tmp_path: Path,
-) -> None:
-    """Regression: under a headless `--message` run the invocation is
-    non_interactive=True AND has a one-shot reply user_input_fn attached. The
-    runner-level dual-write must treat that as ATTENDED (attended iff a
-    user_input_fn exists; non_interactive no longer participates), so it does
-    NOT mark awaiting_user on the first wait_for_user. The run consumes the
-    reply and proceeds to complete_step rather than pausing immediately.
-
-    Guards the stale `and not invocation.non_interactive` rule that killed
-    `--message` on the production claude_code provider."""
-    (tmp_path / "art").mkdir()
-    log = InMemoryEventLog()
-    inv = _inv(
-        tmp_path,
-        tools=frozenset({"complete_step", "wait_for_user"}),
-        event_log=log,
-    )
-    inv = replace(inv, non_interactive=True)
-
-    scripted = [
-        assistant(
-            text("need a decision"),
-            tool_use("wfu1", "wait_for_user", {"prompt": "merge?"}),
-        ),
-        assistant(
-            text("proceeding"),
-            tool_use("c1", "complete_step", {"status": "Success"}),
-        ),
-        result(),
-    ]
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5",
-        client_factory=factory,
-        # One-shot reply channel installed by a headless --message run.
-        user_input_fn=lambda _prompt: "go ahead",
-    )
-
-    events = []
-    async for ev in runner.run(inv):
-        events.append(ev)
-
-    # With the stale rule the runner would have raised AwaitingUserInput on the
-    # first wait_for_user (awaiting_user=True) and never reached complete_step.
-    kinds = [e["type"] for e in events]
-    assert kinds[-1] == "agent_output", f"expected agent_output, got {kinds}"
-    assert events[-1]["payload"] == {"status": "Success"}
-
-
-@pytest.mark.anyio
-async def test_no_channel_wait_for_user_marks_pause(tmp_path: Path) -> None:
-    """The dual-write's ONLY remaining job: when NO reply channel is attached
-    (user_input_fn is None — subagent / no-channel run), the first
-    wait_for_user marks the pause and run() unwinds with AwaitingUserInput."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-
-    (tmp_path / "art").mkdir()
-    log = InMemoryEventLog()
-    inv = _inv(
-        tmp_path,
-        tools=frozenset({"complete_step", "wait_for_user"}),
-        event_log=log,
-    )
-
-    scripted = [
-        assistant(
-            text("need a decision"),
-            tool_use("wfu1", "wait_for_user", {"prompt": "merge?"}),
-        ),
-        result(),
-    ]
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5",
-        client_factory=factory,
-        user_input_fn=None,
-    )
-
-    with pytest.raises(AwaitingUserInput) as ei:
-        async for _ev in runner.run(inv):
-            pass
-    assert ei.value.prompt == "merge?"
-
-
-@pytest.mark.anyio
 async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
     """A headless resume (no user_input_fn) of a bare-turn-end AWAITING_USER
     transcript yields a clean no_user_input_fn error and never queries the SDK.
@@ -2355,3 +2262,21 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
     assert "context_window" not in resp["payload"]
     assert "context_pct" not in resp["payload"]
     assert "context_tokens" not in resp["payload"]
+
+
+def test_run_state_has_no_wait_for_user_pause_fields() -> None:
+    """No live-run wait_for_user pause intercept; the _build_tools carve-out is retained."""
+    import dataclasses
+    import inspect
+
+    import imp.providers.claude_code as cc_mod
+    from imp.providers.claude_code import _RunState
+
+    names = {f.name for f in dataclasses.fields(_RunState)}
+    assert "awaiting_user" not in names
+    assert "awaiting_prompt" not in names
+
+    src = inspect.getsource(cc_mod)
+    assert 'b.name == "wait_for_user"' not in src
+    # The non-registration carve-out is intentionally retained.
+    assert 'if name == "wait_for_user"' in src

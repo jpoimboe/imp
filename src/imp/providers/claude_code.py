@@ -338,14 +338,6 @@ class _RunState:
     # kind="fatal_tool_error" and bail out instead of letting Claude keep
     # going.
     fatal_tool_error: tuple[str, str] | None = None
-    # Headless wait_for_user pause. Set EITHER by the MCP wrapper (_impl, real
-    # SDK) OR dual-written at the runner level when a wait_for_user tool_use is
-    # observed on a headless turn (mirrors the complete_step dual-write so test
-    # fakes need not drive the wrapper). The receive loop raises AwaitingUserInput
-    # to unwind run() into a clean pause, stopping BEFORE the tool_result is
-    # appended so the transcript ends at the dangling wait_for_user tool_use.
-    awaiting_user: bool = False
-    awaiting_prompt: str = ""
     # Set once at runner entry; read by the MCP wrapper to append the spawning
     # task tool_call on the parent's agent chain.
     agent_id: str = ""
@@ -599,15 +591,6 @@ def _wrap_one(
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
             return _tool_response(str(fte), is_error=True)
-        except AwaitingUserInput as au:
-            # Headless wait_for_user: the SDK owns the conversation, so a raise
-            # can't unwind _run_loop. Capture onto state; the receive loop detects
-            # awaiting_user after the next yielded message and raises
-            # AwaitingUserInput out of run() into a clean pause. Returning isError
-            # keeps the SDK call well-formed in the meantime.
-            state.awaiting_user = True
-            state.awaiting_prompt = au.prompt
-            return _tool_response("awaiting user", is_error=True)
         except Exception as exc:
             # Decision #6: re-raise a subagent-origin pause for honesty, but a
             # clean synchronous unwind through the claude_agent_sdk loop is NOT
@@ -1096,7 +1079,7 @@ class ClaudeCodeAgentRunner:
                 yield perr.make_error_event(exc)
                 return
             except AwaitingUserInput:
-                raise  # headless wait_for_user pause unwinds, not classified
+                raise  # bare-turn-end / resume-solicit pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)
                 if self._cancel or _is_terminated_process_teardown(exc):
@@ -1473,33 +1456,6 @@ class ClaudeCodeAgentRunner:
                                     if b.name == "complete_step":
                                         state.complete_step_called = True
                                         state.complete_step_args = b.input
-                                    # Dual-write the wait_for_user pause at the
-                                    # runner level (same reasoning as complete_step
-                                    # above). Attended is the tool's own rule:
-                                    # attended iff a user_input_fn (reply channel)
-                                    # is attached; non_interactive no longer
-                                    # participates. A headless run sets a one-shot
-                                    # --message reply fn AND keeps
-                                    # non_interactive=True, so it is attended here
-                                    # and consumes --message on the first solicit;
-                                    # the pause then comes from that reply fn
-                                    # raising AwaitingUserInput on a later solicit,
-                                    # marked by the MCP wrapper's except (see
-                                    # ~line 384). This dual-write only marks the
-                                    # subagent / no-channel case (user_input_fn is
-                                    # None). When unattended, mark the pause; the
-                                    # receive loop raises AwaitingUserInput out of
-                                    # run() before any tool_result for this block
-                                    # is appended, so the transcript ends at this
-                                    # dangling wait_for_user tool_use. (In
-                                    # production _impl also sets these — idempotent.)
-                                    if b.name == "wait_for_user":
-                                        attended = self._user_input_fn is not None
-                                        if not attended:
-                                            state.awaiting_user = True
-                                            state.awaiting_prompt = (
-                                                b.input.get("prompt", "")
-                                                if isinstance(b.input, dict) else "")
                                     # Ceiling guard: observational here. With
                                     # Claude Code we can't prevent the (K+1)th
                                     # tool dispatch — MCP invocation is async
@@ -1587,17 +1543,6 @@ class ClaudeCodeAgentRunner:
                             "message": msg,
                         }}
                         return
-
-                    # Headless wait_for_user pause: raise out of run() so
-                    # drive_invocation pauses with awaiting_user=True. This fires
-                    # in the SAME iteration that processed the assistant message
-                    # bearing the wait_for_user tool_use — BEFORE the SDK's
-                    # tool_result UserMessage is ever consumed/appended — so the
-                    # persisted transcript ends at the dangling wait_for_user
-                    # tool_use with NO following tool_result (the real human reply
-                    # on an attended resume resolves it).
-                    if state.awaiting_user:
-                        raise AwaitingUserInput(state.awaiting_prompt)
 
                     if cls_name == "ResultMessage":
                         # Loop guard: ResultMessage is the true end-of-turn
