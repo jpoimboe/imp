@@ -35,26 +35,9 @@ from imp.cli.live_status import LiveStatus
 _FG_RESET = "\x1b[22;39m"
 _RESET = "\x1b[0m"
 
-_CONTEXT_WINDOWS: dict[str, int] = {
-    "haiku": 200_000,
-    "sonnet": 200_000,
-    "opus": 200_000,
-    "gpt-5": 400_000,
-}
-
 _CONTEXT_WIDTH = 10
 _BAR_GREEN_MAX = 0.60
 _BAR_YELLOW_MAX = 0.85
-
-
-def context_window(model: str | None) -> int | None:
-    if not model:
-        return None
-    lowered = model.lower()
-    for token, size in _CONTEXT_WINDOWS.items():
-        if token in lowered:
-            return size
-    return None
 
 
 def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
@@ -66,11 +49,18 @@ def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
 
 
 def context_bar(model: str | None, prompt_tokens: int | None, *,
+                context_pct: float | None = None,
                 color: bool, over_bg: bool) -> str | None:
-    window = context_window(model)
-    if window is None or prompt_tokens is None:
-        return None
-    frac = prompt_tokens / window
+    if context_pct is not None:
+        frac = context_pct / 100
+    else:
+        # Lazy import keeps `import live_driver` free of the providers package;
+        # the catalog is the renderer's only window source.
+        from imp.providers.catalog import window_for_model
+        window = window_for_model(model)
+        if window is None or prompt_tokens is None:
+            return None
+        frac = prompt_tokens / window
     filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
     pct = round(frac * 100)
     hue = ("green" if frac < _BAR_GREEN_MAX
@@ -96,7 +86,7 @@ def _toolbar_step_segment(activity: nv.Activity, *, color: bool, over_bg: bool) 
 
 def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
                     prompt_tokens: int | None, elapsed: float, frame: int,
-                    color: bool) -> str:
+                    color: bool, context_pct: float | None = None) -> str:
     """The single pure toolbar composer: builds the seven-field bar from plain values —
     change id, title, model, phase, step (+ transient detail), elapsed, context bar —
     wrapped in the user-message slate background when the active theme supplies one."""
@@ -116,7 +106,8 @@ def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
     if step:
         segments.append(step)
     segments.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over))
-    bar = context_bar(activity.model, prompt_tokens, color=color, over_bg=over)
+    bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
+                      color=color, over_bg=over)
     if bar:
         segments.append(bar)
     body = f"{spin} " + rt.compose_label(segments)
@@ -133,7 +124,7 @@ def compose_activity_status(
     return compose_toolbar(
         activity=activity, change_id=root.id, title=root.title,
         prompt_tokens=builder.latest_prompt_tokens, elapsed=elapsed,
-        frame=frame, color=color)
+        frame=frame, color=color, context_pct=builder.latest_context_pct)
 
 
 @dataclass
