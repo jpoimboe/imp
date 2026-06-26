@@ -445,6 +445,9 @@ class NarrativeBuilder:
         # the §1 orphan-result net.
         self._pending_wfu: dict[str, str] = {}
         self._opening_intent_node: UserMessageNode | None = None
+        # TUI-only optimistic reply echo: reconciled by the next user_message;
+        # None on the streaming path.
+        self._pending_reply_node: UserMessageNode | None = None
         self._first_step: StepNode | None = None
         # <imp> rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
@@ -525,6 +528,22 @@ class NarrativeBuilder:
         if self._current_phase is not None:
             return Activity(label="working")
         return None
+
+    def seed_opening_intent(self, text: str) -> None:
+        """TUI-only optimistic echo: seed the committed opening-intent node at root
+        so frame one shows it; _h_opening_intent reconciles the authoritative event
+        into it."""
+        node = UserMessageNode(text=text, interactive=True)
+        self._opening_intent_node = node
+        self._root.children.append(node)
+
+    def seed_pending_reply(self, text: str) -> None:
+        """TUI-only optimistic echo for a your-turn reply: append a pending
+        interactive node; the next user_message reconciles into it via the
+        single-outstanding awaiting-reply invariant."""
+        node = UserMessageNode(text=text, interactive=True)
+        self._pending_reply_node = node
+        self._append(node)
 
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:
         """Close every still-open fold opened by `agent_id` (the resuming parent).
@@ -1111,6 +1130,13 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             text = _summarize_result(block.get("content"))
             rid = str(block.get("tool_use_id") or block.get("id") or "")
             self._pending_wfu.pop(rid, None)
+    pending, self._pending_reply_node = self._pending_reply_node, None
+    if pending is not None:
+        # Reconcile the optimistic echo: adopt authoritative text in place
+        # (one-to-one awaiting-reply match).
+        pending.text = text
+        pending.interactive = interactive
+        return
     self._append(UserMessageNode(text=text, interactive=interactive))
 
 
@@ -1185,7 +1211,12 @@ def _inject_opening_intent(self: NarrativeBuilder, step: StepNode) -> None:
 
 
 def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    node = UserMessageNode(text=p.get("text", ""), interactive=True)
+    text = p.get("text", "")
+    if self._opening_intent_node is not None:
+        # Seeded by the TUI: adopt the authoritative text in place; never append a duplicate.
+        self._opening_intent_node.text = text
+        return
+    node = UserMessageNode(text=text, interactive=True)
     self._opening_intent_node = node
     self._append(node)
 
