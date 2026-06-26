@@ -408,6 +408,8 @@ class NarrativeBuilder:
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
         self._latest_prompt_tokens: int | None = None
+        self._latest_context_pct: float | None = None
+        self._latest_context_window: int | None = None
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -462,6 +464,18 @@ class NarrativeBuilder:
         """Prompt-token occupancy of the most recent llm_response turn (input + cache),
         or None before any usage has arrived. NOT cumulative."""
         return self._latest_prompt_tokens
+
+    @property
+    def latest_context_pct(self) -> float | None:
+        """SDK-reported context-usage percentage (0-100) of the most recent
+        llm_response turn, or None before any has arrived."""
+        return self._latest_context_pct
+
+    @property
+    def latest_context_window(self) -> int | None:
+        """SDK-reported raw context window of the most recent llm_response turn,
+        or None before any has arrived."""
+        return self._latest_context_window
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -613,6 +627,12 @@ class NarrativeBuilder:
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
             if pt is not None and not is_subagent:
                 self._latest_prompt_tokens = pt
+            cpct = payload.get("context_pct")
+            if cpct is not None:
+                self._latest_context_pct = cpct
+            cwin = payload.get("context_window")
+            if cwin is not None:
+                self._latest_context_window = cwin
 
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
         #    a nested builder's own events carry a sub: id that is NOT one of

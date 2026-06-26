@@ -2416,3 +2416,29 @@ def test_unseeded_reply_appends_as_today() -> None:
     assert len(replies) == 1
     assert replies[0].text == "the reply"
     assert replies[0].interactive is True
+
+
+def test_builder_captures_context_pct_and_window() -> None:
+    from imp.cli import narrative as nv
+
+    b = nv.NarrativeBuilder()
+    assert b.latest_context_pct is None
+    assert b.latest_context_window is None
+
+    # A lone tool_use carrier (no prose) — exercises the add() step-0 capture
+    # without needing an open container.
+    b.add({
+        "type": "llm_response", "agent_id": None,
+        "payload": {
+            "provider": "claude_code", "model": "opus-1m",
+            "stop_reason": "tool_use",
+            "raw": {"content": [{"type": "tool_use", "id": "t1",
+                                 "name": "bash", "input": {}}],
+                    "stop_reason": "tool_use", "usage": {}},
+            "usage": {},
+            "context_pct": 37.5, "context_window": 1_000_000,
+        },
+    })
+
+    assert b.latest_context_pct == 37.5
+    assert b.latest_context_window == 1_000_000
