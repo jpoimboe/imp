@@ -98,7 +98,7 @@ def build_resume_manifest(
                 continue
             name = b.name[len("mcp__imp__"):] \
                 if b.name.startswith("mcp__imp__") else b.name
-            if name in ("complete_step", "wait_for_user"):
+            if name == "complete_step":
                 continue
             line = f"- {name} — succeeded"
             if name in _MANIFEST_WRITE_TOOLS:
