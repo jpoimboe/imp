@@ -2382,3 +2382,37 @@ def test_unseeded_opening_intent_still_creates_single_node() -> None:
     assert len(intents) == 1
     assert intents[0].text == "add a --json flag"
     assert intents[0].interactive is True
+
+
+def test_seeded_pending_reply_reconciles_into_single_node() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    b.add(_ev("aw", "awaiting_user_input", agent_id="step:design/spec"))
+    b.seed_pending_reply("typed reply")
+    b.add(_ev("um", "user_message", agent_id="step:design/spec", role="user",
+              content=[{"type": "text", "text": "authoritative reply"}]))
+    tree = b.tree
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    replies = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    # One node only, carrying the AUTHORITATIVE event text (not the seed).
+    assert len(replies) == 1
+    assert replies[0].text == "authoritative reply"
+    assert replies[0].interactive is True
+
+
+def test_unseeded_reply_appends_as_today() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    b.add(_ev("aw", "awaiting_user_input", agent_id="step:design/spec"))
+    b.add(_ev("um", "user_message", agent_id="step:design/spec", role="user",
+              content=[{"type": "text", "text": "the reply"}]))
+    tree = b.tree
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    replies = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(replies) == 1
+    assert replies[0].text == "the reply"
+    assert replies[0].interactive is True
