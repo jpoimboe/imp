@@ -231,3 +231,56 @@ def test_imp_flat_header_states_fresh_context_not_tier_gap() -> None:
     assert "fresh context" in low
     assert "adversarial role" in low
     assert "medium-tier" not in low  # the stale tier-gap framing is gone
+
+
+def _read_agent(name: str) -> str:
+    return (AGENTS / name).read_text()
+
+
+def test_imp_flat_coder_output_schema_is_status_tolerated_summary() -> None:
+    fields = set(_flat().agents["coder"].output_schema.field_names())
+    assert fields == {"status", "verify_tolerated", "summary"}
+
+
+def test_imp_flat_coder_documents_verify_triage() -> None:
+    text = _read_agent("coder.md")
+    low = text.lower()
+    assert "DEFERRED verify:" in text
+    assert "## Deferred Followups" in text
+    assert "— needs-decision:" in text      # em dash U+2014
+    assert "verify_tolerated" in text
+    assert "attributable" in low
+    assert "review_base..HEAD" in text
+    assert "non-converging" in low
+    assert "max_loops" in text
+
+
+def test_imp_flat_coder_reads_plan_and_is_whole_plan() -> None:
+    low = _read_agent("coder.md").lower()
+    assert "whole plan" in low or "entire plan" in low
+    assert "read the plan" in low or "reads the plan" in low
+    # The old per-task subagent framing is gone.
+    assert "task-lead" not in low
+    assert "the task-lead's dispatch message" not in low
+
+
+def test_imp_flat_coder_opportunistic_and_no_fixup_outside_change() -> None:
+    text = _read_agent("coder.md")
+    low = text.lower()
+    assert "opportunistic" in low
+    assert "standalone commit" in low
+    assert "does not own" in low          # the no-fixup-outside-the-change guardrail
+    assert "surviving directive" in low
+    assert "forward" in low
+
+
+def test_imp_flat_coder_sources_human_decision_bar() -> None:
+    text = _read_agent("coder.md")
+    assert text.count('{% include "partials/human-decision.md" %}') == 1
+    assert "DEFERRED coder:" in text
+
+
+def test_imp_flat_coder_terminal_contract_no_report_back() -> None:
+    text = _read_agent("coder.md")
+    assert "complete_step" in text
+    assert "report back" not in text.lower()
