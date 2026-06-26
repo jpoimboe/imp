@@ -181,6 +181,7 @@ class ScriptedAgentRunner:
                         role="user", content=(TextBlock(text=str(nxt)),))
                     messages.append(reply_msg)
                     transcript.append(reply_msg)
+                    elog.append_user_message(agent_id=aid, message=reply_msg)
 
             yield {"type": "error", "payload": {
                 "category": "agent_output_missing",
