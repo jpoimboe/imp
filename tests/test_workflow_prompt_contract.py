@@ -713,3 +713,13 @@ def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     assert 'depends_on=["abc"]' in out
     # Plain-language resume hint for the spun-off change.
     assert "imp resume" in out
+
+
+def test_task_lead_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "task-lead.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The needs-decision note-type row and its routing semantics survive.
+    assert "**needs-decision**" in text
+    assert "gate's needs-decision walk" in text
+    # The include must not reintroduce the removed backward-jump vocabulary.
+    assert "deviation" not in text.lower()
