@@ -157,3 +157,42 @@ def test_migrate_archive_repoints_blob_and_reindexes(tmp_path):
     conn.close()
     assert n == 0  # index regenerated from migrated blob
     assert mig.migrate_archive(control, apply=True) == 0  # idempotent
+
+
+def test_migrate_aborts_on_unsafe(tmp_path):
+    cdir = tmp_path / ".imp" / "changes" / "ch1"
+    cdir.mkdir(parents=True)
+    interleave = {"type": "tool_call", "payload": {"name": "bash", "id": "B"}}
+    (cdir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in [_call("X"), interleave, _result("X", "hi")]))
+    rep = mig.migrate(tmp_path, apply=False)
+    assert rep["unsafe"] == [("ch1", "X")]
+    import pytest
+    with pytest.raises(SystemExit):
+        mig.migrate(tmp_path, apply=True)
+
+
+def test_migrate_full_run_clears_live_events_and_transcripts(tmp_path):
+    cdir = tmp_path / ".imp" / "changes" / "ch2"
+    (cdir / "steps" / "s").mkdir(parents=True)
+    (cdir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in [_call("X"), _result("X", "ok")]))
+    (cdir / "steps" / "s" / "transcript.jsonl").write_text(
+        json.dumps(_assistant({"type": "text", "text": "q"}, _tool_use("X"))) + "\n")
+    rep = mig.migrate(tmp_path, apply=True)
+    assert rep["live_events"] == 1 and rep["live_transcripts"] == 1
+    assert "wait_for_user" not in (cdir / "events.jsonl").read_text()
+    assert "wait_for_user" not in (cdir / "steps" / "s" / "transcript.jsonl").read_text()
+
+
+def test_migrate_skips_live_change(tmp_path, monkeypatch):
+    cdir = tmp_path / ".imp" / "changes" / "live1"
+    cdir.mkdir(parents=True)
+    before = "".join(json.dumps(e) + "\n" for e in [_call("X"), _result("X", "ok")])
+    (cdir / "events.jsonl").write_text(before)
+    # Force the live-detection to report this change as running.
+    monkeypatch.setattr(mig, "_live_change_ids", lambda root: {"live1"})
+    rep = mig.migrate(tmp_path, apply=True)
+    assert rep["skipped_live"] == ["live1"]
+    assert rep["live_events"] == 0
+    assert (cdir / "events.jsonl").read_text() == before  # untouched, no race

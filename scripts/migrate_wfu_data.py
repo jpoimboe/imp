@@ -7,6 +7,7 @@ zaba25). Usage: `python scripts/migrate_wfu_data.py [CONTROL_ROOT] [--apply]`
 (defaults to the current working directory; dry-run unless --apply)."""
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -181,6 +182,62 @@ def migrate_archive(control_root: Path, *, apply: bool) -> int:
     return changed
 
 
+def _live_change_ids(control_root: Path) -> set[str]:
+    """Change ids whose lock names a living pid — actively running, must not be
+    rewritten under them. lock_is_live is false for a crashed change's stale lock."""
+    from imp.engine.state import lock_is_live
+    changes = control_root / ".imp" / "changes"
+    if not changes.is_dir():
+        return set()
+    return {d.name for d in changes.iterdir()
+            if d.is_dir() and lock_is_live(d / "lock")}
+
+
+def collect_unsafe(control_root: Path, *, skip: set[str]) -> list[tuple[str, str]]:
+    offenders: list[tuple[str, str]] = []
+    for ev in (control_root / ".imp" / "changes").glob("*/events.jsonl"):
+        if ev.parent.name in skip:
+            continue
+        for cid in find_unsafe_events(_read_jsonl(ev)):
+            offenders.append((ev.parent.name, cid))
+    from imp.engine import archive
+    from imp.engine.archive import record
+    from imp.engine.archive.blobstore import LocalBlobStore
+    recs_dir = archive.records_root(control_root)
+    if recs_dir.is_dir():
+        store = LocalBlobStore(archive.blobs_root(control_root))
+        for rid in record.list_record_ids(recs_dir):
+            rec = record.read_record(recs_dir, rid)
+            if rec is None:
+                continue
+            blob = store.get(rec["events_hash"])
+            if blob is None:
+                continue
+            events = [json.loads(line) for line in blob.decode().splitlines() if line.strip()]
+            for cid in find_unsafe_events(events):
+                offenders.append((rid, cid))
+    return offenders
+
+
+def migrate(control_root: Path, *, apply: bool) -> dict[str, Any]:
+    skip = _live_change_ids(control_root)
+    offenders = collect_unsafe(control_root, skip=skip)
+    if offenders and apply:
+        raise SystemExit(
+            f"refusing to migrate: {len(offenders)} wfu gate(s) need manual review "
+            f"(interleaved or error result): {offenders}")
+    report: dict[str, Any] = {"unsafe": offenders, "skipped_live": sorted(skip),
+                               "live_events": 0, "live_transcripts": 0, "archive": 0}
+    for ev in (control_root / ".imp" / "changes").glob("*/events.jsonl"):
+        if ev.parent.name in skip:
+            continue
+        report["live_events"] += migrate_change_events_file(ev, apply=apply)
+        report["live_transcripts"] += migrate_transcripts_under(
+            ev.parent / "steps", apply=apply)
+    report["archive"] = migrate_archive(control_root, apply=apply)
+    return report
+
+
 def migrate_transcripts_under(steps_dir: Path, *, apply: bool) -> int:
     """Walk steps_dir.rglob("transcript.jsonl") and rewrite each in place using
     migrate_transcript_lines. Returns total blocks removed. Dry-run when apply=False;
@@ -195,3 +252,19 @@ def migrate_transcripts_under(steps_dir: Path, *, apply: bool) -> int:
             if apply:
                 _write_jsonl(tpath, new_msgs)
     return total
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Migrate legacy wait_for_user data.")
+    parser.add_argument("control_root", nargs="?", default=".", type=Path)
+    parser.add_argument("--apply", action="store_true",
+                        help="perform the migration (default: dry-run report only)")
+    ns = parser.parse_args()
+    rep = migrate(ns.control_root, apply=ns.apply)
+    mode = "APPLIED" if ns.apply else "DRY-RUN"
+    print(f"[{mode}] live_events={rep['live_events']} "
+          f"live_transcripts={rep['live_transcripts']} archive_records={rep['archive']}")
+    if rep["skipped_live"]:
+        print(f"SKIPPED (running live — re-run when finished): {rep['skipped_live']}")
+    if rep["unsafe"]:
+        print(f"UNSAFE (needs manual review): {rep['unsafe']}")
