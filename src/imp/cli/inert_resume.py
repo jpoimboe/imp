@@ -50,3 +50,19 @@ def make_buffered_solicit(
         return await inner(prompt)
 
     return _solicit
+
+
+async def run_inert_resume(
+    *,
+    question: str,
+    ask_line: Callable[[], Awaitable[str | None]],
+    launch: Callable[[str], Awaitable[int]],
+) -> int:
+    """Print the question; loop until a non-blank line (launch it) or None (return 0)."""
+    print(question)
+    while True:
+        line = await ask_line()
+        if line is None:
+            return 0
+        if line.strip():
+            return await launch(line)

@@ -10,6 +10,7 @@ from imp.cli.inert_resume import (
     bare_turn_end_question,
     make_buffered_solicit,
     render_pending_question,
+    run_inert_resume,
 )
 from imp.engine.change import Change
 from imp.engine.state import CurrentStep, State
@@ -132,3 +133,66 @@ async def test_make_buffered_solicit_delivers_first_line_then_delegates() -> Non
     third = await solicit("prompt-3")
     assert third == "from-tty"
     assert calls == ["prompt-2", "prompt-3"]   # every later reply delegates
+
+
+@pytest.mark.anyio
+async def test_run_inert_resume_launches_with_first_line(capsys) -> None:
+    launched: list[str] = []
+
+    async def ask_line() -> str | None:
+        return "go ahead"
+
+    async def launch(line: str) -> int:
+        launched.append(line)
+        return 7
+
+    rc = await run_inert_resume(
+        question="Pending Q?", ask_line=ask_line, launch=launch)
+
+    assert rc == 7
+    assert launched == ["go ahead"]
+    assert "Pending Q?" in capsys.readouterr().out
+
+
+@pytest.mark.anyio
+async def test_run_inert_resume_reprompts_on_blank_line() -> None:
+    lines = iter(["", "   ", "real answer"])
+    launched: list[str] = []
+
+    async def ask_line() -> str | None:
+        return next(lines)
+
+    async def launch(line: str) -> int:
+        launched.append(line)
+        return 0
+
+    rc = await run_inert_resume(
+        question="Pending Q?", ask_line=ask_line, launch=launch)
+
+    assert rc == 0
+    assert launched == ["real answer"]   # blank lines re-prompted, not launched
+
+
+@pytest.mark.anyio
+async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(
+        tmp_path, title="C", change_id="c", base_branch="main")
+    before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+
+    async def ask_line() -> str | None:
+        return None
+
+    async def launch(line: str) -> int:
+        # The real launch would append events; assert it never runs.
+        ch.event_log().append(
+            agent_id=None, type="user_message",
+            payload={"role": "user", "content": []})
+        return 0
+
+    rc = await run_inert_resume(
+        question="Pending Q?", ask_line=ask_line, launch=launch)
+
+    assert rc == 0
+    after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    assert after == before              # launch never ran -> no events appended
