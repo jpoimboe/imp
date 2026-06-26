@@ -411,3 +411,32 @@ def test_log_picker_rows_include_backlog(
     import anyio
     anyio.run(m._pick_log_target, tmp_path)
     assert any(r[0] == "2026-06-16-bkg111" for r in captured["rows"])
+
+
+def test_display_width_uses_kernel_winsize_ignoring_columns(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Out:
+        def fileno(self) -> int:
+            return 1
+
+    # An inflated COLUMNS must be ignored: _display_width asks the kernel.
+    monkeypatch.setenv("COLUMNS", "10000")
+    monkeypatch.setattr(cli_main.sys, "stdout", _Out())
+    monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((137, 40)))
+    assert cli_main._display_width() == 137
+
+
+def test_display_width_falls_back_to_80_when_no_terminal(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Out:
+        def fileno(self) -> int:
+            return 1
+
+    def _raise(fd):
+        raise OSError("not a terminal")
+
+    monkeypatch.setattr(cli_main.sys, "stdout", _Out())
+    monkeypatch.setattr(os, "get_terminal_size", _raise)
+    assert cli_main._display_width() == 80

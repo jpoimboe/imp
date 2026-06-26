@@ -1084,6 +1084,14 @@ def _term_width() -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
+def _display_width() -> int:
+    # Physical terminal width via kernel winsize; ignores $COLUMNS (inverse of _term_width).
+    try:
+        return os.get_terminal_size(sys.stdout.fileno()).columns
+    except OSError:
+        return 80
+
+
 def _list_change_homes(control: Path) -> list[str]:
     """Ids of changes with a permanent root home under .imp/changes/."""
     root = control / ".imp" / "changes"
