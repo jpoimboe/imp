@@ -171,12 +171,13 @@ pass is unchanged.
 
 ## Surfacing a decision you cannot resolve
 
-When a concern is genuinely the human's call and you cannot settle it from the spec
-or the codebase — an ambiguity you had to assume past, or a risk worth a human
-decision before merge — do not bury it in prose. Append it to the **Deferred
-Followups** list in `{{ change.home }}/progress.md` (create the `## Deferred Followups`
-heading if absent) in `finalize`'s exact reader form, the same `— needs-decision:`
-line shape the merge gate already walks:
+{% include "partials/human-decision.md" %}
+
+When a concern clears that bar and you cannot settle it from the spec or the codebase,
+do not bury it in prose. Append it to the **Deferred Followups** list in
+`{{ change.home }}/progress.md` (create the `## Deferred Followups` heading if absent)
+in `finalize`'s exact reader form, the same `— needs-decision:` line shape the merge
+gate already walks:
 
 `- [ ] DEFERRED plan-writer: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
 

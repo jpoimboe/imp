@@ -723,3 +723,58 @@ def test_task_lead_sources_human_decision_bar() -> None:
     assert "gate's needs-decision walk" in text
     # The include must not reintroduce the removed backward-jump vocabulary.
     assert "deviation" not in text.lower()
+
+
+def test_plan_writer_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "plan-writer.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The inline "Surfacing a decision you cannot resolve" bar prose is gone.
+    assert "an ambiguity you had to assume past" not in text
+    # Mechanics preserved: reader-form line + fast_path note.
+    assert "DEFERRED plan-writer:" in text
+    assert "fast_path" in text
+    # The distinct higher-bar Ask-vs-decide / wait_for_user framing stays.
+    assert "When to ask — all three must hold" in text
+
+
+HUMAN_DECISION_AGENTS = [
+    "deferred-sweep.md", "spec-finalizer.md", "reconciler.md",
+    "task-lead.md", "plan-writer.md",
+]
+
+
+@pytest.mark.parametrize("name", HUMAN_DECISION_AGENTS)
+def test_authoring_agent_includes_human_decision_once(name: str) -> None:
+    text = (AGENTS_DIR / name).read_text()
+    assert text.count('{% include "partials/human-decision.md" %}') == 1, (
+        f"{name}: must source the shared human-decision bar exactly once")
+
+
+@pytest.mark.parametrize("name", [Path(n).stem for n in HUMAN_DECISION_AGENTS])
+def test_authoring_agent_renders_human_decision_partial(
+    name: str, tmp_path: Path,
+) -> None:
+    body = load_workflow(
+        bundled_workflow_dir("imp")).agents[name].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    rendered = render_prompt(
+        body,
+        build_context(
+            change_title="t", event_log=log, change_id="abc",
+            change_home=".imp/changes/abc",
+            cur_base_head="X", orig_base_head="X",
+            vars={"fast_path": False, "plan_total": 1, "task_total": 1,
+                  "integration_fork": "P"},
+            project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    # Sentinel lives entirely on one partial line (the canonical sentence wraps
+    # across a newline, so assert a within-line substring that survives the wrap).
+    assert "never the bar for code quality." in rendered, (
+        f"{name}: the human-decision include did not resolve into the prompt")
+
+
+def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
+    for md in AGENTS_DIR.glob("*.md"):
+        assert "observable/external behavior" not in md.read_text(), (
+            f"{md.name}: still carries the removed standalone "
+            "'observable/external behavior' escalation trigger")
