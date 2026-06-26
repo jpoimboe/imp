@@ -83,6 +83,16 @@ def step_divider(event: Mapping[str, Any]) -> str | None:
     return f"— {inner} —"
 
 
+def header_line(event: Mapping[str, Any]) -> str:
+    """The per-message header 'id · name · time'; time is the event's own send time."""
+    change = event.get("change") or {}
+    cid = str(change.get("id") or "")
+    name = change.get("title") or cid or "imp"
+    ts = event.get("timestamp")
+    when = format_time_of_day(ts) if ts else ""
+    return f"{cid} · {name} · {when}"
+
+
 def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
     """Classify an event into a delivery tier: 'buzz' (notify), 'silent' (quiet
     stream), or None (dropped). Buzz = input prompts + status transitions; silent =

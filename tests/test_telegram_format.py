@@ -161,6 +161,44 @@ def test_step_divider_none_when_quiet() -> None:
          "payload": {"label": "internal setup", "quiet": True}}) is None
 
 
+def test_header_line_renders_id_name_and_event_local_time(set_tz) -> None:
+    from imp.remote.drivers.telegram import header_line
+
+    set_tz("UTC")
+    event = {
+        "change": {"id": "tozi28", "title": "Telegram subscriptions"},
+        "timestamp": "2026-06-25T14:32:05+00:00",
+    }
+    assert header_line(event) == "tozi28 · Telegram subscriptions · 2:32pm"
+
+
+def test_header_line_name_falls_back_to_the_id(set_tz) -> None:
+    from imp.remote.drivers.telegram import header_line
+
+    set_tz("UTC")
+    event = {"change": {"id": "abc123"}, "timestamp": "2026-06-25T11:05:00+00:00"}
+    assert header_line(event) == "abc123 · abc123 · 11:05am"
+
+
+def test_header_line_name_falls_back_to_imp_when_no_id_or_title(set_tz) -> None:
+    from imp.remote.drivers.telegram import header_line
+
+    set_tz("UTC")
+    event = {"change": {}, "timestamp": "2026-06-25T11:05:00+00:00"}
+    assert header_line(event) == " · imp · 11:05am"
+
+
+def test_header_line_uses_event_time_in_daemon_local_zone(set_tz) -> None:
+    from imp.remote.drivers.telegram import header_line
+
+    set_tz("America/New_York")
+    event = {
+        "change": {"id": "tozi28", "title": "T"},
+        "timestamp": "2026-06-25T14:32:05+00:00",
+    }
+    assert header_line(event) == "tozi28 · T · 10:32am"
+
+
 def test_event_labels_humanize_every_buzz_type() -> None:
     assert imp_telegram._EVENT_LABELS == {
         "awaiting_user_input": "needs your input",
