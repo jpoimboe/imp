@@ -1,5 +1,5 @@
 ---
-name: plan-cycle-check
+name: gap-check
 label: checking plan coverage
 description: Decide whether the spec needs another plan (supercycle) or is fully covered by the plans implemented so far.
 output:

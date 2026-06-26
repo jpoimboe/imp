@@ -6,6 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
   result: {type: enum, values: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}
   report: {type: string}
+  verify_tolerated: {type: bool}
 ---
 
 {% if project.guidance %}
