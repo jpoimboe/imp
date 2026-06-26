@@ -23,10 +23,6 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from imp.agents.classify import (
-    ResumeState,
-    classify_resume,
-)
 from imp.agents.runner import (
     Message,
     TextBlock,
