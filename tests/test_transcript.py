@@ -12,6 +12,7 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
+    deliver_reply_on_resume,
     inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
 )
@@ -402,3 +403,32 @@ def test_build_resume_manifest_echoes_edit_file_new_body() -> None:
     assert "edit_file — succeeded" in out
     assert "x.py" in out
     assert "NEWBODY" in out
+
+
+def test_deliver_reply_on_resume_appends_user_text_message(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "t.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="what color?"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    log = InMemoryEventLog()
+
+    injected = deliver_reply_on_resume(msgs, t, log, "step:p/s", "blue")
+
+    # Delivered as a plain user TextBlock turn — NOT a tool_result fill.
+    assert injected.role == "user"
+    assert len(injected.content) == 1
+    block = injected.content[0]
+    assert isinstance(block, TextBlock)
+    assert block.text == "blue"
+    assert msgs[-1] is injected
+
+    # Persisted to disk: the transcript now ends on the user reply.
+    reloaded = Transcript(tmp_path / "t.jsonl").load()
+    assert reloaded[-1].role == "user"
+    assert reloaded[-1].content[0].text == "blue"
+
+    # Journaled as a user_message event.
+    assert [e["type"] for e in log.read()] == ["user_message"]

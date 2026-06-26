@@ -355,6 +355,24 @@ def resolve_wait_for_user_on_resume(
     return repaired
 
 
+def deliver_reply_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, reply: str,
+) -> Message:
+    """Deliver a human reply (or drained interject) as the next user message.
+
+    A bare-turn-end pause leaves the transcript ending on assistant text with no
+    tool_use — nothing to repair, the reply is simply the next user turn. Append
+    it to `messages`, persist it, and journal a user_message event; the now
+    user-terminated transcript drives the next LLM turn.
+    """
+    injected = Message(role="user", content=(TextBlock(text=reply),))
+    messages.append(injected)
+    transcript.append(injected)
+    elog.append_user_message(agent_id=agent_id, message=injected)
+    return injected
+
+
 def inject_continue_nudge_on_resume(
     messages: list[Message], transcript: Transcript, elog: EventLog,
     agent_id: str,
