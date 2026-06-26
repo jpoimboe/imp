@@ -63,6 +63,19 @@ def format_time_of_day(iso: str) -> str:
     return f"{hour}:{dt.minute:02d}{suffix}"
 
 
+def step_divider(event: Mapping[str, Any]) -> str | None:
+    """Header-less divider for a step_started event; None when quiet or label empty."""
+    payload = event.get("payload") or {}
+    if payload.get("quiet"):
+        return None
+    label = str(payload.get("label") or "").strip()
+    if not label:
+        return None
+    phase = str(payload.get("phase_label") or "").strip()
+    inner = f"{phase} › {label}" if phase else label
+    return f"— {inner} —"
+
+
 def curate(event_type: Any) -> str | None:
     """Classify an imp event type: 'loud' (notify), 'silent' (quiet narrative),
     or None (dropped). Anything not loud/silent is dropped, including tool_call,

@@ -119,3 +119,43 @@ def test_format_time_of_day_converts_utc_to_daemon_local_zone(set_tz) -> None:
 
     set_tz("America/New_York")
     assert format_time_of_day("2026-06-25T14:32:05+00:00") == "10:32am"
+
+
+def test_step_divider_uses_phase_label_then_label() -> None:
+    from imp.remote.drivers.telegram import step_divider
+
+    event = {
+        "type": "step_started",
+        "payload": {"phase_label": "Brainstorm", "label": "scoping the change"},
+    }
+    assert step_divider(event) == "— Brainstorm › scoping the change —"
+
+
+def test_step_divider_label_only_when_no_phase_label() -> None:
+    from imp.remote.drivers.telegram import step_divider
+
+    assert step_divider(
+        {"type": "step_started", "payload": {"label": "planning"}}) == "— planning —"
+
+
+def test_step_divider_none_when_label_empty() -> None:
+    from imp.remote.drivers.telegram import step_divider
+
+    assert step_divider(
+        {"type": "step_started",
+         "payload": {"phase_label": "Brainstorm", "label": ""}}) is None
+
+
+def test_step_divider_none_when_label_whitespace_only() -> None:
+    from imp.remote.drivers.telegram import step_divider
+
+    assert step_divider(
+        {"type": "step_started", "payload": {"label": "   "}}) is None
+
+
+def test_step_divider_none_when_quiet() -> None:
+    from imp.remote.drivers.telegram import step_divider
+
+    assert step_divider(
+        {"type": "step_started",
+         "payload": {"label": "internal setup", "quiet": True}}) is None
