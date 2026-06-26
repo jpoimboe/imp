@@ -628,10 +628,10 @@ class NarrativeBuilder:
             if pt is not None and not is_subagent:
                 self._latest_prompt_tokens = pt
             cpct = payload.get("context_pct")
-            if cpct is not None:
+            if cpct is not None and not is_subagent:
                 self._latest_context_pct = cpct
             cwin = payload.get("context_window")
-            if cwin is not None:
+            if cwin is not None and not is_subagent:
                 self._latest_context_window = cwin
 
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —

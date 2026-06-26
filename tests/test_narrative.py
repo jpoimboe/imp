@@ -2442,3 +2442,24 @@ def test_builder_captures_context_pct_and_window() -> None:
 
     assert b.latest_context_pct == 37.5
     assert b.latest_context_window == 1_000_000
+
+
+def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
+    # A subagent turn carries its own session context usage; like prompt tokens,
+    # it must NOT flip the top-level context bar to the subagent's values.
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    b.add(ev("p1", "llm_response", agent_id="step:p/s", provider="claude_code",
+             model="opus-1m", stop_reason="end_turn", usage={},
+             raw={"content": []}, context_pct=20.0, context_window=1_000_000))
+    assert b.latest_context_pct == 20.0
+    assert b.latest_context_window == 1_000_000
+    # Open a subagent fold so the sub: turn routes through a registered child.
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+             input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(ev("s1", "llm_response", agent_id="sub:tk1", provider="claude_code",
+             model="opus-1m", stop_reason="end_turn", usage={},
+             raw={"content": []}, context_pct=88.0, context_window=200_000))
+    assert b.latest_context_pct == 20.0          # frozen at the parent's value
+    assert b.latest_context_window == 1_000_000
