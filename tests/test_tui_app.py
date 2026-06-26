@@ -232,6 +232,18 @@ async def test_solicit_shows_prompt_returns_submitted_line(tmp_path: Path) -> No
     assert result["line"] == "go ahead"
 
 
+def test_opening_intent_seeded_shows_in_narrative_from_frame_one() -> None:
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80,
+                 opening_intent="add a --json flag")
+    # Before any daemon event is processed, the typed text already renders.
+    assert "add a --json flag" in app.narrative()
+
+
+def test_no_opening_intent_seeds_nothing() -> None:
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    assert app.narrative() == ""
+
+
 def test_status_line_reads_your_turn_during_solicit_not_spinner() -> None:
     app = _app()
     app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))

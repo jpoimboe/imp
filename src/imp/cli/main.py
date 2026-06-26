@@ -606,7 +606,8 @@ async def _run_tui_session(
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
-    app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
+    app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width(),
+                 opening_intent=opening_intent)
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only)

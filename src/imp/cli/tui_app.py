@@ -28,7 +28,8 @@ def _elide_to_width(text: str, budget: int) -> str:
 
 
 class TuiApp:
-    def __init__(self, *, coord: Any, color: bool, width: int) -> None:
+    def __init__(self, *, coord: Any, color: bool, width: int,
+                 opening_intent: str | None = None) -> None:
         self._coord = coord
         self._color = color
         self._width = width
@@ -49,6 +50,9 @@ class TuiApp:
         self._solicit_question: str = ""
         self._question_control: Any = None
         self._prompt_control: Any = None
+        # Must be last: seed_opening_intent triggers _invalidate, which reads self._app.
+        if opening_intent:
+            self._driver.seed_opening_intent(opening_intent)
 
     # -- event intake ---------------------------------------------------------
     def on_event(self, event: Any) -> None:
