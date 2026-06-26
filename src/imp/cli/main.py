@@ -656,11 +656,15 @@ async def _run_cleared_session(
     try:
         print(_run_header_line(change.id, change.title, "new", color=color))
         _print_splash_banner(interactive=True)
+        term_title = None if tui else TerminalTitle(
+            sys.stdout, change.id, change.title)
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(
                 width=_term_width(), hint=OPENING_HINT)).strip()
         except (EOFError, KeyboardInterrupt):
+            if term_title is not None:
+                term_title.reset()
             print("imp: cancelled", file=sys.stderr)
             return 130
         _session_started = True
@@ -678,7 +682,8 @@ async def _run_cleared_session(
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
+            opening_intent=opening_text, leave_mode="new",
+            leave_state=leave_state, title=term_title)
     finally:
         if not _session_started:
             discard_conversation(change)
