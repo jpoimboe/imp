@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import io
 from argparse import Namespace
 from types import SimpleNamespace
 
 import pytest
 
 import imp.cli.main as main
+
+
+class _TTY(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 @pytest.fixture
@@ -155,3 +161,136 @@ async def test_seeded_interactive_leads_with_header_before_splash(
     out = capsys.readouterr().out
     assert "z9y8x7 · new\n\nSCENE\n" in out
     assert out.index("z9y8x7") < out.index("SCENE")
+
+
+@pytest.mark.anyio
+async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> None:
+    m = stub_new
+    tty = _TTY()
+    monkeypatch.setattr(m.sys, "stdout", tty)        # real TerminalTitle writes here
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+
+    at_prompt: dict[str, str] = {}
+
+    class _CapturePrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            at_prompt["value"] = tty.getvalue()      # stdout contents when the prompt blocks
+            return "do the thing"
+
+    monkeypatch.setattr(m, "Prompt", _CapturePrompt)
+
+    captured: dict[str, object] = {}
+
+    async def _capture_client(change: object, **kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _capture_client)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+
+    assert rc == 0
+    # The working escape (unnamed draft → "✦ imp · <id>") is already on stdout.
+    assert "\x1b]2;✦ imp · z9y8x7\x07" in at_prompt["value"]
+    # The same instance is threaded into run_session_client.
+    assert captured["title"]._change_id == "z9y8x7"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc) -> None:
+    m = stub_new
+    reset: list[str] = []
+
+    class _FakeTitle:
+        def __init__(self, stream: object, cid: str, name: str) -> None:
+            self._change_id = cid
+            self._name = name
+
+        def working(self) -> None: ...
+        def waiting(self) -> None: ...
+
+        def reset(self) -> None:
+            reset.append("reset")
+
+    monkeypatch.setattr(m, "TerminalTitle", _FakeTitle)
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "discard_conversation", lambda change: None)
+
+    class _CancelPrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            raise exc()
+
+    monkeypatch.setattr(m, "Prompt", _CancelPrompt)
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+
+    assert rc == 130
+    assert reset == ["reset"]
+
+
+@pytest.mark.anyio
+async def test_tui_path_builds_no_title(stub_new, monkeypatch) -> None:
+    m = stub_new
+    monkeypatch.setattr(m, "_tui_requested", lambda args: True)
+
+    def _no_title(*a: object, **k: object) -> object:
+        raise AssertionError("no TerminalTitle may be constructed on the TUI path")
+
+    monkeypatch.setattr(m, "TerminalTitle", _no_title)
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_print_opening", lambda *a, **k: None)
+
+    class _FakePrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            return "do the thing"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "_run_tui_session", _ok)
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+    assert rc == 0
+
+
+@pytest.mark.anyio
+async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
+    m = stub_new
+    monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+
+    class _FakePrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            return "do the thing"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    captured: dict[str, object] = {}
+
+    async def _capture_client(change: object, **kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _capture_client)
+    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+
+    assert rc == 0
+    assert captured["title"]._change_id == "z9y8x7"

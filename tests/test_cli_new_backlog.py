@@ -132,6 +132,7 @@ def test_interactive_backlog_seeds_session_and_sets_origin(
     async def _fake_run_session_client(
         change, *, driver, coord, solicit, seed_opening=None, status=None,
         opening_intent=None, leave_mode=None, scope_only=False, leave_state=None,
+        title=None,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening
@@ -181,7 +182,7 @@ def test_headless_backlog_sets_scope_only(
 
     async def _fake_run_session_client(
         change, *, driver, coord, solicit, seed_opening=None, status=None,
-        opening_intent=None, leave_mode=None, scope_only=False,
+        opening_intent=None, leave_mode=None, scope_only=False, title=None,
     ) -> int:
         captured["scope_only"] = scope_only
         return 0
