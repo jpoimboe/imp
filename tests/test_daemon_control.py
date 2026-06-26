@@ -7,6 +7,9 @@ from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.focus import Focus
 
 
+async def _noop_deliver(cid: str, text: str) -> None: ...
+
+
 def _plane(*, delivered: list, created: list, abandoned: list,
            infos: list[ChangeInfo], abandon_rc: int = 0) -> ControlPlane:
     def _abandon(cid: str) -> int:
@@ -58,3 +61,19 @@ def test_list_returns_the_enumerated_changes() -> None:
     infos = [ChangeInfo(id="a", title="A", status="running", step="plan")]
     plane = _plane(delivered=[], created=[], abandoned=[], infos=infos)
     assert plane.list_changes() == infos
+
+
+def test_full_history_delegates_to_the_wired_callable() -> None:
+    seen: list[str] = []
+    history = [{"id": "e1", "type": "notice"}]
+    plane = ControlPlane(
+        deliver=_noop_deliver,
+        create=lambda prompt: None,
+        abandon=lambda cid: 0,
+        list_changes=lambda: [],
+        focus=Focus(),
+        snapshot=lambda cid: None,
+        recent_narrative=lambda cid, n: [],
+        full_history=lambda cid: (seen.append(cid) or history))
+    assert plane.full_history("alpha") == history
+    assert seen == ["alpha"]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.focus import Focus
@@ -21,6 +22,7 @@ class ControlPlane:
         search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
         resume: Callable[[str], str] | None = None,
         save: Callable[[str], None] | None = None,
+        full_history: Callable[[str], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._deliver = deliver
         self._create = create
@@ -32,6 +34,7 @@ class ControlPlane:
         self._search = search
         self._resume = resume
         self._save = save
+        self._full_history = full_history
 
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshot(change_id)
@@ -50,6 +53,10 @@ class ControlPlane:
     def save(self, change_id: str) -> None:
         assert self._save is not None  # run_daemon always wires it
         self._save(change_id)
+
+    def full_history(self, change_id: str) -> list[dict[str, Any]]:
+        assert self._full_history is not None  # run_daemon always wires it
+        return self._full_history(change_id)
 
     async def reply(self, change_id: str, text: str) -> None:
         """Deliver a reply into the change's session daemon, rehydrating if hibernated."""
