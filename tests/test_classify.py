@@ -9,17 +9,19 @@ def test_empty_is_fresh() -> None:
     assert classify_resume([]) is ResumeState.FRESH
 
 
-def test_assistant_text_only_autonomous_is_invalid() -> None:
-    msg = Message(role="assistant", content=(TextBlock(text="done"),))
-    assert classify_resume([msg]) is ResumeState.MISSING_COMPLETE_STEP
-
-
-def test_assistant_text_only_is_missing_complete_step() -> None:
-    # A text-only assistant turn-end now always classifies MISSING_COMPLETE_STEP
-    # (the interactive PROMPT_USER path was replaced by the explicit
-    # wait_for_user / AWAITING_USER mechanism).
+def test_assistant_text_only_is_awaiting_user() -> None:
+    # A bare turn-end (assistant text, no complete_step) IS the yield to the
+    # human -> AWAITING_USER. The reply is delivered as the next user message.
     msg = Message(role="assistant", content=(TextBlock(text="?"),))
-    assert classify_resume([msg]) is ResumeState.MISSING_COMPLETE_STEP
+    assert classify_resume([msg]) is ResumeState.AWAITING_USER
+
+
+def test_assistant_text_after_user_is_awaiting_user() -> None:
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="what color?"),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.AWAITING_USER
 
 
 def test_user_text_means_send_to_llm() -> None:

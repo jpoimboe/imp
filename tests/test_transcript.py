@@ -6,7 +6,6 @@ from pathlib import Path
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
-    RESUME_CONTINUE_NUDGE,
     RESUME_DURABILITY_NOTE,
     RESUME_SUPERSEDED_NOTE,
     Transcript,
@@ -287,28 +286,6 @@ def test_repair_returns_only_synthesized_blocks_on_partial_match(tmp_path: Path)
     assert result_ids == {"m1", "u1"}
     assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
 
-
-def test_inject_continue_nudge_turns_bare_assistant_into_send_to_llm(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=(TextBlock(text="You've hit your monthly spend limit"),)),
-    ]
-    for m in msgs:
-        t.append(m)
-    assert classify_resume(msgs) is ResumeState.MISSING_COMPLETE_STEP
-    elog = InMemoryEventLog()
-
-    injected = inject_continue_nudge_on_resume(msgs, t, elog, "step:p/s")
-
-    assert injected is msgs[-1]
-    assert injected.role == "user"
-    assert [b.text for b in injected.content if isinstance(b, TextBlock)] == [RESUME_CONTINUE_NUDGE]
-    # Now replayable as the ordinary SEND_TO_LLM case, on disk too.
-    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
-    on_disk = Transcript(tmp_path / "transcript.jsonl").load()
-    assert classify_resume(on_disk) is ResumeState.SEND_TO_LLM
-    assert [e["type"] for e in elog.read()] == ["user_message"]
 
 
 def test_inject_continue_nudge_noop_when_not_missing(tmp_path: Path) -> None:

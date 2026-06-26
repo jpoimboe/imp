@@ -14,7 +14,7 @@ from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
 class ResumeState(Enum):
     FRESH = "fresh"                            # no history; yield initial_messages
     SEND_TO_LLM = "send_to_llm"                # last message is user; LLM responds next
-    AWAITING_USER = "awaiting_user"            # last tool_use is wait_for_user; solicit + fill
+    AWAITING_USER = "awaiting_user"            # bare turn-end: assistant text, no complete_step
     MISSING_COMPLETE_STEP = "missing_complete" # agent stopped without complete_step; replay+nudge
     DANGLING_TOOL_USE = "dangling_tool_use"    # other dangling tool_use; repaired with placeholder
 
@@ -46,18 +46,15 @@ def classify_resume(messages: list[Message]) -> ResumeState:
         # Replay artifact — recurse on the previous message.
         return classify_resume(messages[:-1])
 
-    if unresolved_wait_for_user(messages) is not None:
-        return ResumeState.AWAITING_USER
-
     if last.role == "user":
         return ResumeState.SEND_TO_LLM
 
-    # assistant — any remaining dangling tool_use is a non-wait_for_user one
-    # (an unresolved wait_for_user was already routed to AWAITING_USER above).
+    # assistant: a dangling tool_use needs repair; a bare turn-end (assistant
+    # text, no complete_step) IS the yield to the human -> AWAITING_USER.
     tool_uses = [b for b in last.content if isinstance(b, ToolUseBlock)]
     if tool_uses:
         return ResumeState.DANGLING_TOOL_USE
-    return ResumeState.MISSING_COMPLETE_STEP
+    return ResumeState.AWAITING_USER
 
 
 def count_tool_uses(messages: list[Message]) -> int:

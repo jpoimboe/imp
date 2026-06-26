@@ -48,9 +48,9 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    deliver_reply_on_resume,
     inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
-    resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import (
     _resolve_wait_reply,
@@ -550,20 +550,19 @@ class OpenAIAgentRunner:
                         ),
                     }}
                     return
-                # wait_for_user carries no prompt arg (the schema dropped it),
-                # so the gate has no question payload: the agent's prose IS the
-                # question, already journaled and rendered. Emit an empty prompt.
+                # A bare turn-end carries no separate question payload: the
+                # agent's prose IS the question, already journaled and rendered.
+                # Emit an empty prompt.
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": ""})
-                # §2 dangling-wait join (F5): queued interjects satisfy the wait
-                # directly (mirrors wait_for_user.py R6). Fall back to
-                # user_input_fn only when the queue is empty.
+                # Queued interjects satisfy the pending yield directly; fall back
+                # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn)
-                resolve_wait_for_user_on_resume(
+                deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
-                # Fall through (do NOT return): the now-balanced transcript
-                # drives the next LLM turn with the human's reply.
+                # Fall through (do NOT return): the reply drives the next LLM
+                # turn as the transcript's trailing user message.
             # §2 resume-entry drain: mid-turn pending texts fold into the first
             # request. (The AWAITING_USER dangling-wait join is handled above.)
             if state is not ResumeState.AWAITING_USER:

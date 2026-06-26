@@ -80,9 +80,9 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
+    deliver_reply_on_resume,
     inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
-    resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
 from imp.engine.drivers import driver_allowed_tools
@@ -1221,19 +1221,19 @@ class ClaudeCodeAgentRunner:
         # Native resume is sound ONLY when existing's final turn was actually
         # flushed to the store. The SDK mirror batcher flushes solely at a `result`
         # boundary, so the only resume shape whose final turn carries a result is
-        # MISSING_COMPLETE_STEP (the agent stopped on assistant prose — the ckx9f5
-        # target). Every other shape leaves its final turn UNflushed and outside
-        # the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
-        # AWAITING_USER and DANGLING_TOOL_USE (and the balance_on_resume flag's path)
-        # end on an unflushed, interrupted assistant tool_use whose id lives in neither
-        # claude-p's loaded session nor the slice — so the surgery's tool_result would be
-        # orphaned (the unmatched-tool_use 400 this change targets). Those
+        # AWAITING_USER (the agent ended its turn on assistant prose — a bare
+        # turn-end yield). Every other shape leaves its final turn UNflushed and
+        # outside the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
+        # DANGLING_TOOL_USE (and the balance_on_resume flag's path) ends on an
+        # unflushed, interrupted assistant tool_use whose id lives in neither
+        # claude-p's loaded session nor the slice — so the surgery's tool_result
+        # would be orphaned (the unmatched-tool_use 400 this change targets). Those
         # downgrade to stream-json replay, which re-streams the whole balanced
         # history in position.
         native_resume = (
             (not is_fresh)
             and store_has_conversation_body(await store.load(skey))
-            and classify_resume(existing) is ResumeState.MISSING_COMPLETE_STEP
+            and classify_resume(existing) is ResumeState.AWAITING_USER
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
@@ -1299,20 +1299,19 @@ class ClaudeCodeAgentRunner:
                         ),
                     }}
                     return
-                # wait_for_user carries no prompt arg (the schema dropped it),
-                # so the gate has no question payload: the agent's prose IS the
-                # question, already journaled and rendered. Emit an empty prompt.
+                # A bare turn-end carries no separate question payload: the
+                # agent's prose IS the question, already journaled and rendered.
+                # Emit an empty prompt.
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": ""})
-                # §2 dangling-wait join (F5): queued interjects satisfy the wait
-                # directly (mirrors wait_for_user.py R6). Fall back to
-                # user_input_fn only when the queue is empty.
+                # Queued interjects satisfy the pending yield directly; fall back
+                # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn)
-                resolve_wait_for_user_on_resume(
+                deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
-                # Fall through (do NOT return): the now-balanced transcript
-                # drives the next LLM turn with the human's reply.
+                # Fall through (do NOT return): the reply drives the next LLM
+                # turn as the transcript's trailing user message.
             # §2 resume-entry drain: fold pending interjects into the history
             # that feeds _stream_history(messages) on the first query. The SDK
             # is queried with the WHOLE transcript as a stream, so appending

@@ -655,17 +655,17 @@ def test_join_pending_interjects_empty_returns_none() -> None:
 
 
 @pytest.mark.anyio
-async def test_anthropic_dangling_wait_resume_joins_pending_interjects(
+async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
     tmp_path: Path,
 ) -> None:
     """AWAITING_USER resume with two queued interjects: the joined text becomes
-    the ONE reply resolving the wait, and user_input_fn is NOT called."""
+    the ONE reply, delivered as a plain user TextBlock turn, and user_input_fn is
+    NOT called."""
     from imp.agents.runner import (
         AgentInvocation,
         ChangeContext,
         Message,
         TextBlock,
-        ToolUseBlock,
     )
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.agents.transcript import Transcript
@@ -691,12 +691,12 @@ async def test_anthropic_dangling_wait_resume_joins_pending_interjects(
     inv_dir = tmp_path / "step"
     inv_dir.mkdir(parents=True, exist_ok=True)
 
-    # Seed a transcript ending with a DANGLING wait_for_user tool_use.
-    # This puts the resume classifier into AWAITING_USER state.
+    # Seed a transcript ending on a BARE assistant turn-end (assistant prose,
+    # no complete_step). This puts the resume classifier into AWAITING_USER.
     transcript = Transcript(inv_dir / "transcript.jsonl")
     transcript.append(Message(role="user", content=(TextBlock(text="begin"),)))
     transcript.append(Message(role="assistant", content=(
-        ToolUseBlock(id="wfu1", name="wait_for_user", input={"prompt": "answer?"}),
+        TextBlock(text="answer?"),
     )))
 
     # user_input_fn must NOT be called — the queue satisfies the wait.
@@ -759,19 +759,16 @@ async def test_anthropic_dangling_wait_resume_joins_pending_interjects(
     # Queue must be fully drained.
     assert coord.drain_interject() is None, "queue should be cleared after the join"
 
-    # The reply that resolved the wait must be "one\ntwo" (joined in order).
-    # Verify via the first messages.create call: the tool_result for wfu1 must
-    # carry "one\ntwo" as its content.
-    first_call = fake.messages.calls[0]
-    all_tool_result_contents: list[str] = []
-    for m in first_call["messages"]:
-        if m.get("role") == "user":
-            for block in m.get("content", []):
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    all_tool_result_contents.append(block.get("content", ""))
-    assert any("one\ntwo" in c for c in all_tool_result_contents), (
-        f"joined reply 'one\\ntwo' not found in tool_result content: "
-        f"{all_tool_result_contents}"
+    # The joined reply "one\ntwo" was delivered as a plain user TextBlock turn
+    # (not a wait_for_user tool_result fill), resolving the paused yield.
+    loaded = Transcript(inv_dir / "transcript.jsonl").load()
+    reply_texts = [
+        b.text
+        for m in loaded if m.role == "user"
+        for b in m.content if isinstance(b, TextBlock)
+    ]
+    assert "one\ntwo" in reply_texts, (
+        f"joined reply 'one\\ntwo' not found in delivered user turns: {reply_texts}"
     )
 
 
