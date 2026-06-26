@@ -6,7 +6,11 @@ import pytest
 
 from imp.agents.runner import Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.cli.inert_resume import bare_turn_end_question, render_pending_question
+from imp.cli.inert_resume import (
+    bare_turn_end_question,
+    make_buffered_solicit,
+    render_pending_question,
+)
 from imp.engine.change import Change
 from imp.engine.state import CurrentStep, State
 from tests.conftest import _seed_control
@@ -105,3 +109,26 @@ def test_bare_turn_end_question_none_when_transcript_absent(tmp_path: Path) -> N
     State(id="c", step="s", step_attempt=0, status="paused",
           current_step=CurrentStep(transcript_dir=tdir)).save(ch.state_dir)
     assert bare_turn_end_question(ch) is None
+
+
+@pytest.mark.anyio
+async def test_make_buffered_solicit_delivers_first_line_then_delegates() -> None:
+    calls: list[str] = []
+
+    async def inner(prompt: str) -> str:
+        calls.append(prompt)
+        return "from-tty"
+
+    solicit = make_buffered_solicit("typed line", inner)
+
+    first = await solicit("prompt-1")
+    assert first == "typed line"
+    assert calls == []                  # inner NOT consulted for the first reply
+
+    second = await solicit("prompt-2")
+    assert second == "from-tty"
+    assert calls == ["prompt-2"]        # later replies delegate to inner
+
+    third = await solicit("prompt-3")
+    assert third == "from-tty"
+    assert calls == ["prompt-2", "prompt-3"]   # every later reply delegates

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock
 from imp.agents.transcript import Transcript
@@ -32,3 +34,19 @@ def bare_turn_end_question(change: Change) -> str | None:
     if classify_resume(messages) is not ResumeState.AWAITING_USER:
         return None
     return render_pending_question(messages)
+
+
+def make_buffered_solicit(
+    first_line: str, inner: Callable[[str], Awaitable[str]],
+) -> Callable[[str], Awaitable[str]]:
+    """Return first_line on the first call; delegate to inner(prompt) on every later call."""
+    delivered = False
+
+    async def _solicit(prompt: str) -> str:
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return first_line
+        return await inner(prompt)
+
+    return _solicit
