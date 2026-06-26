@@ -2131,3 +2131,20 @@ def test_markdown_paragraph_breaks_and_lists_unaffected_by_hardbreak() -> None:
     assert para == ["p1", "", "p2"]
     items = [ln.rstrip() for ln in _markdown_to_ansi("- one\n- two", 40, False).splitlines()]
     assert items == ["", " • one", " • two"]
+
+
+def test_markdown_hr_capped_to_display_width_and_gray() -> None:
+    # Console (wrap) width is huge; the HR must still cap at the display width
+    # and render as gray ─ identical to palette.rule().
+    rendered = rt._markdown_to_ansi("before\n\n---\n\nafter", 10000, True, display_width=24)
+    hr_lines = [ln for ln in rendered.splitlines() if "─" in ln]
+    assert hr_lines, "expected a horizontal-rule line"
+    assert hr_lines[0] == pal.rule(24, enabled=True)
+
+
+def test_markdown_hr_capped_to_console_width_when_smaller_than_display() -> None:
+    # rule_width = min(display_width, console width): a narrow console wins.
+    rendered = rt._markdown_to_ansi("before\n\n---\n\nafter", 30, True, display_width=200)
+    hr_lines = [ln for ln in rendered.splitlines() if "─" in ln]
+    assert hr_lines, "expected a horizontal-rule line"
+    assert hr_lines[0].count("─") == 30

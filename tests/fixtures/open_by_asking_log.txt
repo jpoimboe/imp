@@ -480,8 +480,7 @@ final-review · sonnet
    • Nit: _resolve_version() is called eagerly on every main() invocation
      (harmless for a short-lived CLI process).
 
-  ------------------------------------------------------------------------------
-
+  ──────────────────────────────────────────────────────────────────────────────
   All 7 acceptance criteria are satisfied. The code reviewer gave an approve
   verdict with no critical or important findings.
 

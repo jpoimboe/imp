@@ -157,6 +157,20 @@ def _no_bg_code_block_cls() -> type:
     return _NoBgCodeBlock
 
 
+@functools.cache
+def _capped_hr_cls(display_width: int) -> type:
+    """Gray `─` HorizontalRule capped at the display width, matching `palette.rule()`."""
+    from rich.markdown import HorizontalRule
+    from rich.text import Text
+
+    class _CappedHR(HorizontalRule):
+        def __rich_console__(self, console, options):  # type: ignore[no-untyped-def]
+            rule_width = min(display_width, options.max_width)
+            yield Text("─" * max(1, rule_width), style="bright_black")
+
+    return _CappedHR
+
+
 # Headers match inline `code`: rich's defaults give them underlined magenta (h2)
 # / bold magenta (h3) etc.; we recolor every level to the same cyan, keeping
 # bold (no underline) so headers stay emphasized but in imp's accent rather than
@@ -167,7 +181,7 @@ _MD_THEME = {
 }
 
 
-def _markdown_to_ansi(text: str, width: int, color: bool) -> str:
+def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 80) -> str:
     import io
 
     from rich.console import Console
@@ -183,6 +197,7 @@ def _markdown_to_ansi(text: str, width: int, color: bool) -> str:
     no_bg = _no_bg_code_block_cls()
     md.elements["fence"] = no_bg
     md.elements["code_block"] = no_bg
+    md.elements["hr"] = _capped_hr_cls(display_width)
     Console(file=buf, width=width, no_color=not color,
             color_system="standard" if color else None,
             force_terminal=color, soft_wrap=False, highlight=False,
