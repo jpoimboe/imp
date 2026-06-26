@@ -42,7 +42,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import (
@@ -990,7 +990,10 @@ class ClaudeCodeAgentRunner:
                        session_id: str | None = None,
                        resume: str | None = None,
                        config_dir: Path | None = None) -> Any:
-        from claude_agent_sdk import ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions, SdkBeta
+
+        from imp.providers.catalog import CLAUDE_CODE, model_info
+        info = model_info(CLAUDE_CODE, self.model)
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
         # it can't read/write/exec, so allowing it doesn't break the
@@ -1023,7 +1026,8 @@ class ClaudeCodeAgentRunner:
             env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
             extra_args = {"no-session-persistence": None}
         return ClaudeAgentOptions(
-            model=self.model,
+            model=info.cli_model or self.model,
+            betas=cast(list[SdkBeta], list(info.betas)),
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
             env=env,
             # Pin the `claude` subprocess to the change's project_root. Without
@@ -1817,7 +1821,7 @@ class ClaudeCodeProvider:
         )
 
 
-TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus"}
+TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus-1m"}
 ENV_VAR: str | None = None  # CLI-authenticated (claude login); no env var
 
 

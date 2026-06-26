@@ -2346,3 +2346,23 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
 
     assert captured["cfg"]
     assert not Path(captured["cfg"]).exists()
+
+
+def test_build_options_requests_1m_beta_for_opus_1m(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="opus-1m")
+    opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
+    assert list(opts.betas) == ["context-1m-2025-08-07"]
+    # opus-1m is not a CLI alias; cli_model maps it to the real `opus` model.
+    assert opts.model == "opus"
+
+
+def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="opus")
+    opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
+    assert list(opts.betas) == []
+    assert opts.model == "opus"
+
+
+def test_high_tier_floor_defaults_to_opus_1m() -> None:
+    from imp.providers.claude_code import TIER_DEFAULTS
+    assert TIER_DEFAULTS["high"] == "opus-1m"
