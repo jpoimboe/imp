@@ -526,6 +526,14 @@ class NarrativeBuilder:
             return Activity(label="working")
         return None
 
+    def seed_opening_intent(self, text: str) -> None:
+        """TUI-only optimistic echo: seed the committed opening-intent node at root
+        so frame one shows it; _h_opening_intent reconciles the authoritative event
+        into it."""
+        node = UserMessageNode(text=text, interactive=True)
+        self._opening_intent_node = node
+        self._root.children.append(node)
+
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:
         """Close every still-open fold opened by `agent_id` (the resuming parent).
         Outcome-free close — there is no task tool_result to read — so the fold
@@ -1185,7 +1193,12 @@ def _inject_opening_intent(self: NarrativeBuilder, step: StepNode) -> None:
 
 
 def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    node = UserMessageNode(text=p.get("text", ""), interactive=True)
+    text = p.get("text", "")
+    if self._opening_intent_node is not None:
+        # Seeded by the TUI: adopt the authoritative text in place; never append a duplicate.
+        self._opening_intent_node.text = text
+        return
+    node = UserMessageNode(text=text, interactive=True)
     self._opening_intent_node = node
     self._append(node)
 

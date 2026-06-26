@@ -2348,3 +2348,37 @@ def test_current_activity_model_none_without_a_step() -> None:
     b.add(ev("1", "change_created", id="z9gixx", title="t"))
     act = b.current_activity()
     assert act is None or act.model is None
+
+
+def test_seeded_opening_intent_reconciles_in_place_under_first_step() -> None:
+    b = nv.NarrativeBuilder()
+    b.seed_opening_intent("typed text")
+    b.add({"id": "oi", "agent_id": None, "type": "opening_intent",
+           "payload": {"text": "authoritative text"}})
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    tree = b.tree
+    # No stray echo left at root: the seeded node relocated into the first step.
+    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    intents = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    # Exactly one node, carrying the AUTHORITATIVE event text (not the seed).
+    assert len(intents) == 1
+    assert intents[0].text == "authoritative text"
+    assert intents[0].interactive is True
+
+
+def test_unseeded_opening_intent_still_creates_single_node() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"id": "oi", "agent_id": None, "type": "opening_intent",
+           "payload": {"text": "add a --json flag"}})
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    tree = b.tree
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    intents = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    assert intents[0].text == "add a --json flag"
+    assert intents[0].interactive is True
