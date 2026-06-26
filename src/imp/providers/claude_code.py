@@ -367,11 +367,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name == "load_skill":
             # Auto-injected below; tolerate a redundant explicit declaration.
             continue
-        if name == "wait_for_user":
-            # No longer a registered tool — a bare turn-end is the yield. A stale
-            # or resume-transcript declaration is tolerated (silently not
-            # registered) rather than rejected as an unknown tool.
-            continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]

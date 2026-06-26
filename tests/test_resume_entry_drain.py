@@ -676,7 +676,7 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
 
     agent_def = AgentDef(
         name="t", description="",
-        tools=frozenset({"complete_step", "wait_for_user"}),
+        tools=frozenset({"complete_step"}),
         subagents=(),
         output_schema=OutputSchema(
             fields=(OutputField(name="status", type="enum",

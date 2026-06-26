@@ -37,12 +37,6 @@ class _Inv:
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
-def test_wait_for_user_not_a_registered_tool(provider):
-    tools = provider._build_tools(_Inv(["complete_step", "wait_for_user"]))
-    assert "wait_for_user" not in tools
-
-
-@pytest.mark.parametrize("provider", PROVIDERS)
 def test_wait_for_user_absent_when_not_declared(provider):
     tools = provider._build_tools(_Inv(["complete_step"]))
     assert "wait_for_user" not in tools

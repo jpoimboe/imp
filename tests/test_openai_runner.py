@@ -747,12 +747,11 @@ async def test_resume_preserves_tool_output_and_omits_manifest(tmp_path: Path) -
 
 
 def test_openai_has_no_wait_for_user_result_handling() -> None:
-    """No wait_for_user result handling; the _build_tools carve-out is kept."""
+    """No wait_for_user result handling; the _build_tools carve-out is removed."""
     import inspect
 
     import imp.providers.openai as openai_mod
 
     src = inspect.getsource(openai_mod)
     assert '_tu.name == "wait_for_user"' not in src
-    # The non-registration carve-out is intentionally retained.
-    assert 'if name == "wait_for_user"' in src
+    assert 'if name == "wait_for_user"' not in src

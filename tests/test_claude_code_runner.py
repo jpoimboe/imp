@@ -2265,7 +2265,7 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
 
 
 def test_run_state_has_no_wait_for_user_pause_fields() -> None:
-    """No live-run wait_for_user pause intercept; the _build_tools carve-out is retained."""
+    """No live-run wait_for_user pause intercept; the _build_tools carve-out is removed."""
     import dataclasses
     import inspect
 
@@ -2278,5 +2278,4 @@ def test_run_state_has_no_wait_for_user_pause_fields() -> None:
 
     src = inspect.getsource(cc_mod)
     assert 'b.name == "wait_for_user"' not in src
-    # The non-registration carve-out is intentionally retained.
-    assert 'if name == "wait_for_user"' in src
+    assert 'if name == "wait_for_user"' not in src
