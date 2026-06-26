@@ -24,6 +24,15 @@ def render_pending_question(messages: list[Message]) -> str | None:
     return None
 
 
+def render_inert_question(text: str, *, width: int, color: bool) -> str:
+    """Render the pending bare-turn-end question as markdown→ANSI for the inert
+    resume preview. Without this the raw markdown source (code fences, lists,
+    emphasis) is dumped verbatim; here it reads as prose, matching the live
+    driver's question styling once the session attaches."""
+    from imp.cli.render_text import render_question_block
+    return "\n".join(render_question_block(text, width, 0, color))
+
+
 def bare_turn_end_question(change: Change) -> str | None:
     """Pending question if `change` is paused at a bare-turn-end yield, else None."""
     state = State.load(change.state_dir)

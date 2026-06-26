@@ -31,6 +31,7 @@ from imp.cli import palette as pal
 from imp.cli.inert_resume import (
     bare_turn_end_question,
     make_buffered_solicit,
+    render_inert_question,
     run_inert_resume,
 )
 from imp.cli.init import GitSetupDeclined, run_init
@@ -1097,6 +1098,7 @@ async def _resume_inert(
 
     color = should_use_color(sys.stdout)
     print(_run_header_line(change.id, change.title, "resuming", color=color))
+    question = render_inert_question(question, width=_term_width(), color=color)
 
     async def _launch(line: str) -> int:
         async def _first(leave_state: dict[str, str]) -> int:

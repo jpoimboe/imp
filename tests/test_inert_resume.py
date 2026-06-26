@@ -9,6 +9,7 @@ from imp.agents.transcript import Transcript
 from imp.cli.inert_resume import (
     bare_turn_end_question,
     make_buffered_solicit,
+    render_inert_question,
     render_pending_question,
     run_inert_resume,
 )
@@ -52,6 +53,22 @@ def test_render_pending_question_falls_back_past_tool_use_only_turn() -> None:
 def test_render_pending_question_none_when_no_assistant_text() -> None:
     msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
     assert render_pending_question(msgs) is None
+
+
+_FENCED = "Try this:\n\n```bash\ncd ~/x && make\n```\n\nThen retry."
+
+
+def test_render_inert_question_renders_markdown_not_raw() -> None:
+    # The fenced code block must be rendered (no literal ``` markers dumped),
+    # so the replayed agent message reads as prose, not markdown source.
+    out = render_inert_question(_FENCED, width=80, color=False)
+    assert "```" not in out
+    assert "cd ~/x && make" in out
+
+
+def test_render_inert_question_emits_ansi_when_color() -> None:
+    out = render_inert_question(_FENCED, width=80, color=True)
+    assert "\x1b[" in out  # markdown→ANSI styling applied
 
 
 def _seed_paused_change(

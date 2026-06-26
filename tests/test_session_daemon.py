@@ -105,7 +105,8 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
         return "resident"
 
     with anyio.fail_after(5):
-        result = await serve_change_session(change, run_fn=fake_run)
+        result = await serve_change_session(
+            change, run_fn=fake_run, first_attach_timeout=0.1)
     assert result == "hibernated"
 
 
@@ -374,7 +375,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
 
     with anyio.fail_after(5):
         result = await serve_change_session(
-            change, run_fn=fake_run, hibernate=True)
+            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1
 
@@ -1234,7 +1235,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
 
     with anyio.fail_after(5):
         result = await serve_change_session(
-            change, run_fn=fake_run, hibernate=True)
+            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1   # held once, then hibernated — never looped
 

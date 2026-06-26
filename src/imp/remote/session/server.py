@@ -25,6 +25,15 @@ RunFn = Callable[..., Awaitable[Any]]
 
 _CONTROL_QUEUE_DEPTH = 64
 
+# Startup grace: how long a hibernation gate waits for the FIRST client to attach
+# before falling back to hibernation. The spawning client (interactive or remote
+# reply delivery) attaches a beat after the daemon starts resuming, so a
+# bare-turn-end solicit can reach the gate first; without this wait it would
+# hibernate on the transient zero-client window and the resume would pause+exit.
+# Generous vs. attach latency (which loses by ~tens of ms); only a crashed client
+# ever exhausts it.
+_DEFAULT_FIRST_ATTACH_TIMEOUT = 30.0
+
 
 class SessionServer:
     def __init__(
@@ -37,6 +46,7 @@ class SessionServer:
         hibernate: bool = False,
         events_path: Path | None = None,
         on_first_attach: Callable[[], None] | None = None,
+        first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
@@ -44,6 +54,10 @@ class SessionServer:
         self._hibernate = hibernate
         self._events_path = events_path
         self._on_first_attach = on_first_attach
+        self._first_attach_timeout = first_attach_timeout
+        # Set on the first 0 -> 1 attach and never cleared: distinguishes "no
+        # client has arrived yet" (startup — wait) from "a client attached and
+        # left" (hibernate now) at the zero-attached gates.
         self._first_attach_fired: bool = False
         self.abandoned = False
         self.saved = False
@@ -117,11 +131,38 @@ class SessionServer:
             self.set_pending_prompt(None)
             self._last_gate_event = None
 
+    async def _await_first_attach(self) -> bool:
+        """Startup-only: block until the first client attaches, bounded by
+        first_attach_timeout. Returns True iff a client is attached when it
+        stops waiting (False on timeout). Captures the attach event BEFORE
+        testing attached_count so an attach landing between test and await is
+        not a lost wakeup (mirrors _await_all_detached)."""
+        with anyio.move_on_after(self._first_attach_timeout):
+            while True:
+                evt = self._attach_changed
+                if self._socket.attached_count > 0:
+                    return True
+                if evt is None:                  # pre-open(): no event to await
+                    await anyio.sleep(0.02)
+                else:
+                    await evt.wait()
+        return self._socket.attached_count > 0
+
+    async def _hibernate_or_await_first_attach(self) -> None:
+        """Resolve a zero-attached gate. A client that already attached and left
+        (_first_attach_fired) hibernates now; otherwise this is the startup
+        window before the spawning client lands — wait for it, and only
+        hibernate if it never shows."""
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+        if self._first_attach_fired or not await self._await_first_attach():
+            raise AwaitingUserInput()
+
     async def _hibernation_gate(self) -> str:
         from imp.agents.tools.wait_for_user import AwaitingUserInput
 
         if self._socket.attached_count == 0:
-            raise AwaitingUserInput()
+            await self._hibernate_or_await_first_attach()
         holder: dict[str, str] = {}
         async with anyio.create_task_group() as tg:
             async def _await_input() -> None:
@@ -161,12 +202,14 @@ class SessionServer:
     async def wait_for_turn(
         self, predicate: Callable[[], bool], *, poll_interval: float = 2.0,
     ) -> None:
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
         while True:
             if predicate():
                 return
             if self._socket.attached_count == 0:
-                raise AwaitingUserInput()
+                # Same startup vs. detach split as the solicit gate: wait for the
+                # first attach before hibernating so a turn-wait reached during
+                # the startup window doesn't pause+exit.
+                await self._hibernate_or_await_first_attach()
             with anyio.move_on_after(poll_interval):
                 await self.wait_for_attach_change()
 
@@ -184,12 +227,13 @@ class SessionServer:
         if self._pending_prompt is not None:
             send_one(self._pending_prompt)
         # Fire after snapshot capture so the marker is never replayed to the
-        # attaching client; emit only on the fresh 0 -> 1 attach.
-        if (self._socket.attached_count == 1
-                and self._on_first_attach is not None
-                and not self._first_attach_fired):
+        # attaching client; latch _first_attach_fired on the fresh 0 -> 1 attach
+        # (independent of the callback — the zero-attached gates read it as the
+        # "a client has ever attached" signal) and run the callback if present.
+        if self._socket.attached_count == 1 and not self._first_attach_fired:
             self._first_attach_fired = True
-            self._on_first_attach()
+            if self._on_first_attach is not None:
+                self._on_first_attach()
         return snapshot
 
     def _on_detach_pulse(self) -> None:

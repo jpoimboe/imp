@@ -216,10 +216,12 @@ async def test_lock_is_held_during_serve_and_released_after(tmp_path: Path) -> N
 
 @pytest.mark.anyio
 async def test_gate_with_zero_clients_hibernates(tmp_path: Path) -> None:
+    """No client attaches within first_attach_timeout -> the startup gate falls
+    back to hibernation (avoids a daemon hung on the lock after a crashed client)."""
     from imp.agents.tools.wait_for_user import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=True)
+    server = SessionServer(sock, hibernate=True, first_attach_timeout=0.1)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         try:
@@ -381,6 +383,50 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
             while "r" not in result:
                 await anyio.sleep(0.02)
         assert result["r"] == "hibernated"
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_gate_waits_for_first_attach_before_hibernating(tmp_path: Path) -> None:
+    """Startup race (resume pause/exit bug): the bare-turn-end solicit reaches the
+    gate before the spawning client has finished attaching. The gate must wait for
+    that first attach and return its input, NOT hibernate on the transient
+    zero-client startup window."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True, first_attach_timeout=5.0)
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        # Enter the gate with ZERO clients attached — the daemon resumes and
+        # solicits before the client's attach lands.
+        gate_reached.set()
+        try:
+            return await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        await gate_reached.wait()
+        assert server.attached_count == 0  # gate entered before any attach
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.send((encode_input("late but here") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "late but here"
+        await client.aclose()
         tg.cancel_scope.cancel()
 
 

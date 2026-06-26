@@ -22,7 +22,7 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
 from imp.remote.session.discover import session_socket_path
-from imp.remote.session.server import SessionServer
+from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
 
 RunFn = Callable[..., Awaitable[Any]]
 
@@ -93,6 +93,7 @@ async def serve_change_session(
     opening_intent: str | None = None,
     scope_only: bool = False,
     non_interactive: bool = False,
+    first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -111,6 +112,7 @@ async def serve_change_session(
         hibernate=hibernate,
         events_path=change.events_path,
         on_first_attach=_on_first_attach,
+        first_attach_timeout=first_attach_timeout,
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:

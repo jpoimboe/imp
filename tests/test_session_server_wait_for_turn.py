@@ -20,6 +20,17 @@ def test_returns_immediately_when_predicate_true() -> None:
 def test_hibernates_when_no_client_and_not_head() -> None:
     srv = _server()
     srv._socket._clients = set()                 # attached_count == 0
+    srv._first_attach_fired = True               # a client attached and left -> hibernate now
+    with pytest.raises(AwaitingUserInput):
+        anyio.run(srv.wait_for_turn, lambda: False)
+
+
+def test_startup_zero_clients_waits_then_hibernates_on_timeout() -> None:
+    """Never-attached + zero clients is the startup window, not a detach: wait for
+    the first attach, and only hibernate (raise) once first_attach_timeout lapses."""
+    srv = _server()
+    srv._socket._clients = set()                 # attached_count == 0, never attached
+    srv._first_attach_timeout = 0.05
     with pytest.raises(AwaitingUserInput):
         anyio.run(srv.wait_for_turn, lambda: False)
 
