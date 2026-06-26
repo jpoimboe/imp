@@ -122,3 +122,38 @@ def test_migrate_transcripts_under_walks_and_rewrites(tmp_path):
 
 def test_migrate_transcripts_under_missing_dir_is_zero(tmp_path):
     assert mig.migrate_transcripts_under(tmp_path / "nope", apply=True) == 0
+
+
+def test_migrate_archive_repoints_blob_and_reindexes(tmp_path):
+    from imp.engine import archive
+    from imp.engine.archive import index, record
+    from imp.engine.archive.blobstore import LocalBlobStore
+
+    control = tmp_path
+    store = LocalBlobStore(archive.blobs_root(control))
+    events = [_call("X"), _result("X", "ok")]
+    old_hash = store.put("".join(json.dumps(e) + "\n" for e in events).encode())
+    rec = record.build_record(
+        {"id": "abc123", "title": "t", "base_branch": "master",
+         "created_at": "2026-01-01", "depends_on": []},
+        {"status": "completed", "step": "done"}, old_hash)
+    record.write_record(archive.records_root(control), rec)
+    conn = index.connect(archive.index_path(control))
+    index.ingest(conn, rec, events)
+    conn.commit()
+    conn.close()
+
+    assert mig.migrate_archive(control, apply=True) == 1
+
+    new_rec = record.read_record(archive.records_root(control), "abc123")
+    assert new_rec["events_hash"] != old_hash
+    new_blob = store.get(new_rec["events_hash"]).decode()
+    assert "wait_for_user" not in new_blob
+    assert '"awaiting_user_input"' in new_blob
+    conn = index.connect(archive.index_path(control))
+    n = conn.execute(
+        "SELECT COUNT(*) FROM events WHERE type='tool_call'"
+        " AND payload_json LIKE '%wait_for_user%'").fetchone()[0]
+    conn.close()
+    assert n == 0  # index regenerated from migrated blob
+    assert mig.migrate_archive(control, apply=True) == 0  # idempotent

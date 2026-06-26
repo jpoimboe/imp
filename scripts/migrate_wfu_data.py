@@ -130,6 +130,57 @@ def migrate_transcript_lines(msgs: list[Event]) -> tuple[list[Event], int]:
     return out, removed
 
 
+def migrate_archive(control_root: Path, *, apply: bool) -> int:
+    """For each archive record: rewrite its events blob and any transcript.jsonl
+    step blobs via migrate_event_lines / migrate_transcript_lines; call
+    rebuild_index once when anything changed. Returns number of records changed."""
+    from imp.engine import archive
+    from imp.engine.archive import record
+    from imp.engine.archive.blobstore import LocalBlobStore
+
+    store = LocalBlobStore(archive.blobs_root(control_root))
+    recs_dir = archive.records_root(control_root)
+    if not recs_dir.is_dir():
+        return 0
+    changed = 0
+    for cid in record.list_record_ids(recs_dir):
+        rec = record.read_record(recs_dir, cid)
+        if rec is None:
+            continue
+        blob = store.get(rec["events_hash"])
+        if blob is None:
+            continue
+        events = [json.loads(line) for line in blob.decode().splitlines() if line.strip()]
+        new_events, gates = migrate_event_lines(events)
+
+        step_blobs = dict(rec.get("step_blobs") or {})
+        step_removed = 0
+        for rel, digest in list(step_blobs.items()):
+            if not rel.endswith("transcript.jsonl"):
+                continue
+            tb = store.get(digest)
+            if tb is None:
+                continue
+            msgs = [json.loads(line) for line in tb.decode().splitlines() if line.strip()]
+            new_msgs, n = migrate_transcript_lines(msgs)
+            if n:
+                step_removed += n
+                if apply:
+                    step_blobs[rel] = store.put(
+                        "".join(json.dumps(m) + "\n" for m in new_msgs).encode())
+
+        if gates or step_removed:
+            changed += 1
+            if apply:
+                rec["events_hash"] = store.put(
+                    "".join(json.dumps(e) + "\n" for e in new_events).encode())
+                rec["step_blobs"] = step_blobs
+                record.write_record(recs_dir, rec)
+    if apply and changed:
+        archive.rebuild_index(control_root)
+    return changed
+
+
 def migrate_transcripts_under(steps_dir: Path, *, apply: bool) -> int:
     """Walk steps_dir.rglob("transcript.jsonl") and rewrite each in place using
     migrate_transcript_lines. Returns total blocks removed. Dry-run when apply=False;
