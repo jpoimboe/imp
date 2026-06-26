@@ -30,7 +30,6 @@ from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 
 # Bypass posture for the codex provider. This is the SAME value the ThreadOptions
 # builder feeds to approvalPolicy (codex_runner._build_thread_options); the task
@@ -77,21 +76,10 @@ class RunState:
     runtime_errors: list[str] = field(default_factory=list)
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
-    # Headless wait_for_user pause captured in the MCP wrapper (it can't raise
-    # out of the in-process SDK handler). The runner detects awaiting_user after
-    # process_event and re-raises AwaitingUserInput(awaiting_prompt) to unwind.
-    awaiting_user: bool = False
-    awaiting_prompt: str = ""
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
     # Runner's event loop, recorded at runner entry. start_server raises on a
     # foreign loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
-
-
-
-CODEX_AWAIT_CAPTURE_TEXT = (
-    "awaiting user; run will pause; do not dispatch further tasks"
-)
 
 
 async def dispatch_tool(
@@ -160,13 +148,6 @@ async def dispatch_tool(
     except FatalToolError as fte:
         state.fatal_tool_error = (tool.name, str(fte))
         return f"fatal tool error: {fte}"
-    except AwaitingUserInput as au:
-        # Headless wait_for_user: capture onto state (the in-process MCP handler
-        # cannot raise out to the SDK). The runner re-raises AwaitingUserInput
-        # after process_event to unwind the codex run into a clean pause.
-        state.awaiting_user = True
-        state.awaiting_prompt = au.prompt
-        return CODEX_AWAIT_CAPTURE_TEXT
     except Exception as exc:
         text = f"{type(exc).__name__}: {exc}"
         state.runtime_errors.append(text)
