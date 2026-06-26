@@ -632,11 +632,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.RenameNode):
         # A naming reads as a quiet agent-style aside, inline where it happened:
-        # a yellow "• " turn bullet, then "Set name to" with the new title also in
-        # yellow — the warm accent — so the whole aside reads as one identity signal.
+        # a wordmark "• " turn bullet, then "Set name to" with the new title also in
+        # wordmark — the warm accent — so the whole aside reads as one identity signal.
         indent = _gutter_indent(depth, gutters, color)
-        bullet = pal.ansi("• ", "yellow", enabled=color)
-        name = pal.ansi(_caret_escape(node.name), "yellow", enabled=color)
+        bullet = pal.ansi("• ", "wordmark", enabled=color)
+        name = pal.ansi(_caret_escape(node.name), "wordmark", enabled=color)
         yield indent + bullet + 'Set name to "' + name + '"'
         return
 
