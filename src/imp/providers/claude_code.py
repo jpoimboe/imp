@@ -951,6 +951,26 @@ def _sdk_message_to_imp(
     return None, [], []
 
 
+async def _context_usage_fields(client: Any) -> dict[str, Any]:
+    try:
+        cu = await client.get_context_usage()
+    except Exception:
+        return {}
+    if cu is None:
+        return {}
+
+    def _field(obj: Any, name: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(name)
+        return getattr(obj, name, None)
+
+    return {
+        "context_window": _field(cu, "rawMaxTokens"),
+        "context_pct": _field(cu, "percentage"),
+        "context_tokens": _field(cu, "totalTokens"),
+    }
+
+
 class ClaudeCodeAgentRunner:
     """Drives `claude -p` via claude_agent_sdk.
 
@@ -1422,11 +1442,15 @@ class ClaudeCodeAgentRunner:
                                     pending_text + turn_text if pending_text else turn_text)
                             if cls_name == "AssistantMessage":
                                 raw = _serialize_claude_code_message(sdk_msg)
+                                cu_fields = await _context_usage_fields(client)
                                 elog.append_llm_response(
                                     agent_id=aid, provider=invocation.provider_name,
                                     model=self.model, raw=raw,
                                     usage=raw.get("usage") or {},
-                                    stop_reason=raw.get("stop_reason"))
+                                    stop_reason=raw.get("stop_reason"),
+                                    context_window=cu_fields.get("context_window"),
+                                    context_pct=cu_fields.get("context_pct"),
+                                    context_tokens=cu_fields.get("context_tokens"))
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
