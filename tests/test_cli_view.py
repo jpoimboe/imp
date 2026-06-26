@@ -363,11 +363,61 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
 
 def test_term_width_floors_to_80_when_columns_nonpositive(monkeypatch) -> None:
     from imp.cli import main as cli_main
+
+    class _Tty:
+        def isatty(self) -> bool:
+            return True
+
+        def fileno(self) -> int:
+            return 1
+
     monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(cli_main.sys, "stdout", _Tty())
     # Inner query reports 0 columns (winsize-0 PTY); shutil's `or fallback[0]`
     # must substitute 80.
     monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((0, 24)))
     assert cli_main._term_width() == 80
+
+
+def test_term_width_honors_explicit_columns_even_when_piped(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Pipe:
+        def isatty(self) -> bool:
+            return False
+
+    monkeypatch.setenv("COLUMNS", "10000")
+    monkeypatch.setattr(cli_main.sys, "stdout", _Pipe())
+    assert cli_main._term_width() == 10000
+
+
+def test_term_width_no_wrap_sentinel_when_piped_and_columns_unset(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Pipe:
+        def isatty(self) -> bool:
+            return False
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(cli_main.sys, "stdout", _Pipe())
+    # Piped, no explicit COLUMNS => a large no-wrap width, well above any real terminal.
+    assert cli_main._term_width() >= 10000
+
+
+def test_term_width_uses_real_columns_on_tty_when_columns_unset(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+
+    class _Tty:
+        def isatty(self) -> bool:
+            return True
+
+        def fileno(self) -> int:
+            return 1
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(cli_main.sys, "stdout", _Tty())
+    monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((123, 24)))
+    assert cli_main._term_width() == 123
 
 
 def test_log_backlog_id_renders_card(

@@ -1076,11 +1076,21 @@ def _editing_mode(control_root: Path) -> str:
         return "emacs"
 
 
+_NO_WRAP_WIDTH = 10_000  # piped stdout, no explicit $COLUMNS => effectively no wrap
+
+
 def _term_width() -> int:
-    # shutil.get_terminal_size honors $COLUMNS and substitutes the fallback when
-    # the OS reports columns <= 0 (e.g. a winsize-0 PTY), unlike
-    # os.get_terminal_size which returns a literal 0 and floors wrapping to 8
-    # chars (issue 2). Defense-in-depth with the dogfood PTY winsize fix.
+    # WRAP width (not rule width _display_width): $COLUMNS overrides the piped no-wrap default.
+    cols = os.environ.get("COLUMNS")
+    if cols is not None:
+        try:
+            explicit = int(cols)
+        except ValueError:
+            explicit = 0
+        if explicit > 0:
+            return explicit
+    if not sys.stdout.isatty():
+        return _NO_WRAP_WIDTH
     return shutil.get_terminal_size((80, 24)).columns
 
 
