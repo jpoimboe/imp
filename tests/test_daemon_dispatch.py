@@ -144,7 +144,7 @@ async def test_reply_does_not_subscribe() -> None:
 
 @pytest.mark.anyio
 async def test_subscribe_replays_history_then_confirms() -> None:
-    control = FakeControl()
+    control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
         {"id": "e1", "type": "notice", "timestamp": "2026-06-25T14:32:05+00:00",
          "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
@@ -161,12 +161,25 @@ async def test_subscribe_replays_history_then_confirms() -> None:
 
 @pytest.mark.anyio
 async def test_subscribe_with_empty_history_just_confirms() -> None:
-    control = FakeControl()
+    control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
     assert responses.get_nowait() == Notice("Following @k3f9qa.")
     assert responses.empty()
     assert control.subscriptions.contains("k3f9qa")
+
+
+@pytest.mark.anyio
+async def test_subscribe_to_unknown_handle_errors_without_subscribing() -> None:
+    control = FakeControl()  # no snapshot wired -> snapshot("bogus") is None
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Subscribe("bogus"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "bogus" in notice.text
+    assert "Following" not in notice.text
+    assert responses.empty()
+    assert control.subscriptions.contains("bogus") is False
 
 
 @pytest.mark.anyio

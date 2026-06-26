@@ -260,6 +260,10 @@ async def _handle_command(
             return
     elif isinstance(command, Subscribe):
         handle = handle_for(command.change_id)
+        if await anyio.to_thread.run_sync(control.snapshot, command.change_id) is None:
+            responses.put(Notice(
+                f"No Change @{handle} — send /show to see what's running."))
+            return
         events = await anyio.to_thread.run_sync(
             control.subscriptions.snapshot_and_add,
             command.change_id,

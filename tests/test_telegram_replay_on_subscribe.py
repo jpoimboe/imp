@@ -35,6 +35,9 @@ class _Control:
         self.subscriptions = subscriptions
         self._history = history
 
+    def snapshot(self, change_id: str) -> tuple[str, str, str]:
+        return ("running", "plan", "T")
+
     def full_history(self, change_id: str) -> list[dict]:
         return self._history
 
