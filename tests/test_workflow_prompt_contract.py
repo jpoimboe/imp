@@ -362,6 +362,21 @@ def test_plan_writer_states_soft_task_size_target() -> None:
     assert "atomicity hard rule" in low
 
 
+def test_plan_cycle_check_projects_total_under_greedy_bundling() -> None:
+    text = (AGENTS_DIR / "plan-cycle-check.md").read_text()
+    low = text.lower()
+    # The plan_total projection assumes the SAME greedy ~5-8 bundling plan-writer
+    # now carves: re-derive the still-uncovered scope and bundle it to the target.
+    assert "greedy" in low
+    assert "5\u20138" in text
+    assert "still-uncovered scope" in low
+    # The existing clamp rules remain stated and unchanged - all three pinned.
+    assert "the current plan number" in low  # first clamp rule (>= plan_index)
+    assert "strictly greater" in low          # second clamp rule (more_plans true)
+    assert "coverage complete" in low         # third clamp rule (more_plans false)
+    assert "more_plans" in low
+
+
 def test_task_lead_documents_verify_triage() -> None:
     text = (AGENTS_DIR / "task-lead.md").read_text()
     low = text.lower()
