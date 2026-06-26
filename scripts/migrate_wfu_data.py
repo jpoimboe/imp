@@ -7,6 +7,8 @@ zaba25). Usage: `python scripts/migrate_wfu_data.py [CONTROL_ROOT] [--apply]`
 (defaults to the current working directory; dry-run unless --apply)."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 Event = dict[str, Any]
@@ -69,3 +71,18 @@ def migrate_event_lines(events: list[Event]) -> tuple[list[Event], int]:
         else:
             out.append(e)
     return out, gates
+
+
+def _read_jsonl(path: Path) -> list[Event]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _write_jsonl(path: Path, rows: list[Event]) -> None:
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
+def migrate_change_events_file(path: Path, *, apply: bool) -> int:
+    new_events, gates = migrate_event_lines(_read_jsonl(path))
+    if gates and apply:
+        _write_jsonl(path, new_events)
+    return gates

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -50,3 +51,15 @@ def test_find_unsafe_flags_error_and_interleaved_but_not_dangling():
               _call("Y"), _result("Y", "bad", error=True),    # error -> unsafe
               _call("Z")]                                      # dangling -> safe
     assert sorted(mig.find_unsafe_events(events)) == ["X", "Y"]
+
+
+def test_migrate_change_events_file_dry_run_then_apply(tmp_path):
+    p = tmp_path / "events.jsonl"
+    p.write_text(json.dumps(_call("X")) + "\n" + json.dumps(_result("X", "ok")) + "\n")
+    before = p.read_text()
+    assert mig.migrate_change_events_file(p, apply=False) == 1
+    assert p.read_text() == before  # dry-run leaves the file untouched
+    assert mig.migrate_change_events_file(p, apply=True) == 1
+    lines = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    assert [line["type"] for line in lines] == ["awaiting_user_input", "user_message"]
+    assert mig.migrate_change_events_file(p, apply=True) == 0  # idempotent
