@@ -689,6 +689,14 @@ def test_spec_finalizer_sources_human_decision_bar() -> None:
     assert "fast_path" in text
 
 
+def test_reconciler_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "reconciler.md").read_text()
+    assert '{% include "partials/human-decision.md" %}' in text
+    # Reader-form line + asynchronous-triage framing preserved.
+    assert "DEFERRED reconciler:" in text
+    assert "asynchronous human triage" in text
+
+
 def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source

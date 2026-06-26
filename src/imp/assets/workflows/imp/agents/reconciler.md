@@ -77,9 +77,13 @@ replace it with a new forward commit — never rewrite reviewed history.
 You surface through `progress.md`, like every other step — there is no separate
 integration artifact. Narrate the completed reconciliation in prose: how many base
 commits you integrated, how many conflicts you resolved, and any semantic concern you
-reconciled. For a reconciliation you resolved defensively but a human should still
-ratify, append a line to the `## Deferred Followups` section in reader form (create the
-heading if absent):
+reconciled.
+
+{% include "partials/human-decision.md" %}
+
+For a reconciliation that clears that bar — you resolved it defensively but a human
+should still ratify it — append a line to the `## Deferred Followups` section in reader
+form (create the heading if absent):
 
 `- [ ] DEFERRED reconciler: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
 
