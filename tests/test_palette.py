@@ -258,3 +258,11 @@ def test_yellow_accent_retuned_to_warm_gold_family() -> None:
     # Wiring is UNCHANGED: warning + lifecycle still reference the yellow role.
     assert pal.NODE_COLORS["warning"] == ("yellow",)
     assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
+
+
+def test_display_width_ignores_sgr_and_counts_wide_chars() -> None:
+    # SGR escapes are zero-width; CJK/full-width glyphs count as 2 columns.
+    assert pal.display_width("abc") == 3
+    assert pal.display_width("\x1b[33mabc\x1b[0m") == 3          # escapes excluded
+    assert pal.display_width("世界") == 4                        # 2 wide chars
+    assert pal.display_width("\x1b[90m世\x1b[0m x") == 4         # 2 + space + 1

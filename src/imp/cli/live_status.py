@@ -11,12 +11,10 @@ line. compose returning None means "nothing to show" (the line is erased)."""
 from __future__ import annotations
 
 import contextlib
-import re
 import shutil
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
-from unicodedata import east_asian_width
 
 from imp.cli import palette as pal
 
@@ -35,8 +33,7 @@ def _term_width() -> int:
 
 def _display_width(text: str) -> int:
     """Escape-aware display column count for narrowing detection."""
-    visible = re.sub(r"\x1b\[[0-9;]*m", "", text)
-    return sum(2 if east_asian_width(ch) in ("W", "F") else 1 for ch in visible)
+    return pal.display_width(text)
 
 
 class LiveStatus:

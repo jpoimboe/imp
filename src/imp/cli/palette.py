@@ -221,6 +221,12 @@ def clip_display(text: str, width: int) -> str:
     return "".join(out)
 
 
+def display_width(text: str) -> int:
+    """Visible display columns of `text`, ignoring SGR escapes (CJK/full-width = 2)."""
+    visible = _SGR_RE.sub("", text)
+    return sum(_char_cols(ch) for ch in visible)
+
+
 def should_use_color(stream: Any) -> bool:
     # Precedence: NO_COLOR (disable) > force vars > isatty. NO_COLOR always
     # wins. CLICOLOR_FORCE (ripgrep/fd/bat) and FORCE_COLOR (npm/pytest) let
