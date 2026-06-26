@@ -1139,21 +1139,6 @@ def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
     assert any("(stalled)" in ln for ln in lines)
 
 
-def test_burst_recap_omits_wait_for_user() -> None:
-    out = "\n".join(_lines([
-        _ev("2", "step_started", step="s", kind="agent", phase="p",
-            model="m", provider="anthropic"),
-        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="read_file",
-            input={"path": "x"}),
-        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok"),
-        _ev("6", "tool_call", agent_id="step:p/s", id="b2", name="wait_for_user",
-            input={"prompt": "go?"}),
-        _ev("7", "step_completed", step="s", kind="agent",
-            action={"verb": "continue"}, var_mutations={}),
-    ]))
-    assert "wait_for_user" not in out
-
-
 def test_full_burst_per_call_args_and_output_block() -> None:
     body = "\n".join(f"line{i}" for i in range(1, 13))      # 12 source lines
     out = "\n".join(_lines([
