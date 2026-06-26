@@ -186,6 +186,17 @@ def test_intent_fallback_for_empty_title_color():
     assert "(unnamed)" not in line
 
 
+def test_intent_fallback_flattens_multiline_prompt():
+    # A multi-line opening prompt (e.g. a pasted traceback) must collapse to a
+    # single row; an embedded newline in the NAME cell would spill the table.
+    line = format_change_line(
+        **_row(title="", status="running", step="s"),
+        intent="Ready to land the draft?\n  + Exception Group Traceback\n  |  File",
+        color=False, name_width=80)
+    assert "\n" not in line
+    assert "Ready to land the draft? + Exception Group Traceback | File" in line
+
+
 def test_unnamed_when_no_intent():
     line = format_change_line(**_row(title="   ", status="running", step="s"),
                               intent=None, color=False)

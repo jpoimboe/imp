@@ -95,7 +95,10 @@ def format_change_line(*, change_id: str, title: str, status: str, step: str,
     # NAME is the final column, so it needs no trailing pad — only a cap so a
     # very long name can't spill past the terminal's right edge.
     if not raw and intent:
-        name_text = _truncate(intent, name_width)
+        # The intent fallback is the verbatim opening prompt, which can be
+        # multi-line (e.g. a pasted traceback). Flatten internal whitespace to
+        # single spaces so the NAME cell stays on one row before truncating.
+        name_text = _truncate(" ".join(intent.split()), name_width)
     else:
         name_text = "(unnamed)" if not raw else _truncate(raw, name_width)
     if dim:
