@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from imp.remote.daemon.discover import ChangeInfo
-from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.subscriptions import Subscriptions
 
 
 class ControlPlane:
@@ -16,7 +16,7 @@ class ControlPlane:
         create: Callable[[str], None],
         abandon: Callable[[str], int],
         list_changes: Callable[[], list[ChangeInfo]],
-        focus: Focus,
+        subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[str]],
         search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
@@ -28,7 +28,7 @@ class ControlPlane:
         self._create = create
         self._abandon = abandon
         self._list_fn = list_changes
-        self.focus = focus
+        self.subscriptions = subscriptions
         self._snapshot = snapshot
         self._recent_narrative = recent_narrative
         self._search = search

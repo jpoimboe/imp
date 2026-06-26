@@ -4,7 +4,7 @@ import pytest
 
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import ChangeInfo
-from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.subscriptions import Subscriptions
 
 
 async def _noop_deliver(cid: str, text: str) -> None: ...
@@ -24,7 +24,7 @@ def _plane(*, delivered: list, created: list, abandoned: list,
         create=lambda prompt: created.append(prompt),
         abandon=_abandon,
         list_changes=lambda: infos,
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda cid: None,
         recent_narrative=lambda cid, n: [])
 
@@ -63,6 +63,15 @@ def test_list_returns_the_enumerated_changes() -> None:
     assert plane.list_changes() == infos
 
 
+def test_subscriptions_is_exposed_for_the_gate_and_handlers() -> None:
+    subs = Subscriptions()
+    plane = ControlPlane(
+        deliver=_noop_deliver, create=lambda prompt: None, abandon=lambda cid: 0,
+        list_changes=lambda: [], subscriptions=subs,
+        snapshot=lambda cid: None, recent_narrative=lambda cid, n: [])
+    assert plane.subscriptions is subs
+
+
 def test_full_history_delegates_to_the_wired_callable() -> None:
     seen: list[str] = []
     history = [{"id": "e1", "type": "notice"}]
@@ -71,7 +80,7 @@ def test_full_history_delegates_to_the_wired_callable() -> None:
         create=lambda prompt: None,
         abandon=lambda cid: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda cid: None,
         recent_narrative=lambda cid, n: [],
         full_history=lambda cid: (seen.append(cid) or history))

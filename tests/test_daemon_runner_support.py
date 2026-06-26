@@ -230,7 +230,7 @@ async def test_reply_to_unknown_change_surfaces_a_user_facing_notice() -> None:
     from imp.engine.errors import LoadError
     from imp.remote.daemon.commands import Notice, Reply
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         raise LoadError("no change here")
@@ -240,7 +240,7 @@ async def test_reply_to_unknown_change_surfaces_a_user_facing_notice() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
     )
@@ -256,7 +256,7 @@ async def test_reply_to_unknown_change_surfaces_a_user_facing_notice() -> None:
 async def test_search_hits_render_as_one_notice() -> None:
     from imp.remote.daemon.commands import Notice, Search
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         return None
@@ -272,7 +272,7 @@ async def test_search_hits_render_as_one_notice() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         search=fake_search,
@@ -292,7 +292,7 @@ async def test_search_hits_render_as_one_notice() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         search=lambda _q: [
@@ -313,7 +313,7 @@ async def test_search_hits_render_as_one_notice() -> None:
 async def test_resume_relays_the_control_message_as_a_notice() -> None:
     from imp.remote.daemon.commands import Notice, Resume
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         return None
@@ -323,7 +323,7 @@ async def test_resume_relays_the_control_message_as_a_notice() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         resume=lambda token: f"Resuming {token}",
@@ -339,7 +339,7 @@ async def test_resume_relays_the_control_message_as_a_notice() -> None:
 async def test_save_calls_control_save_and_confirms() -> None:
     from imp.remote.daemon.commands import Notice, Save
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         return None
@@ -350,7 +350,7 @@ async def test_save_calls_control_save_and_confirms() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         save=lambda cid: saved.append(cid),
@@ -364,37 +364,10 @@ async def test_save_calls_control_save_and_confirms() -> None:
 
 
 @pytest.mark.anyio
-async def test_save_untargeted_with_focus_uses_the_focused_change() -> None:
-    from imp.remote.daemon.commands import Save
-    from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
-
-    async def deliver(_cid: str, _text: str) -> None:
-        return None
-
-    saved: list[str] = []
-    focus = Focus()
-    focus.focus_on("2026-06-17-foc")
-    control = ControlPlane(
-        deliver=deliver,
-        create=lambda _p: None,
-        abandon=lambda _c: 0,
-        list_changes=lambda: [],
-        focus=focus,
-        snapshot=lambda _c: None,
-        recent_narrative=lambda _c, _n: [],
-        save=lambda cid: saved.append(cid),
-    )
-    responses: queue.Queue = queue.Queue()
-    await runner._handle_command(Save(None), control, responses)
-    assert saved == ["2026-06-17-foc"]
-
-
-@pytest.mark.anyio
 async def test_save_unreachable_session_surfaces_a_notice() -> None:
     from imp.remote.daemon.commands import Notice, Save
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         return None
@@ -407,7 +380,7 @@ async def test_save_unreachable_session_surfaces_a_notice() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         save=boom,
@@ -421,10 +394,10 @@ async def test_save_unreachable_session_surfaces_a_notice() -> None:
 
 
 @pytest.mark.anyio
-async def test_save_untargeted_with_no_focus_returns_usage_notice() -> None:
+async def test_save_untargeted_returns_usage_notice() -> None:
     from imp.remote.daemon.commands import SAVE_USAGE, Notice, Save
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         return None
@@ -435,14 +408,14 @@ async def test_save_untargeted_with_no_focus_returns_usage_notice() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),  # no focused change
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         save=lambda cid: saved.append(cid),
     )
     responses: queue.Queue = queue.Queue()
     await runner._handle_command(Save(None), control, responses)
-    assert saved == []  # save was not called
+    assert saved == []
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
     assert notice.text == SAVE_USAGE
@@ -452,7 +425,7 @@ async def test_save_untargeted_with_no_focus_returns_usage_notice() -> None:
 async def test_search_no_hits_reports_no_match() -> None:
     from imp.remote.daemon.commands import Notice, Search
     from imp.remote.daemon.control import ControlPlane
-    from imp.remote.daemon.focus import Focus
+    from imp.remote.daemon.subscriptions import Subscriptions
 
     async def deliver(_cid: str, _text: str) -> None:
         return None
@@ -462,7 +435,7 @@ async def test_search_no_hits_reports_no_match() -> None:
         create=lambda _p: None,
         abandon=lambda _c: 0,
         list_changes=lambda: [],
-        focus=Focus(),
+        subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
         recent_narrative=lambda _c, _n: [],
         search=lambda _q: [],
@@ -472,3 +445,14 @@ async def test_search_no_hits_reports_no_match() -> None:
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
     assert "'nope'" in notice.text
+
+
+def test_make_on_attach_subscribes_only_when_autosubscribe() -> None:
+    from imp.remote.daemon.subscriptions import Subscriptions
+
+    subs = Subscriptions()
+    on_attach = runner._make_on_attach(subs)
+    on_attach("aaa", True)
+    on_attach("bbb", False)
+    assert subs.contains("aaa")
+    assert subs.contains("bbb") is False

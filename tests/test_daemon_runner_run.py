@@ -58,7 +58,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
         tg.start_soon(sess.serve)
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, focus: adapter,
+            make_adapter=lambda env, submit, subscriptions: adapter,
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):              # daemon up + pidfile written
@@ -112,7 +112,7 @@ async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) 
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, focus: SubmitOnceAdapter(submit),
+            make_adapter=lambda env, submit, subscriptions: SubmitOnceAdapter(submit),
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):
@@ -138,7 +138,7 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
                 run_daemon, tmp_path, env={},
-                make_adapter=lambda env, submit, focus: adapter,
+                make_adapter=lambda env, submit, subscriptions: adapter,
                 install_signals=False, shutdown=shutdown))
 
             with anyio.fail_after(5):              # socket comes up

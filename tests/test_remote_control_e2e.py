@@ -76,14 +76,20 @@ async def test_e2e_chat_commands_round_trip(
                 while not socket_is_live(spath):
                     await anyio.sleep(0.02)
 
-            # A resident session daemon serves its socket; the supervisor attaches
-            # a relay and pulls its events, so the adapter records the handle/msg map.
+            # A resident session daemon serves its socket; the supervisor attaches a
+            # relay and pulls its events.
             sess = SessionSocket(str(session_socket_path(tmp_path, CHANGE)))
             await sess.open()
             tg.start_soon(sess.serve)
             await _wait(lambda: sess.attached_count > 0)
-            sess.broadcast(
-                {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+
+            # Subscribe by @handle (the handle IS the change id), then live events flow.
+            fake.inject("/subscribe @zzzzzz")
+            await _wait(lambda: _text_in_outbox(fake, "Following @zzzzzz."))
+
+            sess.broadcast({
+                "id": "ev1", "type": "awaiting_user_input",
+                "timestamp": "2026-06-25T14:32:00+00:00", "payload": {"prompt": "go?"}})
             await _wait(lambda: _text_in_outbox(fake, "Dark mode"))
             m1 = next(m["message_id"] for m in fake.outbox() if "Dark mode" in m["text"])
 

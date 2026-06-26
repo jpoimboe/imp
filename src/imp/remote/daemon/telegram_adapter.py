@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from imp.remote.daemon.commands import Command, ListResult, Response, parse
-from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.drivers.telegram import (
     _compose_message,
     api_call,
@@ -100,7 +100,7 @@ def format_outbound(event: dict[str, Any], handle: str, body: str | None = None)
     return f"{message}\n↩ @{handle}"
 
 
-def format_replay_event(event: Mapping[str, Any]) -> str | None:
+def format_replay_event(event: dict[str, Any]) -> str | None:
     """Full outbound text for one replayed history event, or None to skip it."""
     etype = event.get("type")
     kind = curate(etype, event.get("payload") or {})
@@ -116,13 +116,14 @@ def format_replay_event(event: Mapping[str, Any]) -> str | None:
     return f"{header_line(event)}\n{format_outbound(event, handle)}"
 
 
-def render_response(response: Response, focused_id: str | None = None) -> str:
+def render_response(response: Response, subscribed_ids: Iterable[str] = ()) -> str:
     if isinstance(response, ListResult):
         if not response.changes:
             return "No changes."
+        subscribed = set(subscribed_ids)
         lines = []
         for c in response.changes:
-            mark = "● " if c.id == focused_id else ""
+            mark = "● " if c.id in subscribed else ""
             lines.append(
                 f"{mark}@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}")
         return "\n".join(lines)
@@ -148,15 +149,15 @@ class TelegramNorthAdapter:
         submit: Callable[[Command], None],
         send: Callable[[str, bool], int | None],
         get_updates: Callable[[int], dict[str, Any]],
-        focus: Focus,
+        subscriptions: Subscriptions,
     ) -> None:
         self._chat_id = chat_id
         self._submit = submit
         self._send = send
         self._get_updates = get_updates
-        self._focus = focus
+        self._subscriptions = subscriptions
         self._offset = 0
-        self._last_narration = ""
+        self._last_narration: dict[str, str] = {}
         self._msg_to_change: dict[int, str] = {}
         self._handle_to_change: dict[str, str] = {}
         # The reply maps below are WRITTEN by on_event (sender thread) and READ by
@@ -169,7 +170,7 @@ class TelegramNorthAdapter:
         env: dict[str, str],
         submit: Callable[[Command], None],
         *,
-        focus: Focus,
+        subscriptions: Subscriptions,
         file_text: str | None = None,
     ) -> TelegramNorthAdapter:
         config = load_config(env, file_text)
@@ -180,24 +181,30 @@ class TelegramNorthAdapter:
         get_updates = make_get_updates(config.token)
 
         return cls(chat_id=config.chat_id, submit=submit,
-                   send=send, get_updates=get_updates, focus=focus)
+                   send=send, get_updates=get_updates, subscriptions=subscriptions)
 
     def on_event(self, event: dict[str, Any]) -> None:
-        """Curate one event, send it with its handle, and record the reply maps.
+        """Curate one event for a subscribed Change, send it with its header and
+        handle, and record the reply maps.
 
-        A prompt-less awaiting_user_input falls back to the preceding llm_response
-        narration: "needs your input" alone is uninformative on a phone, so carry
-        the last thing imp said as the body. last_narration is sender-thread-only,
-        like _offset, so it needs no lock."""
+        Membership is the first decision (spec §2): an unsubscribed Change is
+        dropped entirely — no message, no buzz, no routing map. The replayed-id set
+        then suppresses any event already sent by replay-on-subscribe (spec §5.4).
+        A prompt-less awaiting_user_input falls back to that Change's preceding
+        llm_response narration; the per-Change _last_narration map is
+        sender-thread-only, like _offset, so it needs no lock."""
+        change = event.get("change") or {}
+        change_id = change.get("id")
+        if not change_id or not self._subscriptions.contains(change_id):
+            return
+        event_id = event.get("id")
+        if event_id is not None and self._subscriptions.seen(change_id, event_id):
+            return
         etype = event.get("type")
         kind = curate(etype, event.get("payload") or {})
         if kind is None:
             return
         if etype == "step_started":
-            change = event.get("change") or {}
-            change_id = change.get("id")
-            if not change_id or self._focus.current() != change_id:
-                return
             divider = step_divider(event)
             if divider is not None:
                 self._send(divider, True)
@@ -205,27 +212,22 @@ class TelegramNorthAdapter:
         body = event_body(etype, event.get("payload") or {})
         override: str | None = None
         if etype == "llm_response" and body.strip():
-            self._last_narration = body
+            self._last_narration[change_id] = body
         elif etype == "awaiting_user_input" and not body.strip():
-            body = override = self._last_narration
+            body = override = self._last_narration.get(change_id, "")
         if kind == "silent" and not body.strip():
-            return
-        change = event.get("change") or {}
-        change_id = change.get("id")
-        if not change_id:
             return
         handle = handle_for(change_id)
         with self._lock:
             self._handle_to_change[handle] = change_id
-        if kind == "silent" and self._focus.current() != change_id:
-            return
-        message_id = self._send(format_outbound(event, handle, override), kind == "silent")
+        full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
+        message_id = self._send(full, kind == "silent")
         with self._lock:
             if message_id is not None:
                 self._msg_to_change[message_id] = change_id
 
     def on_response(self, response: Response) -> None:
-        text = render_response(response, self._focus.current())
+        text = render_response(response, self._subscriptions.all())
         if text:
             self._send(text, True)
 
