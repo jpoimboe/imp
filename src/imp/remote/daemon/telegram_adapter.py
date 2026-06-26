@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +15,7 @@ from imp.remote.drivers.telegram import (
     curate,
     event_body,
     format_event_message,
+    header_line,
     load_config,
     make_get_updates,
     send_message_params,
@@ -91,6 +92,22 @@ def format_outbound(event: dict[str, Any], handle: str, body: str | None = None)
     that fell back to the preceding narration)."""
     message = format_event_message(event) if body is None else _compose_message(event, body)
     return f"{message}\n↩ @{handle}"
+
+
+def format_replay_event(event: Mapping[str, Any]) -> str | None:
+    """Full outbound text for one replayed history event, or None to skip it."""
+    etype = event.get("type")
+    kind = curate(etype, event.get("payload") or {})
+    if kind is None:
+        return None
+    if etype == "step_started":
+        return step_divider(event)
+    body = event_body(etype, event.get("payload") or {})
+    if kind == "silent" and not body.strip():
+        return None
+    change = event.get("change") or {}
+    handle = handle_for(str(change.get("id") or ""))
+    return f"{header_line(event)}\n{format_outbound(event, handle)}"
 
 
 def render_response(response: Response, focused_id: str | None = None) -> str:
