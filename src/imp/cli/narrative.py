@@ -21,12 +21,11 @@ from typing import Any, ClassVar
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
-# (`tool`); `wait_for_user` is retained for backward-compat replay of old transcripts.
-# emit_notice renders as a verbatim block elsewhere; showing it here too would
+# (`tool`); emit_notice renders as a verbatim block elsewhere; showing it here too would
 # double-print as a clipped `text=…` in the recap.
 # update_step_label would register as activity in the very status line it exists to
 # keep clean.
-_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user",
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool",
                                    "emit_notice", "update_step_label"})
 
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
@@ -443,9 +442,6 @@ class NarrativeBuilder:
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `> …`) rather than a synthetic engine prompt (dropped).
         self._awaiting_reply = False
-        # Pending wait_for_user tool calls from old transcripts: id → prompt. Drives
-        # the §1 orphan-result net.
-        self._pending_wfu: dict[str, str] = {}
         self._opening_intent_node: UserMessageNode | None = None
         # TUI-only optimistic reply echo: reconciled by the next user_message;
         # None on the streaming path.
@@ -1145,10 +1141,8 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         if block is not None:
             # Live-safe resume reply: the injected message's sole block is a
             # success tool_result carrying the human's reply (anthropic/openai/
-            # claude_code resume shape). A known dangling id is a strengthener.
+            # claude_code resume shape).
             text = _summarize_result(block.get("content"))
-            rid = str(block.get("tool_use_id") or block.get("id") or "")
-            self._pending_wfu.pop(rid, None)
     pending, self._pending_reply_node = self._pending_reply_node, None
     if pending is not None:
         # Reconcile the optimistic echo: adopt authoritative text in place
@@ -1267,8 +1261,6 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
         input=p.get("input") or {}, call_ts=event.get("timestamp"))
     burst.calls.append(call)
-    if call.name == "wait_for_user":
-        self._pending_wfu[call.call_id] = str((call.input or {}).get("prompt", ""))
 
 
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
@@ -1361,47 +1353,17 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
             is_warning=True))
         return
 
-    pending_prompt = self._pending_wfu.get(rid)
-
     # Normal burst result: pair with the matching open call.
     burst = self._current_burst
     if burst is not None:
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                if call.name == "wait_for_user":
-                    self._pending_wfu.pop(rid, None)
-                    if is_error:
-                        # Failed dispatch: keep the call (renders as failed per §2),
-                        # no split, no turn; the solicit is over so consume flags.
-                        call.result = summary
-                        call.citations_footer = footer
-                        call.is_error = True
-                        self._awaiting_reply = False
-                        return
-                    _synthesize_wfu_turn(self, text=summary, answered_call=call)
-                    return
                 # Non-wfu pairing: this turn actually ran → advance the clock.
                 burst.end_ts = ts
                 call.result = summary
                 call.citations_footer = footer
                 call.is_error = is_error
                 return
-
-    # Pending-id net — BEFORE the orphan fallthrough (load-bearing order).
-    if pending_prompt is not None:
-        self._pending_wfu.pop(rid, None)
-        if is_error:
-            # Error-shaped result matching a pending id that missed pairing →
-            # route to the true-orphan branch, no turn.
-            b = _ensure_burst(self)
-            b.end_ts = ts
-            b.calls.append(ToolCall(
-                call_id=rid, name="tool", input={}, result=summary,
-                citations_footer=footer, is_error=True, call_ts=ts))
-            self._awaiting_reply = False
-            return
-        _synthesize_wfu_turn(self, text=summary, answered_call=None)
-        return
 
     # (The former §11 unmatched-result heuristic — popitem() the most-recent open
     # fold — was removed: the resume-close fallback in add() now closes a fold whose
@@ -1481,31 +1443,6 @@ def _summarize_result(content: Any) -> str:
         return "".join(_flatten_block(b) for b in content)
     return str(content)      # safety net for any other shape (unchanged)
 
-
-def _synthesize_wfu_turn(self: NarrativeBuilder, *, text: str,
-                         answered_call: ToolCall | None) -> None:
-    """Split the open burst and append the synthesized user turn (I1/I3). Child
-    order: [closed burst, user turn, fresh open burst]. Carries unresulted
-    siblings (result is None — including killed-unresulted) into the fresh burst,
-    whose start_ts is the earliest carried call_ts. No carried siblings → no
-    fresh burst; _current_burst becomes None. Consumes the awaiting flags."""
-    burst = self._current_burst
-    self._current_burst = None
-    carried: list[ToolCall] = []
-    if burst is not None:
-        if answered_call is not None and answered_call in burst.calls:
-            burst.calls.remove(answered_call)
-        carried = [c for c in burst.calls if c.result is None]
-        burst.calls = [c for c in burst.calls if c.result is not None]
-    self._awaiting_reply = False
-    self._append(UserMessageNode(text=text, interactive=True))
-    if carried:
-        fresh = ToolBurstFold()
-        cts = [c.call_ts for c in carried if c.call_ts]
-        fresh.start_ts = min(cts) if cts else None
-        fresh.calls = carried
-        self._current_burst = fresh
-        self._append(fresh)
 
 
 NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call
