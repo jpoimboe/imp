@@ -351,3 +351,18 @@ def test_imp_flat_gap_check_keeps_clamp_rules() -> None:
     assert "the current plan number" in low   # plan_total >= plan_index
     assert "strictly greater" in low          # more_plans true => plan_total > plan_index
     assert "coverage complete" in low         # more_plans false => plan_total == plan_index
+
+
+def test_imp_flat_spec_finalizer_authors_plan_outline() -> None:
+    text = _read_agent("spec-finalizer.md")
+    low = text.lower()
+    assert "## Plan outline" in text
+    assert "what" in low and "not the how" in low
+    assert "5–8" in text                 # the greedy ~5–8 tasks/plan grain
+    assert "source of truth" in low
+    assert "plan count" in low or "plan_total" in low
+
+
+def test_imp_flat_spec_finalizer_output_schema_has_no_plan_total() -> None:
+    fields = set(_flat().agents["spec-finalizer"].output_schema.field_names())
+    assert "plan_total" not in fields
