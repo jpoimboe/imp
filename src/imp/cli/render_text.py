@@ -67,13 +67,14 @@ def fmt_seconds_done(seconds: float | int | None) -> str:
 
 
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
-                width: int = 80, live_viewer: bool = False) -> Iterator[str]:
+                width: int = 80, display_width: int = 80,
+                live_viewer: bool = False) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
     # change id/title belong to `imp` chrome (the run header, `imp show`), not the
     # narrative body — so live and log both start with content, not a banner.
     root = tree.root
     yield from _render_children(root.children, depth=0, full=full, color=color, width=width,
-                                gutters=(), live_viewer=live_viewer)
+                                display_width=display_width, gutters=(), live_viewer=live_viewer)
 
 
 def _gutter_indent(depth: int, gutters: tuple[int, ...], color: bool) -> str:
@@ -206,6 +207,7 @@ def _markdown_to_ansi(text: str, width: int, color: bool, display_width: int = 8
 
 
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
+                           display_width: int = 80,
                            gutters: tuple[int, ...] = ()) -> list[str]:
     """Render one finalized prose block as markdown→ANSI at inner width, then
     prefix the depth gutter/indent. rich owns bold/heading/list/fence formatting;
@@ -227,7 +229,7 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     bullet = pal.ansi("• ", "bold", enabled=color)   # bold dot marks the turn
     out: list[str] = []
     first = True
-    for raw in _markdown_to_ansi(text, inner, color).splitlines():
+    for raw in _markdown_to_ansi(text, inner, color, display_width).splitlines():
         stripped = raw.rstrip()
         if not stripped:
             # Blank line inside the prose block — emit the bare gutter-indent
@@ -314,7 +316,7 @@ def spaces_before(node: Any) -> bool:
 
 
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
-                     width: int, gutters: tuple[int, ...] = (),
+                     width: int, display_width: int = 80, gutters: tuple[int, ...] = (),
                      prime: bool = False, live_viewer: bool = False) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
     a prose block and ANY following emission. A child that renders nothing
@@ -328,7 +330,8 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
     prev_prose = prime
     for child in children:
         lines = list(_render(child, depth=depth, full=full, color=color, width=width,
-                             gutters=gutters, live_viewer=live_viewer))
+                             display_width=display_width, gutters=gutters,
+                             live_viewer=live_viewer))
         if not lines:
             continue
         if prev_prose or spaces_before(child):
@@ -484,7 +487,7 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
-            width: int, gutters: tuple[int, ...] = (),
+            width: int, display_width: int = 80, gutters: tuple[int, ...] = (),
             live_viewer: bool = False) -> Iterator[str]:
     if isinstance(node, nv.PhaseNode):
         # The phase start line is surrounded by blank lines: the blank ABOVE comes
@@ -494,8 +497,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if not suppress:
             yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth, full=full,
-                                    color=color, width=width, gutters=gutters,
-                                    prime=True, live_viewer=live_viewer)
+                                    color=color, width=width, display_width=display_width,
+                                    gutters=gutters, prime=True, live_viewer=live_viewer)
         if not suppress and node.closed and nv.phase_elapsed(node) is not None:
             # Blank ABOVE the phase-complete line (it's surrounded too); the blank
             # BELOW comes from the root walk (spaces_after(PhaseNode)).
@@ -524,8 +527,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         children = ([c for c in node.children if not isinstance(c, nv.BreadcrumbLine)]
                     if suppress else node.children)
         yield from _render_children(children, depth=depth, full=full,
-                                    color=color, width=width, gutters=gutters,
-                                    prime=True, live_viewer=live_viewer)
+                                    color=color, width=width, display_width=display_width,
+                                    gutters=gutters, prime=True, live_viewer=live_viewer)
         if full and node.agent_output:
             yield from _render_output_args(node.agent_output, depth=depth,
                                            color=color, width=width, gutters=gutters)
@@ -533,7 +536,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.AgentTextNode):
         yield from _render_markdown_block(_caret_escape(node.text), width, depth,
-                                          color, gutters)
+                                          color, display_width, gutters)
         return
 
     if isinstance(node, nv.LiteralTextNode):
@@ -547,7 +550,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                              *pal.NODE_COLORS[node.color_role], gutters=gutters)
             return
         yield from _render_markdown_block(_caret_escape(node.text), width, depth,
-                                          color, gutters)
+                                          color, display_width, gutters)
         return
 
     if isinstance(node, nv.UserMessageNode):
@@ -601,7 +604,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.SubagentFold):
         yield from _render_subagent(node, depth=depth, full=full, color=color, width=width,
-                                    gutters=gutters, live_viewer=live_viewer)
+                                    display_width=display_width, gutters=gutters,
+                                    live_viewer=live_viewer)
         return
 
     if isinstance(node, nv.StepContextNode):
@@ -829,7 +833,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
 
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
-                     color: bool, width: int,
+                     color: bool, width: int, display_width: int = 80,
                      gutters: tuple[int, ...] = (),
                      live_viewer: bool = False) -> Iterator[str]:
     if not full:
@@ -844,8 +848,8 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
     yield _line(f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}",
                 depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
-                                color=color, width=width, gutters=(*gutters, depth),
-                                live_viewer=live_viewer)
+                                color=color, width=width, display_width=display_width,
+                                gutters=(*gutters, depth), live_viewer=live_viewer)
     yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width,
                                       gutters=(*gutters, depth))
 

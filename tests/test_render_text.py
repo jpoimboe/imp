@@ -2148,3 +2148,21 @@ def test_markdown_hr_capped_to_console_width_when_smaller_than_display() -> None
     hr_lines = [ln for ln in rendered.splitlines() if "─" in ln]
     assert hr_lines, "expected a horizontal-rule line"
     assert hr_lines[0].count("─") == 30
+
+
+def test_render_tree_caps_hr_while_prose_stays_unwrapped() -> None:
+    # Wrap width is huge (10000) so prose does NOT wrap; display_width is 40 so
+    # the markdown HR caps at 40 — the two widths are decoupled.
+    long_line = "X" * 200  # no spaces: only wraps if the wrap width forces it
+    out = list(render_tree(
+        nv.build_tree([
+            _ev("2", "step_started", step="s", kind="agent", phase="p",
+                model="m", provider="anthropic"),
+            _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+                model="m", stop_reason="end_turn", usage={},
+                raw={"content": [{"type": "text", "text": long_line + "\n\n---\n\nafter"}]}),
+        ]),
+        full=False, color=False, width=10000, display_width=40))
+    assert any(long_line in ln for ln in out)          # prose unwrapped
+    assert any(ln.count("─") == 40 for ln in out)      # HR capped to display width
+    assert not any(ln.count("─") > 40 for ln in out)
