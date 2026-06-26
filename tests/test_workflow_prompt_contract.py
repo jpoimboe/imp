@@ -344,6 +344,22 @@ def test_plan_writer_states_soft_task_size_target() -> None:
     assert "supercycle" in low
     assert "task headings" in low
     assert "not lines of code" in low
+    # ~5\u20138 is a floor to fill up toward, not merely an upper bound, and the carve
+    # is a greedy global bundle of the LARGEST green-preserving set of independent
+    # slices \u2014 not the smallest separable sliver.
+    assert "fill up toward" in low
+    assert "floor" in low
+    assert "largest" in low
+    assert "green-preserving" in low
+    assert "first coherent chunk" not in low
+    # The remainder rule and the two named carve anti-patterns are present.
+    assert "forced-atomic remainder" in low
+    assert "file family" in low
+    assert "capstone task" in low
+    assert "deferral target" in low
+    # Per-plan review motivates the floor; atomicity stays sacrosanct.
+    assert "per-plan review" in low
+    assert "atomicity hard rule" in low
 
 
 def test_task_lead_documents_verify_triage() -> None:
