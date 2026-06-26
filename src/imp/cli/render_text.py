@@ -675,7 +675,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                     lines = detail.split("\n")
                     if len(lines) > _SCRIPT_DETAIL_TAIL_LINES:
                         hidden = len(lines) - _SCRIPT_DETAIL_TAIL_LINES
-                        yield _line(f"… ({hidden} earlier lines — imp log --full)",
+                        yield _line(f"… ({hidden} earlier {'line' if hidden == 1 else 'lines'} — imp log --full)",
                                     depth + 1, color, *pal.NODE_COLORS["metadata"],
                                     gutters=gutters)
                         detail = "\n".join(lines[-_SCRIPT_DETAIL_TAIL_LINES:])
