@@ -7,11 +7,10 @@ import pytest
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers import anthropic, claude_code, openai, scripted
 
-# wait_for_user is no longer a registered tool on the real model providers: a
-# bare turn-end is the yield, so the live LLM is never advertised the tool. The
-# offline scripted provider still synthesizes it (its fixtures inject the call).
-NO_INJECT = [anthropic, openai, claude_code]
-INJECT = [scripted]
+# wait_for_user is no longer a registered tool on ANY provider: a bare turn-end
+# is the yield. Even the offline scripted provider routes its bare turn-end
+# through the shared continuation handler instead of a wait_for_user tool_use.
+PROVIDERS = [anthropic, openai, claude_code, scripted]
 
 
 def _agent(tools):
@@ -37,19 +36,13 @@ class _Inv:
         self.tiers = ()
 
 
-@pytest.mark.parametrize("provider", NO_INJECT)
-def test_wait_for_user_not_injected_on_model_providers(provider):
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_wait_for_user_not_a_registered_tool(provider):
     tools = provider._build_tools(_Inv(["complete_step", "wait_for_user"]))
     assert "wait_for_user" not in tools
 
 
-@pytest.mark.parametrize("provider", INJECT)
-def test_wait_for_user_injected_when_declared(provider):
-    tools = provider._build_tools(_Inv(["complete_step", "wait_for_user"]))
-    assert "wait_for_user" in tools
-
-
-@pytest.mark.parametrize("provider", NO_INJECT + INJECT)
+@pytest.mark.parametrize("provider", PROVIDERS)
 def test_wait_for_user_absent_when_not_declared(provider):
     tools = provider._build_tools(_Inv(["complete_step"]))
     assert "wait_for_user" not in tools

@@ -22,7 +22,6 @@ from imp.agents.runner import (
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, change_home_path
-from imp.agents.tools.wait_for_user import make_wait_for_user_tool
 from imp.agents.transcript import Transcript
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
@@ -53,8 +52,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name in reg:
             out[name] = reg[name]
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
-    if "wait_for_user" in invocation.agent_def.tools:
-        out["wait_for_user"] = make_wait_for_user_tool()
     if "bash" in invocation.agent_def.tools:
         out["bash_output"] = reg["bash_output"]
         out["bash_kill"] = reg["bash_kill"]
