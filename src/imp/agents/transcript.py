@@ -328,21 +328,4 @@ def deliver_reply_on_resume(
     return injected
 
 
-def inject_continue_nudge_on_resume(
-    messages: list[Message], transcript: Transcript, elog: EventLog,
-    agent_id: str,
-) -> Message | None:
-    """Append a synthetic user nudge when the transcript ends without complete_step.
 
-    When a resumed transcript classifies as MISSING_COMPLETE_STEP (autonomous turn
-    ended without complete_step), inject a user turn carrying RESUME_CONTINUE_NUDGE
-    so the shape becomes the already-working SEND_TO_LLM case. Returns the injected
-    Message, or None when no nudge is needed.
-    """
-    if classify_resume(messages) is not ResumeState.MISSING_COMPLETE_STEP:
-        return None
-    injected = Message(role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
-    messages.append(injected)
-    transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected)
-    return injected

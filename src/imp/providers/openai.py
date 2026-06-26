@@ -49,7 +49,6 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     deliver_reply_on_resume,
-    inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
@@ -530,7 +529,6 @@ class OpenAIAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
-            inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             state = classify_resume(messages)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {

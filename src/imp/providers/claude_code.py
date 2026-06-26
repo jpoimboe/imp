@@ -81,7 +81,6 @@ from imp.agents.transcript import (
     balance_success_on_resume,
     build_resume_manifest,
     deliver_reply_on_resume,
-    inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
@@ -1262,7 +1261,6 @@ class ClaudeCodeAgentRunner:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
-            inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {

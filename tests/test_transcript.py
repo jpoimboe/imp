@@ -12,7 +12,6 @@ from imp.agents.transcript import (
     balance_success_on_resume,
     build_resume_manifest,
     deliver_reply_on_resume,
-    inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.state import InMemoryEventLog
@@ -286,14 +285,6 @@ def test_repair_returns_only_synthesized_blocks_on_partial_match(tmp_path: Path)
     assert result_ids == {"m1", "u1"}
     assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
 
-
-
-def test_inject_continue_nudge_noop_when_not_missing(tmp_path: Path) -> None:
-    t = Transcript(tmp_path / "transcript.jsonl")
-    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]   # already SEND_TO_LLM
-    t.append(msgs[0])
-    assert inject_continue_nudge_on_resume(msgs, t, InMemoryEventLog(), "x") is None
-    assert len(msgs) == 1                       # untouched
 
 
 def test_repair_noop_when_trailing_user_already_balanced(tmp_path: Path) -> None:
