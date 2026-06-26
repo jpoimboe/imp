@@ -124,6 +124,27 @@ Write a complete, zero-ambiguity implementation plan that a skilled developer wi
 
 Make illegal states unrepresentable — prefer a design where the type or structure rules out the bad case over one that admits it and then validates or falls back.
 
+## Consume the plan outline (full path) — and the express carve-out
+
+On the **full path**, the spec contains a `## Plan outline` (authored by
+`spec-finalizer`): the whole spec decomposed into N coarse plans, each stating *what*
+it covers. That outline decides *what* plan N covers — **you do not re-decide it**.
+Read the spec's `## Plan outline`, find the **slice** for the current plan
+(`plan {{ vars.plan_index }}` of `{{ vars.plan_total }}`), and write **only the HOW**
+for that slice: the bite-sized tasks, tests, and commits that implement it. Interleaving
+is preserved — you still read `progress.md`, so plan N's HOW reacts to what plans
+`1..N-1` actually landed; the outline gives the *what*, reality informs the *how*.
+
+`plan_total` comes from the outline, **not** an estimate: count the outline's plans and
+echo that **outline-derived** value (see *First-run plan_total estimate*).
+
+**Express carve-out.** On the **express** path, front-door routes straight here with
+`fast_path: true` and **no `spec-finalizer` runs**, so **no `## Plan outline` section
+exists**. Do **not** hard-depend on the outline being present: when there is no
+`## Plan outline`, **self-scope** the single plan directly from the spec exactly as
+`imp` does, and default `plan_total` to `1`. The outline-consumption rules above apply
+**only on the full path**.
+
 ## Ask vs. decide
 
 The policy is **turn-agnostic** — it governs fresh authoring (plan 1,
@@ -181,10 +202,10 @@ gate already walks:
 
 `- [ ] DEFERRED plan-writer: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
 
-Writing it in this reader form is **load-bearing**: on a trivial `fast_path`
-corrective the `deferred-sweep` step never runs, so an item not already in
-`— needs-decision:` form would be silently dropped before the merge gate. Authoring
-it in reader form means it reaches `finalize` whether or not `deferred-sweep` runs.
+Writing it in this reader form is **load-bearing**: imp-flat has no sweep step to convert
+a plainly-worded deferral, so an item not already in `— needs-decision:` form would be
+silently dropped before the merge gate. Authoring it in reader form means it reaches
+`finalize` directly.
 This is for genuine human-decision items only — keep deciding the technical calls
 yourself and recording them in the `## Decisions` section (see "Ask vs. decide").
 
@@ -263,10 +284,10 @@ slices, filling up toward ~5–8, splitting only at genuine dependency boundarie
 never by file family, layer, or convenience. Then **defer only the genuinely
 forced-atomic remainder**: when one piece is truly un-splittable, defer *that
 piece* to a later lap; do not let it fragment the independent slices around it
-into one- and two-task plans. Rely on the existing `plan-cycle-check`
-**supercycle** to author the remaining plans — there is no new control flow to
-add; `plan-cycle-check` is the sole coverage guard and loops back to you for the
-next plan.
+into one- and two-task plans. Rely on the **outline-driven plan loop** to author the remaining plans — the spec's
+`## Plan outline` already enumerates them and the engine loops back to you for each next
+plan while `plan_index < plan_total`; the end-of-change `gap-check` is the sole coverage
+**backstop**, looping back to you only when it finds uncovered scope.
 
 **Two carve anti-patterns to avoid:**
 
@@ -296,13 +317,18 @@ lap, never crammed into the current plan.
 ## First-run plan_total estimate
 
 Always emit `plan_total` in your output contract — an integer `>= 1` (it is a required
-field). On the **first plan** of a change (`plan_index == 1`) make it your honest best
-estimate of how many plans the whole spec will take (use `1` when a single plan covers
-everything); the workflow captures that first-plan value into `vars.plan_total`, seeding
-the `plan N/total` denominator the user sees from the very first plan label, so it is never
-blank and never `1/0`. On every later plan (`plan_index > 1`) `plan-cycle-check` owns the
-authoritative total — it refines and clamps it each lap — and the workflow ignores your
-emission, so just echo the current `{{ vars.plan_total }}` to satisfy the contract.
+field). On the **first plan** of a change (`plan_index == 1`) it is captured into
+`vars.plan_total`, seeding the `plan N/total` denominator the user sees.
+
+- **Full path:** do **not** estimate. Read the spec's `## Plan outline`, **count its
+  plans**, and emit that count as `plan_total`. This is the outline-derived value; the
+  outline is the source of truth.
+- **Express path:** there is no outline — emit `plan_total = 1` (a trivial express
+  change is a single plan).
+
+On every later plan (`plan_index > 1`) `gap-check` owns the authoritative total — it
+bumps it only when it authors a corrective — and the workflow ignores your emission on
+those laps, so just echo the current `{{ vars.plan_total }}` to satisfy the contract.
 
 ## Plan Document Format
 
@@ -526,7 +552,7 @@ complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-
 (Substitute the actual integers for N and T.)
 
 Always pass `plan_total=T` to this call (a required output field): on the first plan
-(`plan_index == 1`) it is your estimate and seeds the denominator; on later plans echo the
+(`plan_index == 1`) it is the outline-derived count (or 1 on express) and seeds the denominator; on later plans echo the
 current `{{ vars.plan_total }}` (see *First-run plan_total estimate*).
 
 (On a **minors-integration pass** — `blocking: false` — the `complete_step` call

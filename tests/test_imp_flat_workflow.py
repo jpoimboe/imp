@@ -366,3 +366,22 @@ def test_imp_flat_spec_finalizer_authors_plan_outline() -> None:
 def test_imp_flat_spec_finalizer_output_schema_has_no_plan_total() -> None:
     fields = set(_flat().agents["spec-finalizer"].output_schema.field_names())
     assert "plan_total" not in fields
+
+
+def test_imp_flat_plan_writer_consumes_outline_with_express_carveout() -> None:
+    text = _read_agent("plan-writer.md")
+    low = text.lower()
+    assert "## Plan outline" in text
+    assert "slice" in low                     # reads its assigned outline slice
+    assert "only the **HOW**" in text or "only the how" in low
+    # plan_total now comes from the outline, not an estimate, on the full path.
+    assert "outline-derived" in low or "from the outline" in low
+    # Express carve-out: no spec-finalizer / no outline -> self-scope, default to 1.
+    assert "express" in low
+    assert "hard-depend" in low   # bold-surviving: prose is "Do **not** hard-depend"
+    assert "self-scope" in low
+    # Stale references to deleted agents are refreshed (edits c, d). The dormant
+    # NEEDS-REPLAN/task-lead handle text is left verbatim per Decisions, so we do
+    # NOT assert "plan-cycle-check" absent — only these two live references.
+    assert "deferred-sweep" not in low          # the load-bearing note refreshed (edit d)
+    assert "outline-driven plan loop" in low    # the supercycle sentence refreshed (edit c)
