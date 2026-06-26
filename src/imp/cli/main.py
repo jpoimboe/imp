@@ -41,6 +41,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group
+from imp.cli.terminal_title import TerminalTitle
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
@@ -655,11 +656,15 @@ async def _run_cleared_session(
     try:
         print(_run_header_line(change.id, change.title, "new", color=color))
         _print_splash_banner(interactive=True)
+        term_title = None if tui else TerminalTitle(
+            sys.stdout, change.id, change.title)
         prompt = Prompt(editing_mode=_editing_mode(control), color=color)
         try:
             reply = (await prompt.ask_async(
                 width=_term_width(), hint=OPENING_HINT)).strip()
         except (EOFError, KeyboardInterrupt):
+            if term_title is not None:
+                term_title.reset()
             print("imp: cancelled", file=sys.stderr)
             return 130
         _session_started = True
@@ -677,7 +682,8 @@ async def _run_cleared_session(
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_text, leave_mode="new", leave_state=leave_state)
+            opening_intent=opening_text, leave_mode="new",
+            leave_state=leave_state, title=term_title)
     finally:
         if not _session_started:
             discard_conversation(change)
@@ -857,6 +863,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     _scope_kw: dict[str, Any] = {"scope_only": True} if scope_only else {}
 
+    # Build the title before the opening prompt so the escape is written at startup,
+    # not after the user answers.
+    term_title = None if _tui_requested(args) else TerminalTitle(
+        sys.stdout, change.id, change.title)
+
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
@@ -866,6 +877,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                 color=color, width=_term_width(),
                 editing_mode=_editing_mode(control))
         except (EOFError, KeyboardInterrupt):
+            if term_title is not None:
+                term_title.reset()
             discard_conversation(change)   # drop the just-minted draft on cancel
             print("imp: cancelled", file=sys.stderr)
             return 130
@@ -893,7 +906,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, **_scope_kw)
+            opening_intent=opening_intent, title=term_title, **_scope_kw)
 
     if _tui_requested(args):
         if not header_printed:
@@ -922,7 +935,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
             opening_intent=opening_intent, leave_mode=leave_mode,
-            leave_state=leave_state, **_scope_kw)
+            leave_state=leave_state, title=term_title, **_scope_kw)
 
     return await _clear_loop(control, tui=False, first=_first)
 

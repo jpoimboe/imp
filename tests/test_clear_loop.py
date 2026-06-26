@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import io
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,11 @@ import imp.cli.signals as sig
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
+
+
+class _TTY(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 @pytest.fixture
@@ -535,3 +541,114 @@ def test_resume_interactive_wires_preceded_by_blank_to_splash(
 
     assert rc == 0
     assert captured["preceded_by_blank"] is splash_shown
+
+
+@pytest.mark.anyio
+async def test_run_cleared_session_writes_title_before_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    tty = _TTY()
+    monkeypatch.setattr(m.sys, "stdout", tty)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+
+    at_prompt: dict[str, str] = {}
+
+    class _CapturePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            at_prompt["value"] = tty.getvalue()
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _CapturePrompt)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(change: object, **kwargs: object) -> int:
+        captured["change"] = change
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    rc = await m._run_cleared_session(tmp_path, "main", tui=False, leave_state={})
+
+    assert rc == 0
+    # The working escape for the freshly minted (unnamed) draft is already written.
+    assert "\x1b]2;• imp · " in at_prompt["value"]
+    title = captured["title"]
+    assert title._change_id == captured["change"].id   # one instance threaded through
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_run_cleared_session_cancel_resets_title(
+    exc: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
+
+    reset: list[str] = []
+
+    class _FakeTitle:
+        def __init__(self, stream: object, cid: str, name: str) -> None:
+            self._change_id = cid
+            self._name = name
+
+        def working(self) -> None: ...
+        def waiting(self) -> None: ...
+
+        def reset(self) -> None:
+            reset.append("reset")
+
+    monkeypatch.setattr(m, "TerminalTitle", _FakeTitle)
+
+    class _CancelPrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            raise exc()
+
+    monkeypatch.setattr(m, "Prompt", _CancelPrompt)
+
+    rc = await m._run_cleared_session(tmp_path, "main", tui=False, leave_state={})
+
+    assert rc == 130
+    assert reset == ["reset"]
+
+
+@pytest.mark.anyio
+async def test_run_cleared_session_tui_builds_no_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
+
+    def _no_title(*a: object, **k: object) -> object:
+        raise AssertionError("no TerminalTitle may be constructed on the TUI path")
+
+    monkeypatch.setattr(m, "TerminalTitle", _no_title)
+
+    class _FakePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    async def _fake_tui(change: object, **kwargs: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "_run_tui_session", _fake_tui)
+
+    rc = await m._run_cleared_session(tmp_path, "main", tui=True, leave_state={})
+    assert rc == 0
