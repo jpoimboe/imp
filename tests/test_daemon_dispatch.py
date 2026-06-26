@@ -20,8 +20,8 @@ from imp.remote.daemon.commands import (
     Unsubscribe,
 )
 from imp.remote.daemon.discover import ChangeInfo
-from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.runner import _dispatch_inbound, _handle_command
+from imp.remote.daemon.subscriptions import Subscriptions
 
 
 @pytest.fixture
@@ -39,9 +39,13 @@ class FakeControl:
         self.abandoned: list[str] = []
         self._changes = changes or []
         self._abandon_rc = abandon_rc
-        self.focus = Focus()
+        self.subscriptions = Subscriptions()
         self._snapshots = snapshots or {}
         self._narratives = narratives or {}
+        self._histories: dict = {}
+
+    def full_history(self, change_id: str) -> list[dict]:
+        return self._histories.get(change_id, [])
 
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshots.get(change_id)
@@ -130,63 +134,62 @@ async def test_notice_passes_through() -> None:
 
 
 @pytest.mark.anyio
-async def test_reply_auto_focuses_the_change() -> None:
+async def test_reply_does_not_subscribe() -> None:
     control = FakeControl()
     responses: queue.Queue = queue.Queue()
     await _handle_command(Reply("aaaaaa", "go"), control, responses)
-    assert control.focus.current() == "aaaaaa"
+    assert control.subscriptions.contains("aaaaaa") is False
     assert responses.empty()
 
 
 @pytest.mark.anyio
-async def test_subscribe_sets_focus_catches_up_and_confirms() -> None:
-    control = FakeControl(
-        snapshots={"k3f9qa": ("running", "implement", "Dark mode")},
-        narratives={"k3f9qa": ["earlier", "latest message"]})
+async def test_subscribe_replays_history_then_confirms() -> None:
+    control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
+    control._histories["k3f9qa"] = [
+        {"id": "e1", "type": "notice", "timestamp": "2026-06-25T14:32:05+00:00",
+         "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
+    ]
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
-    assert control.focus.current() == "k3f9qa"
-    catchup = responses.get_nowait()
-    assert isinstance(catchup, Notice)
-    assert catchup.text == "@k3f9qa  Dark mode — running · implement\nlatest message"
-    confirm = responses.get_nowait()
-    assert confirm == Notice("Following @k3f9qa.")
+    first = responses.get_nowait()
+    assert isinstance(first, Notice) and "hi" in first.text
+    assert responses.get_nowait() == Notice("Following @k3f9qa.")
     assert responses.empty()
+    assert control.subscriptions.contains("k3f9qa")
+    assert control.subscriptions.seen("k3f9qa", "e1")
 
 
 @pytest.mark.anyio
-async def test_subscribe_with_no_narrative_is_header_only() -> None:
-    control = FakeControl(
-        snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
+async def test_subscribe_with_empty_history_just_confirms() -> None:
+    control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
-    catchup = responses.get_nowait()
-    assert catchup == Notice("@k3f9qa  Dark mode — running · plan")
-    confirm = responses.get_nowait()
-    assert confirm == Notice("Following @k3f9qa.")
+    assert responses.get_nowait() == Notice("Following @k3f9qa.")
     assert responses.empty()
+    assert control.subscriptions.contains("k3f9qa")
 
 
 @pytest.mark.anyio
-async def test_subscribe_with_unknown_change_emits_handle_only_header() -> None:
-    control = FakeControl()   # no snapshots — snapshot() returns None
+async def test_subscribe_to_unknown_handle_errors_without_subscribing() -> None:
+    control = FakeControl()  # no snapshot wired -> snapshot("bogus") is None
     responses: queue.Queue = queue.Queue()
-    await _handle_command(Subscribe("k3f9qa"), control, responses)
-    catchup = responses.get_nowait()
-    assert catchup == Notice("@k3f9qa")
-    confirm = responses.get_nowait()
-    assert confirm == Notice("Following @k3f9qa.")
+    await _handle_command(Subscribe("bogus"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "bogus" in notice.text
+    assert "Following" not in notice.text
     assert responses.empty()
+    assert control.subscriptions.contains("bogus") is False
 
 
 @pytest.mark.anyio
-async def test_unsubscribe_clears_focus_and_confirms() -> None:
+async def test_unsubscribe_removes_the_target_and_confirms() -> None:
     control = FakeControl()
-    control.focus.focus_on("k3f9qa")
+    control.subscriptions.add("k3f9qa", ["e1"])
     responses: queue.Queue = queue.Queue()
-    await _handle_command(Unsubscribe(), control, responses)
-    assert control.focus.current() is None
-    assert responses.get_nowait() == Notice("Muted — lifecycle alerts still on.")
+    await _handle_command(Unsubscribe("k3f9qa"), control, responses)
+    assert control.subscriptions.contains("k3f9qa") is False
+    assert responses.get_nowait() == Notice("Unfollowed @k3f9qa.")
 
 
 @pytest.mark.anyio
@@ -201,16 +204,7 @@ async def test_replay_resends_each_message_oldest_first() -> None:
 
 
 @pytest.mark.anyio
-async def test_replay_falls_back_to_current_focus() -> None:
-    control = FakeControl(narratives={"k3f9qa": ["only"]})
-    control.focus.focus_on("k3f9qa")
-    responses: queue.Queue = queue.Queue()
-    await _handle_command(Replay(None, 5), control, responses)
-    assert responses.get_nowait() == Notice("only")
-
-
-@pytest.mark.anyio
-async def test_replay_with_no_target_and_no_focus_is_route_hint() -> None:
+async def test_replay_with_no_target_is_route_hint() -> None:
     control = FakeControl()
     responses: queue.Queue = queue.Queue()
     await _handle_command(Replay(None, 5), control, responses)
@@ -220,9 +214,8 @@ async def test_replay_with_no_target_and_no_focus_is_route_hint() -> None:
 @pytest.mark.anyio
 async def test_replay_with_no_narrative_notes_nothing_to_replay() -> None:
     control = FakeControl()
-    control.focus.focus_on("k3f9qa")
     responses: queue.Queue = queue.Queue()
-    await _handle_command(Replay(None, 5), control, responses)
+    await _handle_command(Replay("k3f9qa", 5), control, responses)
     notice = responses.get_nowait()
     assert isinstance(notice, Notice) and "Nothing to replay" in notice.text
 

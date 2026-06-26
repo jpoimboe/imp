@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from imp.remote.daemon.discover import ChangeInfo
-from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.subscriptions import Subscriptions
 
 
 class ControlPlane:
@@ -15,23 +16,25 @@ class ControlPlane:
         create: Callable[[str], None],
         abandon: Callable[[str], int],
         list_changes: Callable[[], list[ChangeInfo]],
-        focus: Focus,
+        subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[str]],
         search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
         resume: Callable[[str], str] | None = None,
         save: Callable[[str], None] | None = None,
+        full_history: Callable[[str], list[dict[str, Any]]] | None = None,
     ) -> None:
         self._deliver = deliver
         self._create = create
         self._abandon = abandon
         self._list_fn = list_changes
-        self.focus = focus
+        self.subscriptions = subscriptions
         self._snapshot = snapshot
         self._recent_narrative = recent_narrative
         self._search = search
         self._resume = resume
         self._save = save
+        self._full_history = full_history
 
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshot(change_id)
@@ -50,6 +53,10 @@ class ControlPlane:
     def save(self, change_id: str) -> None:
         assert self._save is not None  # run_daemon always wires it
         self._save(change_id)
+
+    def full_history(self, change_id: str) -> list[dict[str, Any]]:
+        assert self._full_history is not None  # run_daemon always wires it
+        return self._full_history(change_id)
 
     async def reply(self, change_id: str, text: str) -> None:
         """Deliver a reply into the change's session daemon, rehydrating if hibernated."""

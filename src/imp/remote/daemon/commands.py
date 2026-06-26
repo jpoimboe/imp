@@ -49,7 +49,7 @@ class Subscribe:
 
 @dataclass(frozen=True)
 class Unsubscribe:
-    pass
+    change_id: str
 
 
 @dataclass(frozen=True)
@@ -92,16 +92,19 @@ SAVE_USAGE = (
 ABANDON_USAGE = (
     "To abandon a Change, reply to one of its messages or use @handle "
     "(e.g. /abandon @ab12cd).")
+UNSUBSCRIBE_USAGE = (
+    "To unsubscribe, reply to one of its messages or use @handle "
+    "(e.g. /unsubscribe @ab12cd).")
 UNKNOWN_COMMAND = "Unknown command. Try /help."
 ROUTE_HINT = (
-    "Couldn't route that — reply to a Change's message, prefix @handle, or send /list.")
+    "Couldn't route that — reply to a Change's message, prefix @handle, or send /show.")
 HELP_TEXT = (
     "Commands:\n"
-    "/list — show changes (● = subscribed)\n"
+    "/show — show changes (● = subscribed)\n"
     "/new <prompt> — start a Change\n"
-    "/subscribe (reply or @handle) — follow a Change's narrative\n"
-    "/unsubscribe — mute narrative (lifecycle alerts stay on)\n"
-    "/replay [n] (reply, @handle, or subscribed) — re-send last n messages\n"
+    "/subscribe @handle — follow a Change (replays its history, then streams it)\n"
+    "/unsubscribe (reply or @handle) — stop all messages for a Change\n"
+    "/replay [n] (reply or @handle) — re-send last n messages\n"
     "/abandon (reply or @handle) — stop a Change\n"
     "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
@@ -127,7 +130,10 @@ def _parse_replay_n(rest: str) -> int:
     return 5
 
 
-def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Command:
+def parse(
+    text: str, reply_to: int | None, resolve_lookup: ResolveLookup,
+    resolve_handle: Callable[[str], str | None] | None = None,
+) -> Command:
     """Map one inbound message to a Command. A leading '/' (after whitespace strip)
     selects the command path; everything else takes the reply path. Pure given args."""
     stripped = text.strip()
@@ -135,7 +141,7 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
         word, _, rest = stripped.partition(" ")
         rest = rest.strip()
         verb = word[1:].lower()
-        if verb == "list":
+        if verb == "show":
             return ListChanges()
         if verb == "help":
             return Help()
@@ -145,10 +151,15 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
             change_id = _resolve_target(rest, reply_to, resolve_lookup, "abandon")
             return Abandon(change_id) if change_id is not None else Notice(ABANDON_USAGE)
         if verb in ("subscribe", "sub"):
-            change_id = _resolve_target(rest, reply_to, resolve_lookup, "subscribe")
+            change_id = (
+                resolve_handle(rest) if resolve_handle is not None
+                else _resolve_target(rest, None, resolve_lookup, "subscribe"))
             return Subscribe(change_id) if change_id is not None else Notice(ROUTE_HINT)
         if verb in ("unsubscribe", "unsub", "mute"):
-            return Unsubscribe()
+            change_id = _resolve_target(rest, reply_to, resolve_lookup, "unsubscribe")
+            return (
+                Unsubscribe(change_id) if change_id is not None
+                else Notice(UNSUBSCRIBE_USAGE))
         if verb == "replay":
             n = _parse_replay_n(rest)
             change_id = _resolve_target(rest, reply_to, resolve_lookup, "replay")

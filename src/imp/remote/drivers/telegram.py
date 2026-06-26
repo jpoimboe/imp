@@ -17,20 +17,28 @@ import os
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-# Curation map (spec Decisions §"Default curation"). Curation classifies an event
-# type as loud / silent / dropped; imp only streams event *types*.
-_LOUD = frozenset({"awaiting_user_input", "merge_blocked", "completed"})
-_SILENT = frozenset({"agent_output", "llm_response"})
+# Delivery tiers (spec §2). buzz = input prompts + status transitions (phone buzzes);
+# silent = narrative / notices / step dividers (streams quietly); everything else drops.
+_BUZZ = frozenset({
+    "awaiting_user_input", "merge_blocked", "script_blocked", "change_merged",
+    "change_abandoned", "workflow_paused", "workflow_resumed", "error",
+})
+_SILENT = frozenset({"llm_response", "agent_output", "notice", "step_started"})
 
-# Human-readable headers for loud events. The phone-buzzing notifications read as
-# plain English, not imp's internal snake_case event types. An unmapped type
-# falls back to its raw name (defensive — every loud type is mapped today).
+# Human-readable labels for buzz events — phone notifications read as plain English,
+# not imp's internal snake_case types. An unmapped type falls back to its raw name.
 _EVENT_LABELS = {
     "awaiting_user_input": "needs your input",
     "merge_blocked": "merge blocked",
-    "completed": "done",
+    "script_blocked": "script blocked",
+    "change_merged": "done",
+    "change_abandoned": "abandoned",
+    "workflow_paused": "paused",
+    "workflow_resumed": "resumed",
+    "error": "error",
 }
 
 _API_BASE = "https://api.telegram.org"
@@ -54,12 +62,48 @@ def clamp_text(text: str) -> str:
     return text[:keep] + _TRUNCATION_MARKER
 
 
-def curate(event_type: Any) -> str | None:
-    """Classify an imp event type: 'loud' (notify), 'silent' (quiet narrative),
-    or None (dropped). Anything not loud/silent is dropped, including tool_call,
-    tool_result, thinking, step_context and workflow_paused."""
-    if event_type in _LOUD:
-        return "loud"
+def format_time_of_day(iso: str) -> str:
+    """Event's UTC timestamp as lower-case am/pm in daemon-local time (its original send time)."""
+    dt = datetime.fromisoformat(iso).astimezone()
+    hour = dt.hour % 12 or 12
+    suffix = "am" if dt.hour < 12 else "pm"
+    return f"{hour}:{dt.minute:02d}{suffix}"
+
+
+def step_divider(event: Mapping[str, Any]) -> str | None:
+    """Header-less divider for a step_started event; None when quiet or label empty."""
+    payload = event.get("payload") or {}
+    if payload.get("quiet"):
+        return None
+    label = str(payload.get("label") or "").strip()
+    if not label:
+        return None
+    phase = str(payload.get("phase_label") or "").strip()
+    inner = f"{phase} › {label}" if phase else label
+    return f"— {inner} —"
+
+
+def header_line(event: Mapping[str, Any]) -> str:
+    """The per-message header 'id · name · time'; time is the event's own send time."""
+    change = event.get("change") or {}
+    cid = str(change.get("id") or "")
+    name = change.get("title") or cid or "imp"
+    ts = event.get("timestamp")
+    when = format_time_of_day(ts) if ts else ""
+    return f"{cid} · {name} · {when}"
+
+
+def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
+    """Classify an event into a delivery tier: 'buzz' (notify), 'silent' (quiet
+    stream), or None (dropped). Buzz = input prompts + status transitions; silent =
+    narrative / notices / step dividers; everything else (tool plumbing) drops. The
+    one payload-aware case: a nonterminal interrupt 'error' is dropped to match the
+    summary builder — only terminal errors buzz."""
+    if event_type == "error":
+        from imp.cli.render_summary import _is_nonterminal_error
+        return None if _is_nonterminal_error(dict(payload)) else "buzz"
+    if event_type in _BUZZ:
+        return "buzz"
     if event_type in _SILENT:
         return "silent"
     return None

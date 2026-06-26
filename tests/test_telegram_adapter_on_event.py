@@ -1,26 +1,34 @@
 from __future__ import annotations
 
-from imp.remote.daemon.focus import Focus
+from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.daemon.telegram_adapter import Inbound, TelegramNorthAdapter
 
 CHANGE_ID = "aabbcc"
 OTHER_CHANGE_ID = "zzxxww"
+TS = "2026-06-25T14:32:05+00:00"
 
 LOUD_EVENT = {
-    "type": "awaiting_user_input",
+    "id": "L1", "type": "awaiting_user_input", "timestamp": TS,
     "payload": {"prompt": "Need your call"},
     "change": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 SILENT_EVENT = {
-    "type": "agent_output",
+    "id": "S1", "type": "agent_output", "timestamp": TS,
     "payload": {"text": "working on it"},
     "change": {"id": CHANGE_ID, "title": "My change"},
 }
 
 
+def _subs(*change_ids: str) -> Subscriptions:
+    subs = Subscriptions()
+    for cid in change_ids:
+        subs.add(cid)
+    return subs
+
+
 def _adapter(
-    sent: list, *, message_id: int | None = 42, focus: Focus | None = None
+    sent: list, *, message_id: int | None = 42, subscriptions: Subscriptions | None = None
 ) -> TelegramNorthAdapter:
     def send(text: str, silent: bool) -> int | None:
         sent.append((text, silent))
@@ -29,24 +37,7 @@ def _adapter(
     return TelegramNorthAdapter(
         chat_id=4242, submit=lambda _: None,
         send=send, get_updates=lambda _: {"result": []},
-        focus=focus if focus is not None else Focus())
-
-
-def _make_adapter(focus: Focus) -> tuple[TelegramNorthAdapter, list[tuple[str, bool]]]:
-    sent: list[tuple[str, bool]] = []
-
-    def fake_send(text: str, silent: bool) -> int | None:
-        sent.append((text, silent))
-        return 42
-
-    adapter = TelegramNorthAdapter(
-        chat_id=1234,
-        submit=lambda _: None,
-        send=fake_send,
-        get_updates=lambda _: {},
-        focus=focus,
-    )
-    return adapter, sent
+        subscriptions=subscriptions if subscriptions is not None else _subs("k3f9qa"))
 
 
 def test_on_event_sends_a_message_carrying_the_handle() -> None:
@@ -55,6 +46,7 @@ def test_on_event_sends_a_message_carrying_the_handle() -> None:
     adapter.on_event(LOUD_EVENT)
     assert len(sent) == 1
     text, silent = sent[0]
+    assert text.startswith("k3f9qa · Dark mode · ")
     assert "k3f9qa" in text and "Need your call" in text
     assert silent is False
 
@@ -75,11 +67,9 @@ def test_on_event_records_handle_mapping_for_the_at_fallback() -> None:
 
 def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     sent: list = []
-    focus = Focus()
-    focus.focus_on("k3f9qa")
-    adapter = _adapter(sent, focus=focus)
-    adapter.on_event({"type": "llm_response", "payload": {},
-                      "change": {"id": "k3f9qa", "title": "X"}})
+    adapter = _adapter(sent)
+    adapter.on_event({"id": "x", "type": "llm_response", "timestamp": TS,
+                      "payload": {}, "change": {"id": "k3f9qa", "title": "X"}})
     assert sent == []
 
 
@@ -90,28 +80,21 @@ def test_on_event_records_handle_map_even_when_send_returns_none() -> None:
     assert adapter.resolve(reply) == ("k3f9qa", "go")
 
 
-def test_silent_unfocused_event_populates_handle_map_without_sending() -> None:
-    """A silent event for a change that isn't focused should still register the
-    handle→change_id mapping so the user can address it with @handle later."""
-    focus = Focus()
-    focus.focus_on(OTHER_CHANGE_ID)
-    adapter, sent = _make_adapter(focus)
-
+def test_unsubscribed_event_is_dropped_and_records_no_maps() -> None:
+    adapter = _adapter([], subscriptions=Subscriptions())
     adapter.on_event(SILENT_EVENT)
-
-    assert adapter._handle_to_change.get("aabbcc") == CHANGE_ID
-    assert sent == []
+    assert adapter._handle_to_change == {}
     assert adapter._msg_to_change == {}
 
 
 def _narration(text: str) -> dict:
-    return {"type": "llm_response",
+    return {"id": "n1", "type": "llm_response", "timestamp": TS,
             "change": {"id": "k3f9qa", "title": "t"},
             "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
 
 
 def _prompt_less_await() -> dict:
-    return {"type": "awaiting_user_input",
+    return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
             "change": {"id": "k3f9qa", "title": "t"},
             "payload": {"prompt": ""}}
 
@@ -142,3 +125,46 @@ def test_consecutive_prompt_less_awaits_reuse_last_narration() -> None:
     loud = [text for text, silent in sent if not silent]
     assert len(loud) == 2
     assert all("Proceed with the merge?" in text for text in loud)
+
+
+def _step_started(
+    change_id: str, *, phase: str | None = None, label: str = "scoping",
+    quiet: bool = False,
+) -> dict:
+    payload: dict = {"label": label}
+    if phase is not None:
+        payload["phase_label"] = phase
+    if quiet:
+        payload["quiet"] = True
+    return {"id": "st1", "type": "step_started", "timestamp": TS,
+            "change": {"id": change_id, "title": "t"}, "payload": payload}
+
+
+def test_step_started_renders_silent_header_less_divider_when_subscribed() -> None:
+    sent: list = []
+    _adapter(sent, subscriptions=_subs("k3f9qa")).on_event(
+        _step_started("k3f9qa", phase="Brainstorm", label="scoping"))
+    assert sent == [("— Brainstorm › scoping —", True)]
+
+
+def test_step_started_divider_dropped_when_unsubscribed() -> None:
+    sent: list = []
+    _adapter(sent, subscriptions=Subscriptions()).on_event(_step_started("k3f9qa"))
+    assert sent == []
+
+
+def test_quiet_step_started_renders_no_divider() -> None:
+    sent: list = []
+    _adapter(sent, subscriptions=_subs("k3f9qa")).on_event(
+        _step_started("k3f9qa", quiet=True))
+    assert sent == []
+
+
+def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
+    sent: list = []
+    adapter = _adapter(sent, subscriptions=_subs("k3f9qa", "other"))
+    adapter.on_event(_narration("A's secret context"))   # narration for k3f9qa
+    adapter.on_event({"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
+                      "change": {"id": "other", "title": "t"}, "payload": {"prompt": ""}})
+    loud = [text for text, silent in sent if not silent]
+    assert loud and all("A's secret context" not in text for text in loud)

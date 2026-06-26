@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 def socket_path(control_root: Path) -> Path:
@@ -74,3 +75,21 @@ def socket_is_live(path: Path | str) -> bool:
     finally:
         probe.close()
     return True
+
+
+def full_history(control_root: Path, change_id: str) -> list[dict[str, Any]]:
+    """Complete events.jsonl as raw, ordered augmented events; empty when the id is unknown."""
+    from imp.cli.main import _load_events_for_id
+    from imp.remote.curate import EventCurator
+    events = _load_events_for_id(control_root, change_id)
+    if events is None:
+        return []
+    snap = snapshot(control_root, change_id)
+    title = snap[2] if snap is not None else ""
+    curator = EventCurator(id=change_id, title=title, events=("all",))
+    out: list[dict[str, Any]] = []
+    for event in events:
+        augmented = curator.curate(event)
+        if augmented is not None:
+            out.append(augmented)
+    return out

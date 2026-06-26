@@ -41,10 +41,14 @@ from imp.remote.daemon.commands import (
 )
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import socket_is_live, socket_path
-from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.daemon.server import SouthHub
-from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
+from imp.remote.daemon.subscriptions import Subscriptions
+from imp.remote.daemon.telegram_adapter import (
+    TelegramNorthAdapter,
+    format_replay_event,
+    handle_for,
+)
 from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.save import save_change as _save_change
 
@@ -151,10 +155,21 @@ def check_not_running(control_root: Path) -> None:
 
 
 def _make_telegram_adapter(
-    env: Mapping[str, str], submit: Callable[[Command], None], focus: Focus,
+    env: Mapping[str, str], submit: Callable[[Command], None],
+    subscriptions: Subscriptions,
 ) -> TelegramNorthAdapter:
     """Default north adapter — Telegram, refusing without an allowlist."""
-    return TelegramNorthAdapter.from_env(dict(env), submit, focus=focus)
+    return TelegramNorthAdapter.from_env(dict(env), submit, subscriptions=subscriptions)
+
+
+def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]:
+    """Auto-subscribe a freshly attached Change whose hello set autosubscribe (spec
+    §6). Membership only — a freshly attached Change has no prior history. No
+    on_detach hook: a detach is process churn, not an intent to stop following."""
+    def on_attach(change_id: str, autosubscribe: bool) -> None:
+        if autosubscribe:
+            subscriptions.add(change_id)
+    return on_attach
 
 
 _WORKER_GAP = 1.0
@@ -232,17 +247,6 @@ def _sender_worker(
         _log.warning("final response drain failed during shutdown", exc_info=True)
 
 
-def _catchup_text(
-    handle: str, snap: tuple[str, str, str] | None, bodies: list[str],
-) -> str:
-    if snap is not None:
-        status, step, title = snap
-        header = f"@{handle}  {title} — {status} · {step}"
-    else:
-        header = f"@{handle}"
-    last = bodies[-1] if bodies else ""
-    return f"{header}\n{last}" if last else header
-
 
 async def _handle_command(
     command: Command, control: ControlPlane, responses: queue.Queue[Response],
@@ -254,20 +258,26 @@ async def _handle_command(
             responses.put(Notice(
                 f"no such change `{command.change_id}` — unknown or pruned"))
             return
-        control.focus.focus_on(command.change_id)
     elif isinstance(command, Subscribe):
-        control.focus.focus_on(command.change_id)
         handle = handle_for(command.change_id)
-        snap = await anyio.to_thread.run_sync(control.snapshot, command.change_id)
-        bodies = await anyio.to_thread.run_sync(
-            control.recent_narrative, command.change_id, 1)
-        responses.put(Notice(_catchup_text(handle, snap, bodies)))
+        if await anyio.to_thread.run_sync(control.snapshot, command.change_id) is None:
+            responses.put(Notice(
+                f"No Change @{handle} — send /show to see what's running."))
+            return
+        events = await anyio.to_thread.run_sync(
+            control.subscriptions.snapshot_and_add,
+            command.change_id,
+            lambda: control.full_history(command.change_id))
+        for event in events:
+            text = format_replay_event(event)
+            if text is not None:
+                responses.put(Notice(text))
         responses.put(Notice(f"Following @{handle}."))
     elif isinstance(command, Unsubscribe):
-        control.focus.clear()
-        responses.put(Notice("Muted — lifecycle alerts still on."))
+        control.subscriptions.remove(command.change_id)
+        responses.put(Notice(f"Unfollowed @{handle_for(command.change_id)}."))
     elif isinstance(command, Replay):
-        change_id = command.change_id or control.focus.current()
+        change_id = command.change_id
         if change_id is None:
             responses.put(Notice(ROUTE_HINT))
         else:
@@ -311,7 +321,7 @@ async def _handle_command(
         message = await anyio.to_thread.run_sync(control.resume, command.token)
         responses.put(Notice(message))
     elif isinstance(command, Save):
-        change_id = command.change_id or control.focus.current()
+        change_id = command.change_id
         if change_id is None:
             responses.put(Notice(SAVE_USAGE))
         else:
@@ -374,7 +384,7 @@ async def run_daemon(
     *,
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
-        [Mapping[str, str], Callable[[Command], None], Focus],
+        [Mapping[str, str], Callable[[Command], None], Subscriptions],
         Any,
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[None]] | None = None,
@@ -403,10 +413,13 @@ async def run_daemon(
     inbound: queue.Queue[Command] = queue.Queue()
     responses: queue.Queue[Response] = queue.Queue()
     stop = threading.Event()
-    focus = Focus()
+    subscriptions = Subscriptions()
 
     # on_event is a no-op: events now arrive via the supervisor's directory pull.
-    hub = SouthHub(str(spath), on_event=lambda cid, line: None)
+    # on_attach auto-subscribes a Change whose hello set autosubscribe (spec §6).
+    hub = SouthHub(
+        str(spath), on_event=lambda cid, line: None,
+        on_attach=_make_on_attach(subscriptions))
     supervisor = RelaySupervisor(
         control_root=control_root,
         sink=lambda event: outbound.put(event),
@@ -415,12 +428,13 @@ async def run_daemon(
     control = ControlPlane(
         deliver=deliver, create=create,
         abandon=abandon, list_changes=list_changes,
-        focus=focus,
+        subscriptions=subscriptions,
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n),
-        search=search, resume=resume, save=save)
-    adapter = make_adapter(env, inbound.put, focus)
+        search=search, resume=resume, save=save,
+        full_history=lambda cid: discover.full_history(control_root, cid))
+    adapter = make_adapter(env, inbound.put, subscriptions)
 
     log_handlers = _install_file_logging(control_root, env)
     _log.info("remote-control daemon starting (control_root=%s)", control_root)

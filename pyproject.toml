@@ -75,9 +75,9 @@ extend-exclude = ["spikes", "docs/superpowers/spikes"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-# ❯ (U+276F) is the intentional prompt caret (palette.CARET); it reads as a
-# confusable for '>' but is a deliberate UI glyph, so don't flag it (RUF001-003).
-allowed-confusables = ["❯"]
+# ❯ (U+276F) is the intentional prompt caret (palette.CARET) and › (U+203A) is the
+# phase/step divider glyph; both read as confusables but are deliberate UI glyphs (RUF001-003).
+allowed-confusables = ["❯", "›"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["imp", "impty"]
