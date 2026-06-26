@@ -870,3 +870,47 @@ async def test_discard_is_delivered_even_when_the_control_queue_is_full() -> Non
         server._serve_scope = tg.cancel_scope
         tg.start_soon(server._control_loop)
     assert server.discarded is True
+
+
+@pytest.mark.anyio
+async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+    received: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        received.append(await user_chat_input_fn(""))   # exchange 1
+        received.append(await user_chat_input_fn(""))   # exchange 2 (follow-up)
+        return "completed"                              # control returns only now
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let run_fn reach the first gate (open next_input)
+        await client.send((encode_input("answer one") + "\n").encode())
+        with anyio.fail_after(5):
+            while len(received) < 1:
+                await anyio.sleep(0.02)
+        # The run is blocked on the SECOND gate: serve() has NOT returned between
+        # exchanges (the AC7 invariant).
+        assert "r" not in result
+        await client.send((encode_input("answer two") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert received == ["answer one", "answer two"]
+        assert result["r"] == "completed"   # control returns to the shell at completion
+        await client.aclose()
+        tg.cancel_scope.cancel()
