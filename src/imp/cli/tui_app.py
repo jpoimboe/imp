@@ -298,6 +298,9 @@ class TuiApp:
     def _resolve_prompt(self, value: str) -> None:
         fut = self._prompt_future
         if fut is not None and not fut.done():
+            # Seed before resolving: solicit's finally hides the box on
+            # resolution, so the committed node must already be in the narrative.
+            self._driver.seed_pending_reply(value)
             fut.set_result(value)
 
     def _accept(self, buffer: Any) -> bool:
