@@ -46,3 +46,8 @@ def test_wait_for_user_not_a_registered_tool(provider):
 def test_wait_for_user_absent_when_not_declared(provider):
     tools = provider._build_tools(_Inv(["complete_step"]))
     assert "wait_for_user" not in tools
+
+
+def test_make_wait_for_user_tool_no_longer_exists():
+    import imp.agents.tools.wait_for_user as wfu
+    assert not hasattr(wfu, "make_wait_for_user_tool")
