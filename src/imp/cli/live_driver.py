@@ -74,13 +74,13 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
 def _toolbar_step_segment(activity: nv.Activity, *, color: bool, over_bg: bool) -> str | None:
     parts: list[str] = []
     if activity.step_label:
-        parts.append(_paint(activity.step_label, "step", color=color, over_bg=over_bg))
+        parts.append(_paint(activity.step_label, "wordmark", color=color, over_bg=over_bg))
     if activity.count is not None:
-        parts.append(activity.count)
+        parts.append(_paint(activity.count, "gray", color=color, over_bg=over_bg))
         if activity.detail:
             parts.append(_paint(activity.detail, "gray", color=color, over_bg=over_bg))
     elif activity.label:
-        parts.append(activity.label)
+        parts.append(_paint(activity.label, "gray", color=color, over_bg=over_bg))
     return rt.compose_label(parts) or None
 
 
@@ -96,11 +96,13 @@ def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
     spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=over)
-    id_seg = _paint(change_id, "gray", color=color, over_bg=over) if change_id else None
+    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
     title_seg = title if title else None
     model_seg = (_paint(activity.model, "magenta", color=color, over_bg=over)
                  if activity.model else None)
-    phase_seg = (_paint(activity.phase_label, "blue", color=color, over_bg=over)
+    phase_seg = (_paint(activity.phase_label,
+                        "blue" if activity.step_label else "wordmark",
+                        color=color, over_bg=over)
                  if activity.phase_label else None)
     step_seg = _toolbar_step_segment(activity, color=color, over_bg=over)
     elapsed_seg = _paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over)

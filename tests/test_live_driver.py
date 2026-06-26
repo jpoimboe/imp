@@ -1834,10 +1834,38 @@ def test_compose_toolbar_paints_field_accents_under_ansi_theme() -> None:
     line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
                            title="streaming toolbar", prompt_tokens=26000,
                            elapsed=5.0, frame=0, color=True, width=80)
-    assert "\x1b[90m" in line          # change id gray (also the detail track)
+    assert "\x1b[33m" in line          # wordmark: spinner, change id, active step label
+    assert "\x1b[90m" in line          # gray: call-count phrase + context-bar track
+    assert "\x1b[34m" in line          # blue: phase (a step is present)
     assert "\x1b[35m" in line          # model magenta
-    assert "\x1b[34m" in line          # phase blue (and step `step` blue)
     assert "\x1b[2m" in line           # elapsed dim
+
+
+def test_compose_toolbar_change_id_and_active_label_are_orange() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                           title="streaming toolbar", prompt_tokens=26000,
+                           elapsed=5.0, frame=0, color=True, width=80)
+    assert "\x1b[33mz9gixx\x1b[0m" in line          # id painted wordmark (was gray)
+    assert "\x1b[33mtask-lead\x1b[0m" in line        # active step label wordmark (was step-blue)
+    assert "\x1b[34mimplement\x1b[0m" in line        # phase stays blue when a step is present
+
+
+def test_compose_toolbar_tool_detail_counts_recede_gray() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
+                           title="t", prompt_tokens=26000,
+                           elapsed=5.0, frame=0, color=True, width=80)
+    assert "\x1b[90m2 calls\x1b[0m" in line          # call-count phrase recedes gray
+    assert "\x1b[90mbash ls\x1b[0m" in line          # tool name/arg detail stays gray
+
+
+def test_compose_toolbar_phase_is_orange_when_no_step_label() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    act = nv.Activity(phase_label="implement", model="claude-sonnet-4-5")  # no step_label
+    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
+                           prompt_tokens=26000, elapsed=5.0, frame=0, color=True, width=80)
+    assert "\x1b[33mimplement\x1b[0m" in line        # most-specific active label (phase) is orange
 
 
 def test_compose_toolbar_wears_user_slate_background_under_dark_theme() -> None:
@@ -1876,6 +1904,16 @@ def test_compose_toolbar_step_segment_uses_label_when_no_count() -> None:
                            prompt_tokens=26000, elapsed=5.0, frame=0, color=False, width=80)
     assert "task-lead" in line          # step label still present
     assert "reviewing plan" in line     # fallback label used when count is None
+
+
+def test_compose_toolbar_label_fallback_recedes_gray() -> None:
+    from imp.cli.live_driver import compose_toolbar
+    act = nv.Activity(step_label="task-lead", label="reviewing plan",
+                      model="claude-sonnet-4-5")  # label fallback, no count
+    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
+                           prompt_tokens=26000, elapsed=5.0, frame=0,
+                           color=True, width=80)
+    assert "\x1b[90mreviewing plan\x1b[0m" in line   # label fallback recedes gray
 
 
 def test_compose_activity_status_now_includes_change_id_and_title() -> None:
