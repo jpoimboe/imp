@@ -29,7 +29,10 @@ Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
 
 1. Glob `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`, sort numerically, and read the
    highest-N file — that is the plan under review.
-2. Read the spec.
+2. Read the spec, **including its `## Plan outline`** (the coarse decomposition that
+   assigns *what* each plan covers). The current plan implements the outline slice for
+   `plan {{ vars.plan_index }}` of `{{ vars.plan_total }}`. (On an express/fast-path
+   change there is no `## Plan outline` — skip this reference; the spec is the scope.)
 3. If you need to confirm the plan reflects a decision from brainstorm or spec
    review, use `query_events`.
 
@@ -65,8 +68,12 @@ incomplete implementations:
   other plans.
 - **No placeholders** — no TBD/TODO, no "add error handling / validation / tests"
   without the code, no "similar to Task N" shortcut standing in for real code.
-- **Scope** — the plan stays within the spec; no unrequested feature or
-  over-engineering.
+- **Scope (against the assigned outline slice)** — the plan faithfully implements its
+  assigned `## Plan outline` slice: no **drift** into scope the slice does not own, and
+  no **silent skip** of scope the slice does cover. Don't flag a requirement as missing
+  just because it belongs to *another* outline slice — that is another plan's job. When
+  there is no outline (express), fall back to "the plan stays within the spec; no
+  unrequested feature or over-engineering."
 
 ## The Decisions section
 

@@ -358,7 +358,7 @@ def test_imp_flat_spec_finalizer_authors_plan_outline() -> None:
     low = text.lower()
     assert "## Plan outline" in text
     assert "what" in low and "not the how" in low
-    assert "5–8" in text                 # the greedy ~5–8 tasks/plan grain
+    assert "5\u20138" in text                 # the greedy ~5-8 tasks/plan grain
     assert "source of truth" in low
     assert "plan count" in low or "plan_total" in low
 
@@ -385,3 +385,14 @@ def test_imp_flat_plan_writer_consumes_outline_with_express_carveout() -> None:
     # NOT assert "plan-cycle-check" absent — only these two live references.
     assert "deferred-sweep" not in low          # the load-bearing note refreshed (edit d)
     assert "outline-driven plan loop" in low    # the supercycle sentence refreshed (edit c)
+
+
+def test_imp_flat_plan_reviewer_uses_outline_for_scope() -> None:
+    text = _read_agent("plan-reviewer.md")
+    low = text.lower()
+    assert "## Plan outline" in text
+    assert "outline slice" in low or "assigned outline" in low
+    assert "drift" in low         # bold-surviving: prose is "no **drift** into scope"
+    assert "silent skip" in low or "silently skip" in low
+    # The primary diff-review remit is still present (no remit removed).
+    assert "like a diff" in low
