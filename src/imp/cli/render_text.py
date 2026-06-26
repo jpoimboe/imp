@@ -670,7 +670,16 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                         *pal.NODE_COLORS["error"], gutters=gutters)
             is_script = node.category == "script"
             if (full or is_script) and node.detail and node.detail not in node.message:
-                yield from _wrap(_caret_escape(node.detail), width, depth + 1, color,
+                detail = node.detail
+                if is_script and not full:
+                    lines = detail.split("\n")
+                    if len(lines) > _SCRIPT_DETAIL_TAIL_LINES:
+                        hidden = len(lines) - _SCRIPT_DETAIL_TAIL_LINES
+                        yield _line(f"… ({hidden} earlier lines — imp log --full)",
+                                    depth + 1, color, *pal.NODE_COLORS["metadata"],
+                                    gutters=gutters)
+                        detail = "\n".join(lines[-_SCRIPT_DETAIL_TAIL_LINES:])
+                yield from _wrap(_caret_escape(detail), width, depth + 1, color,
                                  *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
@@ -723,6 +732,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 _ARG_VALUE_CLIP = 120        # §2: per-arg-value clip on the --full args line
 _OUTPUT_LINE_CLIP = 400      # §2: per-source-line clip in the --full output block
 _OUTPUT_MAX_LINES = 10       # §2: source lines shown before the "+N more" tail
+_SCRIPT_DETAIL_TAIL_LINES = 15   # lean view: last N lines of a blocked-script detail
 
 
 def _call_args_line(c: nv.ToolCall) -> str:
