@@ -23,6 +23,16 @@ class TuiDriver:
         if self._on_invalidate is not None:
             self._on_invalidate()
 
+    def seed_opening_intent(self, text: str) -> None:
+        self._builder.seed_opening_intent(text)
+        if self._on_invalidate is not None:
+            self._on_invalidate()
+
+    def seed_pending_reply(self, text: str) -> None:
+        self._builder.seed_pending_reply(text)
+        if self._on_invalidate is not None:
+            self._on_invalidate()
+
     def render(self, *, full: bool) -> str:
         return "\n".join(rt.render_tree(
             self._builder.tree, full=full, color=self._color, width=self._width,

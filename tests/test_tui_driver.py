@@ -64,6 +64,22 @@ def test_status_text_present_during_activity() -> None:
 
 
 
+def test_seed_opening_intent_shows_in_render_and_invalidates() -> None:
+    calls: list[int] = []
+    drv = _drv(on_invalidate=lambda: calls.append(1))
+    drv.seed_opening_intent("add a --json flag")
+    assert "add a --json flag" in drv.render(full=False)
+    assert calls == [1]
+
+
+def test_seed_pending_reply_shows_in_render_and_invalidates() -> None:
+    calls: list[int] = []
+    drv = _drv(on_invalidate=lambda: calls.append(1))
+    drv.seed_pending_reply("ship it")
+    assert "ship it" in drv.render(full=False)
+    assert calls == [1]
+
+
 def test_render_full_suppresses_system_prompt_in_live_viewer() -> None:
     drv = _drv()
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
