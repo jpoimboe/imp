@@ -272,7 +272,7 @@ def _emit_paused_summary(change: Change) -> None:
 def _emit_merge_blocked(
     change: Change, reason: str | None, detail: str | None = None,
 ) -> None:
-    """Merge couldn't complete — the user must act: yellow, ⚠.
+    """Merge couldn't complete — the user must act: wordmark, ⚠.
 
     `detail` is git's own stderr (carried on the `merge_blocked` event). The
     `refused` and `conflict` reasons are neutral buckets — REFUSED alone covers
@@ -298,7 +298,7 @@ def _emit_merge_blocked(
         msg = f"Change {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
     if detail and reason in ("refused", "conflict"):
         msg = f"{msg}\ngit said: {detail.strip()}"
-    print(ansi(f"{mark}{msg}", "yellow", enabled=color))
+    print(ansi(f"{mark}{msg}", "wordmark", enabled=color))
 
 
 def _emit_script_blocked(step: str, stderr: str) -> None:
@@ -306,7 +306,7 @@ def _emit_script_blocked(step: str, stderr: str) -> None:
     Print its stderr so the recovery text reaches the user."""
     color = should_use_color(sys.stdout)
     mark = "⚠ " if color else ""
-    print(ansi(f"{mark}{step} paused:\n{stderr.strip()}", "yellow", enabled=color))
+    print(ansi(f"{mark}{step} paused:\n{stderr.strip()}", "wordmark", enabled=color))
 
 
 def _last_script_blocked(
