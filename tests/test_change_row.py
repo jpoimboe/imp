@@ -171,6 +171,19 @@ def test_status_word_never_truncated_only_label_is():
     assert "resolving deferred items" not in line  # full label did not fit
 
 
+def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
+    from imp.cli import palette as pal
+    try:
+        pal.set_theme("dark")
+        line = format_change_line(**_row(status="merge_blocked", step="x"), color=True)
+    finally:
+        pal.set_theme("ansi")
+    wordmark = pal.theme_escapes("dark")["wordmark"]   # \x1b[38;2;255;154;60m
+    yellow = pal.theme_escapes("dark")["yellow"]        # \x1b[38;2;199;151;106m
+    assert wordmark + "merge_blocked" in line           # status word painted wordmark
+    assert yellow not in line                           # not the muted yellow role
+
+
 def test_intent_fallback_for_empty_title():
     line = format_change_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=False)

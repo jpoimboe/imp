@@ -39,7 +39,7 @@ STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "merged": ("green",),
     "new": ("cyan",),
     "paused": ("cyan",),
-    "merge_blocked": ("yellow",),
+    "merge_blocked": ("wordmark",),
     "draft": ("dim",),
     "backlog": ("dim",),
     "idea": ("dim",),
