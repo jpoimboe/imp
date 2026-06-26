@@ -284,3 +284,46 @@ def test_imp_flat_coder_terminal_contract_no_report_back() -> None:
     text = _read_agent("coder.md")
     assert "complete_step" in text
     assert "report back" not in text.lower()
+
+
+def test_imp_flat_code_reviewer_absorbs_dropped_checks() -> None:
+    low = _read_agent("code-reviewer.md").lower()
+    assert "naming" in low and "clarity" in low
+    assert "magic number" in low
+    assert "yagni" in low
+    assert "dead code" in low
+    assert "defensive" in low
+    assert "speculative abstraction" in low
+    assert "file structure" in low
+    assert "independently" in low          # decomposable/testable independently
+    assert "file size" in low or "significantly grow" in low
+
+
+def test_imp_flat_code_reviewer_routes_to_coder_not_task_lead() -> None:
+    text = _read_agent("code-reviewer.md")
+    low = text.lower()
+    assert "task-lead" not in low
+    assert "deferred-sweep" not in low
+    assert "plan-cycle-check" not in low
+    assert "best-effort sweep" not in low   # the dropped sweep is not referenced anywhere
+    # task_gap routes the fix back to the coder
+    assert "coder" in low
+    assert "task_gap" in low
+
+
+def test_imp_flat_code_reviewer_resolves_deferred_in_loop_or_needs_decision() -> None:
+    text = _read_agent("code-reviewer.md")
+    low = text.lower()
+    assert "— needs-decision:" in text
+    assert "in-loop" in low or "in the loop" in low
+    # It is the sole reviewer; gap-check (not the reviewer) owns coverage.
+    assert "gap-check" in low
+    assert "name: code-reviewer" in text
+
+
+def test_imp_flat_code_reviewer_keeps_severity_partial_and_no_preamble_clean() -> None:
+    text = _read_agent("code-reviewer.md")
+    assert '{% include "partials/severity.md" %}' in text
+    low = text.lower()
+    for banned in ("no preamble", "output only the tool", "go straight to the tool"):
+        assert banned not in low
