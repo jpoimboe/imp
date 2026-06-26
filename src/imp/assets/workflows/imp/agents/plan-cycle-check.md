@@ -71,6 +71,14 @@ alongside plan 1 (`plan_index == 1`); from your first lap onward you refine and 
 so the rendered `plan N/total` position is never dishonest. Emit your honest anticipated
 number of plans for the whole spec, already clamped:
 
+**Project the total under the same greedy bundling `plan-writer` carves.** Re-derive
+the still-uncovered scope (the backstop derivation you already perform), mentally
+bundle it into the **largest** green-preserving ~5–8-task plans — splitting only at
+genuine dependency boundaries, deferring only forced-atomic remainders — and count
+the resulting plans. This keeps estimator and carver aligned so they do not drift to
+different assumed sizes; it adds no new inputs or tool calls. The clamp rules below
+are unchanged:
+
 - `plan_total` MUST be `>= {{ vars.plan_index }}` (the current plan number).
 - When `more_plans` is **true** (another plan follows), `plan_total` MUST be
   **strictly greater** than `{{ vars.plan_index }}` — at least `{{ vars.plan_index }} + 1` —

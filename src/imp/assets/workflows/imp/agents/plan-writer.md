@@ -249,14 +249,48 @@ unit — not a step dressed up as a task.
 
 ## Plan sizing
 
-Aim for **~5–8 tasks per plan**, split at **natural dependency boundaries**.
-When the spec is larger than that, do **not** cram it into one giant plan: emit the
-first coherent chunk — a runnable, independently-reviewable slice — and rely on the
-existing `plan-cycle-check` **supercycle** to author the remaining plans. There is no
-new control flow to add; `plan-cycle-check` is the sole coverage guard and loops back
-to you for the next plan. Size in **tasks**, not lines of code. A generous hard
-ceiling (~12 **task headings**) is enforced by `plan-commit-verify.sh` and sits well
-above this target, so treat ~5–8 as the working aim, not the limit.
+Aim for **~5–8 tasks per plan** — a target to **fill up toward**, not merely an
+upper bound. ~5–8 is a working **floor** as much as an aim: under-filling it is a
+defect, not a tidy habit. It is explicitly distinct from the ~12-**task-heading**
+hard ceiling below — a floor to reach, not just a ceiling to stay under. Split
+only at **natural dependency boundaries**.
+
+When the spec is larger than ~5–8 tasks, do **not** cram it into one giant plan —
+and do **not** carve off the smallest separable sliver either. Each lap, assemble
+the **largest** green-preserving bundle of all currently-available independent
+slices, filling up toward ~5–8, splitting only at genuine dependency boundaries —
+never by file family, layer, or convenience. Then **defer only the genuinely
+forced-atomic remainder**: when one piece is truly un-splittable, defer *that
+piece* to a later lap; do not let it fragment the independent slices around it
+into one- and two-task plans. Rely on the existing `plan-cycle-check`
+**supercycle** to author the remaining plans — there is no new control flow to
+add; `plan-cycle-check` is the sole coverage guard and loops back to you for the
+next plan.
+
+**Two carve anti-patterns to avoid:**
+
+- **File-family split.** Independent same-posture slices separated only by which
+  **file family** they touch belong in **one** plan. When the sole ordering
+  constraint is a tree-wide guard (e.g. a grep-zero check that needs every file
+  swept first), make that guard the **capstone task** of the single bundled plan
+  rather than a reason to split into several.
+- **Shared deferral target.** Several slices that are each independently
+  green-preserving and each defer to the *same* entangled remainder, but none of
+  which reads or writes another's edit, are **one** plan, not several:
+  independent slices that merely share a deferral target are not dependent on
+  each other.
+
+**Per-plan review makes under-filling costly.** Under per-plan review, every plan
+with more scope still to come triggers its own full code-review pass, so a
+1–2-task plan spends an entire review on a sliver. Under-filling is actively
+expensive, not just untidy — one more reason to fill up toward the floor.
+
+Size in **tasks**, not lines of code. A generous hard ceiling
+(~12 **task headings**) is enforced by `plan-commit-verify.sh` and sits well
+above this target, so treat ~5–8 as the working aim and floor, not the limit.
+Greedy bundling never overrides the spec's **atomicity hard rule** or merges
+genuinely dependent work: a forced-atomic remainder is always deferred to a later
+lap, never crammed into the current plan.
 
 ## First-run plan_total estimate
 
