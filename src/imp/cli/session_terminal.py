@@ -14,6 +14,7 @@ and the solicit callback, and replaces the in-process run_change call in
 from __future__ import annotations
 
 import contextlib
+import math
 import signal
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -45,7 +46,7 @@ async def run_terminal_client(
     title: TerminalTitle | None = None,
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
-        max_buffer_size=1)
+        max_buffer_size=math.inf)
 
     def _on_event(event: dict[str, Any]) -> None:
         driver.on_event(event)
@@ -84,6 +85,13 @@ async def run_terminal_client(
                         async for prompt in gate_recv:
                             while True:
                                 reply = await solicit(prompt)
+                                # Coalesce re-announce frames: mid-solicit the run is
+                                # blocked on this reply and cannot have opened a new gate.
+                                while True:
+                                    try:
+                                        gate_recv.receive_nowait()
+                                    except anyio.WouldBlock:
+                                        break
                                 if reply.strip() == "/abandon":
                                     if leave_state is not None:
                                         leave_state["intent"] = "abandon"

@@ -1007,3 +1007,70 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             release_archive.set()                     # let the daemon finish
 
     assert archived == [change.id]                    # teardown completed in the daemon
+
+
+@pytest.mark.anyio
+async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    prompts: list[str] = []
+    result: dict[str, Any] = {}
+    captured: dict[str, Any] = {}
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        # The run blocks on ONE real gate here; the duplicate frames are fed
+        # straight through the captured _on_event below, mimicking the emit +
+        # resume re-announce + attach re-broadcast of the same open gate.
+        return await user_chat_input_fn("q1")
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        captured["on_event"] = on_event
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:
+        prompts.append(prompt)
+        return "answer"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _serve() -> None:
+                result["r"] = await server.serve(run_fn)
+
+            tg.start_soon(_serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+
+            # Feed several live (non-_replay) frames for the SAME gate back to
+            # back. With max_buffer_size=1 the second send_nowait raised
+            # anyio.WouldBlock here; without coalescing, solicit fires 3 times.
+            with anyio.fail_after(5):
+                while "on_event" not in captured:
+                    await anyio.sleep(0.02)
+            dup = {"type": "awaiting_user_input", "payload": {"prompt": "q1"}}
+            captured["on_event"](dict(dup))
+            captured["on_event"](dict(dup))
+            captured["on_event"](dict(dup))
+
+    assert prompts == ["q1"]         # exactly one solicit despite three frames
+    assert result["r"] == "answer"   # exactly one reply reached the gate
