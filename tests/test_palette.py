@@ -115,8 +115,8 @@ def test_node_colors_calm_scheme() -> None:
     assert pal.NODE_COLORS["workflow"] == ("bold", "magenta")  # lone bold anchor, unchanged
     # Semantic colors untouched.
     assert pal.NODE_COLORS["error"] == ("bold", "red")
-    assert pal.NODE_COLORS["warning"] == ("yellow",)
-    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
+    assert pal.NODE_COLORS["warning"] == ("wordmark",)
+    assert pal.NODE_COLORS["lifecycle"] == ("wordmark",)
 
 
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
@@ -203,13 +203,14 @@ def test_light_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
 
 
 
-def test_lifecycle_role_is_nonbold_yellow_in_all_themes() -> None:
-    # named role over yellow, non-bold — must resolve identically in all themes.
-    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
+def test_lifecycle_role_is_nonbold_wordmark_in_all_themes() -> None:
+    # lifecycle now references the wordmark warm accent (orange), non-bold — it must
+    # resolve to wordmark's per-theme escape (NOT the muted yellow role) in every theme.
+    assert pal.NODE_COLORS["lifecycle"] == ("wordmark",)
     for theme in ("ansi", "dark", "light"):
         pal.set_theme(theme)
         assert pal.ansi("x", *pal.NODE_COLORS["lifecycle"], enabled=True) == \
-            pal.ansi("x", "yellow", enabled=True)
+            pal.ansi("x", "wordmark", enabled=True)
         assert pal._ANSI["bold"] not in pal.ansi("x", *pal.NODE_COLORS["lifecycle"],
                                                  enabled=True)
 
@@ -255,9 +256,10 @@ def test_yellow_accent_retuned_to_warm_gold_family() -> None:
         assert r > g > b
     # Muted, not the saturated brand: dimmer than the wordmark on the dark surface.
     assert _lum(pal._DARK_RGB["yellow"]) < _lum(pal._DARK_RGB["wordmark"])
-    # Wiring is UNCHANGED: warning + lifecycle still reference the yellow role.
-    assert pal.NODE_COLORS["warning"] == ("yellow",)
-    assert pal.NODE_COLORS["lifecycle"] == ("yellow",)
+    # The yellow RGB role stays DEFINED (it backs the snap-ui mockup + theme maps),
+    # but warning + lifecycle no longer wire to it — they now use the wordmark accent.
+    assert pal.NODE_COLORS["warning"] == ("wordmark",)
+    assert pal.NODE_COLORS["lifecycle"] == ("wordmark",)
 
 
 def test_display_width_ignores_sgr_and_counts_wide_chars() -> None:

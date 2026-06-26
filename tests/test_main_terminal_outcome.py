@@ -56,7 +56,7 @@ def test_non_merge_pause_still_emits_paused_summary() -> None:
     ps.assert_called_once()          # ordinary pauses keep the summary line
 
 
-def test_emit_completed_merge_lines_render_lifecycle_yellow(monkeypatch, capsys) -> None:
+def test_emit_completed_merge_lines_render_lifecycle_wordmark(monkeypatch, capsys) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     for theme in ("ansi", "dark", "light"):
@@ -66,7 +66,7 @@ def test_emit_completed_merge_lines_render_lifecycle_yellow(monkeypatch, capsys)
             out = capsys.readouterr().out
             assert "✓ Merged 2026-06-12-run-x into master." in out
             assert "Change 2026-06-12-run-x: shipped it" in out
-            assert pal.sgr("yellow", enabled=True) in out
+            assert pal.sgr("wordmark", enabled=True) in out
             assert pal._ANSI["green"] not in out
         finally:
             pal.set_theme("ansi")
