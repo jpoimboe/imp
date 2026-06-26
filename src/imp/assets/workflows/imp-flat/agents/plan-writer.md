@@ -160,13 +160,13 @@ default exists: decide the correct call, implement it in the plan, record the
 rationale in `## Decisions`, and — because it crosses a spec scope/AC boundary —
 surface it as **one** `— needs-decision:` open item in `progress.md` (the reader
 form under "Surfacing a decision you cannot resolve", which is load-bearing). Do
-**not** call `wait_for_user` for it. The human ratifies it exactly once, at the
+**not** yield to the human for it. The human ratifies it exactly once, at the
 merge gate, where `finalize` already walks `— needs-decision:` items: that gate
 ratifies at near-zero marginal cost (one batched walk), whereas a mid-planning
 ask spends a second, earlier, blocking interruption — justified only when it
 saves an expensive wrong-guess unwind.
 
-**When to ask — all three must hold** to call `wait_for_user`:
+**When to ask — all three must hold** to yield to the human:
 
 1. the fork is in genuine user *intent* — not facts (facts have a right answer;
    correct them) and not engineering judgment (the reviewer and gate defer to it

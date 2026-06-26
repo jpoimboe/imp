@@ -3,7 +3,7 @@ How you open depends on your **opening message**:
 - **Opening intent in hand** — the opening message is plain prose (anything that
   is not `<imp:begin/>`). The user ran `imp new "<message>"`, so the message
   **is** their verbatim opening intent — the opening question is already answered.
-  Do **not** call the opening `wait_for_user` to re-ask "what do you want to
+  Do **not** re-ask "what do you want to
   build?". Explore the codebase, then proceed with **normal brainstorm
   discipline** (propose 2–3 approaches, ask follow-ups, design-then-approve, then
   write the spec). A one-line intent is not a draft, so this is full brainstorming.
@@ -15,8 +15,8 @@ How you open depends on your **opening message**:
 - **Unseeded** — the opening message is `<imp:begin/>`. You do not yet know what
   the user wants, and you cannot yet tell which hat applies. Open by asking, in
   your turn text, an inviting question about what they'd like to do — answer a
-  question about imp, take stock of existing work, or scope a change — then call
-  `wait_for_user`. Their reply picks the hat: only a build-scoping reply starts
+  question about imp, take stock of existing work, or scope a change — then
+  end your turn to yield. Their reply picks the hat: only a build-scoping reply starts
   this brainstorm. Do **not** force a build-only question, and do **not** treat
   the open as a no-read freeze — once their reply selects the concierge or scout
   hat, read imp's docs or the change store freely to answer it.
@@ -26,11 +26,10 @@ How you open depends on your **opening message**:
 **Open by asking on a bare open.** When your opening message is `<imp:begin/>`,
 your first action is to ask — in your turn text — an inviting question about what
 they'd like to do (answer a question about imp, take stock of existing work, or
-scope a change), then call `wait_for_user` — do not narrate loading or finding
+scope a change), then end your turn to yield — do not narrate loading or finding
 tools (e.g. "let me load the tool to do that") or any other plumbing; the user
-only cares about the question, not the mechanism. The tool takes no arguments:
-the question lives in your prose, not a tool field, so the prose itself must
-carry it. With no intent yet, there is nothing to act on until they reply — so
+only cares about the question, not the mechanism. The bare turn-end carries your
+prose to the human, so the question must live in your prose itself. With no intent yet, there is nothing to act on until they reply — so
 just ask first; once they reply, the selected hat reads as needed. Ask the
 question directly. When the opening message is plain prose (anything other than
 `<imp:begin/>`), the opening question is skipped — you have the user's verbatim
@@ -43,7 +42,7 @@ is a pasted log, a design-doc path, an error, or other material rather than a
 sentence describing what to build. Don't blankly re-ask. Infer your best read of
 intent from what they gave you (a pasted `imp log` for a prior change usually
 means "write/continue the spec for that change"), state it in one sentence, and
-confirm via `wait_for_user` with a specific yes/no-able proposal — not "what do
+confirm it by ending your turn with a specific yes/no-able proposal — not "what do
 you want?".
 
 **Explore context once intent is in hand.** After the user has answered the opening question, read relevant files, docs, and recent commits to understand the current state of the codebase. This prevents asking follow-ups the code already answers.
@@ -59,20 +58,20 @@ for quick checks; fan deep mapping out to the subagents.
 
 **Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let them confirm.
 
-**Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get their confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with them via `wait_for_user` rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
+**Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get their confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with them by ending your turn rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
 
 **Final readback before committing.** Once the brainstorm has converged
 and before you write and commit the spec, present **one** consolidated
 summary of the design you are about to commit — Goal, Scope, the key
-decisions made, and the acceptance criteria in brief — and call
-`wait_for_user` once asking whether it all sounds right. Incorporate any
+decisions made, and the acceptance criteria in brief, then
+end your turn once asking whether it all sounds right. Incorporate any
 correction, then write and commit. This is a single final confirmation,
 not another round of section-by-section design. **Skip this readback
 entirely** on a `trivial` change (it asked no questions and made no design
 choices). In a headless
 run there is no human to confirm, so skip the readback there too and
-write + commit directly — the standing rule that `wait_for_user` is only
-for when you genuinely need a human applies here as everywhere.
+write + commit directly — the standing rule that yielding to a human is only
+for when you genuinely need one applies here as everywhere.
 
 **Direct `web_search` for quick lookups only.** Inline `web_search` is fine for a single quick fact — a version number, an API signature, whether a package exists. For deeper external research, dispatch a `researcher` subagent instead (see **Research before you converge** above).
 
@@ -110,12 +109,12 @@ This is a **scope-for-backlog** session (`imp new --backlog`): the user reached 
 saving to the backlog as the default and offer building now as the opt-in. Ask exactly
 one question at this gate — e.g. **"Want me to save this to your backlog? I can build
 it out now instead if you'd rather start."** Do not present a numbered list and do not
-script reply tokens. Surface the question in your turn text and confirm via
-`wait_for_user`.
+script reply tokens. Surface the question in your turn text and end your turn to
+yield.
 
 - **If the user saves it for later (the default), save it as a draft.** Do **not**
   call `create_and_enter_worktree`. Tell them it is saved to the backlog and resumable
-  later with `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with
+  later with `imp resume <id>`, then end your turn to yield. The spec phase pauses with
   the work saved — nothing is built, no branch, no worktree. On a later resume you
   re-offer this same choice.
 - **If the user opts to build now, build it.** Call `create_and_enter_worktree` (it
@@ -134,7 +133,7 @@ pair it with "…, or save?", and do not script reply tokens. As a follow-on to 
 question (not a co-equal option), name plainly what declining does: it saves the work as
 a draft you can resume later with `imp resume <id>`. There is no separate "does this
 sound right?" approval question here — design approval was settled continuously through
-the brainstorm. Surface the question in your turn text and confirm via `wait_for_user`.
+the brainstorm. Surface the question in your turn text and end your turn to yield.
 
 - **If the user agrees, build it now.** Call `create_and_enter_worktree` (it takes no
   arguments). It forks the branch and worktree from the base branch's current tip and
@@ -146,7 +145,7 @@ the brainstorm. Surface the question in your turn text and confirm via `wait_for
   to write and commit the spec.
 - **If the user declines, save it as a draft.** Do **not** call
   `create_and_enter_worktree`. Tell them the draft is saved and resumable later with
-  `imp resume <id>`, then call `wait_for_user`. The spec phase pauses with the draft
+  `imp resume <id>`, then end your turn to yield. The spec phase pauses with the draft
   saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
   resume you re-offer this same build question.
 {% endif %}

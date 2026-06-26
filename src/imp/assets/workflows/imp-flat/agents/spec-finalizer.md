@@ -46,7 +46,7 @@ re-brainstorm: the design dialogue already happened at the front door.
 This is the standard arrival from the front-door conversation. The draft spec is
 already on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the
 change is already materialized — your job is to **adopt and finalize** it, not to
-re-author it. Skip the opening `wait_for_user`, do not call
+re-author it. Skip the opening question, do not call
 `create_and_enter_worktree`, and do not run the build-or-save gate (the front door
 already handled all of that).
 
@@ -57,9 +57,9 @@ survive the boundary into this step:
 {% if change.cur_base_head and change.cur_base_head != change.orig_base_head %}
 The base branch advanced since the draft started. Re-read the files the draft
 assumed and **reconcile any drift** in this same turn; leave the rest as drafted.
-{% if not run.non_interactive %}Ask, via `wait_for_user`, only where the spec
+{% if not run.non_interactive %}Ask — by ending your turn with the question — only where the spec
 actually conflicts with the now-current code.{% else %}This is a headless run, so
-do **not** call `wait_for_user`: reconcile the drift yourself against current code
+do **not** yield to a human: reconcile the drift yourself against current code
 and proceed (a genuine intent-fork at the "Ask vs. decide" high bar still parks).{% endif %}
 {% else %}
 The base has not moved. **Adopt near-silently**: light edits only, usually no
@@ -176,11 +176,11 @@ imp artifact-commit spec
 complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")
 ```
 
-The rework turn must be tool-terminal: end with `imp artifact-commit spec` then the
-`complete_step(phase="written", …)` call. Do NOT end a rework turn with a bare
-question or trailing prose. Most rework decisions you **decide and record** (see
-"Ask vs. decide" below); escalate via `wait_for_user` only at the high bar that
-section defines.
+A rework turn you resolve ends tool-terminal: `imp artifact-commit spec` then the
+`complete_step(phase="written", …)` call — do not trail off with prose when you are
+done. Most rework decisions you **decide and record** (see
+"Ask vs. decide" below); escalate — by ending your turn with the question to yield
+to the human — only at the high bar that section defines.
 
 ## Ask vs. decide
 
@@ -191,7 +191,7 @@ call, and record it in the spec's **Decisions summary** with the marker
 has no Decisions summary yet gains one the moment a turn actually decides
 something.
 
-**Escalate via `wait_for_user` only when the decision is genuinely the
+**Escalate by ending your turn with the question only when the decision is genuinely the
 user's to make** — a big deal, not a technical detail:
 
 - the fix would change scope, or drop/alter/add a user-stated requirement;
@@ -203,9 +203,9 @@ user's to make** — a big deal, not a technical detail:
 
 Technical choices the spec or codebase can settle never qualify. When you do
 escalate and the user answers, record it with "*(user-confirmed during review)*"
-and treat that change as user-directed. `wait_for_user` mid-turn is an ordinary
-tool call: the reply returns as the tool result and the turn still ends
-tool-terminal with `complete_step`. In a headless run an escalation pauses
+and treat that change as user-directed. To escalate, end your turn with the
+question: the reply returns as your next message, then that follow-up turn ends tool-terminal
+with `complete_step`. In a headless run an escalation pauses
 `AWAITING_USER`; that pause is designed behavior, not a failure.
 
 This policy does **not** loosen the two kept bans: the pre-commit

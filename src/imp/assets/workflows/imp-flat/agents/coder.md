@@ -67,7 +67,7 @@ load_skill(name="systematic-debugging")
 
 You run **non-interactively** — there is no user to ask. Do not end your turn with a
 bare question. When a genuine human call surfaces, record it as a reader-form
-needs-decision item (see **needs-decision** below); do not call `wait_for_user`.
+needs-decision item (see **needs-decision** below); do not yield to the human.
 
 ## Your Job
 

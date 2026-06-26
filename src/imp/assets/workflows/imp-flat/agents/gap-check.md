@@ -41,7 +41,7 @@ not implemented by any plan so far. Two subtleties:
   a plan — that item **suppresses** the backstop for its scope and rides to the
   `finalize` gate. If the human says "build it," that becomes a finalize-rework that
   authors the plan then.
-- You never call `wait_for_user` and never author a `— needs-decision:` item; your sole
+- You never yield to the human and never author a `— needs-decision:` item; your sole
   lever is `more_plans`.
 
 ## Anticipated plan total — `plan_total`
