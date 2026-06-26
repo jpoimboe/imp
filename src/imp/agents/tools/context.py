@@ -59,7 +59,7 @@ class ToolContext:
     # Distinct from change_context, which is the FROZEN render-time snapshot.
     change: Any = None
     change_home: Path | None = None
-    # The runner injects this callable as the wait_for_user / AWAITING_USER
+    # The runner injects this callable as the bare-turn-end / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
     # Shared EventLog WRITE instance, set by the parent runner at the same site
@@ -69,8 +69,8 @@ class ToolContext:
     # builds for prompt-context rendering.
     event_log: Any = None
     # The agent_id of THIS invocation (e.g. "step:review/final-review" or a
-    # subagent id). Set by each provider where it builds the ToolContext, so a
-    # tool that emits an event (wait_for_user) pairs it under the right node.
+    # subagent id). Set by each provider where it builds the ToolContext, so an
+    # event emitted for this invocation pairs under the right node.
     agent_id: str | None = None
     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
     spawn_subagent: Any = None
