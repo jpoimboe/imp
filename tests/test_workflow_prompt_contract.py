@@ -636,6 +636,33 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     assert "do **not** call `wait_for_user`" in headless_moved
 
 
+HUMAN_DECISION_PARTIAL = Path(
+    "src/imp/assets/workflows/imp/partials/human-decision.md")
+
+
+def test_human_decision_partial_holds_canonical_bar() -> None:
+    text = HUMAN_DECISION_PARTIAL.read_text()
+    # The two conjoined conditions.
+    assert "intent-level" in text
+    assert "costly to reverse" in text
+    assert "Both conditions must hold" in text
+    # Observable-behavior / public-contract is NOT a standalone trigger; the
+    # suite is the backstop for a covered behavior change.
+    assert "test suite is the backstop" in text
+    assert "not on its own a reason to escalate" in text.lower()
+    # The decide-yourself-and-log directive.
+    assert "decide yourself and log" in text
+    # The "make it the right call, not the cheap one" quality clause. The
+    # canonical sentence wraps across a newline in the partial, and read_text()
+    # preserves that raw newline, so a continuous-string assert spanning the
+    # break would never match — assert within-line substrings instead.
+    assert "Reversibility lowers the bar for bothering" in text
+    assert "never the bar for code quality." in text
+    assert "not the smallest diff" in text
+    # Partials carry no superpowers attribution line.
+    assert "superpowers" not in text.lower()
+
+
 def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source
