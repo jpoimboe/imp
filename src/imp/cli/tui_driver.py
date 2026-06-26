@@ -10,12 +10,13 @@ from imp.cli.live_driver import compose_activity_status
 
 class TuiDriver:
     def __init__(
-        self, *, color: bool, width: int,
+        self, *, color: bool, width: int, display_width: int = 80,
         on_invalidate: Callable[[], None] | None = None,
     ) -> None:
         self._builder = nv.NarrativeBuilder()
         self._color = color
         self._width = width
+        self._display_width = display_width
         self._on_invalidate = on_invalidate
 
     def on_event(self, event: Any) -> None:
@@ -36,7 +37,7 @@ class TuiDriver:
     def render(self, *, full: bool) -> str:
         return "\n".join(rt.render_tree(
             self._builder.tree, full=full, color=self._color, width=self._width,
-            live_viewer=True))
+            display_width=self._display_width, live_viewer=True))
 
     def status_text(self, frame: int, elapsed: float) -> str | None:
         return compose_activity_status(
@@ -46,6 +47,6 @@ class TuiDriver:
     def print_collapsed_transcript(self, stream: Any) -> None:
         for line in rt.render_tree(
                 self._builder.tree, full=False, color=self._color,
-                width=self._width, live_viewer=True):
+                width=self._width, display_width=self._display_width, live_viewer=True):
             stream.write(line + "\n")
         stream.flush()

@@ -1997,3 +1997,22 @@ def test_compose_toolbar_slate_background_covers_full_padded_line() -> None:
         assert pal.display_width(line) == 138                # padding included under the bg
     finally:
         pal.set_theme("ansi")
+
+
+def test_live_driver_caps_hr_at_display_width() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=10000, display_width=40,
+                     status=LiveStatus(out))
+    long_line = "X" * 200
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    drv.on_event(ev("3", "llm_response", agent_id="a", usage={},
+                    raw={"content": [{"type": "text",
+                                      "text": long_line + "\n\n---\n\nafter"}]}))
+    drv.on_event(ev("4", "step_completed", step="s", kind="agent",
+                    action={"verb": "continue"}, var_mutations={}))
+    body = _body(out)
+    assert any(long_line in ln for ln in body)        # prose unwrapped (wrap width)
+    assert any(ln.count("─") == 40 for ln in body)    # HR capped to the display width
+    assert not any(ln.count("─") > 40 for ln in body)

@@ -29,16 +29,18 @@ def _elide_to_width(text: str, budget: int) -> str:
 
 class TuiApp:
     def __init__(self, *, coord: Any, color: bool, width: int,
-                 opening_intent: str | None = None) -> None:
+                 opening_intent: str | None = None, display_width: int = 80) -> None:
         self._coord = coord
         self._color = color
         self._width = width
+        self._display_width = display_width
         self._full = False
         self._frame = 0
         self._start = time.monotonic()
         self._viewport = ViewportState()
         self._driver = TuiDriver(
-            color=color, width=width, on_invalidate=self._invalidate)
+            color=color, width=width, display_width=display_width,
+            on_invalidate=self._invalidate)
         self._narrative_text: str | None = None
         self._app: Any = None
         self._body: Any = None
