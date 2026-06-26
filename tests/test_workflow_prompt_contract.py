@@ -663,6 +663,22 @@ def test_human_decision_partial_holds_canonical_bar() -> None:
     assert "superpowers" not in text.lower()
 
 
+def test_deferred_sweep_sources_human_decision_bar() -> None:
+    text = (AGENTS_DIR / "deferred-sweep.md").read_text()
+    # Sources the shared bar.
+    assert '{% include "partials/human-decision.md" %}' in text
+    # The standalone observable-behavior trigger and the risk-paragraph bar
+    # definition are gone (no longer its own prose definition of the bar).
+    assert "observable/external behavior" not in text
+    assert "alters observable behavior" not in text
+    assert "preserves observable behavior" not in text
+    # Agent-specific framing survives: the fail-fast guard under `fixed`, the
+    # `dismissed` disposition, and the fix-it-or-dismiss nuance.
+    assert "fail-fast" in text
+    assert "**dismissed**" in text
+    assert '"is this cheap change worth it?"' in text
+
+
 def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source

@@ -76,12 +76,9 @@ scope. Decide one of:
    you judge the silent path is not a real footgun. Apply it (see *Dispatch* and
    *Commit granularity* below) and record it `fixed`.
 
-2. **needs-decision** — the item **needs a design choice or a spec call**, OR it is
-   **genuinely high-risk**: it changes observable/external behavior or a public
-   contract (CLI / API / data format), shifts an invariant, touches
-   concurrency / locking / migrations, or **cannot be verified by the existing
-   suite**. An item that is neither a design/spec choice nor genuinely high-risk must
-   **not** be parked here out of uncertainty about whether it is worth doing — that
+2. **needs-decision** — the item is a genuine human call by the bar below. An item
+   that is neither a design/spec choice nor genuinely high-risk must **not** be parked
+   here out of uncertainty about whether it is worth doing — that
    "is this cheap change worth it?" judgment is your own call (fix it or dismiss it),
    never a `needs-decision`. Leave a genuine needs-decision item unfixed; it surfaces
    to the human via finalize.
@@ -89,12 +86,12 @@ scope. Decide one of:
 3. **dismissed** — you considered it and judged it **not an improvement, or not
    worth the diff**. Record it for audit; it is never surfaced.
 
-The line between **fixed** and **needs-decision** is risk: if the existing gate can
-prove the change safe and it preserves observable behavior, it is **fixed**; if it
-needs a design or spec choice, or is genuinely high-risk (alters observable behavior,
-a public contract, or cannot be verified by the suite), it is **needs-decision**. If
-an item you started to fix turns out high-risk once you touch it, re-classify it as
-**needs-decision** — never force it through.
+{% include "partials/human-decision.md" %}
+
+That bar is the line between **fixed** and **needs-decision**: if the existing gate can
+prove the change safe, it is **fixed**; if it clears the bar above, it is
+**needs-decision**. If an item you started to fix turns out to clear that bar once you
+touch it, re-classify it as **needs-decision** — never force it through.
 
 ## Dispatch — preserve the reviewer discipline
 
