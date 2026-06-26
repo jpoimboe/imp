@@ -93,12 +93,16 @@ FakeResultMessage.__name__ = "ResultMessage"
 class FakeClaudeSDKClient:
     """In-memory drop-in for ClaudeSDKClient. Use via async-with."""
 
-    def __init__(self, opts: Any, *, scripted_messages: list[Any]) -> None:
+    def __init__(self, opts: Any, *, scripted_messages: list[Any],
+                 context_usage: Any = None,
+                 context_usage_raises: bool = False) -> None:
         self.opts = opts
         self._scripted = list(scripted_messages)
         self._pos = 0
         self.queries: list[Any] = []  # whatever was passed to .query()
         self.closed = False
+        self._context_usage = context_usage
+        self._context_usage_raises = context_usage_raises
 
     async def __aenter__(self) -> FakeClaudeSDKClient:
         return self
@@ -132,6 +136,11 @@ class FakeClaudeSDKClient:
 
     async def interrupt(self) -> None:
         pass
+
+    async def get_context_usage(self) -> Any:
+        if self._context_usage_raises:
+            raise RuntimeError("simulated get_context_usage failure")
+        return self._context_usage
 
     async def disconnect(self) -> None:
         self.closed = True
@@ -168,3 +177,17 @@ def tool_result(id_: str, content: str, is_error: bool = False) -> FakeToolResul
 
 def thinking(content: str) -> FakeThinkingBlock:
     return FakeThinkingBlock(thinking=content)
+
+
+@dataclass
+class FakeContextUsage:
+    rawMaxTokens: int
+    percentage: float
+    totalTokens: int
+
+
+def context_usage(*, raw_max_tokens: int, percentage: float,
+                  total_tokens: int) -> FakeContextUsage:
+    return FakeContextUsage(
+        rawMaxTokens=raw_max_tokens, percentage=percentage,
+        totalTokens=total_tokens)

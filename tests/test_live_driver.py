@@ -1764,14 +1764,32 @@ def test_context_bar_color_thresholds_green_yellow_red() -> None:
     assert "\x1b[31m" in boundary_red and "\x1b[33m" not in boundary_red
 
 
-def test_context_bar_resolves_dated_and_alias_model_ids() -> None:
-    from imp.cli.live_driver import context_bar, context_window
-    assert context_window("claude-sonnet-4-5") == 200_000
-    assert context_window("opus") == 200_000
-    assert context_window("gpt-5.5") == 400_000
+def test_context_bar_falls_back_to_catalog_window() -> None:
+    from imp.cli.live_driver import context_bar
+    from imp.providers.catalog import window_for_model
+    assert window_for_model("claude-sonnet-4-5") == 200_000
+    assert window_for_model("opus") == 200_000
+    assert window_for_model("opus-1m") == 1_000_000
+    assert window_for_model("gpt-5.5") == 400_000
     # 40000/200000 = 0.2 -> round(0.2*10) = 2 filled cells, 8 track.
     assert context_bar("claude-opus-4-1", 40000, color=False, over_bg=False) == \
         "██░░░░░░░░ 20%"
+
+
+def test_context_bar_prefers_sdk_percentage_over_tokens() -> None:
+    from imp.cli.live_driver import context_bar
+    # context_pct is rendered directly: a huge prompt_tokens that would imply
+    # ~100% is ignored when the SDK percentage is present.
+    bar = context_bar("opus-1m", 999_999, context_pct=42.0,
+                      color=False, over_bg=False)
+    # 42% -> round(0.42*10) = 4 filled cells, 6 track.
+    assert bar == "████░░░░░░ 42%"
+
+
+def test_live_driver_has_no_context_windows_symbol() -> None:
+    import imp.cli.live_driver as ld
+    assert not hasattr(ld, "_CONTEXT_WINDOWS")
+    assert not hasattr(ld, "context_window")
 
 
 def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:

@@ -2346,3 +2346,80 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
 
     assert captured["cfg"]
     assert not Path(captured["cfg"]).exists()
+
+
+def test_build_options_requests_1m_beta_for_opus_1m(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="opus-1m")
+    opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
+    assert list(opts.betas) == ["context-1m-2025-08-07"]
+    # opus-1m is not a CLI alias; cli_model maps it to the real `opus` model.
+    assert opts.model == "opus"
+
+
+def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="opus")
+    opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
+    assert list(opts.betas) == []
+    assert opts.model == "opus"
+
+
+def test_high_tier_floor_defaults_to_opus_1m() -> None:
+    from imp.providers.claude_code import TIER_DEFAULTS
+    assert TIER_DEFAULTS["high"] == "opus-1m"
+
+
+@pytest.mark.anyio
+async def test_llm_response_enriched_with_context_usage(tmp_path: Path) -> None:
+    from tests.cc_fakes import context_usage
+
+    scripted = [
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        ),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(
+            opts, scripted_messages=scripted,
+            context_usage=context_usage(
+                raw_max_tokens=1_000_000, percentage=4.2, total_tokens=42_000),
+        )
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(model_name="opus-1m", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert resp["payload"]["context_window"] == 1_000_000
+    assert resp["payload"]["context_pct"] == 4.2
+    assert resp["payload"]["context_tokens"] == 42_000
+
+
+@pytest.mark.anyio
+async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
+    scripted = [
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        ),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(
+            opts, scripted_messages=scripted, context_usage_raises=True)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(model_name="opus-1m", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    assert [e["type"] for e in events] == ["agent_output"]
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert "context_window" not in resp["payload"]
+    assert "context_pct" not in resp["payload"]
+    assert "context_tokens" not in resp["payload"]

@@ -42,7 +42,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import (
@@ -951,6 +951,26 @@ def _sdk_message_to_imp(
     return None, [], []
 
 
+async def _context_usage_fields(client: Any) -> dict[str, Any]:
+    try:
+        cu = await client.get_context_usage()
+    except Exception:
+        return {}
+    if cu is None:
+        return {}
+
+    def _field(obj: Any, name: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(name)
+        return getattr(obj, name, None)
+
+    return {
+        "context_window": _field(cu, "rawMaxTokens"),
+        "context_pct": _field(cu, "percentage"),
+        "context_tokens": _field(cu, "totalTokens"),
+    }
+
+
 class ClaudeCodeAgentRunner:
     """Drives `claude -p` via claude_agent_sdk.
 
@@ -990,7 +1010,10 @@ class ClaudeCodeAgentRunner:
                        session_id: str | None = None,
                        resume: str | None = None,
                        config_dir: Path | None = None) -> Any:
-        from claude_agent_sdk import ClaudeAgentOptions
+        from claude_agent_sdk import ClaudeAgentOptions, SdkBeta
+
+        from imp.providers.catalog import CLAUDE_CODE, model_info
+        info = model_info(CLAUDE_CODE, self.model)
         # ToolSearch is claude-p's internal schema-loader for deferred MCP
         # tools (default mode for any mcp_server). It only returns schemas;
         # it can't read/write/exec, so allowing it doesn't break the
@@ -1023,7 +1046,8 @@ class ClaudeCodeAgentRunner:
             env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
             extra_args = {"no-session-persistence": None}
         return ClaudeAgentOptions(
-            model=self.model,
+            model=info.cli_model or self.model,
+            betas=cast(list[SdkBeta], list(info.betas)),
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
             env=env,
             # Pin the `claude` subprocess to the change's project_root. Without
@@ -1418,11 +1442,15 @@ class ClaudeCodeAgentRunner:
                                     pending_text + turn_text if pending_text else turn_text)
                             if cls_name == "AssistantMessage":
                                 raw = _serialize_claude_code_message(sdk_msg)
+                                cu_fields = await _context_usage_fields(client)
                                 elog.append_llm_response(
                                     agent_id=aid, provider=invocation.provider_name,
                                     model=self.model, raw=raw,
                                     usage=raw.get("usage") or {},
-                                    stop_reason=raw.get("stop_reason"))
+                                    stop_reason=raw.get("stop_reason"),
+                                    context_window=cu_fields.get("context_window"),
+                                    context_pct=cu_fields.get("context_pct"),
+                                    context_tokens=cu_fields.get("context_tokens"))
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
@@ -1817,7 +1845,7 @@ class ClaudeCodeProvider:
         )
 
 
-TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus"}
+TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus-1m"}
 ENV_VAR: str | None = None  # CLI-authenticated (claude login); no env var
 
 

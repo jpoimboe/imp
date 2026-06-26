@@ -202,7 +202,10 @@ class EventLog(Protocol):
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
                             stop_reason: Any,
-                            auth_mode: str | None = None) -> dict[str, Any]: ...
+                            auth_mode: str | None = None,
+                            context_window: int | None = None,
+                            context_pct: float | None = None,
+                            context_tokens: int | None = None) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any, label: str | None = None,
                          id_ns: str | None = None) -> dict[str, Any]: ...
@@ -317,13 +320,22 @@ class _BaseEventLog:
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
                             stop_reason: Any,
-                            auth_mode: str | None = None) -> dict[str, Any]:
+                            auth_mode: str | None = None,
+                            context_window: int | None = None,
+                            context_pct: float | None = None,
+                            context_tokens: int | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "provider": provider, "model": model, "raw": raw,
             "usage": usage, "stop_reason": stop_reason,
         }
         if auth_mode is not None:
             payload["auth_mode"] = auth_mode
+        if context_window is not None:
+            payload["context_window"] = context_window
+        if context_pct is not None:
+            payload["context_pct"] = context_pct
+        if context_tokens is not None:
+            payload["context_tokens"] = context_tokens
         return self._emit(
             agent_id=agent_id, type="llm_response", payload=payload)
 
