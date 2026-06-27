@@ -75,3 +75,48 @@ def test_inert_on_non_tty_stream() -> None:
     title.waiting()
     title.reset()
     assert s.getvalue() == ""
+
+
+def test_update_name_emits_new_name_under_working_glyph() -> None:
+    s = _TTY()
+    title = TerminalTitle(s, "nagi22", "Old Name")
+    s.truncate(0)
+    s.seek(0)
+    title.update_name("foo")
+    assert s.getvalue() == "\x1b]2;• imp · nagi22 · foo\x07"
+
+
+def test_update_name_same_name_is_noop() -> None:
+    s = _TTY()
+    title = TerminalTitle(s, "nagi22", "My Change")
+    s.truncate(0)
+    s.seek(0)
+    title.update_name("My Change")
+    assert s.getvalue() == ""
+
+
+def test_update_name_preserves_waiting_glyph() -> None:
+    s = _TTY()
+    title = TerminalTitle(s, "nagi22", "Old Name")
+    title.waiting()
+    s.truncate(0)
+    s.seek(0)
+    title.update_name("foo")
+    assert s.getvalue() == f"\x1b]2;{GLYPH_WAITING} imp · nagi22 · foo\x07"
+
+
+def test_update_name_inert_on_non_tty() -> None:
+    s = _Pipe()
+    title = TerminalTitle(s, "nagi22", "Old Name")
+    title.update_name("foo")
+    assert s.getvalue() == ""
+
+
+def test_update_name_after_reset_uses_working_glyph() -> None:
+    s = _TTY()
+    title = TerminalTitle(s, "nagi22", "Old Name")
+    title.reset()
+    s.truncate(0)
+    s.seek(0)
+    title.update_name("foo")
+    assert s.getvalue() == "\x1b]2;• imp · nagi22 · foo\x07"
