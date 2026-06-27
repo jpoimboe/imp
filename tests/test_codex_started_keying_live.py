@@ -25,7 +25,7 @@ async def test_codex_task_lifecycle_keyed_on_sdk_item_id() -> None:
     events = await run_parallel_task_turn(provider="codex")
     calls = [e for e in events
              if e.get("type") == "tool_call"
-             and (e.get("payload") or {}).get("name") == "task"]
+             and (e.get("payload") or {}).get("name") == "sub_agent"]
     results = [e for e in events
                if e.get("type") == "tool_result"
                and (e.get("payload") or {}).get("id_ns") == "event"]

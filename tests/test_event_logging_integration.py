@@ -229,7 +229,7 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
 
     reviewer_def = _reviewer_def()
     parent_def = dataclasses.replace(
-        _agent_def(tools=frozenset({"complete_step", "task"})),
+        _agent_def(tools=frozenset({"complete_step", "sub_agent"})),
         subagents=("reviewer",),
     )
 
@@ -249,7 +249,7 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
     #   3. parent → complete_step (after task returns)
     shared_fake = FakeAsyncAnthropic([
         # parent turn 1: dispatch a task
-        response(tool_use("t1", "task", {
+        response(tool_use("t1", "sub_agent", {
             "subagent_name": "reviewer",
             "task_description": "please review",
         })),

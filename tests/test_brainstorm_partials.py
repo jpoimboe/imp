@@ -35,7 +35,7 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     assert '{% include "partials/live-gate-dialogue.md" %}' in text
     # research before you converge (with the explorer dispatch idiom)
     assert "Research before you converge" in text
-    assert 'task(subagent_name="explorer"' in text
+    assert 'sub_agent(subagent_name="explorer"' in text
     assert "no cost gating" in text
     # propose 2-3 + design-then-approve in sections
     assert "present it in sections" in text

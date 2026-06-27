@@ -65,7 +65,7 @@ async def _call_anthropic(prompt: str, tool_description: str) -> list[ContentBlo
             max_tokens=1024,
             system="You have two subagents named 'a' and 'b'. Use the task tool.",
             tools=[{
-                "name": "task",
+                "name": "sub_agent",
                 "description": tool_description,
                 "input_schema": TASK_TOOL_SCHEMA,
             }],
@@ -104,7 +104,7 @@ async def _call_openai(prompt: str, tool_description: str) -> list[ContentBlock]
             }],
             tools=[{
                 "type": "function",
-                "name": "task",
+                "name": "sub_agent",
                 "description": tool_description,
                 "parameters": to_openai_strict(TASK_TOOL_SCHEMA),
                 "strict": True,
@@ -172,7 +172,7 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
     )
     parent_def = AgentDef(
         name="coordinator", description="dispatches two stub workers in parallel",
-        tools=frozenset({"complete_step", "task"}),
+        tools=frozenset({"complete_step", "sub_agent"}),
         subagents=("worker_a", "worker_b"),
         output_schema=parent_schema,
         prompt_template_source="",

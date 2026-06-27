@@ -85,7 +85,7 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
             model="claude", system_prompt="S", tools_schema=[{"name": "a"}, {"name": "b"}],
             params={}, max_tool_calls=50),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
@@ -114,7 +114,7 @@ def test_subagent_lean_suppresses_all_nested_io() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("t1", "thinking", agent_id="sub:tk1", content="nested musings"),
         _ev("c1", "tool_call", agent_id="sub:tk1", id="n1", name="bash", input={}),
@@ -138,7 +138,7 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
@@ -169,7 +169,7 @@ def test_subagent_error_renders_failed_status_row() -> None:
     out = list(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
@@ -181,7 +181,7 @@ def test_subagent_error_renders_failed_status_row() -> None:
     color_out = list(render_tree(nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
@@ -196,7 +196,7 @@ def test_full_mode_also_emits_subagent_outcome() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
@@ -217,7 +217,7 @@ def test_full_mode_expands_tools_thinking_and_subagent() -> None:
         _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
             input={"command": "ls -la"}),
         _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="total 0", error=False),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
@@ -738,7 +738,7 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
     out = _lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
@@ -771,7 +771,7 @@ def test_subagent_row_de_indents_to_column_two() -> None:
     out = _lines([
         _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
-        _ev("3", "tool_call", agent_id="a", id="t1", name="task",
+        _ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("4", "llm_response", agent_id="sub:3",
             raw={"content": [{"type": "text", "text": "x"}]}, usage={}),
@@ -810,7 +810,7 @@ def test_errored_subagent_gutter_stays_magenta_with_red_outcome() -> None:
     out = list(render_tree(nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
@@ -824,7 +824,7 @@ def test_full_subagent_nested_thinking_keeps_dim_text_and_gains_gutter() -> None
     out = list(render_tree(nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("t1", "thinking", agent_id="sub:tk1", content="nested musings"),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -993,7 +993,7 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
             model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="a",
             raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
-        _ev("tk", "tool_call", agent_id="a", id="b1", name="task",
+        _ev("tk", "tool_call", agent_id="a", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("r", "tool_result", agent_id="a", id="b1",
             content='{"status":"Success"}'),
@@ -1126,7 +1126,7 @@ def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
 
     b = nv.NarrativeBuilder()
     b.add({"type": "tool_call", "payload": {
-        "name": "task", "id": "b1",
+        "name": "sub_agent", "id": "b1",
         "input": {"subagent_name": "reviewer", "task_description": "x"}}})
     b.add({"type": "tool_result", "payload": {
         "id": "b1", "content": content, "error": True}})
@@ -1366,7 +1366,7 @@ def test_clean_review_findings_hidden_by_default() -> None:
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
         _ev("c1", "tool_call", agent_id="step:review/review", id="b1",
-            name="task", input={"subagent_name": "code-reviewer",
+            name="sub_agent", input={"subagent_name": "code-reviewer",
                                 "task_description": "review"}),
         _ev("r1", "tool_result", agent_id="step:review/review", id="b1",
             content=json.dumps({"status": "Success", "verdict": "approve",
@@ -1422,7 +1422,7 @@ def test_subagent_suspended_structured_kind_renders_interrupted() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("4", "tool_result", agent_id="step:p/s", id="b1",
             content="SubagentSuspended: subagent paused", error=True,
@@ -1437,7 +1437,7 @@ def test_subagent_suspended_bracket_marker_renders_interrupted() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("4", "tool_result", agent_id="step:p/s", id="b1",
             content="SubagentSuspended: subagent paused [interrupted]", error=True),
@@ -1453,11 +1453,11 @@ def test_abnormal_then_healthy_same_name_subagent_shows_no_retrying() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("4", "tool_result", agent_id="step:p/s", id="b1",
             content="boom", error=True),
-        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("6", "tool_result", agent_id="step:p/s", id="b2",
             content='{"status": "Success"}', error=False),
@@ -1472,9 +1472,9 @@ def test_parallel_same_name_subagents_not_marked_retrying() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
-        _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="task",
+        _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
             input={"subagent_name": "reviewer"}),
         _ev("5", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status": "Success"}', error=False),

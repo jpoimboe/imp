@@ -47,7 +47,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
 
     top_leaf = BASE_CAPS | {"rename_change", "create_change",
                             "create_and_enter_worktree"}
-    top_dispatcher = top_leaf | {"task"}
+    top_dispatcher = top_leaf | {"sub_agent"}
     subagents = {
         "coder", "code-reviewer",
     }

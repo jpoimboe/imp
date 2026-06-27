@@ -143,7 +143,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
 
     state = _RunState()
     wrapped = _wrap_one(
-        "task", make_task_tool(), ctx, state, _passthrough_decorator,
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
     )
     out = await wrapped({"subagent_name": "sub", "task_description": "do"})
     assert state.complete_step_called is False  # routed to dispatch_task, not capture
@@ -200,7 +200,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
     state = _RunState()
     state.agent_id = "step:p/task-lead"
     wrapped = _wrap_one(
-        "task", make_task_tool(), ctx, state, _passthrough_decorator,
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
     )
     # The SDK passes the (empty) __tool_use_id__; the mint must ignore it.
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
@@ -209,7 +209,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
 
     events = elog._events
     calls = [e for e in events
-             if e["type"] == "tool_call" and e["payload"]["name"] == "task"]
+             if e["type"] == "tool_call" and e["payload"]["name"] == "sub_agent"]
     assert len(calls) == 1, "expected exactly one task tool_call"
     call_id = calls[0]["payload"]["id"]
     assert call_id, "minted block id must be non-empty"
@@ -295,7 +295,7 @@ def test_cc_task_tool_annotated_readonly_when_parallel(
     reset_parallelism_cache()
     try:
         wrapped = _wrap_one(
-            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
         assert wrapped.annotations is not None
         assert wrapped.annotations.readOnlyHint is True
     finally:
@@ -369,7 +369,7 @@ def test_cc_task_annotation_dropped_by_kill_switch(
     reset_parallelism_cache()
     try:
         wrapped = _wrap_one(
-            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
         assert wrapped.annotations is None
     finally:
         reset_parallelism_cache()
@@ -389,7 +389,7 @@ def test_cc_task_annotation_derived_from_allowlist(
         "imp.providers.claude_code.CLAUDE_CODE_ALLOWLIST_MODE", False)
     try:
         wrapped = _wrap_one(
-            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
         assert wrapped.annotations is None
     finally:
         reset_parallelism_cache()
@@ -433,7 +433,7 @@ async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> No
 
     state = _RunState()
     state.agent_id = "step:p/task-lead"
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
     assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
@@ -471,7 +471,7 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
 
     state = _RunState()
     state.agent_id = "step:p/task-lead"
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
     assert out.get("isError") is True
@@ -509,7 +509,7 @@ async def test_wrap_task_suspension_marks_result_interrupted(
 
     state = _RunState()
     state.agent_id = "step:p/task-lead"
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     with pytest.raises(SubagentSuspended):
         await wrapped({"subagent_name": "sub", "task_description": "do",
                        "__tool_use_id__": ""})
@@ -542,7 +542,7 @@ async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
     monkey = cc_mod.dispatch_task
     cc_mod.dispatch_task = _fake  # type: ignore[assignment]
     try:
-        wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+        wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
         out = await wrapped({"subagent_name": "reviewer", "task_description": "go"})
     finally:
         cc_mod.dispatch_task = monkey  # type: ignore[assignment]
@@ -571,7 +571,7 @@ async def test_impl_raises_when_dispatched_off_the_runner_loop(
         state = _RunState()
         state.agent_id = "step:p/task-lead"
         state.runner_loop = foreign      # not the loop this test runs on
-        wrapped = _wrap_one("task", make_task_tool(), ctx, state,
+        wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state,
                             _passthrough_decorator)
         with pytest.raises(RuntimeError, match="runner loop"):
             await wrapped({"subagent_name": "sub", "task_description": "do",

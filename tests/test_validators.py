@@ -441,7 +441,7 @@ def test_subagent_declaring_wait_for_user_no_longer_rejected(tmp_path: Path) -> 
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
     )
     lead = (
-        "---\nname: lead\ntools: [task, complete_step]\nsubagents: [waiter]\n"
+        "---\nname: lead\ntools: [sub_agent, complete_step]\nsubagents: [waiter]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
     )
     wf = _wf(tmp_path, """\
@@ -503,7 +503,7 @@ def test_resume_in_defaults_on_max_retries_to_non_agent_is_rejected(tmp_path: Pa
 _TASKER_SUBAGENT = """\
 ---
 name: tasker
-tools: [task, complete_step]
+tools: [sub_agent, complete_step]
 output:
   status: {type: enum, values: [Success, Error]}
 ---
@@ -523,7 +523,7 @@ prompt body
 _LEAD_WITH_TASKER_SUB = """\
 ---
 name: lead
-tools: [task, complete_step]
+tools: [sub_agent, complete_step]
 subagents: [tasker]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -534,7 +534,7 @@ prompt body
 _LEAD_WITH_RENAMER_SUB = """\
 ---
 name: lead
-tools: [task, complete_step]
+tools: [sub_agent, complete_step]
 subagents: [renamer]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -574,7 +574,7 @@ def test_dispatchable_subagent_with_task_is_error(tmp_path: Path) -> None:
         """, agents={"lead": _LEAD_WITH_TASKER_SUB, "tasker": _TASKER_SUBAGENT})
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
-    assert any("tasker" in str(e) and "task" in str(e) for e in ei.value.errors)
+    assert any("tasker" in str(e) and "sub_agent" in str(e) for e in ei.value.errors)
 
 
 def test_dispatchable_subagent_with_rename_change_is_error(tmp_path: Path) -> None:

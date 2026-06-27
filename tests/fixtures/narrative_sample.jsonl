@@ -9,7 +9,7 @@
 {"id": "e9", "agent_id": "step:design/spec", "type": "tool_call", "payload": {"id": "b2", "name": "bash", "input": {"command": "ls src/"}}}
 {"id": "e10", "agent_id": "step:design/spec", "type": "tool_result", "payload": {"id": "b2", "content": "auth.py\nmain.py", "error": false}}
 {"id": "e11", "agent_id": "step:design/spec", "type": "tool_killed", "payload": {"id": "b1", "name": "read_file"}}
-{"id": "tk1", "agent_id": "step:design/spec", "type": "tool_call", "payload": {"id": "b9", "name": "task", "input": {"subagent_name": "reviewer", "task_description": "Review the draft spec for completeness."}}}
+{"id": "tk1", "agent_id": "step:design/spec", "type": "tool_call", "payload": {"id": "b9", "name": "sub_agent", "input": {"subagent_name": "reviewer", "task_description": "Review the draft spec for completeness."}}}
 {"id": "e12", "agent_id": "sub:tk1", "type": "step_context", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "system_prompt": "You are a reviewer.", "tools_schema": [], "params": {}, "max_tool_calls": 10}}
 {"id": "e13", "agent_id": "sub:tk1", "type": "llm_response", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "raw": {"content": [{"type": "text", "text": "The spec looks good. Auth flows are clearly defined."}]}, "usage": {"input_tokens": 50, "output_tokens": 15}, "stop_reason": "end_turn"}}
 {"id": "e14", "agent_id": "step:design/spec", "type": "tool_result", "payload": {"id": "b9", "content": "{\"status\": \"Success\", \"summary\": \"Spec approved\"}", "error": false}}

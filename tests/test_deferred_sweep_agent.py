@@ -20,7 +20,7 @@ def test_deferred_sweep_parses_with_expected_contract() -> None:
 def test_deferred_sweep_resolves_to_dispatcher_tools() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     agent = wf.agents["deferred-sweep"]
-    for tool in ("read_file", "write_file", "edit_file", "bash", "task"):
+    for tool in ("read_file", "write_file", "edit_file", "bash", "sub_agent"):
         assert tool in agent.tools, f"missing tool {tool}"
     assert "complete_step" not in agent.tools
 

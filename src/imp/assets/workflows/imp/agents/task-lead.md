@@ -54,7 +54,7 @@ unimplemented task, or the re-opened task from injected feedback):
    this task's `## Task <N>` heading). Dispatch the coder with the **full task text +
    scene-setting context**
    (it does not read the plan), at the **`medium` tier**
-   (`task(subagent_name="coder", tier="medium", task_description=…)`):
+   (`sub_agent(subagent_name="coder", tier="medium", task_description=…)`):
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
      trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
@@ -104,12 +104,12 @@ unimplemented task, or the re-opened task from injected feedback):
    commit. Do **not** run the project's full suite or lint/typecheck — the
    phase-level `verify` gate runs the project's combined checks after this phase."
    **One reviewer.** Dispatch ONLY `code-reviewer` at the **`medium` tier**:
-   `task(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs
+   `sub_agent(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
    end-of-run spec coverage now lives in the whole-diff plan-code-reviewer.)
    {% else %}
    Dispatch the `code-reviewer` at the **`medium` tier**:
-   `task(subagent_name="code-reviewer", tier="medium", …)`.
+   `sub_agent(subagent_name="code-reviewer", tier="medium", …)`.
    {% endif %}
    Give the reviewer the task text + spec. (coder → the `medium` tier;
    the reviewer and your own judgment → the `medium` tier. Name tiers, never

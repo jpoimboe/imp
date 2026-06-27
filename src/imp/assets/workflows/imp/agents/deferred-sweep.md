@@ -96,13 +96,13 @@ touch it, re-classify it as **needs-decision** — never force it through.
 ## Dispatch — preserve the reviewer discipline
 
 - **Trivial / mechanical fix** (a rename, an import swap, a dedup): dispatch ONLY
-  the coder (`task(subagent_name="coder", tier="medium", …)`) with the
+  the coder (`sub_agent(subagent_name="coder", tier="medium", …)`) with the
   over-reach guardrail: "apply ONLY this named item; it is bounded and mechanical;
   do not refactor beyond it, touch unrelated code, or alter behavior." Run **no code-reviewer**
   — this matches the existing nit-only-fixup rule. The `verify` gate after the sweep
   is the backstop; you also self-verify the diff stays within the named item.
 - **Non-trivial fix**: dispatch the coder **and then the code-reviewer**
-  (`task(subagent_name="code-reviewer", tier="medium", …)`); address every
+  (`sub_agent(subagent_name="code-reviewer", tier="medium", …)`); address every
   blocking finding before committing.
 
 ## Work source — bounded, not an open audit
@@ -223,7 +223,7 @@ When the list is drained (every parsable item has a disposition recorded; malfor
 lines left untouched), call `complete_step` with `status: Success`, `sweep_tolerated: false`,
 and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
-`task(...)` dispatch and re-dispatch — the next subagent inherits only what you
+`sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you
 write.
 
 ---

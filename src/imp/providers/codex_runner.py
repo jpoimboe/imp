@@ -1040,7 +1040,7 @@ def process_event(
     if etype == "item.started":
         item = getattr(event, "item", None)
         name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
-        if getattr(item, "type", None) == "mcp_tool_call" and name == "task":
+        if getattr(item, "type", None) == "mcp_tool_call" and name == "sub_agent":
             sdk_id = getattr(item, "id", "") or ""
             args = getattr(item, "arguments", None) or {}
             # `arguments` may be a JSON string; mirror the item.completed guard.
@@ -1060,7 +1060,7 @@ def process_event(
             label = sub_def.label if sub_def is not None else None
             elog.append_tool_call(
                 agent_id=agent_id,
-                block=ToolUseBlock(id=sdk_id, name="task", input=args),
+                block=ToolUseBlock(id=sdk_id, name="sub_agent", input=args),
                 label=label)
         return
 
@@ -1115,7 +1115,7 @@ def process_event(
                 content = _serialize_mcp_result(getattr(item, "result", None))
             call_id = sdk_id
             task_id_ns: str | None
-            if name == "task":
+            if name == "sub_agent":
                 # Change 2: the task tool_call was opened at item.started keyed on
                 # this same SDK id; close the fold here with the matching result
                 # (id_ns="event" marks the codex namespace for the §3 fold probe).

@@ -369,7 +369,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     for name in invocation.agent_def.tools:
         if name == "complete_step":
             continue
-        if name == "task":
+        if name == "sub_agent":
             continue
         if name in WEB_TOOL_NAMES:
             # Reserved native-capability names (§4): never registry-looked-up;
@@ -381,8 +381,8 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
-    if "task" in invocation.agent_def.tools:
-        out["task"] = make_task_tool(invocation.tiers)
+    if "sub_agent" in invocation.agent_def.tools:
+        out["sub_agent"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "bash" in invocation.agent_def.tools:
@@ -510,7 +510,7 @@ def _wrap_one(
             # crash the SDK handler. Module-attr call so tests monkeypatch
             # bg._sweep_bg once for all sites.
             await _bg._sweep_bg(ctx)
-            if name == "task":
+            if name == "sub_agent":
                 # Append the task tool_call event INSIDE _impl. This is race-free:
                 # the receive loop processes AssistantMessage on a different
                 # async path and would create a duplicate if it also appended
@@ -545,7 +545,7 @@ def _wrap_one(
                     # a backgrounded fold open to early resume-close (frozen end_ts).
                     tc_ev = ctx.event_log.append_tool_call(
                         agent_id=state.agent_id,
-                        block=ToolUseBlock(id=minted, name="task", input=task_input),
+                        block=ToolUseBlock(id=minted, name="sub_agent", input=task_input),
                         label=label,
                         id_ns="block")
                     tc_event_id = tc_ev["id"]
@@ -621,7 +621,7 @@ def _wrap_one(
 
     # task: posture+width gated (Decision 5 / §2). read_only tools: width-only
     # honest readOnlyHint. Everything else wraps unannotated.
-    if name == "task":
+    if name == "sub_agent":
         annotations = _task_annotations()
     elif t.read_only:
         annotations = _readonly_annotations()
@@ -1501,7 +1501,7 @@ class ClaudeCodeAgentRunner:
                                     pending_tools[b.id] = ToolOutcome(
                                         name=canon, tool_use_id=b.id,
                                         input=b.input, is_error=True)
-                                    if canon == "task":
+                                    if canon == "sub_agent":
                                         # tool_call for task is appended inside the
                                         # MCP wrapper (_impl) keyed on a minted uuid
                                         # block id (see :356-362), race-free. Don't
@@ -1531,13 +1531,13 @@ class ClaudeCodeAgentRunner:
                                     # it too would double the tool_result (and feed
                                     # narrative a second, fold-less close). Identify
                                     # it by its tool_use_id ∈ pending_tools with
-                                    # name=="task" (canon tracked at the tool_use
+                                    # name=="sub_agent" (canon tracked at the tool_use
                                     # site). Still flip is_error on the task outcome
                                     # below so a failed dispatch doesn't leave the
                                     # ToolOutcome is_error=True → LoopGuard
                                     # repeated_failure on identical re-dispatches.
                                     pend = pending_tools.get(b.tool_use_id)
-                                    is_task = pend is not None and pend.name == "task"
+                                    is_task = pend is not None and pend.name == "sub_agent"
                                     if not is_task:
                                         elog.append_tool_result(agent_id=aid, block=b)
                                     if pend is not None:

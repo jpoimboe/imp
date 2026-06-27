@@ -47,7 +47,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     reg = get_registry()
     out: dict[str, Tool] = {}
     for name in invocation.agent_def.tools:
-        if name in ("complete_step", "task", "load_skill"):
+        if name in ("complete_step", "sub_agent", "load_skill"):
             continue
         if name in reg:
             out[name] = reg[name]

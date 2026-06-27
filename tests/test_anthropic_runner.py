@@ -385,7 +385,7 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
         source=SourceLoc(file=Path("r.md"), line=1),
     )
     parent_def = dataclasses.replace(
-        _agent_def(tools=frozenset({"complete_step", "task"})),
+        _agent_def(tools=frozenset({"complete_step", "sub_agent"})),
         subagents=("reviewer",),
     )
 
@@ -401,7 +401,7 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
     #   2. child  → complete_step with verdict=approve (satisfies reviewer schema)
     #   3. parent → complete_step (status=Success) after task returns
     parent_fake = FakeAsyncAnthropic([
-        response(tool_use("t1", "task", {
+        response(tool_use("t1", "sub_agent", {
             "subagent_name": "reviewer", "task_description": "review the spec",
         })),
         response(tool_use("rc", "complete_step",
@@ -749,7 +749,7 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
         prompt_template_source="review", source_path=Path("r.md"),
         source=SourceLoc(file=Path("r.md"), line=1))
     parent_def = dataclasses.replace(
-        _agent_def(tools=frozenset({"complete_step", "task"})),
+        _agent_def(tools=frozenset({"complete_step", "sub_agent"})),
         subagents=("reviewer",))
 
     log = InMemoryEventLog()
@@ -761,7 +761,7 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
         resolved_tiers={"high": ProviderModel("openai", "gpt-5.5")})
 
     parent_fake = FakeAsyncAnthropic([
-        response(tool_use("t1", "task", {
+        response(tool_use("t1", "sub_agent", {
             "subagent_name": "reviewer", "task_description": "hard one",
             "tier": "high"})),
         response(tool_use("pc", "complete_step", {"status": "Success"})),

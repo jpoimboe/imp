@@ -185,7 +185,7 @@ TOP_LEVEL_CAPS: frozenset[str] = frozenset(
 # (almost always a typo). Validated at parse time. Subagents receive a
 # subset of this, so denying e.g. rename_change on a subagent is a harmless
 # no-op rather than an error — the name is real, just not in that context.
-DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"task"})
+DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"sub_agent"})
 
 
 def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
@@ -195,7 +195,7 @@ def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
     if not is_sub:
         effective |= TOP_LEVEL_CAPS
         if agent.subagents:
-            effective.add("task")
+            effective.add("sub_agent")
     effective -= agent.deny_tools
     return frozenset(effective)
 

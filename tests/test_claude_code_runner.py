@@ -299,7 +299,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     """Parent dispatches via task → child runner runs to complete_step →
     parent receives JSON-stringified payload and emits its own complete_step."""
 
-    # NOTE: the fake client bypasses the real MCP transport, so _impl for "task"
+    # NOTE: the fake client bypasses the real MCP transport, so _impl for "sub_agent"
     # is not invoked; the race-free tool_call-append path is integration-only
     # (covered in Task 16). This test verifies dispatch wiring + return payload.
     (tmp_path / "art").mkdir()
@@ -319,7 +319,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
         source=SourceLoc(file=Path("sub.md"), line=1),
     )
 
-    parent_def = _agent_def(tools=frozenset({"complete_step", "task"}))
+    parent_def = _agent_def(tools=frozenset({"complete_step", "sub_agent"}))
     inv = _inv(tmp_path)
     inv = replace(
         inv,
@@ -330,7 +330,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     parent_scripted = [
         assistant(
             text("dispatching"),
-            tool_use("p1", "task",
+            tool_use("p1", "sub_agent",
                      {"subagent_name": "sub", "task_description": "do work"}),
         ),
         # SDK will send a tool_result back from the MCP server's task wrapper.
@@ -394,7 +394,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
 
     (tmp_path / "art").mkdir()
 
-    parent_def = _agent_def(tools=frozenset({"complete_step", "task"}))
+    parent_def = _agent_def(tools=frozenset({"complete_step", "sub_agent"}))
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
     inv = replace(inv, agent_def=parent_def)
@@ -405,7 +405,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
     sdk_id = "toolu_sdk_echo"
     log.append_tool_call(
         agent_id="step:p/s",
-        block=RealToolUseBlock(id=minted_id, name="task",
+        block=RealToolUseBlock(id=minted_id, name="sub_agent",
                                input={"subagent_name": "sub",
                                       "task_description": "do work"}))
     log.append_tool_result(
@@ -418,7 +418,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
     scripted = [
         assistant(
             text("dispatching"),
-            tool_use(sdk_id, "task",
+            tool_use(sdk_id, "sub_agent",
                      {"subagent_name": "sub", "task_description": "do work"}),
         ),
         FakeUserMessage(content=[
@@ -467,7 +467,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
     # (b) The task ToolOutcome's is_error was flipped to the echoed value (False),
     #     off the default True — proving the suppression branch still runs the flip.
     task_outcomes = [
-        t for rec in observed for t in rec.tools if t.name == "task"
+        t for rec in observed for t in rec.tools if t.name == "sub_agent"
     ]
     assert task_outcomes, "no task ToolOutcome reached the LoopGuard"
     assert all(t.is_error is False for t in task_outcomes), (
@@ -1045,7 +1045,7 @@ async def test_receive_loop_sweeps_bg_per_message(
 
 async def _run_events(tmp_path: Path, scripted: list, *, max_tool_calls: int,
                       log: InMemoryEventLog) -> list:
-    inv0 = _inv(tmp_path, tools=frozenset({"complete_step", "task"}), event_log=log)
+    inv0 = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}), event_log=log)
     from dataclasses import replace as _replace
     inv = _replace(inv0, max_tool_calls=max_tool_calls)
 
@@ -1477,11 +1477,11 @@ async def test_task_tool_call_carries_subagent_label(tmp_path, monkeypatch) -> N
             return fn
         return deco
 
-    impl = cc._wrap_one("task", _StubTool(), ctx, state, _fake_sdk_tool)
+    impl = cc._wrap_one("sub_agent", _StubTool(), ctx, state, _fake_sdk_tool)
     await impl({"subagent_name": "explorer", "task_description": "go"})
 
     call = next(e for e in log.read() if e["type"] == "tool_call")
-    assert call["payload"]["name"] == "task"
+    assert call["payload"]["name"] == "sub_agent"
     assert call["payload"]["label"] == "exploring codebase"
 
 
@@ -1515,7 +1515,7 @@ async def test_task_tool_call_omits_label_when_absent(tmp_path, monkeypatch) -> 
             return fn
         return deco
 
-    impl = cc._wrap_one("task", _StubTool(), ctx, state, _fake_sdk_tool)
+    impl = cc._wrap_one("sub_agent", _StubTool(), ctx, state, _fake_sdk_tool)
     # Case 1: subagent name not in subagent_defs
     await impl({"subagent_name": "ghost", "task_description": "haunt"})
     # Case 2: subagent exists but label=None

@@ -83,7 +83,7 @@ async def test_one_heartbeat_per_arm_plus_post_api(tmp_path: Path) -> None:
             tool_use("u1", "read_file", {"path": "data.txt"}),
             tool_use("u2", "read_file", {"path": "missing.txt"}),
             tool_use("u3", "no_such_tool", {}),
-            tool_use("u4", "task", {"subagent_name": "ghost",
+            tool_use("u4", "sub_agent", {"subagent_name": "ghost",
                                     "task_description": "x"}),
         ),
         response(tool_use("c1", "complete_step", {"status": "Success"})),
@@ -91,7 +91,7 @@ async def test_one_heartbeat_per_arm_plus_post_api(tmp_path: Path) -> None:
     log = InMemoryEventLog()
     runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
     events = [e async for e in runner.run(
-        _inv(tmp_path, {"complete_step", "read_file", "task"}, event_log=log))]
+        _inv(tmp_path, {"complete_step", "read_file", "sub_agent"}, event_log=log))]
     assert len(_hb(events)) == 6
     assert events[-1]["type"] == "agent_output"
     # heartbeats carry an empty payload (pinned contract)

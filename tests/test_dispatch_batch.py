@@ -53,7 +53,7 @@ def _ctx(tmp_path: Path, *, spawn, event_log=None) -> ToolContext:
 
 
 def _task_tu(tu_id: str, name: str = "reviewer", desc: str = "go") -> ToolUseBlock:
-    return ToolUseBlock(id=tu_id, name="task",
+    return ToolUseBlock(id=tu_id, name="sub_agent",
                         input={"subagent_name": name, "task_description": desc})
 
 
@@ -562,3 +562,9 @@ async def test_inline_stamps_subagent_label_on_task_tool_call(tmp_path: Path) ->
         assert call["label"] == "exploring codebase"
     finally:
         dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+
+
+def test_spawn_tool_offered_as_sub_agent() -> None:
+    from imp.agents.subagents import make_task_tool
+    assert make_task_tool().name == "sub_agent"
+

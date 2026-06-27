@@ -130,7 +130,7 @@ async def dispatch_tool(
         # nullable, so a None here always means "field not provided".
         state.complete_step_args = {k: v for k, v in args.items() if v is not None}
         return "step complete"
-    if tool.name == "task":
+    if tool.name == "sub_agent":
         # task special-case: never goes through async_invoke (its _invoke raises
         # TaskMustBeAwaited by design). Run the subagent and return its structured
         # output JSON. dispatch_tool does NOT touch the event log for the task
@@ -361,7 +361,7 @@ def _register_tool(
         # task: posture+width gated. read_only tools: width-only honest hint.
         # Every other tool stays unannotated.
         annotations=(
-            _task_annotations() if tool.name == "task"
+            _task_annotations() if tool.name == "sub_agent"
             else _readonly_annotations() if tool_ref.read_only
             else None
         ),

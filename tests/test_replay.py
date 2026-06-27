@@ -90,15 +90,15 @@ def _batch_turn_stream(log: InMemoryEventLog, agent_id: str) -> None:
     log.append_step_context(
         agent_id=agent_id, parent_id_override="seed",
         provider="anthropic", model="m", system_prompt="SYS",
-        tools_schema=[{"name": "task"}], params={}, max_tool_calls=50)
+        tools_schema=[{"name": "sub_agent"}], params={}, max_tool_calls=50)
     log.append_user_message(
         agent_id=agent_id,
         message=Message(role="user", content=(TextBlock(text="begin"),)))
     log.append_llm_response(
         agent_id=agent_id, provider="anthropic", model="m",
         raw={"content": [
-            {"type": "tool_use", "id": "t1", "name": "task", "input": {"a": 1}},
-            {"type": "tool_use", "id": "t2", "name": "task", "input": {"a": 2}}],
+            {"type": "tool_use", "id": "t1", "name": "sub_agent", "input": {"a": 1}},
+            {"type": "tool_use", "id": "t2", "name": "sub_agent", "input": {"a": 2}}],
              "stop_reason": "tool_use", "usage": {}},
         usage={}, stop_reason="tool_use")
     # Completion order: t2 settles first, then t1.
@@ -131,15 +131,15 @@ def test_build_messages_keeps_unmatched_results_at_tail_in_arrival_order() -> No
     log.append_step_context(
         agent_id="step:p/s", parent_id_override="seed",
         provider="anthropic", model="m", system_prompt="SYS",
-        tools_schema=[{"name": "task"}], params={}, max_tool_calls=50)
+        tools_schema=[{"name": "sub_agent"}], params={}, max_tool_calls=50)
     log.append_user_message(
         agent_id="step:p/s",
         message=Message(role="user", content=(TextBlock(text="begin"),)))
     log.append_llm_response(
         agent_id="step:p/s", provider="anthropic", model="m",
         raw={"content": [
-            {"type": "tool_use", "id": "t1", "name": "task", "input": {}},
-            {"type": "tool_use", "id": "t2", "name": "task", "input": {}}],
+            {"type": "tool_use", "id": "t1", "name": "sub_agent", "input": {}},
+            {"type": "tool_use", "id": "t2", "name": "sub_agent", "input": {}}],
              "stop_reason": "tool_use", "usage": {}},
         usage={}, stop_reason="tool_use")
     log.append_tool_result(agent_id="step:p/s",
@@ -161,9 +161,9 @@ def test_repair_backfills_every_dangling_tool_use_not_just_the_last(tmp_path) ->
     from imp.agents.transcript import Transcript, repair_dangling_tool_use_on_resume
 
     assistant = Message(role="assistant", content=(
-        ToolUseBlock(id="t1", name="task", input={}),
-        ToolUseBlock(id="t2", name="task", input={}),
-        ToolUseBlock(id="t3", name="task", input={})))
+        ToolUseBlock(id="t1", name="sub_agent", input={}),
+        ToolUseBlock(id="t2", name="sub_agent", input={}),
+        ToolUseBlock(id="t3", name="sub_agent", input={})))
     messages = [
         Message(role="user", content=(TextBlock(text="go"),)),
         assistant]
@@ -183,16 +183,16 @@ def test_build_messages_reconstructs_settled_subset_with_dangling_siblings() -> 
     log.append_step_context(
         agent_id="step:p/s", parent_id_override="seed",
         provider="anthropic", model="m", system_prompt="SYS",
-        tools_schema=[{"name": "task"}], params={}, max_tool_calls=50)
+        tools_schema=[{"name": "sub_agent"}], params={}, max_tool_calls=50)
     log.append_user_message(
         agent_id="step:p/s",
         message=Message(role="user", content=(TextBlock(text="begin"),)))
     log.append_llm_response(
         agent_id="step:p/s", provider="anthropic", model="m",
         raw={"content": [
-            {"type": "tool_use", "id": "t1", "name": "task", "input": {}},
-            {"type": "tool_use", "id": "t2", "name": "task", "input": {}},
-            {"type": "tool_use", "id": "t3", "name": "task", "input": {}}],
+            {"type": "tool_use", "id": "t1", "name": "sub_agent", "input": {}},
+            {"type": "tool_use", "id": "t2", "name": "sub_agent", "input": {}},
+            {"type": "tool_use", "id": "t3", "name": "sub_agent", "input": {}}],
              "stop_reason": "tool_use", "usage": {}},
         usage={}, stop_reason="tool_use")
     # Only the middle sibling settled.

@@ -133,7 +133,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     for name in invocation.agent_def.tools:
         if name == "complete_step":
             continue
-        if name == "task":
+        if name == "sub_agent":
             # Handled specially below; do NOT pull from registry.
             continue
         if name in WEB_TOOL_NAMES:
@@ -146,12 +146,12 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
-    if "task" in invocation.agent_def.tools:
+    if "sub_agent" in invocation.agent_def.tools:
         # Always register `task` if the agent declares it. If subagent_defs is
         # empty, dispatch_task raises a clear "subagent X not declared" error
         # the first time the LLM invokes `task` — much better than silently
         # advertising no tool at all and letting the LLM fumble.
-        out["task"] = make_task_tool(invocation.tiers)
+        out["sub_agent"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "bash" in invocation.agent_def.tools:

@@ -92,7 +92,7 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
     )
     parent_def = AgentDef(
         name="coder", description="",
-        tools=frozenset({"complete_step", "task"}), subagents=("reviewer",),
+        tools=frozenset({"complete_step", "sub_agent"}), subagents=("reviewer",),
         output_schema=_status_schema(),
         prompt_template_source="code",
         source_path=Path("c.md"), source=_SRC,
@@ -101,7 +101,7 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
     # Delta 1: PARENT-ONLY queue with exactly two responses. The child draws from
     # the recording runner, NOT this queue — do not add a third turn.
     parent_fake = FakeAsyncAnthropic([
-        response(tool_use("t1", "task", {
+        response(tool_use("t1", "sub_agent", {
             "subagent_name": "reviewer",
             "task_description": "review the spec",
         })),

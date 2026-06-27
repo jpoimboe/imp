@@ -664,7 +664,7 @@ class NarrativeBuilder:
             rid_ = str(payload.get("id", ""))
             # A `task` tool_call is a concurrent sibling dispatch in a batch, not
             # a signal that control returned — it must NOT resume-close siblings.
-            is_task_call = etype == "tool_call" and payload.get("name") == "task"
+            is_task_call = etype == "tool_call" and payload.get("name") == "sub_agent"
             is_parent_mid_turn = (
                 etype == "thinking"
                 or (etype == "llm_response"
@@ -1251,7 +1251,7 @@ def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:
 
 def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._segment_had_work = True
-    if p.get("name") == "task":
+    if p.get("name") == "sub_agent":
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return
     burst = _ensure_burst(self)

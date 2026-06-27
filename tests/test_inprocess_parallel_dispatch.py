@@ -68,7 +68,7 @@ def _parent_def() -> AgentDef:
 def _coder_def() -> AgentDef:
     return AgentDef(
         name="coder", description="",
-        tools=frozenset({"complete_step", "task"}), subagents=("reviewer",),
+        tools=frozenset({"complete_step", "sub_agent"}), subagents=("reviewer",),
         output_schema=_status_schema(), prompt_template_source="c",
         source_path=Path("c.md"), source=_SRC)
 
@@ -118,14 +118,14 @@ async def test_single_task_turn_routes_through_batch(
     reset_parallelism_cache()
     responses = {
         "anthropic": [
-            response(tool_use("t1", "task",
+            response(tool_use("t1", "sub_agent",
                               {"subagent_name": "reviewer",
                                "task_description": "only"})),
             response(tool_use("pc", "complete_step", {"status": "Success"})),
         ],
         "openai": [
             resp_response(resp_function_call(
-                "t1", "task",
+                "t1", "sub_agent",
                 '{"subagent_name": "reviewer", "task_description": "only"}')),
             resp_response(resp_function_call(
                 "pc", "complete_step", '{"status": "Success"}')),
@@ -162,19 +162,19 @@ async def test_two_task_turn_both_results_land(
     responses = {
         "anthropic": [
             response(
-                tool_use("t1", "task",
+                tool_use("t1", "sub_agent",
                          {"subagent_name": "reviewer", "task_description": "first"}),
-                tool_use("t2", "task",
+                tool_use("t2", "sub_agent",
                          {"subagent_name": "reviewer", "task_description": "second"})),
             response(tool_use("pc", "complete_step", {"status": "Success"})),
         ],
         "openai": [
             resp_response(
                 resp_function_call(
-                    "t1", "task",
+                    "t1", "sub_agent",
                     '{"subagent_name": "reviewer", "task_description": "first"}'),
                 resp_function_call(
-                    "t2", "task",
+                    "t2", "sub_agent",
                     '{"subagent_name": "reviewer", "task_description": "second"}')),
             resp_response(resp_function_call(
                 "pc", "complete_step", '{"status": "Success"}')),
@@ -211,7 +211,7 @@ async def test_task_tu_does_not_route_through_dispatch_one_tool_use(
 
     async def _guard_task_tus(**kwargs) -> object:
         tu = kwargs["tu"]
-        if tu.name == "task":
+        if tu.name == "sub_agent":
             raise RuntimeError(
                 "task tu reached dispatch_one_tool_use — wiring broken")
         return await original_one(**kwargs)
@@ -221,19 +221,19 @@ async def test_task_tu_does_not_route_through_dispatch_one_tool_use(
     responses = {
         "anthropic": [
             response(
-                tool_use("t1", "task",
+                tool_use("t1", "sub_agent",
                          {"subagent_name": "reviewer", "task_description": "one"}),
-                tool_use("t2", "task",
+                tool_use("t2", "sub_agent",
                          {"subagent_name": "reviewer", "task_description": "two"})),
             response(tool_use("pc", "complete_step", {"status": "Success"})),
         ],
         "openai": [
             resp_response(
                 resp_function_call(
-                    "t1", "task",
+                    "t1", "sub_agent",
                     '{"subagent_name": "reviewer", "task_description": "one"}'),
                 resp_function_call(
-                    "t2", "task",
+                    "t2", "sub_agent",
                     '{"subagent_name": "reviewer", "task_description": "two"}')),
             resp_response(resp_function_call(
                 "pc", "complete_step", '{"status": "Success"}')),

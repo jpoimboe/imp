@@ -19,7 +19,7 @@ def anyio_backend() -> str:
 def _assert_two_task_dispatches_overlap(events: list[dict]) -> None:
     calls = [e for e in events
              if e.get("type") == "tool_call"
-             and (e.get("payload") or {}).get("name") == "task"]
+             and (e.get("payload") or {}).get("name") == "sub_agent"]
     results = [e for e in events
                if e.get("type") == "tool_result"
                and (e.get("payload") or {}).get("id")
