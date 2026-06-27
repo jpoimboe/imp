@@ -286,3 +286,21 @@ def test_write_after_edit_without_reread_allowed(tmp_path: Path) -> None:
     _edit_file(ctx, path="x.py", old="a = 1", new="a = 2")  # refreshes the record
     _write_file(ctx, path="x.py", content="a = 3\n")        # record present -> allowed
     assert (tmp_path / "x.py").read_text() == "a = 3\n"
+
+
+def test_gate_has_no_workflow_vocabulary() -> None:
+    import imp.agents.tools.context as context_mod
+
+    forbidden = (
+        "progress.md",
+        "deferred.md",
+        "Deferred Followups",
+        "task-lead",
+        "plan-cycle",
+        "needs-decision",
+        "NEEDS-REPLAN",
+    )
+    for module in (fs_tools, context_mod):
+        src = Path(module.__file__).read_text()
+        for token in forbidden:
+            assert token not in src, f"{token!r} leaked into {module.__name__}"
