@@ -1,4 +1,4 @@
-"""Language-agnostic structural outline of a source file."""
+"""Language-agnostic structural outline of a file or directory (the symbol_outline tool)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
 from tree_sitter_language_pack import (
     ProcessConfig,
     StructureItem,
@@ -18,11 +19,14 @@ from tree_sitter_language_pack import (
     process,
 )
 
+from imp.agents.tools import imp_tool
+from imp.agents.tools.context import ToolContext
 from imp.agents.tools.ignore import is_ignored, list_unignored, repo_root
 from imp.agents.tools.limits import (
     EXCLUDED_DIRS,
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
+    TOOL_WALLCLOCK_TIMEOUT_S,
     read_text_capped,
     tool_checkpoint,
 )
@@ -434,3 +438,83 @@ def build_tree(root_rel: str, entries: list[FileEntry]) -> DirNode:
         cur.files.append(entry)
     _sort_tree(root)
     return root
+
+
+_UNSUPPORTED_FILE = " — no outline (unsupported); read directly"
+
+
+def _display(target: Path, root: Path) -> str:
+    if target.is_relative_to(root):
+        rel = target.relative_to(root).as_posix()
+        return rel if rel else "."
+    return target.as_posix()
+
+
+async def _outline_file(
+    target: Path, root: Path, *, detail: str,
+    coordinator: object | None, deadline: float | None,
+) -> str:
+    disp = _display(target, root)
+    lang = detect_language(target)
+    if lang is None:
+        return f"{disp}{_UNSUPPORTED_FILE}"
+    try:
+        source, _ = await read_text_capped(target, coordinator=coordinator, deadline=deadline)
+        symbols = extract_cached(target, source, lang)
+    except Exception:
+        return f"{disp}{_UNSUPPORTED_FILE}"
+    if not symbols:
+        return f"{disp}{_UNSUPPORTED_FILE}"
+    return render_file(disp, symbols, detail=detail)
+
+
+async def _outline_dir(
+    target: Path, root: Path, *, detail: str, max_depth: int | None,
+    policy: Any, coordinator: object | None, deadline: float | None,
+) -> str:
+    files = await _enumerate_dir(target, root, policy, coordinator, deadline)
+    disp = _display(target, root)
+    if not files:
+        return f"{disp} — empty (no files to outline)"
+    entries: list[FileEntry] = []
+    for p in files:
+        entries.append(await scan_file(p, root, coordinator=coordinator, deadline=deadline))
+    tree = build_tree(disp, entries)
+    return _render_dir_thinned(tree, detail=detail, max_depth=max_depth)
+
+
+@imp_tool(
+    name="symbol_outline",
+    description=(
+        "Compact structural outline of a file or directory: defined symbols "
+        "(functions, classes, types, …) with signatures and 1-based line "
+        "numbers, bodies elided, so you can see a file's or subtree's shape "
+        "before paying full-read tokens for the few bodies you actually need. "
+        "A file path gives a per-file outline; a directory path recurses "
+        "gitignore-aware with per-file and recursive per-directory counts. "
+        "`detail` is 'signatures' (default: counts plus signatures) or 'counts' "
+        "(names and counts only). `max_depth` caps directory recursion depth "
+        "(directory paths only; ignored for a file). Paths are relative to the "
+        "worktree root, like glob/grep. Read-only and never raises: an "
+        "unsupported or unparseable file degrades to a one-line 'read directly' "
+        "note, and output is capped at 50 KB with breadth-first thinning. Not a "
+        "substitute for read_file — use it to choose what to read."
+    ),
+)
+async def symbol_outline(
+    ctx: ToolContext, path: str, detail: str = "signatures", max_depth: int | None = None,
+) -> str:
+    target = ctx.authorize_fs(("read",), path)
+    root = ctx.project_root.resolve()
+    coordinator = ctx.coordinator
+    deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
+    if max_depth is not None and max_depth < 0:
+        max_depth = 0
+    if target.is_file():
+        return await _outline_file(
+            target, root, detail=detail, coordinator=coordinator, deadline=deadline)
+    if target.is_dir():
+        return await _outline_dir(
+            target, root, detail=detail, max_depth=max_depth,
+            policy=ctx.sandbox_policy, coordinator=coordinator, deadline=deadline)
+    return f"{path}: no such file or directory"

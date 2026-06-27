@@ -7,6 +7,8 @@ from pathlib import Path
 import anyio
 
 import imp.agents.tools.symbol_outline as so
+from imp.agents.tools import get_registry
+from imp.agents.tools.context import ToolContext
 from imp.agents.tools.symbol_outline import (
     Symbol,
     count_phrase,
@@ -527,3 +529,126 @@ def test_build_tree_groups_and_counts_recursively() -> None:
     # (n_dirs, n_files, n_symbols), recursive over the whole subtree.
     assert so.dir_counts(tree) == (2, 3, 4)
     assert so.dir_counts(pkg) == (1, 2, 4)
+
+
+def _ctx(tmp_path):
+    return ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
+
+
+def _outline(ctx, **args):
+    return anyio.run(get_registry()["symbol_outline"].async_invoke, ctx, args)
+
+
+def test_tool_file_mode_python(tmp_path) -> None:
+    (tmp_path / "foo.py").write_text(_PY)
+    out = _outline(_ctx(tmp_path), path="foo.py")
+    assert out == (
+        "foo.py — 2 fn, 1 data\n"
+        "4: class Foo:\n"
+        "5:   def method(self, a: int) -> str:\n"
+        "9: def run_change(change, config=None) -> int:"
+    )
+
+
+def test_tool_file_mode_unsupported(tmp_path) -> None:
+    (tmp_path / "notes.txt").write_text("hello")
+    out = _outline(_ctx(tmp_path), path="notes.txt")
+    assert out == "notes.txt — no outline (unsupported); read directly"
+
+
+def test_tool_not_found(tmp_path) -> None:
+    out = _outline(_ctx(tmp_path), path="missing.py")
+    assert out == "missing.py: no such file or directory"
+
+
+def test_tool_empty_dir(tmp_path) -> None:
+    (tmp_path / "empty").mkdir()
+    out = _outline(_ctx(tmp_path), path="empty")
+    assert out == "empty — empty (no files to outline)"
+
+
+def test_tool_dir_mode(tmp_path, monkeypatch) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "foo.py").write_text(_PY)
+    (tmp_path / "Makefile").write_text("all:\n\techo hi\n")
+
+    async def _no_repo(_p):
+        return None
+
+    monkeypatch.setattr(so, "repo_root", _no_repo)
+    out = _outline(_ctx(tmp_path), path=".")
+    assert out == (
+        "./ — 1 dir, 2 files, 3 symbols\n"
+        "  Makefile — (no outline)\n"
+        "  pkg/ — 1 file, 3 symbols\n"
+        "    foo.py — 2 fn, 1 data\n"
+        "      4: class Foo:\n"
+        "      5:   def method(self, a: int) -> str:\n"
+        "      9: def run_change(change, config=None) -> int:"
+    )
+
+
+def test_tool_dir_mode_counts(tmp_path, monkeypatch) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "foo.py").write_text(_PY)
+
+    async def _no_repo(_p):
+        return None
+
+    monkeypatch.setattr(so, "repo_root", _no_repo)
+    out = _outline(_ctx(tmp_path), path=".", detail="counts")
+    assert out == (
+        "./ — 1 dir, 1 file, 3 symbols\n"
+        "  pkg/ — 1 file, 3 symbols\n"
+        "    foo.py — 2 fn, 1 data"
+    )
+
+
+def test_tool_max_depth_collapses_dir(tmp_path, monkeypatch) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "foo.py").write_text(_PY)
+
+    async def _no_repo(_p):
+        return None
+
+    monkeypatch.setattr(so, "repo_root", _no_repo)
+    out = _outline(_ctx(tmp_path), path=".", detail="counts", max_depth=1)
+    assert out == (
+        "./ — 1 dir, 1 file, 3 symbols\n"
+        "  pkg/ — 1 file, 3 symbols"
+    )
+
+
+def test_tool_max_depth_ignored_for_file(tmp_path) -> None:
+    (tmp_path / "foo.py").write_text(_PY)
+    ctx = _ctx(tmp_path)
+    assert _outline(ctx, path="foo.py", max_depth=0) == _outline(ctx, path="foo.py")
+
+
+def test_tool_file_mode_swallows_parse_failure(tmp_path, monkeypatch) -> None:
+    (tmp_path / "foo.py").write_text(_PY)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("parse exploded")
+
+    monkeypatch.setattr(so, "extract_cached", _boom)
+    out = _outline(_ctx(tmp_path), path="foo.py")
+    assert out == "foo.py — no outline (unsupported); read directly"
+
+
+def test_tool_file_mode_zero_symbols(tmp_path) -> None:
+    (tmp_path / "Makefile").write_text("all:\n\techo hi\n")
+    out = _outline(_ctx(tmp_path), path="Makefile")
+    assert out == "Makefile — no outline (unsupported); read directly"
+
+
+def test_tool_negative_max_depth_clamps_to_zero(tmp_path, monkeypatch) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "foo.py").write_text(_PY)
+
+    async def _no_repo(_p):
+        return None
+
+    monkeypatch.setattr(so, "repo_root", _no_repo)
+    out = _outline(_ctx(tmp_path), path=".", detail="counts", max_depth=-3)
+    assert out == "./ — 1 dir, 1 file, 3 symbols"
