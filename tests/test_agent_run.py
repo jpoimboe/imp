@@ -1026,3 +1026,42 @@ async def test_inline_solicit_returns_reply_and_emits_awaiting() -> None:
 
     assert reply == "redirect now"
     assert any(e["type"] == "awaiting_user_input" for e in log.read())
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_maps_handoff_event_to_result(tmp_path):
+    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.engine.agent_run import drive_invocation
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+    class _HandoffRunner:
+        async def run(self, inv):
+            yield {"type": "handoff",
+                   "payload": {"handoff_path": "/x/s.handoff.md"}}
+
+        async def interrupt(self):
+            ...
+
+    agent_def = AgentDef(
+        name="a", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="go", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    inv = AgentInvocation(
+        agent_def=agent_def, provider_name="fake", model_name="m",
+        system_prompt="p", initial_messages=(),
+        change_context=ChangeContext(title="t", project_root=tmp_path,
+                                     workflow_dir=tmp_path),
+        transcript_dir=tmp_path / "s", events_path=tmp_path / "e.jsonl")
+
+    result = await drive_invocation(
+        inv, _HandoffRunner(), coordinator=None, log=None, emit_events=False)
+
+    assert result.handoff_path == "/x/s.handoff.md"
+    assert result.errored is False
+    assert result.fatal is False
+    assert result.paused is False
+    assert result.output is None
