@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
@@ -1170,3 +1171,70 @@ async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> 
 
     renamed = f"\x1b]2;{GLYPH_WORKING} imp · term1 · Renamed Change\x07"
     assert renamed not in s.getvalue()
+
+
+@pytest.mark.anyio
+async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    survived: list[bool] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "step_started", "payload": {}})
+        # SIGTERM tears the CLIENT down (a leave); the run keeps going here — the
+        # daemon's lease rule, not the client, decides any pause.
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await server.wait_for_attach_change()
+        survived.append(True)
+        return "done"
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(15):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+            tg.start_soon(coord.run_signal_receiver)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+            loop = asyncio.get_running_loop()
+            # Wait until the client is attached, its escalation hook is wired, AND
+            # the coordinator's SIGTERM loop handler is installed — sending the
+            # signal before the handler is live would terminate the test process.
+            with anyio.fail_after(5):
+                while (coord.escalation_event is None
+                       or server.attached_count != 1
+                       or signal.SIGTERM not in loop._signal_handlers):
+                    await anyio.sleep(0.02)
+            os.kill(os.getpid(), signal.SIGTERM)   # leave gesture
+            with anyio.fail_after(5):
+                while not survived:
+                    await anyio.sleep(0.02)
+            tg.cancel_scope.cancel()
+
+    assert survived == [True]
