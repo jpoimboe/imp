@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.prompts import build_context, render_prompt
+from imp.agents.prompts import PromptRenderError, build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
@@ -615,6 +615,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         workflow_dir=bundled_workflow_dir("imp")).lower()
     # Key on a phrase unique to the handoff true-branch.
     assert "the base branch advanced since the draft started" in moved   # head_changed=true
+    assert "yield — by ending your turn with the question" in moved
     assert "adopt near-silently" not in moved
 
     same = render_prompt(body, build_context(
@@ -626,15 +627,16 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     assert "adopt near-silently" in same           # head_changed=false branch
     assert "the base branch advanced since the draft started" not in same
 
-    headless_moved = render_prompt(body, build_context(
+    autonomous_moved = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
-        non_interactive=True,
+        autonomous=True,
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "the base branch advanced since the draft started" in headless_moved
-    assert "do **not** yield to a human" in headless_moved
+    assert "the base branch advanced since the draft started" in autonomous_moved
+    assert "reconcile it yourself and proceed without yielding" in autonomous_moved
+    assert "do **not** yield to a human" not in autonomous_moved
 
 
 HUMAN_DECISION_PARTIAL = Path(
@@ -779,3 +781,27 @@ def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
         assert "observable/external behavior" not in md.read_text(), (
             f"{md.name}: still carries the removed standalone "
             "'observable/external behavior' escalation trigger")
+
+
+def test_no_prompt_references_transport_non_interactive() -> None:
+    roots = [Path("src/imp/assets/workflows/imp"),
+             Path("src/imp/assets/workflows/imp-flat")]
+    offenders = [str(p) for root in roots for p in root.rglob("*.md")
+                 if "run.non_interactive" in p.read_text()]
+    assert offenders == [], offenders
+
+
+def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    ctx = build_context(change_title="t", event_log=log)
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ run.non_interactive }}", ctx)
+
+
+def test_finalize_parks_needs_decision_without_autonomy_escape() -> None:
+    for tree in ("imp", "imp-flat"):
+        text = Path(
+            f"src/imp/assets/workflows/{tree}/agents/finalize.md").read_text()
+        assert "run.non_interactive" not in text
+        assert "run.autonomous" not in text   # the needs-decision walk never auto-resolves
+        assert "needs-decision" in text       # the per-item walk exists

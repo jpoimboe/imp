@@ -99,7 +99,8 @@ def test_new_positional_delivers_verbatim_seed(
                            status: object = None,
                            opening_intent: object = None,
                            title: object = None,
-                           non_interactive: object = False) -> int:
+                           non_interactive: object = False,
+                           autonomous: object = False) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -126,7 +127,8 @@ def test_new_title_flag_sets_change_title(
                            status: object = None,
                            opening_intent: object = None,
                            title: object = None,
-                           non_interactive: object = False) -> int:
+                           non_interactive: object = False,
+                           autonomous: object = False) -> int:
         captured["change"] = change
         captured["seed_opening"] = seed_opening
         return 0
@@ -153,7 +155,8 @@ def test_new_positional_with_message_legal(
                            status: object = None,
                            opening_intent: object = None,
                            title: object = None,
-                           non_interactive: object = False) -> int:
+                           non_interactive: object = False,
+                           autonomous: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
@@ -180,7 +183,8 @@ def test_new_tui_delivers_seed(
                         resume: bool = False,
                         opening_intent: str | None = None,
                         leave_mode: str | None = None,
-                        leave_state: dict[str, str] | None = None) -> int:
+                        leave_state: dict[str, str] | None = None,
+                        autonomous: bool = False) -> int:
         captured["seed_opening"] = seed_opening
         return 0
 
@@ -248,7 +252,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
                            leave_mode: object = None,
                            leave_state: object = None,
                            title: object = None,
-                           non_interactive: object = False) -> int:
+                           non_interactive: object = False,
+                           autonomous: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -291,7 +296,8 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
                            leave_mode: object = None,
                            leave_state: object = None,
                            title: object = None,
-                           non_interactive: object = False) -> int:
+                           non_interactive: object = False,
+                           autonomous: object = False) -> int:
         captured["seed_opening"] = seed_opening
         captured["opening_intent"] = opening_intent
         return 0
@@ -333,7 +339,8 @@ def test_new_creates_unmaterialized_draft(
                            status: object = None,
                            opening_intent: object = None,
                            title: object = None,
-                           non_interactive: object = False) -> int:
+                           non_interactive: object = False,
+                           autonomous: object = False) -> int:
         captured["change"] = change
         return 0
 

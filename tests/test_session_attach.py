@@ -172,7 +172,7 @@ async def test_build_session_attach_threads_seed_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
-            non_interactive: bool = False,
+            non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["change"] = ch
             captured["seed_opening"] = seed_opening
@@ -227,7 +227,8 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
         lambda ch, *, seed_opening=None, resume=False,
-        opening_intent=None, scope_only=False: spawned.append(ch))
+        opening_intent=None, scope_only=False, non_interactive=False,
+        autonomous=False: spawned.append(ch))
 
     received: list[dict[str, Any]] = []
     server = SessionSocket(sock)
@@ -299,7 +300,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
-            non_interactive: bool = False,
+            non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["resume"] = resume
             tg.start_soon(_start_server)
@@ -362,7 +363,7 @@ async def test_build_session_attach_threads_opening_intent_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
-            non_interactive: bool = False,
+            non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["opening_intent"] = opening_intent
             tg.start_soon(_start_server)
@@ -424,7 +425,7 @@ async def test_build_session_attach_threads_scope_only_into_spawn(
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
             opening_intent: str | None = None, scope_only: bool = False,
-            non_interactive: bool = False,
+            non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["scope_only"] = scope_only
             tg.start_soon(_start_server)
@@ -441,3 +442,25 @@ async def test_build_session_attach_threads_scope_only_into_spawn(
         await client.aclose()
         await holder["server"].close()
         tg.cancel_scope.cancel()
+
+
+def test_spawn_session_daemon_includes_autonomous_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(change, autonomous=True)
+    assert "--autonomous" in captured["argv"]
+
+
+def test_spawn_session_daemon_omits_autonomous_when_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(change)
+    assert "--autonomous" not in captured["argv"]

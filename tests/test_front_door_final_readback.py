@@ -15,7 +15,7 @@ def _render(tmp_path: Path) -> str:
     return render_prompt(
         body,
         build_context(change_title="t", event_log=log, change_id="abc",
-                      change_home=".imp/changes/abc", non_interactive=False,
+                      change_home=".imp/changes/abc",
                       project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
 

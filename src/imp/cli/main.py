@@ -610,6 +610,7 @@ async def _run_tui_session(
         opening_intent: str | None = None,
         leave_mode: str | None = None,
         scope_only: bool = False,
+        autonomous: bool = False,
         leave_state: dict[str, str] | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
@@ -618,7 +619,8 @@ async def _run_tui_session(
                  opening_intent=opening_intent, display_width=_display_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent, scope_only=scope_only)
+        opening_intent=opening_intent, scope_only=scope_only,
+        autonomous=autonomous)
     leave_state = {} if leave_state is None else leave_state
 
     async def _solicit(_prompt: str) -> str:
@@ -762,6 +764,7 @@ async def _run_fresh_session(
     _print_run_header(
         change.id, change.title, "new", color=should_use_color(sys.stdout))
     headless, auto_headless = _select_headless(args)
+    autonomous = bool(getattr(args, "autonomous", False))
     if headless:
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
@@ -774,11 +777,13 @@ async def _run_fresh_session(
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=seed_opening, status=status, non_interactive=True)
+            seed_opening=seed_opening, status=status, non_interactive=True,
+            autonomous=autonomous)
     if _tui_requested(args):
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
-                change, seed_opening=seed_opening, leave_state=leave_state)
+                change, seed_opening=seed_opening, leave_state=leave_state,
+                autonomous=autonomous)
 
         return await _clear_loop(change.control_root, tui=True, first=_first_tui)
 
@@ -792,7 +797,8 @@ async def _run_fresh_session(
             change, status=status, driver=driver, coord=coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=seed_opening, status=status, leave_state=leave_state)
+            seed_opening=seed_opening, status=status, leave_state=leave_state,
+            autonomous=autonomous)
 
     return await _clear_loop(change.control_root, tui=False, first=_first)
 
@@ -842,6 +848,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return 2
 
     non_interactive = bool(getattr(args, "non_interactive", False))
+    autonomous = bool(getattr(args, "autonomous", False))
     _verify_command_nudge(
         project_root=control, control_root=control,
         non_interactive=non_interactive,
@@ -916,7 +923,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
             opening_intent=opening_intent, title=term_title,
-            non_interactive=True, **_scope_kw)
+            non_interactive=True, autonomous=autonomous, **_scope_kw)
 
     if _tui_requested(args):
         if not header_printed:
@@ -926,7 +933,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             return await _run_tui_session(
                 change, seed_opening=opening_text,
                 opening_intent=opening_intent, leave_mode=leave_mode,
-                leave_state=leave_state, **_scope_kw)
+                leave_state=leave_state, autonomous=autonomous, **_scope_kw)
 
         return await _clear_loop(control, tui=True, first=_first_tui)
 
@@ -945,7 +952,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
             opening_intent=opening_intent, leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, **_scope_kw)
+            leave_state=leave_state, title=term_title, autonomous=autonomous, **_scope_kw)
 
     return await _clear_loop(control, tui=False, first=_first)
 
@@ -1018,6 +1025,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return 2
 
     headless, auto_headless = _select_headless(args)
+    autonomous = bool(getattr(args, "autonomous", False))
     if headless:
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
@@ -1033,21 +1041,21 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            resume=True, status=status, non_interactive=True)
+            resume=True, status=status, non_interactive=True, autonomous=autonomous)
     if _tui_requested(args):
         print(_run_header_line(
             change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
 
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
-                change, resume=True, leave_state=leave_state)
+                change, resume=True, leave_state=leave_state, autonomous=autonomous)
 
         return await _clear_loop(change.control_root, tui=True, first=_first_tui)
 
     if not getattr(args, "message", None):
         question = bare_turn_end_question(change)
         if question is not None:
-            return await _resume_inert(change, question)
+            return await _resume_inert(change, question, autonomous=autonomous)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
@@ -1069,7 +1077,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change, status=status, driver=driver, coord=coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            resume=True, status=status, leave_state=leave_state)
+            resume=True, status=status, leave_state=leave_state,
+            autonomous=autonomous)
 
     return await _clear_loop(change.control_root, tui=False, first=_first)
 
@@ -1091,7 +1100,7 @@ async def _inert_ask_line(change: Change) -> str | None:
 
 
 async def _resume_inert(
-    change: Change, question: str,
+    change: Change, question: str, *, autonomous: bool = False,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
     from imp.cli.signals import InterruptCoordinator
@@ -1112,7 +1121,8 @@ async def _resume_inert(
             solicit = make_buffered_solicit(line, inner)
             return await run_session_client(
                 change, driver=driver, coord=coord, solicit=solicit,
-                resume=True, status=status, leave_state=leave_state)
+                resume=True, status=status, leave_state=leave_state,
+                autonomous=autonomous)
 
         return await _clear_loop(change.control_root, tui=False, first=_first)
 
@@ -2324,6 +2334,10 @@ def _build_parser() -> argparse.ArgumentParser:
                             "names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
+    p_new.add_argument("--autonomous", action="store_true",
+                       help="Auto-take the recommendation at recommendation-bearing "
+                            "gates instead of confirming each; genuine intent-forks "
+                            "still pause for a human. Independent of --non-interactive.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause+resume with another --message. "
@@ -2358,6 +2372,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional opening message; omit to start with an interactive prompt.")
     p_chat.add_argument("--non-interactive", action="store_true",
                         help="Headless: no live prompt; supply the reply via --message.")
+    p_chat.add_argument("--autonomous", action="store_true",
+                        help="Auto-take the recommendation at recommendation-bearing "
+                             "gates instead of confirming each; genuine intent-forks "
+                             "still pause for a human. Independent of --non-interactive.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Headless reply consumed by the first bare-turn-end prompt; "
                              "requires --non-interactive.")
@@ -2373,6 +2391,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Change id or resume token identifying which Change to resume.")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
+    p_resume.add_argument("--autonomous", action="store_true",
+                          help="Auto-take the recommendation at recommendation-bearing "
+                               "gates instead of confirming each; genuine intent-forks "
+                               "still pause for a human. Independent of --non-interactive.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "

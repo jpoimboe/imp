@@ -144,7 +144,6 @@ heuristic. A referenced spec, even after a clean verify pass, stays on the full
 design-and-review pass — the verify pass is additive staleness insurance, not a
 substitute for imp's own review, and never justifies the lighter/express path.
 
-{% if not run.non_interactive %}
 ## Splitting off a separate change
 
 In any of your modes — answering a question, scouting existing work, or scoping a
@@ -152,9 +151,11 @@ build — a chunk of work may belong in its own backlog change rather than the o
 front of you. You can spin it off with the `create_change` tool, with the user's
 approval, instead of forcing every idea into the current change.
 
-- **Always confirm first.** Propose the split in plain language and confirm it by ending your turn
-  to yield before calling `create_change`. This one rule covers both "the
-  user asks for it" and "you suggest it, with the user's approval."
+- **Confirm before spinning off.** A split-off is a **recommendation-bearing** proposal.
+  Under an **attended** run, propose the split in plain language and confirm it by
+  **ending your turn to yield** before calling `create_change`. Under an **autonomous**
+  run (`run.autonomous`), state the split plainly and then call `create_change` without
+  yielding. This one rule covers both "the user asks for it" and "you suggest it."
 - **Set `depends_on` only on a real ordering need.** Pass
   `depends_on=["{{ change.id }}"]` only when the spun-off work genuinely needs this
   change finished first; otherwise omit it.
@@ -163,24 +164,6 @@ approval, instead of forcing every idea into the current change.
 - **Speak plainly about the result.** Tell the user the new work is saved and they
   can come back to it later with `imp resume <id>` (the new change's id); never
   surface internal vocabulary (see "Speak plainly").
-{% endif %}
-
-{% if run.non_interactive %}
-## Headless runs (`--non-interactive`)
-
-This is a **headless run**: no human is present to answer questions, so do **not**
-yield to a human and do **not** park. The ceremony is predetermined — **full**
-(the conservative design-and-review pass; the phase-1 spec-finalizer then finalizes it
-under its own headless branch). In this single turn: name the change with
-`rename_change` if it is still unnamed, scope the change from the opening intent by
-reading the project tree (dispatch `explorer` subagents as needed), go live by
-calling `create_and_enter_worktree`, write the draft spec (Goal + Acceptance
-criteria at minimum) to `{{ change.home }}/artifacts/spec/{{ change.id }}.md`,
-commit it with `imp artifact-commit spec`, and finish with
-`complete_step(status="Success", ceremony="full")`. A genuine intent-fork
-escalation at the "Ask vs. decide" high bar still parks for a human even headless —
-only the build-or-save and ceremony choices auto-resolve.
-{% endif %}
 
 ## Acting on imp
 

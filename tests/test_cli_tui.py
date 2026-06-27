@@ -113,7 +113,8 @@ def test_new_tui_on_non_tty_warns_and_routes_to_session_client(
 
     async def _fake_client(change, *, driver, coord, solicit,
                            seed_opening=None, status=None, opening_intent=None,
-                           leave_mode=None, leave_state=None, title=None) -> int:
+                           leave_mode=None, leave_state=None, title=None,
+                           autonomous=False) -> int:
         called["n"] += 1
         return 0
 
@@ -316,7 +317,7 @@ def test_resume_tui_routes_to_run_tui_session(tmp_path, monkeypatch) -> None:
     seen: dict[str, object] = {}
 
     async def _fake_tui(change, *, seed_opening=None, resume=False,
-                        leave_state=None) -> int:
+                        leave_state=None, autonomous=False) -> int:
         seen["resume"] = resume
         return 0
 

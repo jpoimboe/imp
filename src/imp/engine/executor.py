@@ -177,6 +177,7 @@ async def run_change(
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
     scope_only: bool = False,
+    autonomous: bool = False,
     seed_opening: str | None = None,
     opening_intent: str | None = None,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
@@ -293,6 +294,7 @@ async def run_change(
                 verify_timeout=config.verify_timeout,
                 non_interactive=non_interactive,
                 scope_only=scope_only,
+                autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
                 project_facts=state.project_facts or {},
@@ -488,6 +490,7 @@ async def _dispatch_step(
     verify_timeout: int | None = None,
     non_interactive: bool = False,
     scope_only: bool = False,
+    autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
     project_facts: dict[str, str] | None = None,
@@ -524,6 +527,7 @@ async def _dispatch_step(
         wrapper_text=wrapper_text, is_resume=is_resume, verify_command=verify_command,
         non_interactive=non_interactive,
         scope_only=scope_only,
+        autonomous=autonomous,
         sandbox_policy=sandbox_policy, seed_opening=seed_opening,
         project_facts=project_facts, guidance=guidance)
 
@@ -795,6 +799,7 @@ async def _route_agent(
     verify_command: str | None = None,
     non_interactive: bool = False,  # forwarded to the invocation/child runs
     scope_only: bool = False,
+    autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
     project_facts: dict[str, str] | None = None,
@@ -847,6 +852,7 @@ async def _route_agent(
             initial_messages=initial, is_resume=is_resume,
             verify_command=verify_command, non_interactive=non_interactive,
             scope_only=scope_only,
+            autonomous=autonomous,
             sandbox_policy=sandbox_policy,
             project_facts=project_facts, guidance=guidance)
         if result.delay is None:
@@ -920,6 +926,7 @@ async def _route_agent(
                                   is_resume=is_resume, verify_command=verify_command,
                                   non_interactive=non_interactive,
                                   scope_only=scope_only,
+                                  autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
                                   seed_opening=seed_opening,
                                   project_facts=project_facts, guidance=guidance)
@@ -970,6 +977,7 @@ async def _run_agent_invocation(
     verify_command: str | None = None,
     non_interactive: bool = False,
     scope_only: bool = False,
+    autonomous: bool = False,
     sandbox_policy: Any = None,
     project_facts: dict[str, str] | None = None,
     guidance: str = "",
@@ -1005,8 +1013,8 @@ async def _run_agent_invocation(
             orig_base_head=change.orig_base_head,
             event_log=log, vars=state.vars,
             project_facts=project_facts, guidance=guidance,
-            non_interactive=non_interactive,
             scope_only=scope_only,
+            autonomous=autonomous,
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,
