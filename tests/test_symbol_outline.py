@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import imp.agents.tools.symbol_outline as so
-from imp.agents.tools.symbol_outline import Symbol, count_phrase, count_symbols, detect_language, extract_symbols, render_file
+from imp.agents.tools.symbol_outline import (
+    Symbol,
+    count_phrase,
+    count_symbols,
+    detect_language,
+    extract_symbols,
+    render_file,
+)
 
 
 def test_detect_language_by_extension() -> None:
@@ -280,3 +288,42 @@ def test_render_file_no_thinning_when_under_budget() -> None:
     out = render_file("pkg/foo.py", extract_symbols(_PY, "python"))
     assert "not shown" not in out
     assert "output truncated" not in out
+
+
+def test_extract_cached_parses_unchanged_file_once(tmp_path, monkeypatch) -> None:
+    f = tmp_path / "m.py"
+    f.write_text(_PY)
+
+    calls = {"n": 0}
+    real_process = so.process
+
+    def counting_process(source, config):
+        calls["n"] += 1
+        return real_process(source, config)
+
+    monkeypatch.setattr(so, "process", counting_process)
+
+    first = so.extract_cached(f, _PY, "python")
+    second = so.extract_cached(f, _PY, "python")
+    assert calls["n"] == 1
+    assert [s.name for s in first] == [s.name for s in second] == ["Foo", "run_change"]
+
+
+def test_extract_cached_reparses_after_mtime_change(tmp_path, monkeypatch) -> None:
+    f = tmp_path / "m.py"
+    f.write_text(_PY)
+
+    calls = {"n": 0}
+    real_process = so.process
+
+    def counting_process(source, config):
+        calls["n"] += 1
+        return real_process(source, config)
+
+    monkeypatch.setattr(so, "process", counting_process)
+
+    so.extract_cached(f, _PY, "python")
+    stat = f.stat()
+    os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    so.extract_cached(f, _PY, "python")
+    assert calls["n"] == 2

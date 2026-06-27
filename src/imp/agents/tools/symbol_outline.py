@@ -7,7 +7,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from imp.agents.tools.limits import OUTPUT_TRUNCATION_MARKER, TOOL_OUTPUT_CAP_BYTES
 from tree_sitter_language_pack import (
     ProcessConfig,
     StructureItem,
@@ -15,6 +14,8 @@ from tree_sitter_language_pack import (
     has_language,
     process,
 )
+
+from imp.agents.tools.limits import OUTPUT_TRUNCATION_MARKER, TOOL_OUTPUT_CAP_BYTES
 
 # Filenames the pack's path-based detector misses but whose grammars exist.
 _FILENAME_LANGS = {"Makefile": "make", "Dockerfile": "dockerfile"}
@@ -69,7 +70,7 @@ class Symbol:
     bucket: str  # "fn" | "data" | "other"
     lineno: int  # 1-based; 0 if the span is unavailable
     signature: str
-    children: tuple["Symbol", ...] = ()
+    children: tuple[Symbol, ...] = ()
 
 
 def _signature(source_bytes: bytes, item: StructureItem) -> str:
@@ -105,6 +106,22 @@ def extract_symbols(source: str, language: str) -> list[Symbol]:
     return [_to_symbol(source_bytes, item) for item in result.structure]
 
 
+# Process-lifetime (per-run) parse cache keyed on (resolved path, mtime_ns).
+_PARSE_CACHE: dict[tuple[str, int], list[Symbol]] = {}
+
+
+def extract_cached(path: Path, source: str, language: str) -> list[Symbol]:
+    """`extract_symbols` for an on-disk file, cached on (path, mtime_ns). Callers pass
+    the already-read `source` so the cache never re-reads."""
+    key = (str(path.resolve()), path.stat().st_mtime_ns)
+    cached = _PARSE_CACHE.get(key)
+    if cached is not None:
+        return list(cached)
+    symbols = extract_symbols(source, language)
+    _PARSE_CACHE[key] = symbols
+    return list(symbols)
+
+
 def count_symbols(symbols: list[Symbol]) -> tuple[int, int, int]:
     """(fn, data, other) totals over the whole symbol tree, recursive."""
     fn = data = other = 0
@@ -123,7 +140,8 @@ def count_symbols(symbols: list[Symbol]) -> tuple[int, int, int]:
 
 
 def count_phrase(fn: int, data: int, other: int) -> str:
-    """The count phrase after the header dash: 'N fn, M data' (zero side omitted), or a single 'K symbol(s)' total when no recognized kind is present."""
+    """The count phrase after the header dash: 'N fn, M data' (zero side omitted),
+    or a single 'K symbol(s)' total when no recognized kind is present."""
     if fn == 0 and data == 0:
         total = other
         return f"{total} symbol" if total == 1 else f"{total} symbols"
@@ -149,7 +167,8 @@ def _render_lines(symbols: list[Symbol], out: list[str], depth: int, width: int)
 
 
 def render_file(display: str, symbols: list[Symbol], *, detail: str = "signatures") -> str:
-    """A file's outline: count header, then '<lineno>: <signature>' lines (detail='signatures'), nesting by indentation; `display` is the worktree-relative path."""
+    """A file's outline: count header, then '<lineno>: <signature>' lines
+    (detail='signatures'), nesting by indentation; `display` is the worktree-relative path."""
     fn, data, other = count_symbols(symbols)
     header = f"{display} — {count_phrase(fn, data, other)}"
     if detail == "counts" or not symbols:
@@ -164,7 +183,8 @@ def render_file(display: str, symbols: list[Symbol], *, detail: str = "signature
 
 
 def _thin_file(header: str, body: list[str]) -> str:
-    """Header plus as many leading symbol lines as the budget allows, then a '… +N not shown' notice and the truncation marker."""
+    """Header plus as many leading symbol lines as the budget allows, then a '… +N
+    not shown' notice and the truncation marker."""
     marker = OUTPUT_TRUNCATION_MARKER.strip()
     kept: list[str] = []
     size = len(header)
