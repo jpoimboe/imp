@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 3
+# LAYOUT_VERSION: 4
 [paths]
 change.json
 events.jsonl
@@ -23,6 +23,7 @@ held_acquire_step
 held_lane
 id
 loop_counts
+max_reincarnations
 merge_commit
 outcome_history
 project_facts

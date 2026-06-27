@@ -383,6 +383,19 @@ def test_reincarnations_defaults_empty(tmp_path: Path) -> None:
     assert back.reincarnations == {}
 
 
+def test_max_reincarnations_round_trips(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new",
+              max_reincarnations=5)
+    s.save(tmp_path)
+    assert State.load(tmp_path).max_reincarnations == 5
+
+
+def test_max_reincarnations_defaults_to_two(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    s.save(tmp_path)
+    assert State.load(tmp_path).max_reincarnations == 2
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json

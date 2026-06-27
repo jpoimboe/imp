@@ -73,6 +73,8 @@ class State:
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
     reincarnations: dict[str, int] = field(default_factory=dict)  # per-session
     # (agent_id-keyed) proactive-handoff counter; the loop guard caps it.
+    max_reincarnations: int = 2  # per-session reincarnation cap (the loop guard);
+    # set from config.context_max_reincarnations() at run start.
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -148,6 +150,7 @@ class State:
             "held_acquire_step": self.held_acquire_step,
             "completion_pending": self.completion_pending,
             "reincarnations": self.reincarnations,
+            "max_reincarnations": self.max_reincarnations,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:

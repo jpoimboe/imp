@@ -16,7 +16,7 @@ from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 3  # bump in the SAME commit as any breaking change-home layout/schema change
+LAYOUT_VERSION = 4  # bump in the SAME commit as any breaking change-home layout/schema change
 
 
 def _fold_phantom(phantom: Path, home: Path) -> None:
@@ -81,9 +81,19 @@ def _migrate_v2_to_v3(change_dir: Path) -> None:
     meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
 
+def _migrate_v3_to_v4(change_dir: Path) -> None:
+    """v3->v4: state.json gained `max_reincarnations` (auto-defaulted on
+    State.load); only the recorded layout_version advances."""
+    meta_path = change_dir / "change.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 4
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
+    (3, 4): _migrate_v3_to_v4,
 }
 
 
