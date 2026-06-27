@@ -2825,11 +2825,13 @@ async def test_native_resume_reconcile_idempotent_when_complete(tmp_path: Path) 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     for m in msgs:
         t.append(m)
-    # AWAITING_USER store is complete at the result boundary: seed all turns.
+    # Store is complete but carries a stale trailing error turn reconcile must strip.
     full = message_to_session_records(
         msgs, parent_uuid=None, session_id=skey["session_id"],
         cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
     await store.append(skey, full)
+    stale_error = {"uuid": "stale-error-uuid", "isApiErrorMessage": True}
+    await store.append(skey, [stale_error])
 
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     runner = ClaudeCodeAgentRunner(
