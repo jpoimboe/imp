@@ -93,6 +93,9 @@ class ImpSessionStore:
         reconcile strips a trailing synthetic error turn whose deterministic uuid
         the real replacement tail reuses, which append's uuid dedup would drop."""
         path = self._path(key)
+        if not entries:
+            path.unlink(missing_ok=True)
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w") as f:
             for entry in entries:

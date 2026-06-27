@@ -470,7 +470,7 @@ def test_overwrite_with_empty_truncates(tmp_path: Path) -> None:
     anyio.run(store.append, key, [
         {"type": "user", "uuid": "a", "message": {"role": "user"}}])
     anyio.run(store.overwrite, key, [])
-    assert anyio.run(store.load, key) == []
+    assert anyio.run(store.load, key) is None
 
 
 def test_overwrite_preserves_duplicate_uuid_replacement(tmp_path: Path) -> None:
