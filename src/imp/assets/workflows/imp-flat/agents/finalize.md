@@ -24,7 +24,8 @@ Read the intent-level summary the `summarizer` step wrote at
 `{{ change.home }}/artifacts/summary/{{ change.id }}.md` — you **lead** your gate
 prose with it (§2). When that artifact is **absent** (e.g. the `summarizer` erred
 without committing), do not block the gate: open from the audit fields below
-instead. Read the spec, plans, and `{{ change.home }}/progress.md`, and inspect the
+instead. Read the spec, plans, `{{ change.home }}/progress.md`, and
+`{{ change.home }}/deferred.md`, and inspect the
 change in `bash` (`git diff <base>..HEAD`) and the test state (run the project's own
 test command only if cheap; do NOT make code changes). **You are not a reviewer.**
 The `git diff <base>..HEAD` read exists only to *orient* you — not to evaluate it,
@@ -35,9 +36,9 @@ here is redundant and is exactly where spurious end-of-run human asks are born.
 Populate the audit fields:
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: the items you surface at the gate are a **closed set** — exactly the
-  recorded `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`, and
+  recorded `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`, and
   nothing else. Read the **Deferred Followups** dispositions the `deferred-sweep`
-  step recorded in `{{ change.home }}/progress.md`, and surface ONLY the
+  step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-finalizer`/`plan-writer` appended directly in reader form (they reach you even on
   a `fast_path` change where `deferred-sweep` never ran) **and tolerations** the
@@ -81,7 +82,7 @@ When you recap the reader's own choice at the gate, address them directly — "y
 chose to ignore it," not "the human chose ignore."
 
 Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed set**
-of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/progress.md`
+of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`
 (including tolerations the `verify` / `sweep-verify` gates recorded there) — and
 nothing else. Do not add an item here from something you noticed while reading the
 diff. For EACH item, ending your turn after each (one item per turn):
@@ -91,7 +92,7 @@ diff. For EACH item, ending your turn after each (one item per turn):
 - Engage the human's natural-language response and map it onto one of three **internal
   outcomes** — do not present these as a menu to choose from:
   - **fix** — fix before merge. Collect the item into the rework brief and
-    leave its `progress.md` line `needs-decision` (it rides the rework and is
+    leave its `deferred.md` line `needs-decision` (it rides the rework and is
     re-evaluated next pass).
   - **defer** — hand it to a new backlog Change. Call
     `create_change(title="<short title>", description="<self-contained brief that needs
@@ -151,7 +152,7 @@ Then route on the dispositions:
 Always emit the audit fields (`verify_status` / `open_items` / `next_steps`) on
 every `complete_step`, whichever decision you make — they land in
 the event log and are queryable via `imp log {{ change.id }}`. Do not write
-files (other than the `progress.md` line rewrites above); do not commit.
+files (other than the `deferred.md` line rewrites above); do not commit.
 
 ---
 

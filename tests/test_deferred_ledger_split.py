@@ -103,6 +103,23 @@ def test_flat_producers_file_deferred_items_to_deferred_md() -> None:
     assert "Deferred Followup open item in `{{ change.home }}/deferred.md`:" in prv
 
 
+def test_flat_consumers_read_ledger_from_deferred_md() -> None:
+    fin = _flat("finalize.md")
+    assert "recorded `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`, and" in fin
+    assert "step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the" in fin
+    assert "the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`" in fin
+    assert "leave its `deferred.md` line `needs-decision`" in fin
+    assert "other than the `deferred.md` line rewrites above" in fin
+
+    gc = _flat("gap-check.md")
+    # gap-check reads the needs-decision items (the backstop-suppression source) from deferred.md,
+    # added to its read list alongside progress.md.
+    assert "`{{ change.home }}/progress.md`, `{{ change.home }}/deferred.md`, and the committed code" in gc
+
+    ir = _flat("integration-review.md")
+    assert "`{{ change.home }}/deferred.md` carries any `## Deferred Followups`" in ir
+
+
 def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     fin = _imp("finalize.md")
     # The closed-set needs-decision read is from deferred.md.
