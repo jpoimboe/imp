@@ -85,7 +85,7 @@ not a reliable signal of user intent on scope — but a scope-contradicting deci
 is **the human's call at the merge gate, not yours to block on**, provided it is
 surfaced. So when a decision contradicts an explicit spec acceptance criterion —
 especially a scope or out-of-scope boundary — your job is to verify it is recorded
-as a `— needs-decision:` Deferred Followup open item in `progress.md`:
+as a `— needs-decision:` Deferred Followup open item in `{{ change.home }}/deferred.md`:
 
 - **Recorded** — the deviation rides to the merge gate as a `— needs-decision:`
   open item: do **not** raise a Critical/Major finding. Note it **non-blocking**

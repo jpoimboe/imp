@@ -76,6 +76,33 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
     assert "does **not** live in" in tl
 
 
+def test_flat_producers_file_deferred_items_to_deferred_md() -> None:
+    pw = _flat("plan-writer.md")
+    assert "open item in `{{ change.home }}/deferred.md` (the reader" in pw
+    assert "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)" in pw
+
+    cd = _flat("coder.md")
+    # The verify-triage toleration and needs-decision append both target deferred.md.
+    assert "Record a toleration as a normal `## Deferred Followups` entry in\n`{{ change.home }}/deferred.md`" in cd
+    assert "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)" in cd
+    # progress.md is still read for completed plans only.
+    assert "`{{ change.home }}/progress.md` if it exists — completed plans." in cd
+
+    cr = _flat("code-reviewer.md")
+    assert "**Deferred ledger:** `{{ change.home }}/deferred.md`" in cr
+    assert "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)," in cr
+    assert "`{{ change.home }}/deferred.md` (the Deferred Followups append above)" in cr
+
+    rec = _flat("reconciler.md")
+    assert "`{{ change.home }}/deferred.md` in reader form (create the file/heading if absent):" in rec
+
+    sf = _flat("spec-finalizer.md")
+    assert "in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if" in sf
+
+    prv = _flat("plan-reviewer.md")
+    assert "Deferred Followup open item in `{{ change.home }}/deferred.md`:" in prv
+
+
 def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     fin = _imp("finalize.md")
     # The closed-set needs-decision read is from deferred.md.

@@ -24,8 +24,9 @@ file yourself; no one hands you a packed task — implement directly from the pl
 Read first, every entry:
 - The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`
   (highest N — find it with glob). Implement **every** `## Task` in it, in order.
-- `{{ change.home }}/progress.md` if it exists — completed plans and the Deferred
-  Followups list.
+- `{{ change.home }}/progress.md` if it exists — completed plans.
+- `{{ change.home }}/deferred.md` if it exists — the append-only Deferred Followups
+  list.
 - The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a feedback
@@ -140,7 +141,7 @@ failure output. Reason over the OPAQUE failure text against the diff
 call per failure.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/progress.md`, born directly in `— needs-decision:` state with the
+`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
 originating gate as its `<source>` — here `verify`, never an agent. The EXACT shape:
 
 `- [ ] DEFERRED verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
@@ -173,7 +174,7 @@ just make and continue is the shared bar:
 When a concern clears that bar and you cannot settle it from the plan, spec, or
 codebase — including a risky opportunistic fix you chose not to make — do not bury it
 in prose. Append it to the **Deferred Followups** list in
-`{{ change.home }}/progress.md` (create the `## Deferred Followups` heading if absent)
+`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)
 in `finalize`'s exact reader form, the same `— needs-decision:` line the merge gate
 walks:
 

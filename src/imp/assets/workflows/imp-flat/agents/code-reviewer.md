@@ -45,7 +45,8 @@ range above.
   change must satisfy.
 - **Plans:** `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` — what was planned
   and intended for each phase.
-- **Progress:** `{{ change.home }}/progress.md` — completed plans and deferred followups.
+- **Progress:** `{{ change.home }}/progress.md` — completed plans.
+- **Deferred ledger:** `{{ change.home }}/deferred.md` — deferred followups.
 
 Read all of these and the diff before forming your assessment.
 
@@ -151,14 +152,14 @@ A finding you do not block is either fixed **in-loop** (routed to the coder this
 as a low-risk standalone fix) or, if it is a genuine human call, recorded straight to
 `finalize` as a reader-form item — there is no separate sweep step to receive a generic
 deferral. Append each such item to the **Deferred Followups** list in
-`{{ change.home }}/progress.md` (create the `## Deferred Followups` heading if absent),
+`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent),
 in this EXACT pinned shape (the merge gate walks it):
 
 `- [ ] DEFERRED code-reviewer: <one-line description> [scope: {% if vars.review_scope == 'change' %}change{% else %}plan{% endif %}] — needs-decision: <why a human must decide>`
 
 Append nothing for a finding you routed `task_gap` (it returns for an immediate,
 re-reviewed fix) or one the coder fixes in-loop this round. Appending to
-`{{ change.home }}/progress.md` is the ONLY write you may make.
+`{{ change.home }}/deferred.md` is the ONLY write you may make.
 
 ## Using `web_search`
 
@@ -170,7 +171,7 @@ change or to discover alternatives.
 ## Hard Rule: READ-ONLY over code
 
 You are strictly read-only over CODE — the only file you may write is
-`{{ change.home }}/progress.md` (the Deferred Followups append above). Never commit, stage,
+`{{ change.home }}/deferred.md` (the Deferred Followups append above). Never commit, stage,
 or edit code files.
 
 ## Output Format
