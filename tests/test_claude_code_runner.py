@@ -2690,3 +2690,90 @@ async def test_second_interrupt_during_steer_skips_requery(
     # The client had only the initial query() — no re-query after _cancel.
     assert len(holder["c"].queries) == 1
     assert runner._cancel is True
+
+
+@pytest.mark.anyio
+async def test_native_resume_reconcile_idempotent_when_complete(tmp_path: Path) -> None:
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="done early"),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    # AWAITING_USER store is complete at the result boundary: seed all turns.
+    full = message_to_session_records(
+        msgs, parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+    await store.append(skey, full)
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted),
+        user_input_fn=lambda _prompt: "keep going")
+    [ev async for ev in runner.run(inv)]
+
+    # Reconcile-and-overwrite ran but changed nothing: same uuids, no duplication.
+    reconciled = await store.load(skey)
+    assert [r["uuid"] for r in reconciled] == [r["uuid"] for r in full]
+    assert len(reconciled) == 2
+
+
+@pytest.mark.anyio
+async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)),
+        Message(role="assistant", content=(TextBlock(text="done early"),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    # Store holds only the first turn; the rest were unflushed at termination.
+    await store.append(skey, message_to_session_records(
+        msgs[:1], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(opts, scripted_messages=scripted),
+        user_input_fn=lambda _prompt: "keep going")
+    [ev async for ev in runner.run(inv)]
+
+    # The three trailing turns missing from the store were synthesized in; the
+    # streamed reply turn is NOT stored (it rides messages[resume_base:]).
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 4
+    assert reconciled[-1]["type"] == "assistant"
+    assert reconciled[-1]["message"]["content"][0]["text"] == "done early"

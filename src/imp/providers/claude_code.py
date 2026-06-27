@@ -96,6 +96,7 @@ from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
     _SESSION_LIMIT_RE,
+    reconcile_store_tail,
     resume_session_id,
     session_key,
     session_store_for,
@@ -1252,9 +1253,10 @@ class ClaudeCodeAgentRunner:
         # would be orphaned (the unmatched-tool_use 400 this change targets). Those
         # downgrade to stream-json replay, which re-streams the whole balanced
         # history in position.
+        store_body = await store.load(skey)
         native_resume = (
             (not is_fresh)
-            and store_has_conversation_body(await store.load(skey))
+            and store_has_conversation_body(store_body)
             and classify_resume(existing) is ResumeState.AWAITING_USER
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
@@ -1410,6 +1412,14 @@ class ClaudeCodeAgentRunner:
             pending_complete = False
             return rec
 
+        if native_resume:
+            reconciled = reconcile_store_tail(
+                messages[:resume_base], store_body or [],
+                session_id=skey["session_id"],
+                cwd=str(invocation.change_context.project_root),
+                model=self.model,
+            )
+            await store.overwrite(skey, reconciled)
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
             # Publish the live client so interrupt() (called from the watchdog/
