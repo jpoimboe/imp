@@ -13,6 +13,7 @@ Schema derivation:
 from __future__ import annotations
 
 import inspect
+import logging
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -115,21 +116,36 @@ __all__ = ["Tool", "clear_registry", "get_registry", "imp_tool", "register_tool"
 # which works only because `imp_tool` is already bound when the import runs.
 # Note: complete_step is NOT auto-imported here — it's synthesized per-agent
 # by make_complete_step_tool(...) and registered via Tool, not @imp_tool.
+_BUILTIN_MODULES = (
+    "bash",
+    "bg",
+    "create_and_enter_worktree",
+    "create_change",
+    "fs",
+    "nav",
+    "notice",
+    "query_events",
+    "rename_change",
+    "step_label",
+    "symbol_outline",
+)
+
+
 def _register_builtins() -> None:
-    """Import all built-in tool modules so their @imp_tool decorations fire."""
-    from imp.agents.tools import (  # noqa: F401
-        bash,
-        bg,
-        create_and_enter_worktree,
-        create_change,
-        fs,
-        nav,
-        notice,
-        query_events,
-        rename_change,
-        step_label,
-        symbol_outline,
-    )
+    """Import all built-in tool modules so their @imp_tool decorations fire.
+
+    A module that fails to import (e.g. a missing optional native dependency) is
+    logged and skipped rather than allowed to take down the entire CLI — no one
+    tool should be able to crash tool registration for all the others."""
+    import importlib
+
+    for name in _BUILTIN_MODULES:
+        try:
+            importlib.import_module(f"imp.agents.tools.{name}")
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "built-in tool %r failed to import; skipping", name, exc_info=True
+            )
 
 
 _register_builtins()

@@ -8,16 +8,14 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
-from tree_sitter_language_pack import (
-    ProcessConfig,
-    StructureItem,
-    detect_language_from_path,
-    has_language,
-    process,
-)
+
+if TYPE_CHECKING:
+    # Type-only: keep the pack off the import critical path. The grammar pack is
+    # a heavy native dependency loaded lazily via _pack(); see below.
+    from tree_sitter_language_pack import ProcessConfig, StructureItem
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
@@ -34,6 +32,29 @@ from imp.agents.tools.limits import (
 # Filenames the pack's path-based detector misses but whose grammars exist.
 _FILENAME_LANGS = {"Makefile": "make", "Dockerfile": "dockerfile"}
 
+# The grammar pack is a heavy native dependency. Import it lazily so the module
+# (and thus the whole CLI, via _register_builtins) loads even when it is absent;
+# only invoking the tool then needs it, and a clean error explains the fix.
+_PACK: Any = None
+
+
+def _pack() -> Any:
+    """The tree_sitter_language_pack module, imported on first use and cached.
+
+    Raises RuntimeError with an install hint when the optional dependency is not
+    installed, rather than letting an ImportError surface as a bare traceback."""
+    global _PACK
+    if _PACK is None:
+        try:
+            import tree_sitter_language_pack as pack
+        except ImportError as e:
+            raise RuntimeError(
+                "symbol_outline needs the 'tree-sitter-language-pack' package, "
+                "which isn't installed. Install it: pip install tree-sitter-language-pack"
+            ) from e
+        _PACK = pack
+    return _PACK
+
 
 def detect_language(path: Path) -> str | None:
     """The tree-sitter language name for `path`, or None when unsupported.
@@ -41,10 +62,11 @@ def detect_language(path: Path) -> str | None:
     Extension-based via the pack's detector, with a filename fallback for a few
     grammars it does not key on filename. Returns a name only when the grammar
     is actually present (`has_language`)."""
-    lang: str | None = detect_language_from_path(str(path))
+    pack = _pack()
+    lang: str | None = pack.detect_language_from_path(str(path))
     if lang is None:
         lang = _FILENAME_LANGS.get(path.name)
-    if lang is not None and has_language(lang):
+    if lang is not None and pack.has_language(lang):
         return lang
     return None
 
@@ -65,17 +87,27 @@ _KIND_BUCKET: dict[str, str] = {
 
 _WHITESPACE = re.compile(r"\s+")
 
-_STRUCTURE_CONFIG = ProcessConfig(
-    language="",  # replaced per call via dataclasses.replace
-    structure=True,
-    imports=False,
-    exports=False,
-    comments=False,
-    docstrings=False,
-    symbols=False,
-    diagnostics=False,
-    data_extraction=False,
-)
+# Built lazily (needs the pack's ProcessConfig) and cached; see _structure_config.
+_STRUCTURE_CONFIG: ProcessConfig | None = None
+
+
+def _structure_config() -> ProcessConfig:
+    """The structure-only ProcessConfig template, built on first use and cached.
+    `language` is empty here and replaced per call via dataclasses.replace."""
+    global _STRUCTURE_CONFIG
+    if _STRUCTURE_CONFIG is None:
+        _STRUCTURE_CONFIG = _pack().ProcessConfig(
+            language="",
+            structure=True,
+            imports=False,
+            exports=False,
+            comments=False,
+            docstrings=False,
+            symbols=False,
+            diagnostics=False,
+            data_extraction=False,
+        )
+    return _STRUCTURE_CONFIG
 
 
 @dataclass(frozen=True)
@@ -114,8 +146,8 @@ def _to_symbol(source_bytes: bytes, item: StructureItem) -> Symbol:
 def extract_symbols(source: str, language: str) -> list[Symbol]:
     """Top-level Symbol tree for `source`, parsed as `language`. Never raises on
     malformed source — the pack returns an empty structure."""
-    config = dataclasses.replace(_STRUCTURE_CONFIG, language=language)
-    result = process(source, config)
+    config = dataclasses.replace(_structure_config(), language=language)
+    result = _pack().process(source, config)
     source_bytes = source.encode("utf-8")
     return [_to_symbol(source_bytes, item) for item in result.structure]
 

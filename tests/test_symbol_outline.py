@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import anyio
+import pytest
 
 import imp.agents.tools.symbol_outline as so
 from imp.agents.tools import get_registry
@@ -17,6 +20,61 @@ from imp.agents.tools.symbol_outline import (
     extract_symbols,
     render_file,
 )
+
+
+def test_cli_imports_without_grammar_pack() -> None:
+    """The whole CLI must load even when tree-sitter-language-pack is absent.
+
+    Regression: symbol_outline imported the pack unconditionally at module top,
+    so a drifted environment (declared dep not installed) crashed `imp` entirely
+    via _register_builtins. The pack is now loaded lazily, so the module — and
+    the CLI that imports it — must come up cleanly without it, register the tool,
+    and only raise a clean, hinted error when the pack-backed path is invoked."""
+    code = textwrap.dedent(
+        """
+        import sys
+        from pathlib import Path
+
+        class _Block:
+            def find_spec(self, name, path=None, target=None):
+                if name == "tree_sitter_language_pack" or name.startswith(
+                    "tree_sitter_language_pack."
+                ):
+                    raise ImportError("blocked for test")
+                return None
+
+        sys.meta_path.insert(0, _Block())
+        sys.modules.pop("tree_sitter_language_pack", None)
+
+        import imp.cli.main  # must not raise
+        import imp.agents.tools as tools
+        assert "symbol_outline" in tools.get_registry(), "tool should still register"
+
+        import imp.agents.tools.symbol_outline as so
+        try:
+            so.detect_language(Path("foo.py"))
+        except RuntimeError as e:
+            assert "tree-sitter-language-pack" in str(e), str(e)
+        else:
+            raise AssertionError("expected RuntimeError when the pack is absent")
+        print("OK")
+        """
+    )
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout
+
+
+def test_pack_missing_raises_clean_error(monkeypatch) -> None:
+    # Setting sys.modules[name]=None makes `import name` raise ImportError, which
+    # _pack() must convert into a friendly, install-hinting RuntimeError.
+    monkeypatch.setattr(so, "_PACK", None)
+    monkeypatch.setitem(sys.modules, "tree_sitter_language_pack", None)
+    with pytest.raises(RuntimeError, match="tree-sitter-language-pack"):
+        so.detect_language(Path("foo.py"))
 
 
 def test_detect_language_by_extension() -> None:
@@ -300,13 +358,14 @@ def test_extract_cached_parses_unchanged_file_once(tmp_path, monkeypatch) -> Non
     f.write_text(_PY)
 
     calls = {"n": 0}
-    real_process = so.process
+    pack = so._pack()
+    real_process = pack.process
 
     def counting_process(source, config):
         calls["n"] += 1
         return real_process(source, config)
 
-    monkeypatch.setattr(so, "process", counting_process)
+    monkeypatch.setattr(pack, "process", counting_process)
 
     first = so.extract_cached(f, _PY, "python")
     second = so.extract_cached(f, _PY, "python")
@@ -319,13 +378,14 @@ def test_extract_cached_reparses_after_mtime_change(tmp_path, monkeypatch) -> No
     f.write_text(_PY)
 
     calls = {"n": 0}
-    real_process = so.process
+    pack = so._pack()
+    real_process = pack.process
 
     def counting_process(source, config):
         calls["n"] += 1
         return real_process(source, config)
 
-    monkeypatch.setattr(so, "process", counting_process)
+    monkeypatch.setattr(pack, "process", counting_process)
 
     so.extract_cached(f, _PY, "python")
     stat = f.stat()

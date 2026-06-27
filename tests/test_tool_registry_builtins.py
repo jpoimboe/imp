@@ -31,6 +31,31 @@ def test_full_builtin_set_schema_builds_under_resolver() -> None:
         assert "properties" in schema, name
 
 
+def test_register_builtins_isolates_a_broken_module(monkeypatch, caplog) -> None:
+    # A built-in tool module that fails to import is logged and skipped, never
+    # fatal — no single tool can crash registration for all the others.
+    import importlib
+
+    import imp.agents.tools as tools
+
+    real_import = importlib.import_module
+
+    def _fake(name, *args, **kwargs):
+        if name == "imp.agents.tools.symbol_outline":
+            raise RuntimeError("boom")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", _fake)
+    with caplog.at_level("WARNING"):
+        tools._register_builtins()  # must not raise despite the broken module
+
+    assert any(
+        "symbol_outline" in r.getMessage() for r in caplog.records
+    ), "the skipped module should be logged"
+    # Siblings registered at the real module load are still available.
+    assert "bash" in tools.get_registry()
+
+
 def test_symbol_outline_in_base_caps() -> None:
     from imp.engine.loader import BASE_CAPS
     assert "symbol_outline" in BASE_CAPS
