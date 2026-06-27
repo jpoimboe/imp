@@ -46,7 +46,8 @@ range above.
   change must satisfy.
 - **Plans:** `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` — what was planned
   and intended for each phase.
-- **Progress:** `{{ change.home }}/progress.md` — completed tasks, deferred followups, and
+- **Progress:** `{{ change.home }}/progress.md` — completed tasks.
+- **Deferred ledger:** `{{ change.home }}/deferred.md` — deferred followups and
   deviation notes.
 
 Read all of these and the diff before forming your assessment.
@@ -145,7 +146,7 @@ Collapse to one verdict over your kept findings:
 ## Record deferred observations (before you emit)
 
 Append each **deferred** finding (and any Minor/Nit observation that has no other
-fix-it path) to the **Deferred Followups** list in `{{ change.home }}/progress.md` so the
+fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.md` so the
 `deferred-sweep` step can act on it. Create a `## Deferred Followups` section if
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
@@ -153,7 +154,7 @@ it):
 `- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: {% if vars.review_scope == 'change' %}change{% else %}plan{% endif %}]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
-re-reviewed fix). Appending to `{{ change.home }}/progress.md` is the ONLY write you may make.
+re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.
 
 ## Using `web_search`
 
@@ -165,7 +166,7 @@ change or to discover alternatives.
 ## Hard Rule: READ-ONLY over code
 
 You are strictly read-only over CODE — the only file you may write is
-`{{ change.home }}/progress.md` (the Deferred Followups append above). Never commit, stage,
+`{{ change.home }}/deferred.md` (the Deferred Followups append above). Never commit, stage,
 or edit code files.
 
 ## Output Format

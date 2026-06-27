@@ -188,7 +188,7 @@ minors-integration pass still asks the user nothing.
 
 When a concern clears that bar and you cannot settle it from the spec, the brainstorm,
 or the codebase, do not bury it in prose. Append it to the **Deferred Followups** list
-in `{{ change.home }}/progress.md` (create the `## Deferred Followups` heading if
+in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if
 absent) in `finalize`'s exact reader form, the same `— needs-decision:` line shape the
 merge gate already walks:
 
