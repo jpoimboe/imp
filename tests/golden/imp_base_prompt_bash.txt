@@ -22,7 +22,7 @@ Generally you can freely take local, reversible actions like editing files or ru
 
 # Using your tools
  - Prefer dedicated tools over bash when one fits (read_file, edit_file, write_file, grep, glob) — reserve bash for shell-only operations.
- - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
+ - You can call multiple tools in a single response, and should do so whenever the calls are independent — maximize parallel tool calls to work efficiently. For example, when you already know you need several files, read them in one batch rather than one per turn. Only sequence calls when a later call genuinely depends on an earlier call's result.
  - To load a skill's instructions, call load_skill with its name — only skills listed as available to you; don't guess.
 
 # Tone and style
