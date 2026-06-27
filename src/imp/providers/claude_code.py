@@ -1418,7 +1418,7 @@ class ClaudeCodeAgentRunner:
             return rec
 
         if native_resume:
-            assert store_body  # invariant: native_resume gate guarantees store_has_conversation_body
+            assert store_body  # native_resume gate guarantees store_has_conversation_body
             reconciled = reconcile_store_tail(
                 messages[:resume_base], store_body,
                 session_id=skey["session_id"],
