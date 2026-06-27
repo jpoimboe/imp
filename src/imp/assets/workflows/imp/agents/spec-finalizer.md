@@ -68,7 +68,8 @@ questions.
 
 Normalize the draft just enough to imp's structure (ensure a **Goal** and
 **Acceptance criteria** are present), run the same pre-commit self-review as in
-"Writing the Spec", commit with `imp artifact-commit spec`, and finish with
+"Writing the Spec", then **author the plan outline** (see **Author the plan outline**
+below), commit with `imp artifact-commit spec`, and finish with
 `complete_step(phase="written", …)`. Pin `complexity` from the draft's shape (see **Pinning complexity** below).
 
 ## Writing the Spec (the `phase: written` turn)
@@ -92,6 +93,35 @@ Be concrete. Reference existing code paths when relevant. Do not modify any proj
 4. Ambiguity — could any requirement be read two different ways? Pick one and make it explicit.
 
 Fix issues inline; do not re-solicit the user.
+
+## Author the plan outline (inside the spec)
+
+After the spec body is final and self-reviewed, append a `## Plan outline` section
+**inside the spec artifact**, before the **Commit** step below. It is the run's
+**source of truth** for plan count and
+seeds `plan_total` (the first `plan-writer` reads it and echoes the count). Decompose
+the **whole spec** into N plans, each a coarse **one-or-two-line statement of *what*
+that plan covers — not the how** (no tasks, no code, no file lists). Use the same
+greedy-bundling sizing guidance `plan-writer` uses, expressed at this coarse grain:
+each outline plan is the **largest** green-preserving bundle of independent scope (a
+working **~5–8 tasks/plan** target), split only at genuine dependency boundaries. On a
+trivial / fast-path change it is a **single** outline plan.
+
+Shape:
+
+```
+## Plan outline
+
+1. <what plan 1 covers — one or two lines>
+2. <what plan 2 covers — one or two lines>
+…
+```
+
+On a **rework or minors re-commit**, the `## Plan outline` already lives in the spec —
+keep it, and refresh it only if the rework changed scope (and thus the plan count).
+
+Append the outline, then commit it with the **Commit** step below and finish with the
+existing `complete_step(phase="written", …)` call.
 
 **Commit** the spec to the change's artifact lineage. The agent writes the
 plain file; `imp artifact-commit` commits it to refs/imp/journal-wip/<id> (NOT

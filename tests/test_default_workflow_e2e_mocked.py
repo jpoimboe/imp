@@ -226,7 +226,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     #   decision:merge     finalize  → goto merge
     #   phase:written      spec-finalizer   → not drafting, advances
     #   done:true          task-lead     → plan fully implemented
-    #   more_plans:false   plan-cycle-check → no supercycle, continue
+    #   more_plans:false   gap-check → coverage complete, continue
     #   blocking:false     spec/plan reviewers → no rework loop
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
 
@@ -422,15 +422,17 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
 
 @pytest.mark.anyio
-async def test_fast_path_skips_reviewers_and_review(
+async def test_express_runs_full_implement_pipeline_with_no_change_panel(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
     # ceremony:express -> front-door sets fast_path=true and routes straight to
-    # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer), plan-review
-    # (plan-verify-commit fast-path rule), and the whole review -> deferred-sweep ->
-    # sweep-verify block (plan-cycle-check fast-path -> finalize). The run still
-    # reaches planning, implementation, and merge.
+    # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer) and plan
+    # review (plan-verify-commit fast-path rule). The implement-side fast_path ->
+    # finalize shortcut is GONE: express now runs the full pipeline
+    # (plan-code-reviewer -> deferred-sweep -> sweep-verify -> review-base-repin ->
+    # gap-check -> summarizer -> finalize), with NO change-wide panel since
+    # plan_total == 1 (gap-check -> summarizer).
     def _default_trivial(**kwargs):
         system = kwargs.get("system", "")
         if _IR_SIG in system:
@@ -455,16 +457,23 @@ async def test_fast_path_skips_reviewers_and_review(
 
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
-    assert "spec-finalizer" not in started, started      # express skips the spec beat
-    assert "spec-reviewer" not in started, started     # spec beat skipped on express
-    assert "plan-reviewer" not in started, started     # plan-verify-commit fast-path rule
-    assert "code-reviewer" not in started, started
-    assert "deferred-sweep" not in started, started
-    assert "sweep-verify" not in started, started
-    assert "summarizer" not in started, started
-    assert "plan-writer" in started, started           # planning still runs
-    assert "plan-finalized" in started, started        # task list announced on the fast path
-    assert "task-lead" in started, started             # implementation still runs
+    # The spec beat and plan review are still skipped on express.
+    assert "spec-finalizer" not in started, started
+    assert "spec-reviewer" not in started, started
+    assert "plan-reviewer" not in started, started
+    # The implement-side pipeline now runs in full.
+    assert "plan-writer" in started, started
+    assert "plan-finalized" in started, started
+    assert "task-lead" in started, started
+    assert "plan-code-reviewer" in started, started
+    assert "deferred-sweep" in started, started
+    assert "sweep-verify" in started, started
+    assert "gap-check" in started, started
+    assert "summarizer" in started, started
+    # Single plan: gap-check runs exactly once and fires NO change-wide panel,
+    # so plan-code-reviewer runs exactly once (the per-plan pass).
+    assert started.count("gap-check") == 1, started
+    assert started.count("plan-code-reviewer") == 1, started
 
 
 @pytest.mark.anyio
