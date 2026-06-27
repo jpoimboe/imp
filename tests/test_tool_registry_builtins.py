@@ -10,6 +10,7 @@ def test_all_builtins_registered() -> None:
         "glob", "grep",
         "bash",
         "query_events",
+        "symbol_outline",
     }
     missing = expected - reg.keys()
     assert not missing, f"missing built-in tools: {sorted(missing)}"
@@ -28,6 +29,11 @@ def test_full_builtin_set_schema_builds_under_resolver() -> None:
         schema = reg[name].input_schema
         assert schema.get("type") == "object", name
         assert "properties" in schema, name
+
+
+def test_symbol_outline_in_base_caps() -> None:
+    from imp.engine.loader import BASE_CAPS
+    assert "symbol_outline" in BASE_CAPS
 
 
 def test_grep_schema_exports_output_mode_enum() -> None:
