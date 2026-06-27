@@ -1875,6 +1875,23 @@ def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
     assert step.resumed is True
 
 
+def test_resume_reentry_updates_position_label_on_step_node() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           position_label=False),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        ev("5", "step_started", step="task-lead", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           position_label=True),
+    ])
+    step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                for c in p.children if isinstance(c, nv.StepNode))
+    assert step.position_label is True
+
+
 def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
     # Regression: a parallel `task` batch dispatches two subagents BEFORE any
     # result. Between the dispatch and the results the parent streams its own
@@ -2377,3 +2394,22 @@ def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
              raw={"content": []}, context_pct=88.0, context_window=200_000))
     assert b.latest_context_pct == 20.0          # frozen at the parent's value
     assert b.latest_context_window == 1_000_000
+
+
+def test_step_node_reads_position_label_from_step_started() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 1/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    top = b._step_stack[-1]
+    assert top.position_label is True
+
+
+def test_step_node_position_label_defaults_false() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+             model="m", provider="anthropic", label="writing plan",
+             phase_label="planning phase · plan 1/1"))
+    assert b._step_stack[-1].position_label is False

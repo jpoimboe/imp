@@ -123,6 +123,7 @@ class StepNode:
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
+    position_label: bool = False       # step label is a position counter, not a verb
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
     chrome: str | None = None          # "none" → suppress this step's header
@@ -875,6 +876,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.resumed = bool(p.get("resumed", False))
             existing.route_label = p.get("route_label")
             existing.rotate_phrase = bool(p.get("rotate_phrase", False))
+            existing.position_label = bool(p.get("position_label", False))
             existing.rotated_phrase = None
             if existing is self._first_step:
                 _inject_opening_intent(self, existing)
@@ -888,6 +890,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
                     quiet=bool(p.get("quiet", False)),
+                    position_label=bool(p.get("position_label", False)),
                     label=p.get("label"),
                     chrome=p.get("chrome"),
                     phase_label=p.get("phase_label"),

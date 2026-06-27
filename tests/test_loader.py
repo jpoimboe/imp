@@ -1306,3 +1306,14 @@ def test_rule_release_parsed_and_non_goto_rejected(tmp_path: Path) -> None:
         """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(bad)
+
+
+def test_task_lead_step_carries_position_label_flag() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    steps = {s.name: s for ph in wf.phases for s in ph.steps}
+    assert steps["task-lead"].position_label is True
+    # every other step defaults to a plain activity-verb label
+    assert steps["plan-writer"].position_label is False
+    assert steps["verify"].position_label is False

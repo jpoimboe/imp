@@ -863,3 +863,11 @@ def test_explorer_opts_into_symbol_outline(tmp_path: Path) -> None:
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     assert "symbol_outline" in wf.agents["explorer"].tools
+
+
+def test_task_lead_step_declares_position_label() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    steps = {s.name: s for ph in wf.phases for s in ph.steps}
+    assert steps["task-lead"].position_label is True

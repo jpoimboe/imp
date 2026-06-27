@@ -134,6 +134,7 @@ phases:
     label: "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     steps:
       - name: task-lead
+        position_label: true
         file: agents/task-lead.md
         tier: high
         label: "task 1/{{ vars.task_total }}"

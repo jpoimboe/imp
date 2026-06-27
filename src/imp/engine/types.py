@@ -177,6 +177,7 @@ class Step:
     cwd: str | None = None
     timeout_seconds: int | None = None
     quiet: bool = False
+    position_label: bool = False  # label is a position counter, not an activity verb
     label: str | None = None
     acquire: str | None = None  # lane keyword "base" → change.base_branch; branch steps only
     release: str | None = None  # runs before step body; agent steps only

@@ -608,6 +608,7 @@ def _parse_step(
     name = raw["name"]
     kind = _infer_kind(raw, source)
     quiet = _parse_bool_flag(raw, "quiet", source)
+    position_label = _parse_bool_flag(raw, "position_label", source)
     label = raw.get("label")
     if label is not None and not isinstance(label, str):
         raise LoadError("a step's `label:` must be a string", source)
@@ -651,6 +652,7 @@ def _parse_step(
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
             quiet=quiet,
+            position_label=position_label,
             label=label,
             acquire=acquire,
             release=release,

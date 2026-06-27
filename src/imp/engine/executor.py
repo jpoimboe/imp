@@ -545,6 +545,8 @@ def _step_started_payload(
         payload["command"] = step.command
     if step.chrome is not None:
         payload["chrome"] = step.chrome
+    if step.position_label:
+        payload["position_label"] = True
     if step.phase_label is not None:
         payload["phase_label"] = render_label(step.phase_label, change, log, state)
     # Consume-on-read: transfer route_label from the prior step's _finish, then clear it.
