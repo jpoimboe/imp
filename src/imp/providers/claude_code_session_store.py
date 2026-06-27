@@ -11,6 +11,7 @@ not subclass the SDK's `SessionStore` Protocol.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import shutil
@@ -18,6 +19,13 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from imp.agents.runner import (
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 
 
 def _sanitize(value: str) -> str:
@@ -135,3 +143,70 @@ def store_has_conversation_body(entries: list[dict[str, Any]] | None) -> bool:
         isinstance(e, dict) and e.get("type") != "ai-title"
         for e in (entries or [])
     )
+
+
+_RECORD_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session-record")
+
+
+def _record_uuid(session_id: str, index: int) -> str:
+    """Deterministic uuid (session_id + turn index) so reconcile re-runs dedup idempotently."""
+    return str(uuid.uuid5(_RECORD_UUID_NAMESPACE, f"{session_id}:{index}"))
+
+
+def _session_block_to_dict(block: Any) -> dict[str, Any]:
+    if isinstance(block, TextBlock):
+        return {"type": "text", "text": block.text}
+    if isinstance(block, ToolUseBlock):
+        return {"type": "tool_use", "id": block.id,
+                "name": block.name, "input": block.input}
+    if isinstance(block, ToolResultBlock):
+        return {"type": "tool_result", "tool_use_id": block.tool_use_id,
+                "content": block.content, "is_error": block.is_error}
+    raise TypeError(f"unexpected content block: {type(block).__name__}")
+
+
+def message_to_session_records(
+    messages: list[Message], *, parent_uuid: str | None, session_id: str,
+    cwd: str, model: str, start_index: int = 0,
+) -> list[dict[str, Any]]:
+    """Convert imp transcript Messages into claude-p on-disk session records.
+
+    Shape matches a real ~/.claude/projects/<key>/<session>.jsonl line: a
+    parentUuid->uuid chain carrying sessionId, type, and an Anthropic message.
+    parent_uuid anchors the chain to the last record already in the store
+    (None for an empty store). start_index is the absolute turn index of
+    messages[0] so uuids stay stable across reconcile re-runs.
+    """
+    records: list[dict[str, Any]] = []
+    parent = parent_uuid
+    timestamp = datetime.datetime.now(datetime.UTC).isoformat()
+    for offset, m in enumerate(messages):
+        index = start_index + offset
+        rec_uuid = _record_uuid(session_id, index)
+        content = [_session_block_to_dict(b) for b in m.content]
+        if m.role == "assistant":
+            message: dict[str, Any] = {
+                "id": "msg_" + rec_uuid.replace("-", "")[:24],
+                "type": "message",
+                "role": "assistant",
+                "model": model,
+                "content": content,
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
+        else:
+            message = {"role": m.role, "content": content}
+        records.append({
+            "parentUuid": parent,
+            "uuid": rec_uuid,
+            "sessionId": session_id,
+            "type": m.role,
+            "cwd": cwd,
+            "isSidechain": False,
+            "userType": "external",
+            "timestamp": timestamp,
+            "message": message,
+        })
+        parent = rec_uuid
+    return records

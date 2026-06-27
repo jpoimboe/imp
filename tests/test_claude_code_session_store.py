@@ -259,3 +259,63 @@ def test_session_store_for_writes_under_claude_session_subdir(
     )
     written = list((tmp_path / "claude_session").rglob("*.jsonl"))
     assert written, "append must land under <transcript_dir>/claude_session/"
+
+
+def test_message_to_session_records_chains_and_shapes() -> None:
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    from imp.providers.claude_code_session_store import message_to_session_records
+
+    messages = [
+        Message(role="assistant", content=(
+            TextBlock(text="reading"),
+            ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "spec.md"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
+    ]
+    recs = message_to_session_records(
+        messages, parent_uuid="P", session_id="sid", cwd="/proj",
+        model="claude-sonnet-4-5", start_index=2)
+
+    assert len(recs) == 2
+    assert recs[0]["type"] == "assistant"
+    assert recs[0]["parentUuid"] == "P"
+    assert recs[0]["sessionId"] == "sid"
+    assert recs[0]["cwd"] == "/proj"
+    assert recs[0]["message"]["role"] == "assistant"
+    assert recs[0]["message"]["model"] == "claude-sonnet-4-5"
+    msg_id = recs[0]["message"]["id"]
+    assert msg_id.startswith("msg_")
+    assert msg_id[4:] == recs[0]["uuid"].replace("-", "")[:24]
+    tool_use = recs[0]["message"]["content"][1]
+    assert tool_use == {"type": "tool_use", "id": "t0",
+                        "name": "mcp__imp__read_file", "input": {"path": "spec.md"}}
+    assert recs[1]["type"] == "user"
+    assert recs[1]["parentUuid"] == recs[0]["uuid"]
+    assert recs[1]["message"]["content"][0] == {
+        "type": "tool_result", "tool_use_id": "t0",
+        "content": "BODY", "is_error": False}
+
+
+def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.providers.claude_code_session_store import message_to_session_records
+
+    messages = [Message(role="assistant", content=(TextBlock(text="hi"),))]
+    a = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=5)
+    b = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=5)
+    assert [r["uuid"] for r in a] == [r["uuid"] for r in b]
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, a)
+    anyio.run(store.append, key, b)
+    assert len(anyio.run(store.load, key)) == 1
