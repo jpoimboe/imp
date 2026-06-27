@@ -1039,6 +1039,9 @@ async def test_run_change_computes_and_persists_resolved_tiers(tmp_path):
     assert len(resolved_events) == 1
     assert "tiers" in resolved_events[0]["payload"]
     assert "steps" in resolved_events[0]["payload"]
+    # The run-start event carries the configured checkpoint threshold so the
+    # renderer/engine can resolve a warn/checkpoint cutoff. Default config -> 0.8.
+    assert resolved_events[0]["payload"]["checkpoint_threshold"] == 0.8
 
 
 @pytest.mark.anyio

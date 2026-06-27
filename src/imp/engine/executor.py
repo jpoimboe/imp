@@ -233,7 +233,8 @@ async def run_change(
             state.resolved_steps = resolved_steps
             state.save(change.state_dir)
             _emit(log, "tiers_resolved",
-                  {"tiers": details["tiers"], "steps": details["steps"]},
+                  {"tiers": details["tiers"], "steps": details["steps"],
+                   "checkpoint_threshold": config.context_checkpoint_threshold()},
                   agent_id=None)
             if opening_intent:
                 _emit(log, "opening_intent", {"text": opening_intent},

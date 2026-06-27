@@ -400,6 +400,7 @@ class NarrativeBuilder:
         self._latest_prompt_tokens: int | None = None
         self._latest_context_pct: float | None = None
         self._latest_context_window: int | None = None
+        self._latest_checkpoint_threshold: float | int | None = None
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -463,6 +464,11 @@ class NarrativeBuilder:
         """SDK-reported raw context window of the most recent llm_response turn,
         or None before any has arrived."""
         return self._latest_context_window
+
+    @property
+    def latest_checkpoint_threshold(self) -> float | int | None:
+        """Configured context-checkpoint threshold; None before tiers_resolved arrives."""
+        return self._latest_checkpoint_threshold
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -1568,7 +1574,9 @@ NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Fires once at run start with agent_id=None, BEFORE any step_started, so the
     # step stack is empty and _append lands this at the workflow root.
-    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}}}
+    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}},
+    #           "checkpoint_threshold": ...}
+    self._latest_checkpoint_threshold = p.get("checkpoint_threshold")
     tiers = p.get("tiers") or {}
     rows = [
         {"tier": tier, "provider": d.get("provider"), "model": d.get("model"),
