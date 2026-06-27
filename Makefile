@@ -102,8 +102,12 @@ typecheck: ## Run mypy on the source tree.
 lockcheck: ## Verify uv.lock is in sync with pyproject.toml.
 	$(UV) lock --check
 
+.PHONY: depcheck
+depcheck: ## Verify the test interpreter has every dependency pyproject declares.
+	$(PYTHON) scripts/check_deps.py
+
 .PHONY: check
-check: lint typecheck lockcheck test ## Full pre-merge gate: lint + types + lockfile + tests.
+check: depcheck lint typecheck lockcheck test ## Full pre-merge gate: deps + lint + types + lockfile + tests.
 
 .PHONY: build
 build: ## Build wheel + sdist into dist/.
