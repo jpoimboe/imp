@@ -2601,3 +2601,20 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
     assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+
+
+@pytest.mark.anyio
+async def test_run_change_threads_checkpoint_threshold_to_invocation(tmp_path):
+    """run_change re-derives config.context_checkpoint_threshold() onto State on
+    every entry (transient, not persisted) and the executor carries it onto each
+    AgentInvocation, so the runner's Tier A watch sees the configured value."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    # Non-default threshold so the assertion is falsifiable (0.65 != default 0.8).
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  checkpoint_threshold: 0.65\n")
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    await run_change(change, on_event=lambda _e: None)
+
+    assert sink and sink[0].checkpoint_threshold == 0.65

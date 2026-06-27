@@ -75,6 +75,10 @@ class State:
     # (agent_id-keyed) proactive-handoff counter; the loop guard caps it.
     max_reincarnations: int = 2  # per-session reincarnation cap (the loop guard);
     # set from config.context_max_reincarnations() at run start.
+    # Transient: NOT written to state.json (so no LAYOUT_VERSION bump). Re-set
+    # from config.context_checkpoint_threshold() on every run_change entry and
+    # carried onto each AgentInvocation for the Tier A proactive-handoff watch.
+    checkpoint_threshold: float | int | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:

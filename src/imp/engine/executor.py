@@ -211,6 +211,10 @@ async def run_change(
         ).config
         state = State.load(change.state_dir)
         change.relink_home()
+        # Transient: re-set on EVERY run_change entry (fresh + resume) so the
+        # Tier A handoff watch always sees the configured threshold without
+        # persisting it (the resolved_tiers block below is skipped on resume).
+        state.checkpoint_threshold = config.context_checkpoint_threshold()
         # Freeze once per Change: resume reuses the facts/guidance the first run saw.
         if state.project_facts is None:
             state.project_facts = config.project_facts
@@ -1109,6 +1113,7 @@ async def _run_agent_invocation(
         verify_command=verify_command,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
+        checkpoint_threshold=state.checkpoint_threshold,
         inject_outcome_field=True,
     )
 
