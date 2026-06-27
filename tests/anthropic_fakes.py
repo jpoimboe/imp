@@ -31,6 +31,7 @@ class FakeResponse:
     content: list[Any]
     stop_reason: str = "end_turn"
     model: str | None = None
+    _request_id: str | None = None
 
 
 class _FakeMessages:

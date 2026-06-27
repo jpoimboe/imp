@@ -776,3 +776,21 @@ async def test_openai_llm_response_records_served_model(tmp_path: Path) -> None:
     assert resp["payload"]["model"] == "gpt-served-fallback"      # served, not configured
     assert "duration_ms" in resp["payload"]
     assert resp["payload"]["duration_ms"] >= 0
+
+
+@pytest.mark.anyio
+async def test_openai_llm_response_records_request_id(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    r = resp_response(
+        resp_message("done"),
+        resp_function_call("c1", "complete_step", '{"status": "Success"}'))
+    r._request_id = "req_openai_xyz"
+    fake = FakeResponsesClient([r])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: fake)
+    async for _ev in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert resp["payload"]["request_id"] == "req_openai_xyz"

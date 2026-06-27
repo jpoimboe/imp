@@ -933,3 +933,22 @@ async def test_anthropic_llm_response_records_served_model(tmp_path: Path) -> No
     assert resp["payload"]["model"] == "claude-served-fallback"   # served, not configured
     assert "duration_ms" in resp["payload"]
     assert resp["payload"]["duration_ms"] >= 0
+
+
+@pytest.mark.anyio
+async def test_anthropic_llm_response_records_request_id(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    r = response(
+        text("done"),
+        tool_use("c1", "complete_step", {"status": "Success"}),
+        stop_reason="end_turn")
+    r._request_id = "req_test_abc123"
+    fake = FakeAsyncAnthropic([r])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ev in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert resp["payload"]["request_id"] == "req_test_abc123"

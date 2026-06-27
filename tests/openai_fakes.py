@@ -19,6 +19,7 @@ class _Dumpable:
     """Carries a pre-built model_dump(mode='json') dict, mirroring the SDK's
     pydantic objects (the runner reads .model_dump, not attributes)."""
     _dump: dict[str, Any]
+    _request_id: str | None = None
 
     def model_dump(self, mode: str | None = None) -> dict[str, Any]:
         return self._dump
