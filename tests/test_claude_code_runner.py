@@ -2243,44 +2243,42 @@ async def test_inplace_repair_falls_back_without_store(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_native_resume_downgrades_on_dangling_tool_use(
-    tmp_path: Path,
-) -> None:
+async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
-    from imp.providers.claude_code_session_store import session_key
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-
+    skey = session_key(inv.change_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
-    await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
-        [{"type": "user", "uuid": "m0",
-          "message": {"role": "user", "content": "go"}}])
 
-    t = Transcript(inv.transcript_dir / "transcript.jsonl")
-    t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    # Completed read round-trip → the fallback manifest names it succeeded.
-    t.append(Message(role="assistant", content=(
-        ToolUseBlock(id="t0", name="mcp__imp__read_file",
-                     input={"path": "a.txt"}),)))
-    t.append(Message(role="user", content=(
-        ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
-    # Mid-tool interrupt: a bare assistant tool_use with NO tool_result. The SDK
-    # batcher never flushed this turn (no `result`), so claude-p's loaded session
-    # ends before it and resume_base excludes it from the slice — native resume
-    # would orphan the repair's synthesized tool_result. classify_resume(existing)
-    # is DANGLING_TOOL_USE (not SEND_TO_LLM, not MISSING_COMPLETE_STEP).
-    t.append(Message(role="assistant", content=(
-        ToolUseBlock(id="t1", name="mcp__imp__read_file",
-                     input={"path": "b.txt"}),)))
-
-    scripted = [
-        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
-        result(),
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)),
+        # Mid-tool interrupt: a bare assistant tool_use with NO tool_result.
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                         input={"path": "b.txt"}),)),
     ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    # Flushed at the prior result boundary: the first two turns. The tool_result
+    # and the dangling t1 turn are the unflushed tail.
+    await store.append(skey, message_to_session_records(
+        msgs[:2], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     created: list[FakeClaudeSDKClient] = []
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
@@ -2290,19 +2288,80 @@ async def test_native_resume_downgrades_on_dangling_tool_use(
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory)
-    [ev async for ev in runner.run(inv)]
+    events = [ev async for ev in runner.run(inv)]
 
+    # The transcript_invalid abort did NOT fire: the run reached completion.
+    assert events[-1]["type"] == "agent_output"
+    assert not any(
+        e["type"] == "error"
+        and e["payload"].get("kind") == "transcript_invalid"
+        for e in events)
     opts = created[0].opts
-    # Downgraded to the stream-json fallback despite a populated store.
-    assert opts.resume is None
-    assert opts.session_store is None
-    first_query = created[0].queries[0]
-    assert len(first_query) > 1
-    blob = _user_text_blob(first_query)
-    # Fallback manifest names the COMPLETED read (t0); the dangling read (t1) is
-    # excluded, so exactly one "succeeded" line.
-    assert RESUME_MANIFEST_HEADER in blob
-    assert blob.count("read_file — succeeded") == 1
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+    assert created[0].queries[0] == []
+    # Repair was bypassed: no synthetic tool_result turn was injected into the
+    # transcript (4 original turns + 1 new assistant turn = 5).
+    assert len(t.load()) == 5
+    # The dangling t1 turn was reconciled into the store as the trailing entry.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 4
+    assert reconciled[-1]["message"]["content"][0] == {
+        "type": "tool_use", "id": "t1",
+        "name": "mcp__imp__read_file", "input": {"path": "b.txt"}}
+
+
+@pytest.mark.anyio
+async def test_dangling_tool_use_falls_back_without_store(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    # No session store → native resume unavailable → fallback repairs the dangling
+    # tool_use (shape-1 synthetic result) rather than aborting.
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "a.txt"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                     input={"path": "b.txt"}),)))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    # No store → fallback (not native), and the dangling tool_use is repaired into
+    # a balanced transcript rather than aborting with transcript_invalid.
+    assert events[-1]["type"] == "agent_output"
+    assert not any(
+        e["type"] == "error"
+        and e["payload"].get("kind") == "transcript_invalid"
+        for e in events)
+    assert created[0].opts.resume is None
+    assert created[0].opts.session_store is None
+    # Repair ran: synthetic tool_result for t1 injected at transcript[4].
+    # Shape: 4 original + 1 synthetic repair + 1 resume manifest + 1 new assistant = 7.
+    transcript_turns = t.load()
+    assert len(transcript_turns) == 7
+    repair_turn = transcript_turns[4]
+    assert repair_turn.role == "user"
+    assert isinstance(repair_turn.content[0], ToolResultBlock)
+    assert repair_turn.content[0].tool_use_id == "t1"
 
 
 

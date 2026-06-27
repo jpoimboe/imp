@@ -1247,7 +1247,8 @@ class ClaudeCodeAgentRunner:
         # a bare turn-end yield) is the only shape whose tail is already flushed.
         # SEND_TO_LLM ends on an unflushed user turn but is handled on the native
         # path via reconcile-and-overwrite: the unflushed tail is written into the
-        # store before claude-p loads its native session. DANGLING_TOOL_USE (and the
+        # store before claude-p loads its native session. DANGLING_TOOL_USE
+        # (native with store; no-store fallback only — and the
         # balance_on_resume flag's path) ends on an unflushed, interrupted assistant
         # tool_use whose id lives in neither claude-p's loaded session nor the slice
         # — so the surgery's tool_result would be orphaned (the unmatched-tool_use
@@ -1260,7 +1261,8 @@ class ClaudeCodeAgentRunner:
             and not invocation.balance_on_resume
             and store_has_conversation_body(store_body)
             and classify_resume(existing) in (
-                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM)
+                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
+                ResumeState.DANGLING_TOOL_USE)
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
@@ -1307,7 +1309,7 @@ class ClaudeCodeAgentRunner:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
             resume_state = classify_resume(messages)
-            if resume_state is ResumeState.DANGLING_TOOL_USE:
+            if resume_state is ResumeState.DANGLING_TOOL_USE and not native_resume:
                 yield {"type": "error", "payload": {
                     "category": "config",
                     "kind": "transcript_invalid",
