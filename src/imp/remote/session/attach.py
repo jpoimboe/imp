@@ -20,7 +20,7 @@ SpawnFn = Callable[[Change], None]
 def spawn_session_daemon(
     change: Change, *, seed_opening: str | None = None, resume: bool = False,
     opening_intent: str | None = None, scope_only: bool = False,
-    non_interactive: bool = False,
+    non_interactive: bool = False, autonomous: bool = False,
 ) -> None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
@@ -37,6 +37,8 @@ def spawn_session_daemon(
         argv.append("--scope-only")
     if non_interactive:
         argv.append("--non-interactive")
+    if autonomous:
+        argv.append("--autonomous")
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     subprocess.Popen(
@@ -82,6 +84,7 @@ def build_session_attach(
     opening_intent: str | None = None,
     scope_only: bool = False,
     non_interactive: bool = False,
+    autonomous: bool = False,
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         return await attach_or_spawn(
@@ -90,7 +93,7 @@ def build_session_attach(
             spawn_fn=lambda ch: spawn_session_daemon(
                 ch, seed_opening=seed_opening, resume=resume,
                 opening_intent=opening_intent, scope_only=scope_only,
-                non_interactive=non_interactive),
+                non_interactive=non_interactive, autonomous=autonomous),
         )
 
     return attach

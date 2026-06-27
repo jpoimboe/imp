@@ -93,6 +93,7 @@ async def serve_change_session(
     opening_intent: str | None = None,
     scope_only: bool = False,
     non_interactive: bool = False,
+    autonomous: bool = False,
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
@@ -134,6 +135,8 @@ async def serve_change_session(
             run_kwargs["scope_only"] = True
         if non_interactive:
             run_kwargs["non_interactive"] = True
+        if autonomous:
+            run_kwargs["autonomous"] = True
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:
             first_kwargs["seed_opening"] = seed_opening
@@ -211,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--scope-only", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument("--autonomous", action="store_true")
     ns = parser.parse_args(argv)
     try:
         change = Change.load(Path(ns.control_root), ns.change_id)
@@ -228,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["scope_only"] = True
     if ns.non_interactive:
         kwargs["non_interactive"] = True
+    if ns.autonomous:
+        kwargs["autonomous"] = True
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_change_session, change, **kwargs))
