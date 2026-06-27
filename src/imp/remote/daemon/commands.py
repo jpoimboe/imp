@@ -76,6 +76,7 @@ class Save:
 @dataclass(frozen=True)
 class ListResult:
     changes: list[ChangeInfo]
+    resident: frozenset[str] = frozenset()
 
 
 Command = (

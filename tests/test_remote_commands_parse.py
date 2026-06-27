@@ -11,6 +11,7 @@ from imp.remote.daemon.commands import (
     Create,
     Help,
     ListChanges,
+    ListResult,
     Notice,
     Reply,
     Resume,
@@ -18,6 +19,7 @@ from imp.remote.daemon.commands import (
     Search,
     parse,
 )
+from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.telegram_adapter import parse_handle
 
 # A fake resolve_lookup: reply_to 42 -> change A; @good -> change B; else unresolved.
@@ -123,3 +125,13 @@ def test_slash_save_at_handle_resolves_the_target() -> None:
 
 def test_slash_save_untargeted_carries_no_change_id() -> None:
     assert parse("/save", None, fake_resolve) == Save(None)
+
+
+def test_listresult_defaults_resident_to_empty_frozenset() -> None:
+    result = ListResult([ChangeInfo(id="a", title="A", status="running", step="plan")])
+    assert result.resident == frozenset()
+
+
+def test_listresult_carries_the_resident_set() -> None:
+    result = ListResult([], frozenset({"a", "b"}))
+    assert result.resident == frozenset({"a", "b"})
