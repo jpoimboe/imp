@@ -120,6 +120,13 @@ _QUOTA_PATTERNS = (
     "Credit balance is too low",
 )
 
+# Friendly session-limit text the claude CLI surfaces as assistant prose with
+# api_error_status=429. It matches neither _API_ERROR_RE nor _QUOTA_PATTERNS, so
+# without this backstop a session limit falls through to a hard pause. A regex
+# over a substring because the wording varies ("session limit", "resets 11:30pm (America/…)").
+_SESSION_LIMIT_RE = re.compile(
+    r"session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/", re.IGNORECASE)
+
 # Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
 # the underlying Anthropic API returns a non-2xx. 401/403 → AuthError; 408 and
 # 5xx → NetworkError; 429 → RateLimitError; other 4xx → ApiError (Pause);
@@ -149,6 +156,8 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     for pat in _QUOTA_PATTERNS:
         if pat in text:
             return perr.QuotaError(f"claude CLI: {pat}")
+    if _SESSION_LIMIT_RE.search(text):
+        return perr.RateLimitError(f"claude CLI: {text[:200]}")
     m = _API_ERROR_RE.search(text)
     if m:
         code = int(m.group(1))

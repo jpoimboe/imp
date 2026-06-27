@@ -191,3 +191,25 @@ def test_429_status_result_classifies_rate_limit() -> None:
     assert isinstance(term, perr.RateLimitError)
     assert not isinstance(term, perr.TerminatedError)
     assert term.detail["api_error_status"] == 429
+
+
+def test_session_limit_text_classifies_rate_limit() -> None:
+    exc = _classify_agent_text(
+        "You've hit your session limit · resets 11:30pm (America/Los_Angeles)")
+    assert isinstance(exc, perr.RateLimitError)
+
+
+def test_session_limit_phrase_classifies_rate_limit() -> None:
+    assert isinstance(
+        _classify_agent_text("You have hit a session limit."), perr.RateLimitError)
+
+
+def test_ordinary_prose_stays_unclassified_after_backstop() -> None:
+    assert _classify_agent_text("Reading the spec and editing files.") is None
+
+
+def test_scheduling_prose_with_timezone_stays_unclassified() -> None:
+    assert _classify_agent_text(
+        "The cron job resets daily at midnight (America/Chicago) every Sunday") is None
+    assert _classify_agent_text(
+        "Database resets at 3am (America/New_York) each week") is None
