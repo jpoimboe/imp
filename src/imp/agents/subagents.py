@@ -246,39 +246,46 @@ async def dispatch_task(
         if n in ctx.subagent_defs
     }
 
-    sub_inv = build_agent_invocation(
-        agent_def=subagent_def,
-        provider_name=sub_provider,
-        model_name=sub_model,
-        rendered_system_prompt=rendered_prompt,
-        rendered_persona=rendered_persona,
-        initial_messages=(Message(
-            role="user", content=(TextBlock(text=task_description),)),),
-        change_context=cc,
-        user_chat_input_fn=None,
-        transcript_dir=target_dir,
-        events_path=ctx.events_path,
-        subagent_defs=child_subagent_defs,
-        tiers=ctx.tiers,
-        # Decision #4: agent-level ceiling (workflow-default fallback not
-        # reachable here; deferred YAGNI). Closes "uncapped" for any subagent
-        # that declares a ceiling.
-        max_tool_calls=subagent_def.max_tool_calls,
-        agent_id=f"sub:{tool_call_event_id}",
-        event_log=ctx.event_log,
-        change_state=None,
-        first_event_parent_id=tool_call_event_id or None,
-        resolved_tiers=ctx.resolved_tiers,
-        coordinator=ctx.coordinator,
-        subagent_depth=child_depth,
-        # Same object as event_log= above, but a distinct role: log= is the
-        # nudge-event sink passed to build_continuation_fn; event_log= is the
-        # invocation's stored audit log. For subagents both are ctx.event_log.
-        log=ctx.event_log,
-        verify_command=ctx.verify_command,
-        non_interactive=ctx.non_interactive,
-        sandbox_policy=ctx.sandbox_policy,
-    )
+    def _build_sub_inv(target: Path, init_msgs: tuple[Message, ...]) -> Any:
+        # Rebuilt verbatim per (re)dispatch so a reincarnation can re-seed the
+        # initial message and re-target a fresh transcript dir; every other arg
+        # is captured unchanged.
+        return build_agent_invocation(
+            agent_def=subagent_def,
+            provider_name=sub_provider,
+            model_name=sub_model,
+            rendered_system_prompt=rendered_prompt,
+            rendered_persona=rendered_persona,
+            initial_messages=init_msgs,
+            change_context=cc,
+            user_chat_input_fn=None,
+            transcript_dir=target,
+            events_path=ctx.events_path,
+            subagent_defs=child_subagent_defs,
+            # Decision #4: agent-level ceiling (workflow-default fallback not
+            # reachable here; deferred YAGNI). Closes "uncapped" for any subagent
+            # that declares a ceiling.
+            max_tool_calls=subagent_def.max_tool_calls,
+            agent_id=f"sub:{tool_call_event_id}",
+            event_log=ctx.event_log,
+            change_state=None,
+            first_event_parent_id=tool_call_event_id or None,
+            resolved_tiers=ctx.resolved_tiers,
+            coordinator=ctx.coordinator,
+            subagent_depth=child_depth,
+            tiers=ctx.tiers,
+            # Same object as event_log= above, but a distinct role: log= is the
+            # nudge-event sink passed to build_continuation_fn; event_log= is the
+            # invocation's stored audit log. For subagents both are ctx.event_log.
+            log=ctx.event_log,
+            verify_command=ctx.verify_command,
+            non_interactive=ctx.non_interactive,
+            sandbox_policy=ctx.sandbox_policy,
+        )
+
+    sub_inv = _build_sub_inv(
+        target_dir,
+        (Message(role="user", content=(TextBlock(text=task_description),)),))
 
     # Drive via the shared loop, with backoff (omission #4). Each backoff
     # iteration spawns a FRESH runner (runners are single-use). emit_events=False
@@ -305,33 +312,64 @@ async def dispatch_task(
     # Lazy import: error_policy pulls providers/__init__, and this module is
     # in that cold-import chain — a top-level import would cycle.
     from imp.engine.error_policy import budget_for
+    from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 
     limiter = ctx.get_parallel_limiter()
     emit_parallelism_warning_once(ctx.event_log, ctx.agent_id)
+    reincarnation_key = f"sub:{tool_call_event_id}"
     async with limiter:
-        backoff = 0
-        cumulative_backoff = 0.0
-        while True:
-            runner = await ctx.spawn_subagent(sub_inv)
-            result = await drive_invocation(
-                sub_inv, runner, coordinator=ctx.coordinator,
-                log=ctx.event_log, emit_events=False, prior_backoff_attempts=backoff)
-            if result.delay is None:
-                break
-            # Per-category wall-clock budget (checked BEFORE sleeping, matching
-            # executor). category comes from the plumbed ErrorInfo, defaulting to
-            # "unknown" when absent. On exhaustion raise SubagentSuspended — this
-            # path's own clean-pause unwind (it cannot return an executor Pause).
-            category = result.error.category if result.error else "unknown"
-            budget = budget_for(category)
-            if budget is not None and cumulative_backoff + result.delay > budget:
-                raise SubagentSuspended(
-                    "retry ceiling reached during subagent backoff")
-            backoff += 1
-            await _interruptible_sleep(result.delay, ctx.coordinator)
-            cumulative_backoff += result.delay
-            if ctx.coordinator is not None and ctx.coordinator.should_pause:
-                raise SubagentSuspended("paused during subagent backoff")
+        while True:  # reincarnation loop (Tier B backstop)
+            backoff = 0
+            cumulative_backoff = 0.0
+            while True:
+                runner = await ctx.spawn_subagent(sub_inv)
+                result = await drive_invocation(
+                    sub_inv, runner, coordinator=ctx.coordinator,
+                    log=ctx.event_log, emit_events=False,
+                    prior_backoff_attempts=backoff)
+                if result.delay is None:
+                    break
+                # Per-category wall-clock budget (checked BEFORE sleeping,
+                # matching executor). category comes from the plumbed ErrorInfo,
+                # defaulting to "unknown" when absent. On exhaustion raise
+                # SubagentSuspended — this path's own clean-pause unwind (it
+                # cannot return an executor Pause).
+                category = result.error.category if result.error else "unknown"
+                budget = budget_for(category)
+                if budget is not None and cumulative_backoff + result.delay > budget:
+                    raise SubagentSuspended(
+                        "retry ceiling reached during subagent backoff")
+                backoff += 1
+                await _interruptible_sleep(result.delay, ctx.coordinator)
+                cumulative_backoff += result.delay
+                if ctx.coordinator is not None and ctx.coordinator.should_pause:
+                    raise SubagentSuspended("paused during subagent backoff")
+
+            # Tier B backstop: a subagent that hit the hard window error is reborn
+            # INSIDE this dispatch (the parent still sees one resolved sub_agent
+            # call) — stash its transcript, seed a fresh instance from it, and
+            # re-dispatch — up to the per-session cap. An inner loop (not a
+            # recursive dispatch_task call) avoids re-acquiring `limiter` and
+            # deadlocking when the width cap is 1. The counter lives on the shared
+            # top-level State (ctx.change_state); a nested dispatch has none, so it
+            # falls through to today's failure path unchanged.
+            if (result.fatal and result.error is not None
+                    and result.error.category == "context_window"
+                    and ctx.change_state is not None
+                    and ctx.change_state.reincarnation_count(reincarnation_key)
+                    < ctx.change_state.max_reincarnations):
+                ctx.change_state.bump_reincarnation(reincarnation_key)
+                stashed = stash_transcript(target_dir)
+                ctx.event_log.append(
+                    agent_id=None, type="reincarnating",
+                    payload={"reason": "context window exceeded"})
+                seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None)
+                _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
+                sub_inv = _build_sub_inv(
+                    target_dir,
+                    (Message(role="user", content=(TextBlock(text=seed),)),))
+                continue
+            break
 
         if result.paused:
             # Unwind to the executor; resume restarts the subagent subtree fresh.
