@@ -60,12 +60,12 @@ def test_planning_phase_label_renders_plan_counter(tmp_path: Path) -> None:
     assert out == "planning phase · plan 2/4"
 
 
-def test_task_lead_label_is_static_task_fallback(tmp_path: Path) -> None:
+def test_task_lead_label_is_position_only(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     out = render_label(_label("task-lead"), ch, ch.event_log(), _state(task_total=6))
-    assert out == "task 1/6 · thinking"
+    assert out == "task 1/6"
     single = render_label(_label("task-lead"), ch, ch.event_log(), _state(task_total=1))
-    assert single == "task 1/1 · thinking"
+    assert single == "task 1/1"
 
 
 def test_plan_writer_frontmatter_label_removed() -> None:

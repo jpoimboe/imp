@@ -142,7 +142,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "plan-writer": "writing plan",
         "plan-reviewer": "reviewing plan",
         "plan-finalized": "finalizing plan",
-        "task-lead": "task 1/{{ vars.task_total }} · thinking",
+        "task-lead": "task 1/{{ vars.task_total }}",
         "verify": "running tests",
         "autosquash-resolve-implement": "resolving task fixups",
         "autosquash-resolve-merge": "resolving merge fixups",

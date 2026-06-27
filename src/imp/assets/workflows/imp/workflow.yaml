@@ -136,7 +136,7 @@ phases:
       - name: task-lead
         file: agents/task-lead.md
         tier: high
-        label: "task 1/{{ vars.task_total }} · thinking"
+        label: "task 1/{{ vars.task_total }}"
         rules:
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {else: true, continue: true}

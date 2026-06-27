@@ -1,6 +1,6 @@
 ---
 name: task-lead
-label: "task 1/{{ vars.task_total }} · thinking"
+label: "task 1/{{ vars.task_total }}"
 description: Implement-phase controller — pick the next task, dispatch coder + one reviewer, adjudicate, commit one clean unit, record progress.
 subagents: [coder, code-reviewer]
 output:
