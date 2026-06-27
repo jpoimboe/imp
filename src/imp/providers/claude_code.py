@@ -83,7 +83,11 @@ from imp.agents.transcript import (
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
 )
-from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
+from imp.engine.agent_run import (
+    _resolve_wait_reply,
+    build_inline_solicit,
+    drain_all_interjects_at_resume,
+)
 from imp.engine.drivers import driver_allowed_tools
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
@@ -1574,6 +1578,46 @@ class ClaudeCodeAgentRunner:
                         return
 
                     if cls_name == "ResultMessage":
+                        if (self._steer_requested and getattr(
+                                sdk_msg, "subtype", None)
+                                == "error_during_execution"):
+                            # Cooperative interrupt landed: the SDK closed this
+                            # turn balanced. Unblock the waiting interrupt() and
+                            # route into the attended inline-yield instead of
+                            # treating the error result as a termination.
+                            self._steer_unblocked.set()
+                            self._steer_requested = False
+                            # Discard the interrupted turn's partial accumulators
+                            # so they don't bleed into the next turn's loop-guard.
+                            _flush_pending()
+                            # Consume the pause: the steer is resolved inside
+                            # this live invocation, so the run continues rather
+                            # than returning PAUSED.
+                            if invocation.coordinator is not None:
+                                invocation.coordinator.clear_pause()
+                            last_text = ""
+                            for prev in reversed(messages):
+                                if prev.role == "assistant":
+                                    last_text = _text_of(prev)
+                                    break
+                            steer = build_inline_solicit(
+                                user_input_fn=self._user_input_fn,
+                                coordinator=invocation.coordinator,
+                                event_log=elog, agent_id=aid)
+                            # Raises AwaitingUserInput when no human is attached;
+                            # the balanced session makes a resume continue with no 400.
+                            reply = await steer(last_text)
+                            user_msg = Message(
+                                role="user",
+                                content=(TextBlock(text=reply),))
+                            messages.append(user_msg)
+                            transcript.append(user_msg)
+                            elog.append_user_message(
+                                agent_id=aid, message=user_msg)
+                            next_query = reply
+                            requery = True
+                            break
+
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE
                         # (a turn ending in complete_step set pending_complete →

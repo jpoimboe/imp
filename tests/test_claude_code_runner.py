@@ -2401,3 +2401,108 @@ def test_run_state_has_no_wait_for_user_pause_fields() -> None:
     src = inspect.getsource(cc_mod)
     assert 'b.name == "wait_for_user"' not in src
     assert 'if name == "wait_for_user"' not in src
+
+
+@pytest.mark.anyio
+async def test_cooperative_interrupt_steer_continues_no_pause(
+    tmp_path: Path,
+) -> None:
+    """An attended agent interrupted mid-turn, given a redirect, acts on it and
+    continues on the SAME live client — no interrupted error, no disconnect(),
+    no PAUSED left for the daemon."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("checking the other file"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "go check the other file instead")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["payload"]["status"] == "Success"
+    assert not any(e.get("payload", {}).get("kind") == "interrupted"
+                   for e in events if e["type"] == "error")
+    assert holder["c"].disconnected is False
+    assert holder["c"].interrupt_calls == 1
+    assert coord.should_pause is False
+    assert holder["c"].queries[-1] == "go check the other file instead"
+
+
+@pytest.mark.anyio
+async def test_cooperative_interrupt_headless_pauses_balanced(
+    tmp_path: Path,
+) -> None:
+    """No user_input_fn: the cooperative stop ends the turn balanced, then
+    raises AwaitingUserInput — never a disconnect() (the session stays balanced
+    so the resume continues with no 400)."""
+    import asyncio
+
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [assistant(text("unused")), result()]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    with pytest.raises(AwaitingUserInput):
+        await asyncio.wait_for(task, timeout=2)
+
+    assert holder["c"].disconnected is False
+    assert holder["c"].interrupt_calls == 1

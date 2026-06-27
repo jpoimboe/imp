@@ -191,3 +191,64 @@ def context_usage(*, raw_max_tokens: int, percentage: float,
     return FakeContextUsage(
         rawMaxTokens=raw_max_tokens, percentage=percentage,
         totalTokens=total_tokens)
+
+
+class CooperativeClient:
+    """Models the cooperative interrupt: first receive_response() parks until
+    interrupt() fires, then yields ResultMessage(subtype="error_during_execution").
+    After the steer reply is queried, the next receive_response() yields
+    after_steer. Tracks interrupt()/disconnect() in order for ordering assertions
+    and queries to prove the SAME live client continued (no re-run)."""
+
+    def __init__(self, opts: Any, *, after_steer: list[Any],
+                 order: list[str] | None = None) -> None:
+        import asyncio
+        self.opts = opts
+        self.queries: list[Any] = []
+        self.closed = False
+        self.disconnected = False
+        self.interrupt_calls = 0
+        self.order = order if order is not None else []
+        self._after_steer = list(after_steer)
+        self._turn = 0
+        self._released = asyncio.Event()
+
+    async def __aenter__(self) -> CooperativeClient:
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        self.closed = True
+        return False
+
+    async def query(self, prompt: Any) -> None:
+        if hasattr(prompt, "__aiter__"):
+            drained: list[Any] = []
+            async for item in prompt:
+                drained.append(item)
+            self.queries.append(drained)
+        else:
+            self.queries.append(prompt)
+
+    async def receive_response(self) -> Any:
+        self._turn += 1
+        if self._turn == 1:
+            await self._released.wait()
+            yield FakeResultMessage(
+                subtype="error_during_execution", is_error=True)
+            return
+        for msg in self._after_steer:
+            yield msg
+            if type(msg).__name__ == "ResultMessage":
+                return
+
+    async def interrupt(self) -> None:
+        self.interrupt_calls += 1
+        self.order.append("interrupt")
+        self._released.set()
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
+        self.order.append("disconnect")
+
+    async def get_context_usage(self) -> Any:
+        return None
