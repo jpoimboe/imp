@@ -2618,3 +2618,51 @@ async def test_run_change_threads_checkpoint_threshold_to_invocation(tmp_path):
     await run_change(change, on_event=lambda _e: None)
 
     assert sink and sink[0].checkpoint_threshold == 0.65
+
+
+@pytest.mark.anyio
+async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
+    """A step whose runner captures a Tier A handoff reincarnates fresh seeded
+    from it (up to the per-session cap), emitting one `reincarnating` event with
+    the threshold reason and stashing the prior transcript; at the cap it pauses."""
+    from imp.engine.reincarnation import handoff_path_for
+    from imp.providers import resolve
+
+    change, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    class _HandoffRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)   # non-empty transcript -> stashable
+            hp = handoff_path_for(invocation.transcript_dir)
+            hp.write_text("# handoff\n")
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffRunner:
+            return _HandoffRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffProvider(model))
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1
+    assert reincarnating[0]["payload"]["reason"] == "context threshold crossed"
+    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    cap_event = next(e for e in events if e["type"] == "step_completed")
+    assert cap_event["payload"]["action"]["verb"] == "pause"

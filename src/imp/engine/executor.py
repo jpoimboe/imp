@@ -904,6 +904,36 @@ async def _route_agent(
             state.save(change.state_dir)
         return Pause(), None, {}
     reincarnation_key = f"step:{step.phase}/{step.name}"
+    if result.handoff_path is not None:
+        # Tier A proactive handoff: the agent approached its window and wrote a
+        # handoff note before stopping. Reincarnate the step fresh seeded from the
+        # handoff (primary) plus the stashed transcript, up to the per-session cap
+        # (shared with Tier B); at the cap, pause to the human (the note is on
+        # disk for them). Same cap counter as Tier B — both are reincarnations.
+        if (state.reincarnation_count(reincarnation_key)
+                < state.max_reincarnations):
+            state.bump_reincarnation(reincarnation_key)
+            stashed = stash_transcript(transcript_dir)
+            _emit(log, "reincarnating",
+                  {"reason": "context threshold crossed"}, agent_id=None)
+            hp = Path(result.handoff_path)
+            seed = reincarnation_seed(
+                stashed_dir=stashed,
+                handoff_path=hp if hp.exists() else None)
+            return await _route_agent(
+                step, workflow, change, state, log,
+                user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                wrapper_text=wrapper_text, is_resume=False,
+                verify_command=verify_command, non_interactive=non_interactive,
+                scope_only=scope_only, autonomous=autonomous,
+                sandbox_policy=sandbox_policy, seed_opening=seed,
+                project_facts=project_facts, guidance=guidance)
+        state.step_attempt = 0
+        pause = Pause(reason="context_window", kind="reincarnation_cap")
+        _emit(log, "step_completed",
+              {"step": step.name, "kind": "agent",
+               "action": _action_payload(pause), "var_mutations": {}})
+        return pause, None, {}
     if (result.fatal and result.error is not None
             and result.error.category == "context_window"
             and state.reincarnation_count(reincarnation_key)
