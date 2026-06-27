@@ -351,7 +351,7 @@ def test_enumerate_dir_walk_fallback_excludes_control_dirs(tmp_path, monkeypatch
     # against the RESOLVED root (a symlinked TMPDIR, e.g. macOS, otherwise breaks
     # relative_to) — the both-sides-resolved pattern from tests/test_ignore.py.
     root = tmp_path.resolve()
-    files = anyio.run(so._enumerate_dir, root, root)
+    files = anyio.run(so._enumerate_dir, root)
     rels = sorted(p.relative_to(root).as_posix() for p in files)
     assert rels == ["a.py", "pkg/b.py"]
 
@@ -364,7 +364,7 @@ def test_enumerate_dir_gitignore_aware(tmp_path) -> None:
     (tmp_path / "ignored" / "secret.py").write_text("s")
 
     root = tmp_path.resolve()
-    files = anyio.run(so._enumerate_dir, root, root)
+    files = anyio.run(so._enumerate_dir, root)
     rels = sorted(p.relative_to(root).as_posix() for p in files)
     assert "keep.py" in rels
     assert ".gitignore" in rels

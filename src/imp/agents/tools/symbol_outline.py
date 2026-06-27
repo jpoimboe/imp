@@ -230,7 +230,6 @@ def _walk_files(target: Path) -> list[Path]:
 
 async def _enumerate_dir(
     target: Path,
-    root: Path,
     policy: Any = None,
     coordinator: object | None = None,
     deadline: float | None = None,
@@ -472,7 +471,7 @@ async def _outline_dir(
     target: Path, root: Path, *, detail: str, max_depth: int | None,
     policy: Any, coordinator: object | None, deadline: float | None,
 ) -> str:
-    files = await _enumerate_dir(target, root, policy, coordinator, deadline)
+    files = await _enumerate_dir(target, policy, coordinator, deadline)
     disp = _display(target, root)
     if not files:
         return f"{disp} — empty (no files to outline)"
