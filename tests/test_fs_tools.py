@@ -242,3 +242,32 @@ def test_partial_read_then_write_after_external_change_refused(
     os.utime(p, (rec.mtime + 10, rec.mtime + 10))
     with pytest.raises(ValueError, match="changed since you read it"):
         _write_file(ctx, path="big.md", content="new")
+
+
+def test_write_allowed_when_mtime_bumped_but_bytes_identical(tmp_path: Path) -> None:
+    # \xff (decodes via errors="replace" to U+FFFD) stays byte-identical across
+    # the touch, so the guard's raw-bytes compare must allow the write; a
+    # decoded-text hasher on the gate side would mismatch and wrongly refuse.
+    p = tmp_path / "p.md"
+    p.write_bytes(b"\xff")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="p.md")
+    rec = ctx.read_state[ctx.resolve_path("p.md")]
+    os.utime(p, (rec.mtime + 10, rec.mtime + 10))  # touch: mtime bumped, bytes identical
+    _write_file(ctx, path="p.md", content="new")   # false-positive guard -> allowed
+    assert (tmp_path / "p.md").read_text() == "new"
+
+
+def test_write_refused_when_bytes_differ_but_decode_to_same_text(tmp_path: Path) -> None:
+    # Proves the guard hashes RAW BYTES, not lossy decoded text: \xff and \xfe
+    # both decode (errors="replace") to U+FFFD, so a decoded-text hash would
+    # wrongly allow this write; a raw-bytes hash refuses it.
+    p = tmp_path / "p.md"
+    p.write_bytes(b"\xff")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="p.md")
+    rec = ctx.read_state[ctx.resolve_path("p.md")]
+    p.write_bytes(b"\xfe")
+    os.utime(p, (rec.mtime + 10, rec.mtime + 10))
+    with pytest.raises(ValueError, match="changed since you read it"):
+        _write_file(ctx, path="p.md", content="new")

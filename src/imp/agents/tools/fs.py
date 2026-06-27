@@ -139,6 +139,17 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     return f"{body}\n{notice}" if notice else body
 
 
+def _hash_file_capped(resolved: Path) -> str | None:
+    """sha256 over the first FILE_READ_CAP_BYTES bytes of `resolved`; None if the
+    file is larger than the cap (it cannot match a full read's hash, so the
+    content-equality fast-path must fail). Bounded: reads at most cap+1 bytes."""
+    with open(resolved, "rb") as fh:
+        data = fh.read(FILE_READ_CAP_BYTES + 1)
+    if len(data) > FILE_READ_CAP_BYTES:
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
 def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
     """Read-before-write gate. Raises ValueError on a blind or stale overwrite
     of an existing file; returns silently when the write may proceed."""
@@ -155,6 +166,11 @@ def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
     except OSError:
         return  # vanished between exists() and stat() — treat as new-file write
     if current_mtime > record.mtime:
+        # False-positive guard: a touch / sync / formatter that rewrote
+        # byte-identical content bumped mtime but not content. Only a FULL read
+        # has a hash over the whole file, so only it may take this fast-path.
+        if record.full and _hash_file_capped(resolved) == record.content_sha256:
+            return
         raise ValueError(
             f"{display_path} changed since you read it — read it again before "
             f"overwriting."
