@@ -29,9 +29,10 @@ In `bash`:
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show what the
   rebase/resolution produced.
 - `{{ change.home }}/progress.md` carries the reconciler's narration of what it
-  reconciled and any `## Deferred Followups` `needs-decision` lines it flagged as
-  reasoned-but-uncertain. Read it and check each flagged reconciliation first — they
-  are the likeliest place something went wrong.
+  reconciled; `{{ change.home }}/deferred.md` carries any `## Deferred Followups`
+  `needs-decision` lines it flagged as reasoned-but-uncertain. Read both and check
+  each flagged reconciliation first — they are the likeliest place something went
+  wrong.
 - `{{ change.home }}/artifacts/spec/{{ change.id }}.md` is the change's intent; you
   judge faithfulness against it.
 

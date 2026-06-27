@@ -12,7 +12,7 @@ output:
 You judge whether the change needs another plan. Read the spec at
 `{{ change.home }}/artifacts/spec/{{ change.id }}.md`, every plan
 `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`, `{{ change.home }}/progress.md`,
-and the committed code (use glob/grep to spot-check).
+`{{ change.home }}/deferred.md`, and the committed code (use glob/grep to spot-check).
 
 ## Coverage decision — you are the SOLE completeness guard
 
@@ -36,8 +36,9 @@ rules decide.
 ## Forward notes — the two `more_plans: true` triggers
 
 `task-lead` now flows forward and logs what it could not fix as durable notes in
-`{{ change.home }}/progress.md`. Read those notes (they live in the durable region
-alongside `## Deferred Followups`, surviving the end-of-plan collapse) and emit
+`{{ change.home }}/deferred.md`. Read those notes (they live in the append-only ledger
+alongside `## Deferred Followups`, never touched by the end-of-plan `progress.md`
+collapse) and emit
 `more_plans: true` in exactly two cases:
 
 1. **Open needs-replan note.** A `- [ ] NEEDS-REPLAN task-lead: …` checkbox that is

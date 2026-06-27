@@ -74,3 +74,22 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
     # The step-5 lead-in no longer reads as if DEFERRED items go to progress.md.
     assert "(create it if missing) the **transient" in tl
     assert "does **not** live in" in tl
+
+
+def test_imp_consumers_read_ledger_from_deferred_md() -> None:
+    fin = _imp("finalize.md")
+    # The closed-set needs-decision read is from deferred.md.
+    assert "recorded `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`, and" in fin
+    assert "step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the" in fin
+    assert "the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`" in fin
+    # The gate's line rewrites target deferred.md, not progress.md.
+    assert "leave its `deferred.md` line `needs-decision`" in fin
+    assert "other than the `deferred.md` line rewrites above" in fin
+
+    pcc = _imp("plan-cycle-check.md")
+    assert "logs what it could not fix as durable notes in\n`{{ change.home }}/deferred.md`" in pcc
+    # The read-list now includes deferred.md alongside progress.md.
+    assert "`{{ change.home }}/deferred.md`, and the committed code (use glob/grep to spot-check)." in pcc
+
+    ir = _imp("integration-review.md")
+    assert "`{{ change.home }}/deferred.md` carries any `## Deferred Followups`" in ir
