@@ -332,7 +332,7 @@ class SessionServer:
 
     async def _dispatch_control(self, action: str) -> None:
         if action == _INTERNAL_PAUSE:
-            if self._coordinator is not None:
+            if self._coordinator is not None and self.leased_count == 0:
                 await self._coordinator.signal_pause(reason="detached")
             return
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
