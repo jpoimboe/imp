@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 2
+# LAYOUT_VERSION: 3
 [paths]
 change.json
 events.jsonl
@@ -26,6 +26,7 @@ loop_counts
 merge_commit
 outcome_history
 project_facts
+reincarnations
 resolved_steps
 resolved_tiers
 resume_pending

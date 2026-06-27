@@ -71,6 +71,8 @@ class State:
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
+    reincarnations: dict[str, int] = field(default_factory=dict)  # per-session
+    # (agent_id-keyed) proactive-handoff counter; the loop guard caps it.
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -145,6 +147,7 @@ class State:
             "held_lane": self.held_lane,
             "held_acquire_step": self.held_acquire_step,
             "completion_pending": self.completion_pending,
+            "reincarnations": self.reincarnations,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:
@@ -157,6 +160,14 @@ class State:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(tmp_name)
             raise
+
+    def reincarnation_count(self, key: str) -> int:
+        return self.reincarnations.get(key, 0)
+
+    def bump_reincarnation(self, key: str) -> int:
+        n = self.reincarnations.get(key, 0) + 1
+        self.reincarnations[key] = n
+        return n
 
 
 # ── EventLog: audit trail with envelope + typed appends + chain map ──────────

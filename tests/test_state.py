@@ -356,6 +356,33 @@ def test_saved_is_a_status_value() -> None:
     assert "saved" in get_args(Status)
 
 
+def test_reincarnation_counter_bumps_independently_per_session() -> None:
+    s = State(id="c1", step="impl", step_attempt=0, status="new")
+    assert s.reincarnation_count("step:implement/task-lead") == 0
+    assert s.bump_reincarnation("step:implement/task-lead") == 1
+    assert s.bump_reincarnation("step:implement/task-lead") == 2
+    # A subagent session under the same step carries its own counter.
+    assert s.bump_reincarnation("sub:coder/1") == 1
+    assert s.reincarnation_count("step:implement/task-lead") == 2
+    assert s.reincarnation_count("sub:coder/1") == 1
+
+
+def test_reincarnations_round_trip(tmp_path: Path) -> None:
+    s = State(id="c1", step="impl", step_attempt=0, status="new")
+    s.bump_reincarnation("step:implement/task-lead")
+    s.save(tmp_path)
+    back = State.load(tmp_path)
+    assert back.reincarnations == {"step:implement/task-lead": 1}
+    assert back.reincarnation_count("step:implement/task-lead") == 1
+
+
+def test_reincarnations_defaults_empty(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    s.save(tmp_path)
+    back = State.load(tmp_path)
+    assert back.reincarnations == {}
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json
