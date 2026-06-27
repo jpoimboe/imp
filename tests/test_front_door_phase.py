@@ -84,30 +84,39 @@ def test_front_door_agent_prose_carries_the_three_hats_and_handoff() -> None:
     assert "announce the name in prose without asking permission" in body
 
 
-def test_front_door_headless_auto_go_live_branch(tmp_path) -> None:
-    # front-door is the UNCONDITIONAL first step of the default workflow, so a
-    # headless (--non-interactive) run must auto-go-live instead of parking on
-    # wait_for_user. The non_interactive branch renders an auto-build directive
-    # and a predetermined ceremony; the interactive render must not.
+def test_front_door_split_off_is_unconditional_and_rekeyed(tmp_path) -> None:
     body = _wf().agents["front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
-    headless = render_prompt(body, build_context(
+    attended = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", non_interactive=True,
-        project_facts={}, guidance=""),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "headless run" in headless
-    assert "the ceremony is predetermined" in headless
-    assert 'ceremony="full"' in headless          # auto-build literal, unique to this branch
+        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "## Splitting off a separate change" in attended
+    assert "ending your turn to yield** before calling `create_change`" in attended
 
-    interactive = render_prompt(body, build_context(
+    autonomous = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", non_interactive=False,
+        change_home=".imp/changes/abc", autonomous=True,
         project_facts={}, guidance=""),
-        workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "the ceremony is predetermined" not in interactive
-    assert 'ceremony="full"' not in interactive
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "## Splitting off a separate change" in autonomous
+    assert "call `create_change` without\n  yielding" in autonomous
+
+
+def test_front_door_has_no_headless_branch(tmp_path) -> None:
+    body = _wf().agents["front-door"].prompt_template_source
+    assert "run.non_interactive" not in body
+    assert "## Headless runs" not in body
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    for autonomous in (False, True):
+        out = render_prompt(body, build_context(
+            change_title="t", event_log=log, change_id="abc",
+            change_home=".imp/changes/abc", autonomous=autonomous,
+            project_facts={}, guidance=""),
+            workflow_dir=bundled_workflow_dir("imp")).lower()
+        assert "the ceremony is predetermined" not in out
+        assert 'ceremony="full"' not in out
 
 
 def test_front_door_includes_both_brainstorm_partials() -> None:
