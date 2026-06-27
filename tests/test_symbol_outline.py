@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.tools.symbol_outline import Symbol, count_phrase, count_symbols, detect_language, extract_symbols
+from imp.agents.tools.symbol_outline import Symbol, count_phrase, count_symbols, detect_language, extract_symbols, render_file
 
 
 def test_detect_language_by_extension() -> None:
@@ -186,3 +186,61 @@ def test_count_phrase_total_only_when_unrecognized() -> None:
     # No recognized fn/data kinds at all -> a single total, never a wrong label.
     assert count_phrase(0, 0, 5) == "5 symbols"
     assert count_phrase(0, 0, 1) == "1 symbol"
+
+
+def test_render_file_signatures() -> None:
+    out = render_file("pkg/foo.py", extract_symbols(_PY, "python"))
+    assert out == (
+        "pkg/foo.py — 2 fn, 1 data\n"
+        "4: class Foo:\n"
+        "5:   def method(self, a: int) -> str:\n"
+        "9: def run_change(change, config=None) -> int:"
+    )
+
+
+def test_render_file_counts_detail_is_header_only() -> None:
+    out = render_file("pkg/foo.py", extract_symbols(_PY, "python"), detail="counts")
+    assert out == "pkg/foo.py — 2 fn, 1 data"
+
+
+def test_render_file_unknown_detail_defaults_to_signatures() -> None:
+    syms = extract_symbols(_PY, "python")
+    assert render_file("pkg/foo.py", syms, detail="bogus") == render_file(
+        "pkg/foo.py", syms
+    )
+
+
+def test_render_file_line_number_alignment() -> None:
+    # Two-digit and one-digit line numbers right-align to width 2.
+    tree = [
+        Symbol("a", "fn", 3, "def a()"),
+        Symbol("big", "fn", 12, "def big()"),
+    ]
+    out = render_file("x.py", tree)
+    assert out == "x.py — 2 fn\n 3: def a()\n12: def big()"
+
+
+def test_render_file_width_from_child_lineno() -> None:
+    # The deepest child's lineno (100) exceeds all top-level linenos, so the
+    # right-align width must come from it (3), not from the top-level max (1).
+    tree = [
+        Symbol("tiny", "fn", 1, "def tiny():"),
+        Symbol(
+            "Big",
+            "data",
+            3,
+            "class Big:",
+            (Symbol("method_z", "fn", 100, "def method_z():"),),
+        ),
+    ]
+    out = render_file("x.py", tree)
+    assert out == (
+        "x.py — 2 fn, 1 data\n"
+        "  1: def tiny():\n"
+        "  3: class Big:\n"
+        "100:   def method_z():"
+    )
+
+
+def test_render_file_empty_symbol_list() -> None:
+    assert render_file("x.py", []) == "x.py — 0 symbols"

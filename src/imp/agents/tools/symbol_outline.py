@@ -132,3 +132,28 @@ def count_phrase(fn: int, data: int, other: int) -> str:
     if data:
         parts.append(f"{data} data")
     return ", ".join(parts)
+
+
+def _max_lineno(symbols: list[Symbol]) -> int:
+    m = 0
+    for s in symbols:
+        m = max(m, s.lineno, _max_lineno(list(s.children)))
+    return m
+
+
+def _render_lines(symbols: list[Symbol], out: list[str], depth: int, width: int) -> None:
+    for s in symbols:
+        out.append(f"{s.lineno:>{width}}: {'  ' * depth}{s.signature}")
+        _render_lines(list(s.children), out, depth + 1, width)
+
+
+def render_file(display: str, symbols: list[Symbol], *, detail: str = "signatures") -> str:
+    """A file's outline: count header, then '<lineno>: <signature>' lines (detail='signatures'), nesting by indentation; `display` is the worktree-relative path."""
+    fn, data, other = count_symbols(symbols)
+    header = f"{display} — {count_phrase(fn, data, other)}"
+    if detail == "counts" or not symbols:
+        return header
+    width = len(str(_max_lineno(symbols)))
+    body: list[str] = []
+    _render_lines(symbols, body, 0, width)
+    return "\n".join([header, *body])
