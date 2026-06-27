@@ -57,10 +57,10 @@ survive the boundary into this step:
 {% if change.cur_base_head and change.cur_base_head != change.orig_base_head %}
 The base branch advanced since the draft started. Re-read the files the draft
 assumed and **reconcile any drift** in this same turn; leave the rest as drafted.
-{% if not run.non_interactive %}Ask — by ending your turn with the question — only where the spec
-actually conflicts with the now-current code.{% else %}This is a headless run, so
-do **not** yield to a human: reconcile the drift yourself against current code
-and proceed (a genuine intent-fork at the "Ask vs. decide" high bar still parks).{% endif %}
+This is a **recommendation-bearing** reconciliation (below the "Ask vs. decide" bar).
+{% if run.autonomous %}Reconcile it yourself and proceed without yielding.{% else %}Yield — by ending your turn with the question — only where the spec actually conflicts
+with the now-current code.{% endif %} A genuine intent-fork at the "Ask vs. decide" high
+bar still parks regardless of autonomy.
 {% else %}
 The base has not moved. **Adopt near-silently**: light edits only, usually no
 questions.

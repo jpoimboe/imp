@@ -615,6 +615,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         workflow_dir=bundled_workflow_dir("imp")).lower()
     # Key on a phrase unique to the handoff true-branch.
     assert "the base branch advanced since the draft started" in moved   # head_changed=true
+    assert "yield — by ending your turn with the question" in moved
     assert "adopt near-silently" not in moved
 
     same = render_prompt(body, build_context(
@@ -626,15 +627,16 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     assert "adopt near-silently" in same           # head_changed=false branch
     assert "the base branch advanced since the draft started" not in same
 
-    headless_moved = render_prompt(body, build_context(
+    autonomous_moved = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
-        non_interactive=True,
+        autonomous=True,
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "the base branch advanced since the draft started" in headless_moved
-    assert "do **not** yield to a human" in headless_moved
+    assert "the base branch advanced since the draft started" in autonomous_moved
+    assert "reconcile it yourself and proceed without yielding" in autonomous_moved
+    assert "do **not** yield to a human" not in autonomous_moved
 
 
 HUMAN_DECISION_PARTIAL = Path(
