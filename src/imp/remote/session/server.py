@@ -24,6 +24,7 @@ _log = logging.getLogger("imp.remote.session.server")
 RunFn = Callable[..., Awaitable[Any]]
 
 _CONTROL_QUEUE_DEPTH = 64
+_INTERNAL_PAUSE = "__detach_pause__"  # server-internal: never a client frame action
 
 # Startup grace: how long a hibernation gate waits for the FIRST client to attach
 # before falling back to hibernation. The spawning client (interactive or remote
@@ -71,6 +72,7 @@ class SessionServer:
         self._serve_scope: anyio.CancelScope | None = None
         self._pending_prompt: dict[str, Any] | None = None
         self._last_gate_event: dict[str, Any] | None = None
+        self._in_wait_for_turn = False
         # Initialized in open() because anyio.Event needs a running event loop.
         self._attach_changed: anyio.Event | None = None
         self._socket = SessionSocket(
@@ -218,16 +220,20 @@ class SessionServer:
     async def wait_for_turn(
         self, predicate: Callable[[], bool], *, poll_interval: float = 2.0,
     ) -> None:
-        while True:
-            if predicate():
-                return
-            if self._socket.leased_count == 0:
-                # Same startup vs. detach split as the solicit gate: wait for the
-                # first leased attach before hibernating so a turn-wait reached
-                # during the startup window doesn't pause+exit.
-                await self._hibernate_or_await_first_attach()
-            with anyio.move_on_after(poll_interval):
-                await self.wait_for_attach_change()
+        self._in_wait_for_turn = True
+        try:
+            while True:
+                if predicate():
+                    return
+                if self._socket.leased_count == 0:
+                    # Same startup vs. detach split as the solicit gate: wait for the
+                    # first attach before hibernating so a turn-wait reached during
+                    # the startup window doesn't pause+exit.
+                    await self._hibernate_or_await_first_attach()
+                with anyio.move_on_after(poll_interval):
+                    await self.wait_for_attach_change()
+        finally:
+            self._in_wait_for_turn = False
 
     def set_pending_prompt(self, event: dict[str, Any] | None) -> None:
         """Track a prompt event to re-emit to clients that connect after it fires."""
@@ -247,6 +253,7 @@ class SessionServer:
 
     def _on_detach_pulse(self) -> None:
         self._pulse_attach_change()
+        self._maybe_pause_on_last_lease()
 
     def _note_first_leased(self) -> None:
         """Latch the first 0 -> 1 LEASED transition (via attach OR set-lease) and
@@ -260,6 +267,18 @@ class SessionServer:
     def _on_lease_change(self) -> None:
         self._pulse_attach_change()
         self._note_first_leased()
+        self._maybe_pause_on_last_lease()
+
+    def _maybe_pause_on_last_lease(self) -> None:
+        if (self._coordinator is None
+                or not self._first_leased_attach_fired
+                or self._socket.leased_count != 0
+                or self._pending_prompt is not None
+                or self._in_wait_for_turn):
+            return
+        with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError,
+                                 anyio.BrokenResourceError):
+            self._control_send.send_nowait(_INTERNAL_PAUSE)
 
     def _enqueue_control(self, action: str) -> None:
         if action == CONTROL_ABANDON:
@@ -312,6 +331,10 @@ class SessionServer:
             await self._dispatch_control(action)
 
     async def _dispatch_control(self, action: str) -> None:
+        if action == _INTERNAL_PAUSE:
+            if self._coordinator is not None:
+                await self._coordinator.signal_pause(reason="detached")
+            return
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c")
         elif action == CONTROL_DETACH:
