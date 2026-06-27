@@ -178,7 +178,7 @@ def render_file(display: str, symbols: Sequence[Symbol], *, detail: str = "signa
     body: list[str] = []
     _render_lines(symbols, body, 0, width)
     full = "\n".join([header, *body])
-    if len(full) <= TOOL_OUTPUT_CAP_BYTES:
+    if len(full.encode()) <= TOOL_OUTPUT_CAP_BYTES:
         return full
     return _thin_file(header, body)
 
@@ -188,13 +188,13 @@ def _thin_file(header: str, body: list[str]) -> str:
     not shown' notice and the truncation marker."""
     marker = OUTPUT_TRUNCATION_MARKER.strip()
     kept: list[str] = []
-    size = len(header)
+    size = len(header.encode())
     for i, line in enumerate(body):
         notice = f"… +{len(body) - i} not shown"
         # +3 accounts for the three join newlines: after header, after this line, after notice.
-        if size + len(line) + len(notice) + len(marker) + 3 > TOOL_OUTPUT_CAP_BYTES:
+        if size + len(line.encode()) + len(notice.encode()) + len(marker.encode()) + 3 > TOOL_OUTPUT_CAP_BYTES:
             break
         kept.append(line)
-        size += len(line) + 1
+        size += len(line.encode()) + 1
     omitted = len(body) - len(kept)
     return "\n".join([header, *kept, f"… +{omitted} not shown", marker])
