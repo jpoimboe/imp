@@ -116,3 +116,88 @@ def test_sandbox_non_mapping_rejected(tmp_path: Path) -> None:
     p.write_text("default-workflow: imp\nsandbox: flat-string\n")
     with pytest.raises(LoadError, match="must be a mapping"):
         parse_config_layer(p)
+
+
+# --- context block tests ---
+
+
+def test_parse_context_block(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text(
+        "default-workflow: imp\n"
+        "context:\n"
+        "  checkpoint_threshold: 0.8\n"
+        "  max_reincarnations: 3\n"
+    )
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert out["context"] == {"checkpoint_threshold": 0.8, "max_reincarnations": 3}
+
+
+def test_context_absolute_threshold_allowed(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: 150000\n")
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert out["context"]["checkpoint_threshold"] == 150000
+
+
+def test_context_unknown_key_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  bogus: 1\n")
+    with pytest.raises(LoadError, match="not a known context setting"):
+        parse_config_layer(p)
+
+
+def test_context_bad_threshold_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: 0\n")
+    with pytest.raises(LoadError, match="checkpoint_threshold"):
+        parse_config_layer(p)
+
+
+def test_context_bad_max_reincarnations_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: 1.5\n")
+    with pytest.raises(LoadError, match="max_reincarnations"):
+        parse_config_layer(p)
+
+
+def test_context_non_mapping_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext: flat-string\n")
+    with pytest.raises(LoadError, match="'context:' must be a mapping"):
+        parse_config_layer(p)
+
+
+def test_context_checkpoint_threshold_bool_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: true\n")
+    with pytest.raises(LoadError, match="checkpoint_threshold"):
+        parse_config_layer(p)
+
+
+def test_context_max_reincarnations_bool_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: true\n")
+    with pytest.raises(LoadError, match="max_reincarnations"):
+        parse_config_layer(p)
+
+
+def test_context_checkpoint_threshold_negative_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  checkpoint_threshold: -1\n")
+    with pytest.raises(LoadError, match="checkpoint_threshold"):
+        parse_config_layer(p)
+
+
+def test_context_max_reincarnations_negative_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: -1\n")
+    with pytest.raises(LoadError, match="max_reincarnations"):
+        parse_config_layer(p)
+
+
+def test_context_max_reincarnations_zero_accepted(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: 0\n")
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert out["context"] == {"max_reincarnations": 0}

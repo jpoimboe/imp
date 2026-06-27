@@ -216,6 +216,8 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["sandbox"] = _parse_sandbox(raw["sandbox"], src)
     if raw.get("remote") is not None:
         out["remote"] = _parse_remote(raw["remote"], src)
+    if raw.get("context") is not None:
+        out["context"] = _parse_context(raw["context"], src)
     return out, src
 
 
@@ -372,6 +374,30 @@ def _parse_remote(raw: Any, src: SourceLoc) -> dict[str, Any]:
                 src)
         out["startup_timeout"] = float(st)
     return {"driver": out}
+
+
+def _parse_context(raw: Any, src: SourceLoc) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise LoadError(f"{src.file.name} 'context:' must be a mapping", src)
+    out: dict[str, Any] = {}
+    for k, v in items(raw):
+        if k == "checkpoint_threshold":
+            # bool is an int subclass; reject it so `checkpoint_threshold: true` isn't read as 1.
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+                raise LoadError(
+                    "context.checkpoint_threshold must be a positive number "
+                    "(a fraction like 0.8, or an absolute token count)", src)
+            out[k] = v
+        elif k == "max_reincarnations":
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                raise LoadError(
+                    "context.max_reincarnations must be a non-negative integer", src)
+            out[k] = v
+        else:
+            raise LoadError(
+                f"context.{k!r} is not a known context setting "
+                "(allowed: checkpoint_threshold, max_reincarnations)", src)
+    return out
 
 
 def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
