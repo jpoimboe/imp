@@ -63,7 +63,9 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
             return None
         frac = prompt_tokens / window
     # The warn (red) cutoff tracks the configured checkpoint threshold when one is
-    # known; otherwise the static yellow->red band applies.
+    # known; otherwise the static yellow->red band applies. `window` here is the
+    # static catalog window — an absolute-token threshold is resolved against it
+    # even on the live `context_pct` path (a slight mismatch if the windows differ).
     warn = checkpoint_fraction(checkpoint_threshold, window)
     if warn is None:
         warn = _BAR_YELLOW_MAX
