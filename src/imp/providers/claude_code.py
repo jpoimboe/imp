@@ -221,6 +221,17 @@ def _termination_from_result(
     )
 
 
+def _roll_back_error_turn(
+    messages: list[Message], transcript: Transcript,
+) -> None:
+    """Drop the trailing assistant error turn so a backoff re-drive re-queries."""
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == "assistant":
+            del messages[i]
+            break
+    transcript.rewrite(messages)
+
+
 def _text_of(message: Any) -> str:
     """Concatenate TextBlock contents from a Message; ignore other block types.
 
@@ -1600,6 +1611,7 @@ class ClaudeCodeAgentRunner:
                             {**_subprocess_diag(client),
                              "stderr_tail": self._stderr_sink.tail()})
                         if term is not None:
+                            _roll_back_error_turn(messages, transcript)
                             yield perr.make_error_event(
                                 term, kind=getattr(term, "kind", ""))
                             return
@@ -1611,6 +1623,7 @@ class ClaudeCodeAgentRunner:
                         # instead of after N nudges.
                         classified = _classify_agent_text(last_text)
                         if classified is not None:
+                            _roll_back_error_turn(messages, transcript)
                             yield perr.make_error_event(
                                 classified, kind=getattr(classified, "kind", ""))
                             return
