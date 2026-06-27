@@ -871,3 +871,20 @@ def test_task_lead_step_declares_position_label() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     steps = {s.name: s for ph in wf.phases for s in ph.steps}
     assert steps["task-lead"].position_label is True
+
+
+def test_spec_finalizer_authors_plan_outline() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents["spec-finalizer"].prompt_template_source
+    low = body.lower()
+    # The finalized spec carries a coarse, WHAT-only decomposition that seeds plan_total.
+    assert "## Plan outline" in body
+    assert "what" in low and "not the how" in low
+    assert "5\u20138" in body                 # the greedy ~5-8 tasks/plan grain
+    assert "source of truth" in low
+    assert "plan count" in low or "plan_total" in low
+    # The handoff turn now routes through outline authoring before committing.
+    assert "Author the plan outline" in body
+    # spec-finalizer never emits plan_total — the outline (echoed by plan-writer) seeds it.
+    assert "plan_total" not in wf.agents["spec-finalizer"].output_schema.field_names()
