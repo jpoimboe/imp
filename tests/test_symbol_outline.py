@@ -465,6 +465,44 @@ def test_render_dir_unknown_detail_defaults_to_signatures() -> None:
     assert so.render_dir(tree, detail="bogus") == so.render_dir(tree, detail="signatures")
 
 
+def test_render_dir_thins_signatures_first(monkeypatch) -> None:
+    foo = so.FileEntry(
+        "pkg/foo.py",
+        tuple(Symbol(f"fn{i}", "fn", i + 1, f"def fn{i}(argument_{i}: int) -> None:")
+              for i in range(6)),
+    )
+    tree = so.build_tree(".", [foo])
+    counts = so.render_dir(tree, detail="counts")
+    marker = so.OUTPUT_TRUNCATION_MARKER.strip()
+    monkeypatch.setattr(
+        so, "TOOL_OUTPUT_CAP_BYTES", len(counts.encode()) + len(marker.encode()) + 1)
+
+    out = so._render_dir_thinned(tree, detail="signatures", max_depth=None)
+    assert out == f"{counts}\n{marker}"
+    assert "def fn0" not in out            # signatures dropped
+    assert "foo.py — 6 fn" in out          # per-file counts kept
+
+
+def test_render_dir_collapses_deep_dirs_when_counts_still_over(monkeypatch) -> None:
+    foo = so.FileEntry(
+        "a/b/foo.py",
+        tuple(Symbol(f"fn{i}", "fn", i + 1, f"def fn{i}():") for i in range(6)),
+    )
+    bar = so.FileEntry("a/bar.py", (Symbol("g", "fn", 1, "def g():"),))
+    tree = so.build_tree(".", [bar, foo])
+    # Collapsing the deepest level (a/b's contents) is max_depth=2; its rollup
+    # line stays, foo.py disappears.
+    collapsed = so.render_dir(tree, detail="counts", max_depth=2)
+    marker = so.OUTPUT_TRUNCATION_MARKER.strip()
+    monkeypatch.setattr(
+        so, "TOOL_OUTPUT_CAP_BYTES", len(collapsed.encode()) + len(marker.encode()) + 1)
+
+    out = so._render_dir_thinned(tree, detail="signatures", max_depth=None)
+    assert out == f"{collapsed}\n{marker}"
+    assert "foo.py" not in out                       # deepest dir collapsed
+    assert "a/b/ — 1 file, 6 symbols" in out         # subtree kept as a rollup line
+
+
 def test_build_tree_groups_and_counts_recursively() -> None:
     foo = so.FileEntry(
         "pkg/foo.py",

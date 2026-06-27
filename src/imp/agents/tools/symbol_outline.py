@@ -380,6 +380,38 @@ def render_dir(tree: DirNode, *, detail: str = "signatures", max_depth: int | No
     return "\n".join(lines)
 
 
+def _tree_depth(node: DirNode) -> int:
+    if not node.subdirs:
+        return 0
+    return 1 + max(_tree_depth(s) for s in node.subdirs)
+
+
+def _render_dir_thinned(tree: DirNode, *, detail: str, max_depth: int | None) -> str:
+    """render_dir fit to TOOL_OUTPUT_CAP_BYTES by breadth-first thinning: first
+    drop per-file signatures (-> counts), then collapse the deepest directories to
+    recursive-rollup lines, never omitting a subtree. A thinned result ends with
+    OUTPUT_TRUNCATION_MARKER."""
+    full = render_dir(tree, detail=detail, max_depth=max_depth)
+    if len(full.encode()) <= TOOL_OUTPUT_CAP_BYTES:
+        return full
+    marker = OUTPUT_TRUNCATION_MARKER.strip()
+
+    def fits(text: str) -> bool:
+        return len(text.encode()) + len(marker.encode()) + 1 <= TOOL_OUTPUT_CAP_BYTES
+
+    body = render_dir(tree, detail="counts", max_depth=max_depth)
+    if fits(body):
+        return f"{body}\n{marker}"
+    ceiling = _tree_depth(tree) if max_depth is None else min(max_depth, _tree_depth(tree))
+    depth = ceiling
+    while depth >= 0:
+        body = render_dir(tree, detail="counts", max_depth=depth)
+        if fits(body):
+            break
+        depth -= 1
+    return f"{body}\n{marker}"
+
+
 def build_tree(root_rel: str, entries: list[FileEntry]) -> DirNode:
     """Group `entries` (each carrying its worktree-relative rel) into a directory
     tree rooted at `root_rel`. Intermediate directories become DirNodes whose
