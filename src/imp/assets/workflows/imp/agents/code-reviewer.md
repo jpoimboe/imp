@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-label: reviewing code
+label: reviewing
 description: Per-task code-quality review (read-only); reports severity-classified findings to the task-lead.
 output:
   status: {type: enum, values: [Success, Error]}

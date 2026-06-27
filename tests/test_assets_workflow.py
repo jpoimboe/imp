@@ -648,8 +648,8 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.agents["explorer"].label == "exploring codebase"
     assert wf.agents["researcher"].label == "researching"
-    assert wf.agents["coder"].label == "writing code"
-    assert wf.agents["code-reviewer"].label == "reviewing code"
+    assert wf.agents["coder"].label == "coding"
+    assert wf.agents["code-reviewer"].label == "reviewing"
     # plan-writer's label is on the workflow step, not the agent frontmatter
     for name, a in wf.agents.items():
         if name == "plan-writer":
