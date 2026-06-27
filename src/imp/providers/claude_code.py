@@ -1595,6 +1595,12 @@ class ClaudeCodeAgentRunner:
                             # than returning PAUSED.
                             if invocation.coordinator is not None:
                                 invocation.coordinator.clear_pause()
+                            # Reap leaked subprocesses only AFTER interrupt():
+                            # a killed-process tool_result must not race the stop.
+                            from imp.agents.tools.bg import terminate_background_processes
+                            from imp.agents.tools.context import terminate_running_processes
+                            await terminate_running_processes(ctx)
+                            await terminate_background_processes(ctx)
                             last_text = ""
                             for prev in reversed(messages):
                                 if prev.role == "assistant":

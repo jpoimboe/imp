@@ -2506,3 +2506,73 @@ async def test_cooperative_interrupt_headless_pauses_balanced(
 
     assert holder["c"].disconnected is False
     assert holder["c"].interrupt_calls == 1
+
+
+@pytest.mark.anyio
+async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """AC7: on the cooperative path client.interrupt() fires BEFORE any
+    subprocess kill; the orphaned in-flight tool forwards no result, leaked
+    subprocesses are reaped only after the turn closes, and the steer — not a
+    stale tool result — drives the next turn."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient, assistant, result, text, tool_use
+
+    (tmp_path / "art").mkdir()
+    order: list[str] = []
+
+    async def _term_run(_ctx: Any) -> None:
+        order.append("terminate_running")
+
+    async def _term_bg(_ctx: Any) -> None:
+        order.append("terminate_bg")
+
+    monkeypatch.setattr(
+        "imp.agents.tools.context.terminate_running_processes", _term_run)
+    monkeypatch.setattr(
+        "imp.agents.tools.bg.terminate_background_processes", _term_bg)
+
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("took the redirect"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer, order=order)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "go look elsewhere")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    # client.interrupt() preceded every subprocess reap.
+    assert order.index("interrupt") < order.index("terminate_running")
+    assert order.index("interrupt") < order.index("terminate_bg")
+    # The steer, not a stale tool result, drives the next turn.
+    assert holder["c"].queries[-1] == "go look elsewhere"
+    assert events[-1]["type"] == "agent_output"
