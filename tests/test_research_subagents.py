@@ -67,6 +67,25 @@ def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
     assert "no cost gating" in out
 
 
+def test_delegate_partial_included_in_explore_heavy_steps() -> None:
+    wf = _wf()
+    for name in ("plan-writer", "spec-finalizer", "task-lead", "finalize"):
+        body = wf.agents[name].prompt_template_source
+        assert '{% include "partials/delegate-exploration.md" %}' in body, name
+
+
+def test_task_lead_declares_research_subagents() -> None:
+    a = _wf().agents["task-lead"]
+    assert set(a.subagents) == {"coder", "code-reviewer", "explorer", "researcher"}
+    assert "sub_agent" in a.tools
+
+
+def test_finalize_declares_research_subagents() -> None:
+    a = _wf().agents["finalize"]
+    assert set(a.subagents) == {"explorer", "researcher"}
+    assert "sub_agent" in a.tools
+
+
 def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
     from pathlib import Path
     p = Path("src/imp/assets/workflows/imp/partials/delegate-exploration.md")

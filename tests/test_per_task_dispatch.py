@@ -16,7 +16,7 @@ def _task_lead():
 
 def test_task_lead_subagents_drop_spec_task_reviewer() -> None:
     subs = set(_task_lead().subagents)
-    assert subs == {"coder", "code-reviewer"}, subs
+    assert subs == {"coder", "code-reviewer", "explorer", "researcher"}, subs
     assert "spec-task-reviewer" not in subs
 
 

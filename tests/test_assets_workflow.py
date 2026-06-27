@@ -52,7 +52,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
         "coder", "code-reviewer",
     }
     dispatchers = {"task-lead", "deferred-sweep",
-                   "plan-writer", "spec-finalizer", "front-door"}
+                   "plan-writer", "spec-finalizer", "front-door", "finalize"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name

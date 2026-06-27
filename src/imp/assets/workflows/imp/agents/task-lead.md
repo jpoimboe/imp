@@ -2,7 +2,7 @@
 name: task-lead
 label: "task 1/{{ vars.task_total }}"
 description: Implement-phase controller — pick the next task, dispatch coder + one reviewer, adjudicate, commit one clean unit, record progress.
-subagents: [coder, code-reviewer]
+subagents: [coder, code-reviewer, explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
   verify_tolerated: {type: bool}
@@ -30,6 +30,8 @@ Read first, every entry:
 - `{{ change.home }}/deferred.md` if it exists — the append-only ledger of deferred
   followups and forward notes (you append to it; it is never collapsed or rewritten).
 - The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` for grounding.
+
+{% include "partials/delegate-exploration.md" %}
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback, treat it as **authoritative over progress.md**:
