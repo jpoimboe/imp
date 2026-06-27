@@ -499,6 +499,7 @@ async def _outline_dir(
         "note, and output is capped at 50 KB with breadth-first thinning. Not a "
         "substitute for read_file — use it to choose what to read."
     ),
+    read_only=True,
 )
 async def symbol_outline(
     ctx: ToolContext, path: str, detail: str = "signatures", max_depth: int | None = None,

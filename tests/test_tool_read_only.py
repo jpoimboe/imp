@@ -8,6 +8,7 @@ def test_read_only_true_on_read_tools() -> None:
     assert reg["read_file"].read_only is True
     assert reg["grep"].read_only is True
     assert reg["glob"].read_only is True
+    assert reg["symbol_outline"].read_only is True
 
 
 def test_read_only_false_on_mutating_tools() -> None:
