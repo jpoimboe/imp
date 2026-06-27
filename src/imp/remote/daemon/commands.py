@@ -101,7 +101,7 @@ ROUTE_HINT = (
     "Couldn't route that — reply to a Change's message, prefix @handle, or send /show.")
 HELP_TEXT = (
     "Commands:\n"
-    "/show — show changes (● = subscribed)\n"
+    "/show — show running changes (● = subscribed)\n"
     "/new <prompt> — start a Change\n"
     "/subscribe @handle — follow a Change (replays its history, then streams it)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a Change\n"

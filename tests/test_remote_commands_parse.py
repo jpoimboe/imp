@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imp.remote.daemon.commands import (
     ABANDON_USAGE,
+    HELP_TEXT,
     NEW_USAGE,
     RESUME_USAGE,
     ROUTE_HINT,
@@ -135,3 +136,7 @@ def test_listresult_defaults_resident_to_empty_frozenset() -> None:
 def test_listresult_carries_the_resident_set() -> None:
     result = ListResult([], frozenset({"a", "b"}))
     assert result.resident == frozenset({"a", "b"})
+
+
+def test_show_help_line_says_running_changes() -> None:
+    assert "/show — show running changes (● = subscribed)" in HELP_TEXT
