@@ -1074,3 +1074,99 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
 
     assert prompts == ["q1"]         # exactly one solicit despite three frames
     assert result["r"] == "answer"   # exactly one reply reached the gate
+
+
+@pytest.mark.anyio
+async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "step_started", "payload": {}})
+        on_event({"type": "change_renamed",
+                   "payload": {"new_title": "Renamed Change"}})
+        await anyio.sleep(0.1)
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "Old Name")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    renamed = f"\x1b]2;{GLYPH_WORKING} imp · term1 · Renamed Change\x07"
+    assert renamed in s.getvalue()
+
+
+@pytest.mark.anyio
+async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "change_renamed", "_replay": True,
+                   "payload": {"new_title": "Renamed Change"}})
+        on_event({"type": "step_started", "payload": {}})
+        await anyio.sleep(0.1)
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "Old Name")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    renamed = f"\x1b]2;{GLYPH_WORKING} imp · term1 · Renamed Change\x07"
+    assert renamed not in s.getvalue()

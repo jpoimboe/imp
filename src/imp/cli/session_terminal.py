@@ -56,6 +56,9 @@ async def run_terminal_client(
             gate_send.send_nowait(prompt)
             if title is not None:
                 title.waiting()
+        elif event.get("type") == "change_renamed" and not replay:
+            if title is not None:
+                title.update_name((event.get("payload") or {})["new_title"])
         elif title is not None and not replay:
             title.working()
 
