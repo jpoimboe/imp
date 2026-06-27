@@ -139,9 +139,9 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "front-door": "<imp>",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
-        "plan-writer": "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
-        "plan-reviewer": "reviewing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
-        "plan-finalized": "finalizing plan {{ vars.plan_index }}/{{ vars.plan_total }}",
+        "plan-writer": "writing plan",
+        "plan-reviewer": "reviewing plan",
+        "plan-finalized": "finalizing plan",
         "task-lead": "task 1/{{ vars.task_total }} · thinking",
         "verify": "running tests",
         "autosquash-resolve-implement": "resolving task fixups",
@@ -189,7 +189,9 @@ def test_phase_labels_assigned() -> None:
     by = {p.name: p for p in _wf().phases}
     assert by["front-door"].label is None
     assert by["spec"].label == "spec phase"
-    assert by["plan"].label == "planning phase"
+    assert by["plan"].label == (
+        "planning phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+    )
     assert by["implement"].label == (
         "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     )
