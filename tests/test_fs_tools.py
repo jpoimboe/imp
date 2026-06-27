@@ -162,3 +162,83 @@ def test_read_file_records_partial_read_as_not_full(
     rec = ctx.read_state[ctx.resolve_path("big.txt")]
     assert rec.full is False
     assert rec.content_sha256 == hashlib.sha256(b"01234567").hexdigest()
+
+
+def test_write_file_refused_when_existing_and_unread(tmp_path: Path) -> None:
+    (tmp_path / "p.md").write_text("old")
+    ctx = _ctx(tmp_path, "read", "write")
+    with pytest.raises(ValueError, match="hasn't been read this step"):
+        _write_file(ctx, path="p.md", content="new")
+
+
+def test_write_file_allowed_for_nonexistent_path(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, "write")
+    _write_file(ctx, path="new.md", content="hi")
+    assert (tmp_path / "new.md").read_text() == "hi"
+
+
+def test_write_file_allowed_after_read_unchanged(tmp_path: Path) -> None:
+    (tmp_path / "p.md").write_text("old")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="p.md")
+    _write_file(ctx, path="p.md", content="new")
+    assert (tmp_path / "p.md").read_text() == "new"
+
+
+def test_write_file_refused_when_content_changed_externally(tmp_path: Path) -> None:
+    p = tmp_path / "p.md"
+    p.write_text("old")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="p.md")
+    rec = ctx.read_state[ctx.resolve_path("p.md")]
+    p.write_text("changed by someone else")
+    os.utime(p, (rec.mtime + 10, rec.mtime + 10))
+    with pytest.raises(ValueError, match="changed since you read it"):
+        _write_file(ctx, path="p.md", content="new")
+
+
+def test_second_write_to_same_path_allowed(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, "read", "write")
+    _write_file(ctx, path="p.md", content="first")   # nonexistent -> allowed; record refreshed
+    _write_file(ctx, path="p.md", content="second")  # record present, mtime matches -> allowed
+    assert (tmp_path / "p.md").read_text() == "second"
+
+
+def test_symlink_read_then_write_target_allowed(tmp_path: Path) -> None:
+    target = tmp_path / "target.md"
+    target.write_text("data")
+    (tmp_path / "link.md").symlink_to(target)
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="link.md")                    # records under resolved == target
+    _write_file(ctx, path="target.md", content="new")  # shared resolved key -> allowed
+    assert target.read_text() == "new"
+
+
+def test_partial_read_then_write_unchanged_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fs_tools, "FILE_READ_CAP_BYTES", 8)
+    monkeypatch.setattr(lines_mod, "FILE_READ_CAP_BYTES", 8)
+    p = tmp_path / "big.md"
+    p.write_bytes(b"0123456789abcdef")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="big.md")
+    assert ctx.read_state[ctx.resolve_path("big.md")].full is False
+    _write_file(ctx, path="big.md", content="new")  # mtime not advanced -> allowed
+    assert (tmp_path / "big.md").read_text() == "new"
+
+
+def test_partial_read_then_write_after_external_change_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fs_tools, "FILE_READ_CAP_BYTES", 8)
+    monkeypatch.setattr(lines_mod, "FILE_READ_CAP_BYTES", 8)
+    p = tmp_path / "big.md"
+    p.write_bytes(b"0123456789abcdef")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="big.md")
+    rec = ctx.read_state[ctx.resolve_path("big.md")]
+    p.write_bytes(b"0123456789ABCDEF")  # same length, different bytes
+    os.utime(p, (rec.mtime + 10, rec.mtime + 10))
+    with pytest.raises(ValueError, match="changed since you read it"):
+        _write_file(ctx, path="big.md", content="new")

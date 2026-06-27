@@ -139,6 +139,28 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     return f"{body}\n{notice}" if notice else body
 
 
+def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
+    """Read-before-write gate. Raises ValueError on a blind or stale overwrite
+    of an existing file; returns silently when the write may proceed."""
+    if not resolved.exists():
+        return
+    record = ctx.read_state.get(resolved)
+    if record is None:
+        raise ValueError(
+            f"{display_path} hasn't been read this step — read_file it before "
+            f"overwriting (or use edit_file to change part of it)."
+        )
+    try:
+        current_mtime = resolved.stat().st_mtime
+    except OSError:
+        return  # vanished between exists() and stat() — treat as new-file write
+    if current_mtime > record.mtime:
+        raise ValueError(
+            f"{display_path} changed since you read it — read it again before "
+            f"overwriting."
+        )
+
+
 @imp_tool(
     name="write_file",
     description=(
@@ -151,8 +173,15 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
 )
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
     resolved = ctx.authorize_fs(("write",), path)
+    _gate_write(ctx, resolved, path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content)
+    data = resolved.read_bytes()
+    ctx.read_state[resolved] = ReadRecord(
+        mtime=resolved.stat().st_mtime,
+        content_sha256=hashlib.sha256(data).hexdigest(),
+        full=True,
+    )
     return f"wrote {len(content)} bytes to {path}"
 
 
