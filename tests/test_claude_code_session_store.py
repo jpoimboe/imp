@@ -319,3 +319,68 @@ def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> N
     anyio.run(store.append, key, a)
     anyio.run(store.append, key, b)
     assert len(anyio.run(store.load, key)) == 1
+
+
+def test_strip_trailing_error_turn_drops_session_limit_turn() -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        strip_trailing_error_turn,
+    )
+
+    good = message_to_session_records(
+        [Message(role="assistant", content=(TextBlock(text="done"),))],
+        parent_uuid=None, session_id="sid", cwd="/p", model="m", start_index=0)
+    bad = message_to_session_records(
+        [Message(role="assistant", content=(
+            TextBlock(text="You've hit your session limit · resets 1am (America/Los_Angeles)"),))],
+        parent_uuid=good[-1]["uuid"], session_id="sid", cwd="/p", model="m",
+        start_index=1)
+    entries = good + bad
+
+    assert strip_trailing_error_turn(entries) == good
+
+
+def test_strip_trailing_error_turn_drops_is_api_error_flag() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a", "message": {"role": "assistant"}},
+        {"type": "assistant", "uuid": "b", "isApiErrorMessage": True,
+         "message": {"role": "assistant", "content": []}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
+def test_strip_trailing_error_turn_drops_nested_message_api_error_flag() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a", "message": {"role": "assistant"}},
+        {"type": "assistant", "uuid": "b",
+         "message": {"role": "assistant", "isApiErrorMessage": True, "content": []}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
+def test_strip_trailing_error_turn_drops_string_content_session_limit() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a",
+         "message": {"role": "assistant", "content": "all good"}},
+        {"type": "assistant", "uuid": "b",
+         "message": {"role": "assistant",
+                     "content": "You've hit your session limit, try later"}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
+def test_strip_trailing_error_turn_keeps_normal_tail() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [{"type": "assistant", "uuid": "a",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "all good"}]}}]
+    assert strip_trailing_error_turn(entries) == entries
+    assert strip_trailing_error_turn([]) == []

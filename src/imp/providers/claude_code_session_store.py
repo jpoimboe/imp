@@ -165,6 +165,42 @@ def _session_block_to_dict(block: Any) -> dict[str, Any]:
     raise TypeError(f"unexpected content block: {type(block).__name__}")
 
 
+_SESSION_LIMIT_RECORD_RE = re.compile(
+    r"session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/", re.IGNORECASE)
+
+
+def session_record_is_error_turn(entry: Any) -> bool:
+    """True for a synthetic API-error / session-limit turn (isApiErrorMessage flag or text)."""
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("isApiErrorMessage") is True:
+        return True
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return False
+    if message.get("isApiErrorMessage") is True:
+        return True
+    content = message.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text")
+    else:
+        text = ""
+    return bool(_SESSION_LIMIT_RECORD_RE.search(text))
+
+
+def strip_trailing_error_turn(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop a single trailing synthetic error turn; return entries unchanged otherwise."""
+    if entries and session_record_is_error_turn(entries[-1]):
+        return list(entries[:-1])
+    return list(entries)
+
+
 def message_to_session_records(
     messages: list[Message], *, parent_uuid: str | None, session_id: str,
     cwd: str, model: str, start_index: int = 0,
