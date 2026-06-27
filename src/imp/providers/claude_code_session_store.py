@@ -165,7 +165,7 @@ def _session_block_to_dict(block: Any) -> dict[str, Any]:
     raise TypeError(f"unexpected content block: {type(block).__name__}")
 
 
-_SESSION_LIMIT_RECORD_RE = re.compile(
+_SESSION_LIMIT_RE = re.compile(
     r"session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/", re.IGNORECASE)
 
 
@@ -189,7 +189,7 @@ def session_record_is_error_turn(entry: Any) -> bool:
             if isinstance(b, dict) and b.get("type") == "text")
     else:
         text = ""
-    return bool(_SESSION_LIMIT_RECORD_RE.search(text))
+    return bool(_SESSION_LIMIT_RE.search(text))
 
 
 def strip_trailing_error_turn(

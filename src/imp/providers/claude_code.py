@@ -95,6 +95,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
+    _SESSION_LIMIT_RE,
     resume_session_id,
     session_key,
     session_store_for,
@@ -119,13 +120,6 @@ _QUOTA_PATTERNS = (
     "You have reached your usage limit",
     "Credit balance is too low",
 )
-
-# Friendly session-limit text the claude CLI surfaces as assistant prose with
-# api_error_status=429. It matches neither _API_ERROR_RE nor _QUOTA_PATTERNS, so
-# without this backstop a session limit falls through to a hard pause. A regex
-# over a substring because the wording varies ("session limit", "resets 11:30pm (America/…)").
-_SESSION_LIMIT_RE = re.compile(
-    r"session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/", re.IGNORECASE)
 
 # Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
 # the underlying Anthropic API returns a non-2xx. 401/403 → AuthError; 408 and
