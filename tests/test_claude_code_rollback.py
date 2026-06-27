@@ -193,3 +193,41 @@ async def test_quota_pause_still_errors_and_rollback_is_harmless(
     # The unconditional rollback fired for the Pause category too — harmless.
     loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
     assert [m.role for m in loaded] == ["user"]
+
+
+@pytest.mark.anyio
+async def test_auth_fails_then_recovers_on_redrive(tmp_path: Path) -> None:
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+
+    drive1 = [
+        assistant(text("Failed to authenticate. API Error: 401")),
+        result(is_error=True, api_error_status=401),
+    ]
+    runner1 = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive1))
+    ev1 = [ev async for ev in runner1.run(inv)]
+    assert any(e["type"] == "error" and e["payload"]["category"] == "auth"
+               for e in ev1), ev1
+
+    # Rolled back -> ready to genuinely re-query on the next drive.
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert classify_resume(loaded) is ResumeState.SEND_TO_LLM
+
+    drive2 = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    runner2 = ClaudeCodeAgentRunner(  # no user_input_fn: recovery needs none
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
+    ev2 = [ev async for ev in runner2.run(inv)]
+
+    assert ev2[-1]["type"] == "agent_output", ev2
+    assert ev2[-1]["payload"]["status"] == "Success"
+
+    # The bug's signature must be absent across the whole recovery.
+    log_types = [e["type"] for e in log.read()]
+    assert "awaiting_user_input" not in log_types
