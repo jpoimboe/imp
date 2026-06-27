@@ -125,3 +125,69 @@ async def test_relay_run_raises_when_no_session_is_resident(tmp_path: Path) -> N
         events=("all",), sink=lambda _e: None)
     with pytest.raises(OSError):
         await relay.run()
+
+
+@pytest.mark.anyio
+async def test_relay_leases_when_subscribed(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    relay = SessionRelay(
+        socket_path=sock, change_id="cid", title="T", events=("all",),
+        sink=lambda _e: None, is_subscribed=lambda: True)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        tg.start_soon(relay.run)
+        with anyio.fail_after(5):
+            while socket.leased_count == 0:
+                await anyio.sleep(0.02)
+        assert socket.leased_count == 1
+        tg.cancel_scope.cancel()
+    await socket.close()
+
+
+@pytest.mark.anyio
+async def test_relay_is_lease_less_when_not_subscribed(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    relay = SessionRelay(
+        socket_path=sock, change_id="cid", title="T", events=("all",),
+        sink=lambda _e: None, is_subscribed=lambda: False)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        tg.start_soon(relay.run)
+        with anyio.fail_after(5):
+            while socket.attached_count == 0:
+                await anyio.sleep(0.02)
+        assert socket.leased_count == 0   # attached for observation, but not leased
+        tg.cancel_scope.cancel()
+    await socket.close()
+
+
+@pytest.mark.anyio
+async def test_relay_set_lease_tracks_subscription_changes(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    sub = {"on": False}
+    relay = SessionRelay(
+        socket_path=sock, change_id="cid", title="T", events=("all",),
+        sink=lambda _e: None, is_subscribed=lambda: sub["on"], lease_poll_gap=0.02)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        tg.start_soon(relay.run)
+        with anyio.fail_after(5):
+            while socket.attached_count == 0:
+                await anyio.sleep(0.02)
+        assert socket.leased_count == 0
+        sub["on"] = True                       # subscribe-while-running
+        with anyio.fail_after(5):
+            while socket.leased_count != 1:
+                await anyio.sleep(0.02)
+        sub["on"] = False                      # unsubscribe
+        with anyio.fail_after(5):
+            while socket.leased_count != 0:
+                await anyio.sleep(0.02)
+        tg.cancel_scope.cancel()
+    await socket.close()

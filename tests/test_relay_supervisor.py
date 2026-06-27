@@ -252,3 +252,31 @@ async def test_supervisor_reattaches_after_rehydration(
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await sock.close()
+
+
+@pytest.mark.anyio
+async def test_supervisor_leases_only_subscribed_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.remote.daemon.subscriptions import Subscriptions
+
+    cid = "subbed"
+    monkeypatch.setattr(
+        "imp.remote.daemon.directory.list_changes",
+        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    await sock.open()
+    subs = Subscriptions()
+    subs.add(cid)
+    sup = RelaySupervisor(
+        control_root=tmp_path, sink=lambda _e: None, events=("all",),
+        title_for=lambda _c: "T", poll_gap=0.02, subscriptions=subs)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(sock.serve)
+        tg.start_soon(sup.run)
+        with anyio.fail_after(5):
+            while sock.leased_count == 0:
+                await anyio.sleep(0.02)
+        assert sock.leased_count == 1
+        tg.cancel_scope.cancel()
+    await sock.close()
