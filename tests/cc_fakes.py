@@ -89,6 +89,12 @@ class FakeResultMessage:
     is_error: bool = False
     api_error_status: Any = None
     stop_reason: Any = None
+    total_cost_usd: float = 0.0
+    duration_api_ms: int = 0
+    num_turns: int = 0
+    model_usage: dict[str, Any] | None = None
+    permission_denials: Any = None
+    errors: Any = None
 
 
 FakeResultMessage.__name__ = "ResultMessage"
@@ -165,10 +171,19 @@ def user(*blocks: Any) -> FakeUserMessage:
 def result(
     *, is_error: bool = False, subtype: str = "end_turn",
     api_error_status: Any = None, stop_reason: Any = None,
+    total_cost_usd: float = 0.0, duration_ms: int = 0,
+    duration_api_ms: int = 0, num_turns: int = 0,
+    usage: dict[str, Any] | None = None,
+    model_usage: dict[str, Any] | None = None,
+    permission_denials: Any = None, errors: Any = None,
 ) -> FakeResultMessage:
     return FakeResultMessage(
         subtype=subtype, is_error=is_error,
-        api_error_status=api_error_status, stop_reason=stop_reason)
+        api_error_status=api_error_status, stop_reason=stop_reason,
+        total_cost_usd=total_cost_usd, duration_ms=duration_ms,
+        duration_api_ms=duration_api_ms, num_turns=num_turns,
+        usage=usage, model_usage=model_usage,
+        permission_denials=permission_denials, errors=errors)
 
 
 def text(t: str) -> FakeTextBlock:

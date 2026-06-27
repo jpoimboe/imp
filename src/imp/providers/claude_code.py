@@ -1652,6 +1652,20 @@ class ClaudeCodeAgentRunner:
                         await _flush_llm_group(
                             backstop_stop_reason=getattr(
                                 sdk_msg, "stop_reason", None))
+                        elog.append_query_result(
+                            agent_id=aid,
+                            total_cost_usd=getattr(sdk_msg, "total_cost_usd", None),
+                            duration_ms=getattr(sdk_msg, "duration_ms", None),
+                            duration_api_ms=getattr(sdk_msg, "duration_api_ms", None),
+                            num_turns=getattr(sdk_msg, "num_turns", None),
+                            stop_reason=getattr(sdk_msg, "stop_reason", None),
+                            subtype=getattr(sdk_msg, "subtype", None),
+                            is_error=bool(getattr(sdk_msg, "is_error", False)),
+                            usage=getattr(sdk_msg, "usage", None) or {},
+                            model_usage=getattr(sdk_msg, "model_usage", None) or {},
+                            api_error_status=getattr(sdk_msg, "api_error_status", None),
+                            permission_denials=getattr(sdk_msg, "permission_denials", None),
+                            errors=getattr(sdk_msg, "errors", None))
                         if (self._steer_requested and getattr(
                                 sdk_msg, "subtype", None)
                                 == "error_during_execution"):

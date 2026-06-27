@@ -3139,3 +3139,100 @@ async def test_none_message_id_opens_group_then_adopts_real_key(tmp_path: Path) 
     texts = [b.get("text") for b in resps[0]["payload"]["raw"]["content"]
              if b["type"] == "text"]
     assert texts == ["part one", " part two"]
+
+
+@pytest.mark.anyio
+async def test_emits_one_query_result_with_authoritative_telemetry(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn", subtype="success",
+               total_cost_usd=0.0321, duration_ms=5000, duration_api_ms=4100,
+               num_turns=1, usage={"input_tokens": 900, "output_tokens": 120},
+               model_usage={"served-x": {"input_tokens": 900}}),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    qrs = [e for e in log.read() if e["type"] == "query_result"]
+    assert len(qrs) == 1                         # AC5: exactly one per query
+    p = qrs[0]["payload"]
+    assert p["total_cost_usd"] == 0.0321
+    assert p["duration_ms"] == 5000
+    assert p["duration_api_ms"] == 4100
+    assert p["num_turns"] == 1
+    assert p["stop_reason"] == "end_turn"
+    assert p["subtype"] == "success"
+    assert p["is_error"] is False
+    assert p["usage"] == {"input_tokens": 900, "output_tokens": 120}
+    assert p["model_usage"] == {"served-x": {"input_tokens": 900}}
+
+
+@pytest.mark.anyio
+async def test_query_result_carries_optional_error_fields(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn", subtype="success",
+               permission_denials=[{"tool": "bash"}], errors=["boom"]),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    p = next(e for e in log.read() if e["type"] == "query_result")["payload"]
+    assert p["permission_denials"] == [{"tool": "bash"}]
+    assert p["errors"] == ["boom"]
+
+
+@pytest.mark.anyio
+async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> None:
+    from tests.cc_fakes import tool_result, user
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "data")),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn", num_turns=2),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    qr = next(e for e in log.read() if e["type"] == "query_result")
+    distinct_ids = {r["payload"]["message_id"] for r in resps}
+    # AC3: llm_response count == distinct message_id count == num_turns
+    assert len(resps) == len(distinct_ids) == qr["payload"]["num_turns"] == 2
