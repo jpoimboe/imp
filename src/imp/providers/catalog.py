@@ -88,3 +88,16 @@ def window_for_model(model: str | None) -> int | None:
         if token in lowered:
             return size
     return None
+
+
+def checkpoint_fraction(
+    threshold: float | int | None, window: int | None
+) -> float | None:
+    """The context-checkpoint cutoff as a fraction of the model window (None if unresolvable)."""
+    if threshold is None or threshold <= 0:
+        return None
+    if threshold <= 1:
+        return float(threshold)
+    if window is None or window <= 0:
+        return None
+    return threshold / window

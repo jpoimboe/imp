@@ -6,6 +6,7 @@ from imp.providers.catalog import (
     DEFAULT_WINDOW,
     OPENAI,
     ModelInfo,
+    checkpoint_fraction,
     model_info,
     window_for_model,
 )
@@ -49,3 +50,24 @@ def test_window_for_model_substring_fallback() -> None:
     assert window_for_model("gpt-5.5") == 400_000
     assert window_for_model("some-unlisted-model") is None
     assert window_for_model(None) is None
+
+
+def test_checkpoint_fraction_fractional_threshold_passes_through() -> None:
+    # A window fraction is window-independent: returned unchanged.
+    assert checkpoint_fraction(0.8, 200_000) == 0.8
+    assert checkpoint_fraction(0.8, None) == 0.8
+    assert checkpoint_fraction(1.0, 1_000_000) == 1.0
+
+
+def test_checkpoint_fraction_absolute_threshold_divides_by_window() -> None:
+    # An absolute token cap becomes a fraction of the model window.
+    assert checkpoint_fraction(150_000, 200_000) == 0.75
+    assert checkpoint_fraction(500_000, 1_000_000) == 0.5
+
+
+def test_checkpoint_fraction_unresolvable_returns_none() -> None:
+    assert checkpoint_fraction(None, 200_000) is None       # no threshold
+    assert checkpoint_fraction(0, 200_000) is None          # non-positive
+    assert checkpoint_fraction(150_000, None) is None        # absolute cap, unknown window
+    assert checkpoint_fraction(150_000, 0) is None           # absolute cap, zero window
+    assert checkpoint_fraction(-1, 200_000) is None        # negative threshold
