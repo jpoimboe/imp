@@ -405,3 +405,29 @@ def test_scan_file_swallows_parse_failure(tmp_path, monkeypatch) -> None:
     e = anyio.run(so.scan_file, f, tmp_path)
     assert e.rel == "foo.py"
     assert e.symbols == ()
+
+
+def test_build_tree_groups_and_counts_recursively() -> None:
+    foo = so.FileEntry(
+        "pkg/foo.py",
+        (
+            Symbol("Foo", "data", 4, "class Foo:",
+                   (Symbol("method", "fn", 5, "def method():"),)),
+            Symbol("run", "fn", 9, "def run():"),
+        ),
+    )
+    util = so.FileEntry("pkg/sub/util.py", (Symbol("helper", "fn", 1, "def helper():"),))
+    mk = so.FileEntry("Makefile", ())
+    tree = so.build_tree(".", [mk, foo, util])
+
+    assert tree.rel == "."
+    assert [f.rel for f in tree.files] == ["Makefile"]
+    assert [d.rel for d in tree.subdirs] == ["pkg"]
+    pkg = tree.subdirs[0]
+    assert [f.rel for f in pkg.files] == ["pkg/foo.py"]
+    assert [d.rel for d in pkg.subdirs] == ["pkg/sub"]
+    assert [f.rel for f in pkg.subdirs[0].files] == ["pkg/sub/util.py"]
+
+    # (n_dirs, n_files, n_symbols), recursive over the whole subtree.
+    assert so.dir_counts(tree) == (2, 3, 4)
+    assert so.dir_counts(pkg) == (1, 2, 4)

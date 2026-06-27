@@ -288,3 +288,58 @@ async def scan_file(
     except Exception:
         return FileEntry(rel, ())
     return FileEntry(rel, tuple(symbols))
+
+
+@dataclass
+class DirNode:
+    rel: str  # worktree-relative directory path ("." for the project root)
+    files: list[FileEntry]
+    subdirs: list[DirNode]
+
+
+def _entry_counts(entry: FileEntry) -> tuple[int, int, int]:
+    return count_symbols(entry.symbols)
+
+
+def dir_counts(node: DirNode) -> tuple[int, int, int]:
+    """(n_dirs, n_files, n_symbols) for the whole subtree under `node`, recursive."""
+    n_dirs = len(node.subdirs)
+    n_files = len(node.files)
+    n_symbols = sum(sum(_entry_counts(f)) for f in node.files)
+    for sub in node.subdirs:
+        sd, sf, ss = dir_counts(sub)
+        n_dirs += sd
+        n_files += sf
+        n_symbols += ss
+    return n_dirs, n_files, n_symbols
+
+
+def _sort_tree(node: DirNode) -> None:
+    node.files.sort(key=lambda f: f.rel)
+    node.subdirs.sort(key=lambda d: d.rel)
+    for sub in node.subdirs:
+        _sort_tree(sub)
+
+
+def build_tree(root_rel: str, entries: list[FileEntry]) -> DirNode:
+    """Group `entries` (each carrying its worktree-relative rel) into a directory
+    tree rooted at `root_rel`. Intermediate directories become DirNodes whose
+    `rel` is the worktree-relative directory path."""
+    root = DirNode(rel=root_rel, files=[], subdirs=[])
+    nodes: dict[str, DirNode] = {root_rel: root}
+    for entry in entries:
+        stripped = entry.rel if root_rel == "." else entry.rel[len(root_rel) + 1:]
+        parts = stripped.split("/")
+        cur = root
+        prefix = root_rel
+        for comp in parts[:-1]:
+            prefix = comp if prefix == "." else f"{prefix}/{comp}"
+            child = nodes.get(prefix)
+            if child is None:
+                child = DirNode(rel=prefix, files=[], subdirs=[])
+                nodes[prefix] = child
+                cur.subdirs.append(child)
+            cur = child
+        cur.files.append(entry)
+    _sort_tree(root)
+    return root
