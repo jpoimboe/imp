@@ -2540,3 +2540,19 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
     await run_change(change, on_event=lambda _e: None)
     assert overlaid.read_text() == "# Mine\nv1\n"
+
+
+@pytest.mark.anyio
+async def test_run_change_persists_configured_max_reincarnations(tmp_path):
+    """run_change copies config.context_max_reincarnations() onto State at run
+    start (config is in scope only here), like resolved_tiers."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    # Overwrite the project layer with a NON-default cap so the assertion is
+    # falsifiable (5 != the default 2).
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 5\n")
+    _register_fake({"status": "Success"})
+
+    await run_change(change, on_event=lambda _e: None)
+
+    assert State.load(change.state_dir).max_reincarnations == 5

@@ -231,6 +231,7 @@ async def run_change(
             resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
             state.resolved_tiers = resolved_tiers
             state.resolved_steps = resolved_steps
+            state.max_reincarnations = config.context_max_reincarnations()
             state.save(change.state_dir)
             _emit(log, "tiers_resolved",
                   {"tiers": details["tiers"], "steps": details["steps"],
