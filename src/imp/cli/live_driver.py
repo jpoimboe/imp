@@ -178,6 +178,7 @@ class LiveDriver:
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
         self._emitted_any = False
+        self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
@@ -215,6 +216,7 @@ class LiveDriver:
                         and not self._builder.has_running_subagent):
                     self._status.restart_span()
         self._walk()
+        self._maybe_reemit_header()
         self._refresh_status()
 
     def finish(self) -> None:
@@ -297,6 +299,10 @@ class LiveDriver:
                         rt.header_line(child, depth=cur.depth, color=self._color,
                                        gutters=gutters),
                         depth=cur.depth, gutters=gutters)
+                    if isinstance(child, nv.StepNode):
+                        entry_act = self._builder.current_activity()
+                        self._last_header_position = (
+                            entry_act.position if entry_act is not None else None)
                 if not suppress and isinstance(child, (nv.StepNode, nv.PhaseNode)):
                     self._prev_prose = True
                 child_depth = cur.depth
@@ -488,6 +494,28 @@ class LiveDriver:
         deferred, self._deferred = self._deferred, []
         for lines, prose, sep in deferred:
             self._emit_now(lines, prose=prose, separator_indent=sep)
+
+    def _maybe_reemit_header(self) -> None:
+        # On a mid-step POSITION change, emit a fresh position-only header into the
+        # scrollback (deduped). A verb push or the internal phrase rotation does not
+        # move the position, so it never re-emits.
+        if not self._builder._step_stack:
+            return
+        activity = self._builder.current_activity()
+        position = activity.position if activity is not None else None
+        if position is None or position == self._last_header_position:
+            return
+        top = self._builder._step_stack[-1]
+        if top.quiet or rt.chrome_suppressed(top):
+            return
+        self._prev_prose = True
+        self._print_lines(
+            [rt.header_line(top, depth=self._frontier_depth(), color=self._color,
+                            gutters=self._gutters())],
+            prose=True,
+            separator_indent=rt._gutter_indent(
+                self._frontier_depth(), self._gutters(), self._color))
+        self._last_header_position = position
 
     def _refresh_status(self) -> None:
         # The status line is TRANSIENT: it draws on the line just below the last

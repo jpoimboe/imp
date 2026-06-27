@@ -383,7 +383,7 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    step_position = node.label if node.position_label else None
+    step_position = (node.live_label or node.label) if node.position_label else None
     label = compose_label([node.phase_label, step_position]) or node.name
     route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
                       enabled=color)

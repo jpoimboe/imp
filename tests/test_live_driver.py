@@ -1952,3 +1952,43 @@ def test_compose_toolbar_static_is_position_bar_only() -> None:
     assert toolbar is not None
     assert "implementation phase · plan 1/1 · task 1/3" in toolbar
     assert "thinking" not in toolbar
+
+
+def test_mid_step_position_change_re_emits_a_header() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="m", provider="anthropic", label="task 1/2",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+                     label="task 2/2"))
+    body = "\n".join(_body(out))
+    assert "implementation phase · plan 1/1 · task 2/2" in body
+
+
+def test_unchanged_position_push_emits_no_duplicate_header() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="m", provider="anthropic", label="task 1/2",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+                     label="task 1/2"))           # same position re-pushed
+    assert _body(out) == []                       # no duplicate header
+
+
+def test_verb_step_label_push_emits_no_header() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+                     model="m", provider="anthropic", label="writing plan",
+                     phase_label="planning phase · plan 2/4"))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:plan/plan-writer",
+                     label="addressing plan review feedback"))   # a verb push, not position
+    assert _body(out) == []                       # position unchanged → no header
