@@ -34,7 +34,7 @@ fi
 TASKS=$(grep -cE '^## Task[[:space:]]' "$LIVE" || true)
 CEILING=12
 if (( TASKS > CEILING )); then
-  echo "plan $LIVE has $TASKS tasks (ceiling $CEILING) — split this plan: emit the first coherent chunk and let plan-cycle-check supercycle the rest" >&2
+  echo "plan $LIVE has $TASKS tasks (ceiling $CEILING) — split this plan: emit the first coherent chunk and rely on the outline-driven plan loop for the rest" >&2
   exit 1
 fi
 echo "ok: $WIP carries plans/${NEWEST} matching $LIVE (${TASKS} tasks)"

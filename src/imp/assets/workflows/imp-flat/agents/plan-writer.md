@@ -115,7 +115,7 @@ nor re-reviewed.
 **Consume the lifecycle handle.** When this `N+1` covers an open `NEEDS-REPLAN
 task-lead:` note in `{{ change.home }}/progress.md` (a `task-lead` needs-replan that
 the coverage guard surfaced), mark that checkbox addressed (`[ ]` → `[x]`) as part of
-authoring the plan. This consumes the handle so the next `plan-cycle-check` lap does
+authoring the plan. This consumes the handle so the next `gap-check` run does
 not re-fire on an already-covered note.
 
 ## Your Role

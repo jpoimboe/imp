@@ -380,9 +380,8 @@ def test_imp_flat_plan_writer_consumes_outline_with_express_carveout() -> None:
     assert "express" in low
     assert "hard-depend" in low   # bold-surviving: prose is "Do **not** hard-depend"
     assert "self-scope" in low
-    # Stale references to deleted agents are refreshed (edits c, d). The dormant
-    # NEEDS-REPLAN/task-lead handle text is left verbatim per Decisions, so we do
-    # NOT assert "plan-cycle-check" absent — only these two live references.
+    # Stale references to deleted agents are refreshed (edits c, d).
+    assert "plan-cycle-check" not in low        # NEEDS-REPLAN handle text retargeted to gap-check
     assert "deferred-sweep" not in low          # the load-bearing note refreshed (edit d)
     assert "outline-driven plan loop" in low    # the supercycle sentence refreshed (edit c)
 
