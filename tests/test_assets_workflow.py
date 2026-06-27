@@ -849,3 +849,17 @@ def test_no_wait_for_user_in_workflow_prompts() -> None:
         str(p) for p in root.rglob("*.md") if "wait_for_user" in p.read_text()
     )
     assert offenders == []
+
+
+def test_explorer_nudges_symbol_outline_in_both_copies() -> None:
+    for wf in ("imp", "imp-flat"):
+        text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
+        assert "symbol_outline" in text
+        assert "before reading full bodies" in text
+
+
+def test_explorer_opts_into_symbol_outline(tmp_path: Path) -> None:
+    asset = Path("src/imp/assets/workflows/imp").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    assert "symbol_outline" in wf.agents["explorer"].tools

@@ -2,7 +2,7 @@
 name: explorer
 label: exploring codebase
 description: Fast read-only codebase exploration — find files, search code, answer questions about the codebase, and report findings with file:line citations.
-tools: [read_file, glob, grep, bash, query_events]
+tools: [read_file, glob, grep, bash, query_events, symbol_outline]
 output:
   status: {type: enum, values: [Success, Error]}
   report: {type: string}
@@ -28,6 +28,9 @@ task seems to require a change, report what change is needed — do not make it.
   dependency between calls.
 - Start broad with `glob`/`grep`, then `read_file` the specific hits. Follow
   imports and references to build an accurate picture.
+- Use `symbol_outline` to see a file's or directory's shape — its defined
+  symbols with signatures and line numbers — before reading full bodies; then
+  `read_file` only the bodies you actually need.
 - Prefer reading the actual code over guessing.
 
 ## Thoroughness
