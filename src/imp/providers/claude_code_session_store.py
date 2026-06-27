@@ -201,6 +201,45 @@ def strip_trailing_error_turn(
     return list(entries)
 
 
+def _store_body_turn_count(entries: list[dict[str, Any]]) -> int:
+    """Count conversation turns (user/assistant with a message) in a store body."""
+    return sum(
+        1 for e in entries
+        if isinstance(e, dict)
+        and e.get("type") in ("user", "assistant")
+        and "message" in e
+    )
+
+
+def reconcile_store_tail(
+    messages: list[Message], store_entries: list[dict[str, Any]], *,
+    session_id: str, cwd: str, model: str,
+) -> list[dict[str, Any]]:
+    """Pure reconcile: strip a trailing synthetic error turn, then append session
+    records for the transcript messages the store is missing.
+
+    Returns the full desired store entry list (kept body + synthesized tail).
+    The turn-count -> message-index mapping assumes the store body's conversation
+    turns are 1:1 with imp transcript messages (the common case at a result
+    boundary). The caller persists the returned list before native resume.
+
+    Persistence note: a stripped trailing error turn and the real tail entry that
+    replaces it can share a deterministic uuid, so the caller must OVERWRITE the
+    store file with the returned list — appending would let the store's uuid dedup
+    drop the real tail.
+    """
+    kept = strip_trailing_error_turn(store_entries)
+    body_count = _store_body_turn_count(kept)
+    missing = messages[body_count:]
+    if not missing:
+        return kept
+    parent = kept[-1].get("uuid") if kept else None
+    tail = message_to_session_records(
+        missing, parent_uuid=parent, session_id=session_id, cwd=cwd,
+        model=model, start_index=body_count)
+    return kept + tail
+
+
 def message_to_session_records(
     messages: list[Message], *, parent_uuid: str | None, session_id: str,
     cwd: str, model: str, start_index: int = 0,

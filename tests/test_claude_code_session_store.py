@@ -384,3 +384,82 @@ def test_strip_trailing_error_turn_keeps_normal_tail() -> None:
                     {"type": "text", "text": "all good"}]}}]
     assert strip_trailing_error_turn(entries) == entries
     assert strip_trailing_error_turn([]) == []
+
+
+def _three_message_transcript() -> list:
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    return [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "s"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
+    ]
+
+
+def test_reconcile_store_tail_appends_missing_trailing_turn() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+
+    out = reconcile_store_tail(
+        messages, store_body, session_id="sid", cwd="/p", model="m")
+
+    assert len(out) == 3
+    assert out[:2] == store_body
+    assert out[2]["type"] == "user"
+    assert out[2]["parentUuid"] == store_body[-1]["uuid"]
+    assert out[2]["message"]["content"][0]["type"] == "tool_result"
+
+
+def test_reconcile_store_tail_strips_error_turn_then_resynthesizes() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    from imp.agents.runner import Message, TextBlock
+    err = message_to_session_records(
+        [Message(role="assistant", content=(
+            TextBlock(text="You've hit your session limit (America/Los_Angeles)"),))],
+        parent_uuid=store_body[-1]["uuid"], session_id="sid", cwd="/p",
+        model="m", start_index=2)
+    store_with_error = store_body + err
+
+    out = reconcile_store_tail(
+        messages, store_with_error, session_id="sid", cwd="/p", model="m")
+
+    assert len(out) == 3
+    assert out[:2] == store_body
+    assert out[2]["message"]["content"][0]["type"] == "tool_result"
+
+
+def test_reconcile_store_tail_is_idempotent_when_complete() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    full = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    out = reconcile_store_tail(
+        messages, full, session_id="sid", cwd="/p", model="m")
+    assert [r["uuid"] for r in out] == [r["uuid"] for r in full]
+    assert len(out) == 3
