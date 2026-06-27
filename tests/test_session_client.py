@@ -6,7 +6,7 @@ import anyio
 import pytest
 
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach
+from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach, encode_set_lease
 from imp.remote.session.socket_server import SessionSocket
 
 
@@ -176,6 +176,52 @@ async def test_client_send_control_rejects_unknown_action(tmp_path: Path) -> Non
             await client.send_control("explode")
         await client.aclose()
         await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_client_attaches_with_lease_flag(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    seen: list[Attach] = []
+    server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None, lease=True)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while not seen:
+                await anyio.sleep(0.02)
+        assert seen == [Attach("c1", "T", True)]
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_send_set_lease_emits_set_lease_frame(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    sent: list[bytes] = []
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        real_send = client._stream.send  # type: ignore[union-attr]
+
+        async def _capture(data: bytes) -> None:
+            sent.append(data)
+            await real_send(data)
+
+        client._stream.send = _capture  # type: ignore[method-assign, union-attr]
+        await client.send_set_lease(True)
+        assert sent == [(encode_set_lease(True) + "\n").encode("utf-8")]
+        await server.close()
+        await client.aclose()
         tg.cancel_scope.cancel()
 
 

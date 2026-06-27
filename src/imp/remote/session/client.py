@@ -12,6 +12,7 @@ from imp.remote.session.protocol import (
     encode_attach,
     encode_control,
     encode_input,
+    encode_set_lease,
     parse_event,
 )
 
@@ -24,11 +25,13 @@ class SessionClient:
         title: str,
         *,
         on_event: Callable[[dict[str, Any]], None],
+        lease: bool = False,
     ) -> None:
         self._path = path
         self._change_id = change_id
         self._title = title
         self._on_event = on_event
+        self._lease = lease
         self._stream: SocketStream | None = None
         self._send_lock = anyio.Lock()
 
@@ -36,7 +39,7 @@ class SessionClient:
         stream = await anyio.connect_unix(self._path)
         try:
             await stream.send(
-                (encode_attach(self._change_id, self._title) + "\n").encode("utf-8"))
+                (encode_attach(self._change_id, self._title, self._lease) + "\n").encode("utf-8"))
         except BaseException:
             await stream.aclose()
             raise
@@ -66,6 +69,12 @@ class SessionClient:
             if self._stream is None:
                 raise RuntimeError("call connect() before send_control()")
             await self._stream.send((encode_control(action) + "\n").encode("utf-8"))
+
+    async def send_set_lease(self, value: bool) -> None:
+        async with self._send_lock:
+            if self._stream is None:
+                raise RuntimeError("call connect() before send_set_lease()")
+            await self._stream.send((encode_set_lease(value) + "\n").encode("utf-8"))
 
     async def aclose(self) -> None:
         async with self._send_lock:

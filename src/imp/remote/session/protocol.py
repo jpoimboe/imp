@@ -1,8 +1,9 @@
 """The attach-protocol frame codec for a per-change session daemon.
 
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
-"attach" (the opening handshake), "input" (a gate reply), or "control" (an
-interrupt/detach/abandon/save/archive/discard action). The daemon -> client
+"attach" (the opening handshake), "input" (a gate reply), "control" (an
+interrupt/detach/abandon/save/archive/discard action), or "set-lease" (toggle
+this attachment's keep-alive lease). The daemon -> client
 frame is "event", wrapping one curated engine event. Encoders return a line
 WITHOUT a trailing newline; the caller frames it (matching
 remote/daemon/protocol.py:make_hello)."""
@@ -13,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 _MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently detaches the client
+
+SET_LEASE = "set-lease"
 
 CONTROL_INTERRUPT = "interrupt"
 CONTROL_DETACH = "detach"
@@ -43,12 +46,21 @@ class Control:
     action: str
 
 
-ClientMessage = Attach | Input | Control
+@dataclass(frozen=True, slots=True)
+class SetLease:
+    value: bool
+
+
+ClientMessage = Attach | Input | Control | SetLease
 
 
 def encode_attach(change_id: str, title: str, lease: bool = False) -> str:
     return json.dumps(
         {"kind": "attach", "change_id": change_id, "title": title, "lease": lease})
+
+
+def encode_set_lease(value: bool) -> str:
+    return json.dumps({"kind": SET_LEASE, "value": value})
 
 
 def encode_input(text: str) -> str:
@@ -75,6 +87,8 @@ def parse_client_message(line: str) -> ClientMessage:
             return Attach(obj["change_id"], obj["title"], bool(obj.get("lease", False)))
         if kind == "input":
             return Input(obj["text"])
+        if kind == SET_LEASE:
+            return SetLease(bool(obj["value"]))
         if kind == "control":
             action = obj["action"]
             if action not in _CONTROL_ACTIONS:
