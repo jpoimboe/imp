@@ -450,13 +450,21 @@ async def run_daemon(
     try:
         write_pid(control_root)
         await hub.open()
+        # Daemon threads are not joined at interpreter shutdown, so a worker parked
+        # in a blocking long-poll syscall is reaped at process exit rather than
+        # holding the process open. stop.set() still asks them to exit cleanly at
+        # the next loop boundary; they are never joined.
+        poll_thread = threading.Thread(
+            target=_poll_worker, args=(adapter, stop), daemon=True)
+        sender_thread = threading.Thread(
+            target=_sender_worker, args=(adapter, outbound, responses, stop),
+            daemon=True)
+        poll_thread.start()
+        sender_thread.start()
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(supervisor.run)
             tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
-            tg.start_soon(anyio.to_thread.run_sync, _poll_worker, adapter, stop)
-            tg.start_soon(anyio.to_thread.run_sync,
-                          _sender_worker, adapter, outbound, responses, stop)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             try:

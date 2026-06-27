@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import threading
 import time
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import pytest
 
 from imp.remote.daemon.commands import Help
 from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
-from imp.remote.daemon.runner import pid_path, run_daemon
+from imp.remote.daemon.runner import _poll_worker, _sender_worker, pid_path, run_daemon
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
@@ -154,3 +155,74 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
     assert time.monotonic() - cancel_time < 1.5
     assert not socket_is_live(spath)
     assert not pid_path(tmp_path).exists()
+
+
+@pytest.mark.anyio
+async def test_workers_run_as_daemon_threads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    created: list[threading.Thread] = []
+    real_thread = threading.Thread
+
+    def recording_thread(*args, **kwargs):
+        # Subclass to preserve _target after Thread.run() deletes it on completion
+        class _T(real_thread):
+            def run(self):
+                saved = self._target
+                super().run()
+                self._target = saved
+        t = _T(*args, **kwargs)
+        created.append(t)
+        return t
+
+    monkeypatch.setattr(
+        "imp.remote.daemon.runner.threading.Thread", recording_thread)
+    shutdown = anyio.Event()
+    spath = socket_path(tmp_path)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=lambda env, submit, subscriptions: FakeAdapter(),
+            install_signals=False, shutdown=shutdown))
+        with anyio.fail_after(5):
+            while not socket_is_live(spath):
+                await anyio.sleep(0.02)
+        shutdown.set()
+
+    workers = [
+        t for t in created
+        if getattr(t, "_target", None) in (_poll_worker, _sender_worker)]
+    assert len(workers) == 2
+    assert all(t.daemon for t in workers)
+
+
+@pytest.mark.anyio
+async def test_run_daemon_returns_while_poll_worker_is_blocked(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    block = threading.Event()
+
+    class BlockingAdapter:
+        def on_event(self, event: dict) -> None: ...
+        def on_response(self, response: object) -> None: ...
+        def poll_once(self) -> None:
+            block.wait(30)   # a long-poll syscall that `stop` cannot interrupt
+
+    shutdown = anyio.Event()
+    spath = socket_path(tmp_path)
+    start = time.monotonic()
+    try:
+        with anyio.fail_after(5):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(functools.partial(
+                    run_daemon, tmp_path, env={},
+                    make_adapter=lambda env, submit, subscriptions: BlockingAdapter(),
+                    install_signals=False, shutdown=shutdown))
+                with anyio.fail_after(5):
+                    while not socket_is_live(spath):
+                        await anyio.sleep(0.02)
+                shutdown.set()
+    finally:
+        block.set()   # release the parked daemon thread so it exits cleanly
+    assert time.monotonic() - start < 3
