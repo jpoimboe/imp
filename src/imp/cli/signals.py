@@ -234,6 +234,15 @@ class InterruptCoordinator:
         self._first_gesture_at = None
         self.escalated = False
 
+    def clear_pause(self) -> None:
+        """Consume a pause that a cooperative interrupt resolved inline. The
+        Ctrl-C steer was handled within the live invocation, so the run must NOT
+        return PAUSED: clear the pause flag and reason. Leaves the gesture /
+        escalation window untouched so a follow-up force-quit Ctrl-C still
+        escalates."""
+        self._should_pause = False
+        self.pause_reason = None
+
     def attach_runner(self, interrupt_fn: Any) -> None:
         """interrupt_fn is an `async def () -> None` callable. All three V1
         runners (AnthropicAgentRunner / OpenAIAgentRunner /

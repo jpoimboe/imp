@@ -47,6 +47,56 @@ def _cancelled_exc() -> type[BaseException]:
     return anyio.get_cancelled_exc_class()
 
 
+def build_inline_solicit(
+    *,
+    user_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
+    coordinator: Any = None,
+    event_log: Any = None,
+    agent_id: str | None = None,
+) -> Callable[[str], Awaitable[str]]:
+    """The turn-end yield-to-human tail, shared by BOTH the bare-turn-end
+    continuation (build_continuation_fn) and the cooperative-interrupt steer.
+    Emits awaiting_user_input, then either solicits the human inline — freezing
+    the inactivity watchdog for the blocked await, and turning a mid-solicit
+    detach/cancel into a clean AwaitingUserInput pause — and returns the reply,
+    or (no human attached) raises AwaitingUserInput(last_text)."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    def _emit_awaiting() -> None:
+        if event_log is not None:
+            event_log.append(agent_id=agent_id, type="awaiting_user_input",
+                             payload={"prompt": ""})
+
+    async def _solicit() -> str:
+        assert user_input_fn is not None
+        reply = user_input_fn("")
+        if inspect.isawaitable(reply):
+            # Attended agent is about to BLOCK on a human reply: freeze the
+            # inactivity watchdog so it cannot falsely kill the parked run. The
+            # finally ALWAYS restores it; a torn-down prompt (SIGINT/cancel)
+            # becomes the headless AwaitingUserInput pause.
+            if coordinator is not None:
+                coordinator.begin_solicit_watchdog()
+            try:
+                reply = await reply
+            except (KeyboardInterrupt, _cancelled_exc()):
+                raise AwaitingUserInput() from None
+            finally:
+                if coordinator is not None:
+                    coordinator.end_solicit_watchdog()
+        assert isinstance(reply, str)
+        return reply
+
+    async def _inline(last_text: str) -> str:
+        # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
+        _emit_awaiting()
+        if user_input_fn is not None:
+            return await _solicit()
+        raise AwaitingUserInput(last_text)
+
+    return _inline
+
+
 def build_continuation_fn(
     *,
     instruction: str,
@@ -78,6 +128,10 @@ def build_continuation_fn(
     """
     from imp.agents.tools.wait_for_user import AwaitingUserInput
 
+    inline = build_inline_solicit(
+        user_input_fn=user_input_fn, coordinator=coordinator,
+        event_log=event_log, agent_id=agent_id)
+
     nudge = (
         "You ended your turn without calling `complete_step` to finish the "
         "step. " + instruction
@@ -89,26 +143,6 @@ def build_continuation_fn(
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
                              payload={"prompt": ""})
 
-    async def _solicit() -> str:
-        assert user_input_fn is not None
-        reply = user_input_fn("")
-        if inspect.isawaitable(reply):
-            # Attended agent is about to BLOCK on a human reply: freeze the
-            # inactivity watchdog so it cannot falsely kill the parked run. The
-            # finally ALWAYS restores it; a torn-down prompt (SIGINT/cancel)
-            # becomes the headless AwaitingUserInput pause.
-            if coordinator is not None:
-                coordinator.begin_solicit_watchdog()
-            try:
-                reply = await reply
-            except (KeyboardInterrupt, _cancelled_exc()):
-                raise AwaitingUserInput() from None
-            finally:
-                if coordinator is not None:
-                    coordinator.end_solicit_watchdog()
-        assert isinstance(reply, str)
-        return reply
-
     def _cont(last_text: str) -> str | Awaitable[str] | None:
         nonlocal count
         if coordinator is not None:
@@ -116,17 +150,18 @@ def build_continuation_fn(
             if pending is not None:
                 return pending
         if user_input_fn is not None and not non_interactive:
-            _emit_awaiting()
-            return _solicit()
+            return inline(last_text)
         if count < NUDGE_LIMIT:
             count += 1
             return nudge
         if subagent:
             return None
         if user_input_fn is not None:
-            _emit_awaiting()
-            return _solicit()
-        # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
+            return inline(last_text)
+        # Top-level with no channel: synchronously emit the pause marker and
+        # raise, carrying the agent's last text. Synchronous (not the async
+        # inline tail) because callers invoke _cont without awaiting and rely on
+        # the raise to pause the run.
         _emit_awaiting()
         raise AwaitingUserInput(last_text)
 

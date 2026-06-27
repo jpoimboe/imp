@@ -147,6 +147,24 @@ def test_should_pause_is_latched_until_reset() -> None:
     assert coord.should_pause is False
 
 
+def test_clear_pause_resets_flag_and_reason_but_keeps_gesture() -> None:
+    coord = InterruptCoordinator()
+    coord._should_pause = True
+    coord.pause_reason = "ctrl-c"
+    coord._first_gesture_at = 123.0
+    coord.escalated = True
+
+    coord.clear_pause()
+
+    # The pause is consumed: the run continues, not pauses.
+    assert coord.should_pause is False
+    assert coord.pause_reason is None
+    # The gesture/escalation window is untouched so a follow-up force-quit
+    # Ctrl-C still escalates.
+    assert coord._first_gesture_at == 123.0
+    assert coord.escalated is True
+
+
 def test_begin_end_solicit_watchdog_toggles_flag_and_fires_listeners() -> None:
     coord = InterruptCoordinator()
     assert coord.solicit_active is False  # default

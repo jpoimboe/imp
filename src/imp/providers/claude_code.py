@@ -83,7 +83,11 @@ from imp.agents.transcript import (
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
 )
-from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
+from imp.engine.agent_run import (
+    _resolve_wait_reply,
+    build_inline_solicit,
+    drain_all_interjects_at_resume,
+)
 from imp.engine.drivers import driver_allowed_tools
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
@@ -988,6 +992,7 @@ class ClaudeCodeAgentRunner:
         *,
         client_factory: Any = None,
         user_input_fn: Any = None,
+        steer_timeout: float = 2.0,
     ) -> None:
         self.model = model_name
         self._client_factory = client_factory
@@ -1006,6 +1011,15 @@ class ClaudeCodeAgentRunner:
         self._stderr_sink: Any = None
         # ephemeral CLAUDE_CONFIG_DIR for a fresh run; run()'s finally removes it
         self._config_dir: Path | None = None
+        # Cooperative-interrupt (steer) state. _steer_requested is the distinct
+        # intent flag (separate from _cancel, which keeps meaning hard-cancel /
+        # teardown); the receive loop sets _steer_unblocked when the
+        # post-interrupt ResultMessage arrives, letting interrupt() return
+        # without escalating. _steer_timeout bounds that wait (injectable so the
+        # escalation tests drive it deterministically).
+        self._steer_requested = False
+        self._steer_unblocked = asyncio.Event()
+        self._steer_timeout = steer_timeout
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None,
@@ -1564,6 +1578,54 @@ class ClaudeCodeAgentRunner:
                         return
 
                     if cls_name == "ResultMessage":
+                        if (self._steer_requested and getattr(
+                                sdk_msg, "subtype", None)
+                                == "error_during_execution"):
+                            # Cooperative interrupt landed: the SDK closed this
+                            # turn balanced. Unblock the waiting interrupt() and
+                            # route into the attended inline-yield instead of
+                            # treating the error result as a termination.
+                            self._steer_unblocked.set()
+                            self._steer_requested = False
+                            # Discard the interrupted turn's partial accumulators
+                            # so they don't bleed into the next turn's loop-guard.
+                            _flush_pending()
+                            # Consume the pause: the steer is resolved inside
+                            # this live invocation, so the run continues rather
+                            # than returning PAUSED.
+                            if invocation.coordinator is not None:
+                                invocation.coordinator.clear_pause()
+                            # Reap leaked subprocesses only AFTER interrupt():
+                            # a killed-process tool_result must not race the stop.
+                            from imp.agents.tools.bg import terminate_background_processes
+                            from imp.agents.tools.context import terminate_running_processes
+                            await terminate_running_processes(ctx)
+                            await terminate_background_processes(ctx)
+                            last_text = ""
+                            for prev in reversed(messages):
+                                if prev.role == "assistant":
+                                    last_text = _text_of(prev)
+                                    break
+                            steer = build_inline_solicit(
+                                user_input_fn=self._user_input_fn,
+                                coordinator=invocation.coordinator,
+                                event_log=elog, agent_id=aid)
+                            # Raises AwaitingUserInput when no human is attached;
+                            # the balanced session makes a resume continue with no 400.
+                            reply = await steer(last_text)
+                            if self._interrupted():
+                                return
+                            user_msg = Message(
+                                role="user",
+                                content=(TextBlock(text=reply),))
+                            messages.append(user_msg)
+                            transcript.append(user_msg)
+                            elog.append_user_message(
+                                agent_id=aid, message=user_msg)
+                            next_query = reply
+                            requery = True
+                            break
+
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE
                         # (a turn ending in complete_step set pending_complete →
@@ -1770,6 +1832,34 @@ class ClaudeCodeAgentRunner:
         return self._cancel
 
     async def interrupt(self) -> None:
+        # Cooperative tier (the first move): ask the SDK to end the turn
+        # balanced — no subprocess kill, no torn transcript. The receive loop
+        # sets _steer_unblocked when the post-interrupt ResultMessage arrives.
+        # Wait a bounded interval; only a genuinely frozen claude-p (no unblock)
+        # falls through to the hard-kill escalation. Fire client.interrupt()
+        # BEFORE any process termination, so a killed-process tool_result can
+        # never race the interrupt and carry the turn past the stop.
+        client = self._client
+        if client is not None and hasattr(client, "interrupt"):
+            self._steer_requested = True
+            # Reset the unblock latch on EVERY interrupt: a prior cooperative
+            # steer left it set, and a stale-set Event would make this wait_for
+            # return immediately and skip escalation on a SECOND interrupt (a
+            # re-steer, or the watchdog firing on a later genuine freeze). Clear
+            # it before client.interrupt() so only THIS turn's post-interrupt
+            # ResultMessage can satisfy the wait.
+            self._steer_unblocked.clear()
+            with contextlib.suppress(Exception):
+                await client.interrupt()
+            try:
+                await asyncio.wait_for(
+                    self._steer_unblocked.wait(), timeout=self._steer_timeout)
+                return
+            except TimeoutError:
+                self._steer_requested = False
+        await self._hard_interrupt()
+
+    async def _hard_interrupt(self) -> None:
         from imp.agents.tools.bg import terminate_background_processes
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True

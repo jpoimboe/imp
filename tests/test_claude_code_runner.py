@@ -1104,11 +1104,10 @@ class _StallingClient:
 
 @pytest.mark.anyio
 async def test_interrupt_tears_down_stalled_sdk_client(tmp_path: Path) -> None:
-    """Regression: the inactivity watchdog tears a stalled agent down via
-    runner.interrupt(). For claude_code that MUST kill the live CLI subprocess —
-    flipping _cancel alone never unblocks a receive_response() parked on a
-    message that isn't coming, so the child would otherwise leak and race the
-    watchdog's restart of the same step."""
+    """Escalation tier: a genuinely frozen claude-p does not answer the
+    cooperative client.interrupt(), so interrupt() must escalate to the hard
+    kill — disconnect() kills the live CLI subprocess and unblocks the parked
+    receive_response(), else the child leaks and races the watchdog's restart."""
     import asyncio
 
     (tmp_path / "art").mkdir()
@@ -1121,7 +1120,8 @@ async def test_interrupt_tears_down_stalled_sdk_client(tmp_path: Path) -> None:
 
     inv = _inv(tmp_path)
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        steer_timeout=0.05)
 
     events: list[dict[str, Any]] = []
 
@@ -1158,6 +1158,128 @@ async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
     assert runner._cancel is True
 
 
+class _NoCoopClient:
+    """A live client that ignores cooperative interrupt(): receive_response()
+    parks forever, so interrupt() must escalate to disconnect()."""
+
+    def __init__(self, opts: Any, *, order: list[str]) -> None:
+        self.opts = opts
+        self.order = order
+        self.disconnected = False
+        import asyncio
+        self._killed = asyncio.Event()
+
+    async def __aenter__(self) -> _NoCoopClient:
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        self.disconnected = True
+        self._killed.set()
+        return False
+
+    async def query(self, _prompt: Any) -> None:
+        pass
+
+    async def receive_response(self) -> Any:
+        await self._killed.wait()
+        return
+        yield  # makes this an async generator
+
+    async def interrupt(self) -> None:
+        self.order.append("interrupt")  # cooperative tier tried first
+
+    async def disconnect(self) -> None:
+        self.order.append("disconnect")  # escalation tier
+        self.disconnected = True
+        self._killed.set()
+
+
+@pytest.mark.anyio
+async def test_interrupt_tries_cooperative_then_escalates_on_timeout(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    (tmp_path / "art").mkdir()
+    order: list[str] = []
+    holder: dict[str, _NoCoopClient] = {}
+
+    def factory(opts: Any) -> _NoCoopClient:
+        c = _NoCoopClient(opts, order=order)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        steer_timeout=0.05)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(_inv(tmp_path)):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await runner.interrupt()
+    await asyncio.wait_for(task, timeout=2)
+
+    # Cooperative interrupt() fired FIRST, then escalated to disconnect().
+    assert order == ["interrupt", "disconnect"], order
+    assert holder["c"].disconnected is True
+    assert events and events[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_repeat_interrupt_escalates_despite_prior_steer(
+    tmp_path: Path,
+) -> None:
+    """Regression for the stale-set unblock latch: a prior cooperative steer
+    leaves _steer_unblocked set, so a SECOND interrupt on a now-frozen agent
+    must STILL escalate. Without the per-interrupt clear() the wait_for returns
+    immediately on the stale-set Event and the hard kill is silently skipped."""
+    import asyncio
+
+    (tmp_path / "art").mkdir()
+    order: list[str] = []
+    holder: dict[str, _NoCoopClient] = {}
+
+    def factory(opts: Any) -> _NoCoopClient:
+        c = _NoCoopClient(opts, order=order)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        steer_timeout=0.05)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(_inv(tmp_path)):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    # Simulate the stale-set latch left behind by a prior cooperative steer.
+    runner._steer_unblocked.set()
+
+    await runner.interrupt()
+    await asyncio.wait_for(task, timeout=2)
+
+    # The clear() forces a fresh wait that times out and escalates.
+    assert order == ["interrupt", "disconnect"], order
+    assert holder["c"].disconnected is True
 
 
 @pytest.mark.anyio
@@ -2279,3 +2401,291 @@ def test_run_state_has_no_wait_for_user_pause_fields() -> None:
     src = inspect.getsource(cc_mod)
     assert 'b.name == "wait_for_user"' not in src
     assert 'if name == "wait_for_user"' not in src
+
+
+@pytest.mark.anyio
+async def test_cooperative_interrupt_steer_continues_no_pause(
+    tmp_path: Path,
+) -> None:
+    """An attended agent interrupted mid-turn, given a redirect, acts on it and
+    continues on the SAME live client — no interrupted error, no disconnect(),
+    no PAUSED left for the daemon."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("checking the other file"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "go check the other file instead")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["payload"]["status"] == "Success"
+    assert not any(e.get("payload", {}).get("kind") == "interrupted"
+                   for e in events if e["type"] == "error")
+    assert holder["c"].disconnected is False
+    assert holder["c"].interrupt_calls == 1
+    assert coord.should_pause is False
+    assert holder["c"].queries[-1] == "go check the other file instead"
+
+
+@pytest.mark.anyio
+async def test_cooperative_interrupt_headless_pauses_balanced(
+    tmp_path: Path,
+) -> None:
+    """No user_input_fn: the cooperative stop ends the turn balanced, then
+    raises AwaitingUserInput — never a disconnect() (the session stays balanced
+    so the resume continues with no 400)."""
+    import asyncio
+
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [assistant(text("unused")), result()]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    with pytest.raises(AwaitingUserInput):
+        await asyncio.wait_for(task, timeout=2)
+
+    assert holder["c"].disconnected is False
+    assert holder["c"].interrupt_calls == 1
+
+
+@pytest.mark.anyio
+async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """AC7: on the cooperative path client.interrupt() fires BEFORE any
+    subprocess kill; the orphaned in-flight tool forwards no result, leaked
+    subprocesses are reaped only after the turn closes, and the steer — not a
+    stale tool result — drives the next turn."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient, assistant, result, text, tool_use
+
+    (tmp_path / "art").mkdir()
+    order: list[str] = []
+
+    async def _term_run(_ctx: Any) -> None:
+        order.append("terminate_running")
+
+    async def _term_bg(_ctx: Any) -> None:
+        order.append("terminate_bg")
+
+    monkeypatch.setattr(
+        "imp.agents.tools.context.terminate_running_processes", _term_run)
+    monkeypatch.setattr(
+        "imp.agents.tools.bg.terminate_background_processes", _term_bg)
+
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("took the redirect"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer, order=order)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "go look elsewhere")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    # client.interrupt() preceded every subprocess reap.
+    assert order.index("interrupt") < order.index("terminate_running")
+    assert order.index("interrupt") < order.index("terminate_bg")
+    # The steer, not a stale tool result, drives the next turn.
+    assert holder["c"].queries[-1] == "go look elsewhere"
+    assert events[-1]["type"] == "agent_output"
+
+
+@pytest.mark.anyio
+async def test_cooperative_steer_drive_invocation_not_paused(
+    tmp_path: Path,
+) -> None:
+    """AC3 integration: drive_invocation returns non-paused after a cooperative
+    steer — the daemon layer never sees a PAUSED result, so _hold_prompt never
+    shows the re-prompt for an attended steer."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.agent_run import drive_invocation
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("taking the redirect"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "redirect here")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    result_holder: dict[str, Any] = {}
+
+    async def do_drive() -> None:
+        result_holder["r"] = await drive_invocation(
+            inv, runner, coordinator=coord, log=None, emit_events=False)
+
+    task = asyncio.create_task(do_drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    r = result_holder["r"]
+    assert r.paused is False
+    assert r.output == {"status": "Success"}
+
+
+@pytest.mark.anyio
+async def test_second_interrupt_during_steer_skips_requery(
+    tmp_path: Path,
+) -> None:
+    """A second interrupt that fires _hard_interrupt while the run is blocked
+    in await steer() sets _cancel=True. The guard after steer() returns must
+    exit cleanly without re-querying the now-disconnected client."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [assistant(text("unused")), result()]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner_ref: dict[str, Any] = {}
+
+    def _input_fn(_prompt: str) -> str:
+        # Simulate a second interrupt arriving while blocked in the steer:
+        # set _cancel directly (what _hard_interrupt does) and return a reply.
+        runner_ref["r"]._cancel = True
+        return "redirect"
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=_input_fn)
+    runner_ref["r"] = runner
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    # Guard fired: no second query() after the steer.
+    # The client had only the initial query() — no re-query after _cancel.
+    assert len(holder["c"].queries) == 1
+    assert runner._cancel is True

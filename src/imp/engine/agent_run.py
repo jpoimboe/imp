@@ -33,7 +33,13 @@ from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import AgentInvocation, ChangeContext, Message
 from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.engine.completion import build_continuation_fn, completion_instruction
+from imp.engine.completion import (
+    build_continuation_fn,
+    completion_instruction,
+)
+from imp.engine.completion import (
+    build_inline_solicit as build_inline_solicit,  # re-export for claude_code.py
+)
 from imp.engine.types import AgentDef, OutputField
 
 # Injected into the system prompt of every agent that has the `bash` tool (see
