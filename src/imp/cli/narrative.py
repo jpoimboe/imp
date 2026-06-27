@@ -790,6 +790,16 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
 
 
+def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    reason = p.get("reason")
+    text = f"reincarnating — {reason}" if reason else "reincarnating"
+    self._append(LiteralTextNode(text=text, color_role="lifecycle"))
+
+
+NarrativeBuilder._HANDLERS["reincarnating"] = _h_reincarnating
+
+
 def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
 
