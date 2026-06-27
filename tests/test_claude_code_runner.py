@@ -1104,11 +1104,10 @@ class _StallingClient:
 
 @pytest.mark.anyio
 async def test_interrupt_tears_down_stalled_sdk_client(tmp_path: Path) -> None:
-    """Regression: the inactivity watchdog tears a stalled agent down via
-    runner.interrupt(). For claude_code that MUST kill the live CLI subprocess —
-    flipping _cancel alone never unblocks a receive_response() parked on a
-    message that isn't coming, so the child would otherwise leak and race the
-    watchdog's restart of the same step."""
+    """Escalation tier: a genuinely frozen claude-p does not answer the
+    cooperative client.interrupt(), so interrupt() must escalate to the hard
+    kill — disconnect() kills the live CLI subprocess and unblocks the parked
+    receive_response(), else the child leaks and races the watchdog's restart."""
     import asyncio
 
     (tmp_path / "art").mkdir()
@@ -1121,7 +1120,8 @@ async def test_interrupt_tears_down_stalled_sdk_client(tmp_path: Path) -> None:
 
     inv = _inv(tmp_path)
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        steer_timeout=0.05)
 
     events: list[dict[str, Any]] = []
 
@@ -1158,6 +1158,128 @@ async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
     assert runner._cancel is True
 
 
+class _NoCoopClient:
+    """A live client that ignores cooperative interrupt(): receive_response()
+    parks forever, so interrupt() must escalate to disconnect()."""
+
+    def __init__(self, opts: Any, *, order: list[str]) -> None:
+        self.opts = opts
+        self.order = order
+        self.disconnected = False
+        import asyncio
+        self._killed = asyncio.Event()
+
+    async def __aenter__(self) -> _NoCoopClient:
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        self.disconnected = True
+        self._killed.set()
+        return False
+
+    async def query(self, _prompt: Any) -> None:
+        pass
+
+    async def receive_response(self) -> Any:
+        await self._killed.wait()
+        return
+        yield  # makes this an async generator
+
+    async def interrupt(self) -> None:
+        self.order.append("interrupt")  # cooperative tier tried first
+
+    async def disconnect(self) -> None:
+        self.order.append("disconnect")  # escalation tier
+        self.disconnected = True
+        self._killed.set()
+
+
+@pytest.mark.anyio
+async def test_interrupt_tries_cooperative_then_escalates_on_timeout(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    (tmp_path / "art").mkdir()
+    order: list[str] = []
+    holder: dict[str, _NoCoopClient] = {}
+
+    def factory(opts: Any) -> _NoCoopClient:
+        c = _NoCoopClient(opts, order=order)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        steer_timeout=0.05)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(_inv(tmp_path)):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await runner.interrupt()
+    await asyncio.wait_for(task, timeout=2)
+
+    # Cooperative interrupt() fired FIRST, then escalated to disconnect().
+    assert order == ["interrupt", "disconnect"], order
+    assert holder["c"].disconnected is True
+    assert events and events[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_repeat_interrupt_escalates_despite_prior_steer(
+    tmp_path: Path,
+) -> None:
+    """Regression for the stale-set unblock latch: a prior cooperative steer
+    leaves _steer_unblocked set, so a SECOND interrupt on a now-frozen agent
+    must STILL escalate. Without the per-interrupt clear() the wait_for returns
+    immediately on the stale-set Event and the hard kill is silently skipped."""
+    import asyncio
+
+    (tmp_path / "art").mkdir()
+    order: list[str] = []
+    holder: dict[str, _NoCoopClient] = {}
+
+    def factory(opts: Any) -> _NoCoopClient:
+        c = _NoCoopClient(opts, order=order)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        steer_timeout=0.05)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(_inv(tmp_path)):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    # Simulate the stale-set latch left behind by a prior cooperative steer.
+    runner._steer_unblocked.set()
+
+    await runner.interrupt()
+    await asyncio.wait_for(task, timeout=2)
+
+    # The clear() forces a fresh wait that times out and escalates.
+    assert order == ["interrupt", "disconnect"], order
+    assert holder["c"].disconnected is True
 
 
 @pytest.mark.anyio
