@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,7 +123,7 @@ def extract_cached(path: Path, source: str, language: str) -> list[Symbol]:
     return list(symbols)
 
 
-def count_symbols(symbols: list[Symbol]) -> tuple[int, int, int]:
+def count_symbols(symbols: Sequence[Symbol]) -> tuple[int, int, int]:
     """(fn, data, other) totals over the whole symbol tree, recursive."""
     fn = data = other = 0
     for s in symbols:
@@ -132,7 +133,7 @@ def count_symbols(symbols: list[Symbol]) -> tuple[int, int, int]:
             data += 1
         else:
             other += 1
-        cfn, cdata, cother = count_symbols(list(s.children))
+        cfn, cdata, cother = count_symbols(s.children)
         fn += cfn
         data += cdata
         other += cother
@@ -153,20 +154,20 @@ def count_phrase(fn: int, data: int, other: int) -> str:
     return ", ".join(parts)
 
 
-def _max_lineno(symbols: list[Symbol]) -> int:
+def _max_lineno(symbols: Sequence[Symbol]) -> int:
     m = 0
     for s in symbols:
-        m = max(m, s.lineno, _max_lineno(list(s.children)))
+        m = max(m, s.lineno, _max_lineno(s.children))
     return m
 
 
-def _render_lines(symbols: list[Symbol], out: list[str], depth: int, width: int) -> None:
+def _render_lines(symbols: Sequence[Symbol], out: list[str], depth: int, width: int) -> None:
     for s in symbols:
         out.append(f"{s.lineno:>{width}}: {'  ' * depth}{s.signature}")
-        _render_lines(list(s.children), out, depth + 1, width)
+        _render_lines(s.children, out, depth + 1, width)
 
 
-def render_file(display: str, symbols: list[Symbol], *, detail: str = "signatures") -> str:
+def render_file(display: str, symbols: Sequence[Symbol], *, detail: str = "signatures") -> str:
     """A file's outline: count header, then '<lineno>: <signature>' lines
     (detail='signatures'), nesting by indentation; `display` is the worktree-relative path."""
     fn, data, other = count_symbols(symbols)
