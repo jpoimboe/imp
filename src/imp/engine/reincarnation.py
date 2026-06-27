@@ -56,3 +56,25 @@ def reincarnation_seed(
         "- Orientation: `query_events` returns the change's event log "
         "(change-level steps and notices, not this step's own tool calls).")
     return "\n".join(lines)
+
+
+def handoff_path_for(transcript_dir: Path) -> Path:
+    """The on-disk handoff-note path for a session — a SIBLING of its transcript
+    dir (`<name>.handoff.md`), so it survives the fresh-entry wipe that removes
+    the transcript dir itself. One file per session generation; a later
+    reincarnation of the same step overwrites it (the prior content is preserved
+    in the stashed transcript)."""
+    return transcript_dir.parent / f"{transcript_dir.name}.handoff.md"
+
+
+def handoff_instruction(handoff_path: Path) -> str:
+    """The user-turn text that elicits an agent-authored handoff when a session
+    approaches its context limit (Tier A proactive handoff). The agent writes the
+    note to `handoff_path` with write_file and stops; the engine then reincarnates
+    the session seeded from it."""
+    return (
+        "You are approaching the context limit. Stop new work now. Write a "
+        f"compact handoff to `{handoff_path}` capturing: the current goal and "
+        "progress, decisions made, key findings as `file:line` citations, and "
+        "exactly what remains to be done. Use write_file. After you have written "
+        "it, stop — do not start anything new.")

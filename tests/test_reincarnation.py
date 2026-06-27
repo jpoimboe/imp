@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from imp.engine.reincarnation import reincarnation_seed, stash_transcript
+from imp.engine.reincarnation import (
+    handoff_instruction,
+    handoff_path_for,
+    reincarnation_seed,
+    stash_transcript,
+)
 
 
 def _seed(transcript_dir: Path, body: str = '{"k": 1}\n') -> None:
@@ -65,3 +70,17 @@ def test_seed_degrades_to_orientation_only_when_nothing_stashed() -> None:
     assert seed                                  # non-empty
     assert "query_events" in seed
     assert "transcript.jsonl" not in seed
+
+
+def test_handoff_path_is_sibling_of_transcript_dir() -> None:
+    # A sibling (not a child) so it survives the fresh-entry wipe of the dir.
+    p = handoff_path_for(Path("/x/steps/impl/coder"))
+    assert p == Path("/x/steps/impl/coder.handoff.md")
+
+
+def test_handoff_instruction_names_path_and_tells_agent_to_write_and_stop() -> None:
+    instr = handoff_instruction(Path("/x/steps/impl/coder.handoff.md"))
+    assert "/x/steps/impl/coder.handoff.md" in instr
+    assert "write_file" in instr
+    assert "context limit" in instr
+    assert "stop" in instr.lower()
