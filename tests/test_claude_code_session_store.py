@@ -449,6 +449,42 @@ def test_reconcile_store_tail_strips_error_turn_then_resynthesizes() -> None:
     assert out[2]["message"]["content"][0]["type"] == "tool_result"
 
 
+def test_overwrite_replaces_existing_entries(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "a", "message": {"role": "user"}},
+        {"type": "assistant", "uuid": "b", "message": {"role": "assistant"}},
+    ])
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "c", "message": {"role": "user"}},
+    ])
+    # The pre-existing a/b entries are gone — overwrite truncates, unlike append.
+    assert anyio.run(store.load, key) == [
+        {"type": "user", "uuid": "c", "message": {"role": "user"}}]
+
+
+def test_overwrite_with_empty_truncates(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "a", "message": {"role": "user"}}])
+    anyio.run(store.overwrite, key, [])
+    assert anyio.run(store.load, key) == []
+
+
+def test_overwrite_preserves_duplicate_uuid_replacement(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "stale"}])
+    # Same uuid, new content: append's dedup would drop this; overwrite must keep it.
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}])
+    assert anyio.run(store.load, key) == [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}]
+
+
 def test_reconcile_store_tail_is_idempotent_when_complete() -> None:
     from imp.providers.claude_code_session_store import (
         message_to_session_records,

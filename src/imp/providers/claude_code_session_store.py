@@ -85,6 +85,19 @@ class ImpSessionStore:
                 if uid is not None:
                     seen.add(uid)
 
+    async def overwrite(
+        self, key: Mapping[str, Any], entries: list[dict[str, Any]],
+    ) -> None:
+        """Replace the key's file with `entries`, truncating. Unlike append (which
+        only dedups-and-adds), this drops entries no longer present — required when
+        reconcile strips a trailing synthetic error turn whose deterministic uuid
+        the real replacement tail reuses, which append's uuid dedup would drop."""
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+
     async def load(
         self, key: Mapping[str, Any],
     ) -> list[dict[str, Any]] | None:
