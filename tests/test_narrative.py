@@ -2476,3 +2476,77 @@ def test_current_activity_extra_running_subagents_append_to_detail() -> None:
     act = b.current_activity()
     assert act.verb == "coding"
     assert act.detail is not None and "+1 subagent" in act.detail
+
+
+def test_claude_code_totals_come_from_query_result_not_llm_response() -> None:
+    # The coalesced claude_code llm_response usage is streaming-partial and must
+    # NOT drive the displayed totals; query_result is authoritative.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="claude_code",
+             model="served-x", stop_reason="end_turn",
+             usage={"input_tokens": 9999, "output_tokens": 8888},
+             raw={"content": []}))
+    b.add(ev("2", "query_result", agent_id="step:p/s",
+             total_cost_usd=0.05, num_turns=1,
+             usage={"input_tokens": 1000, "output_tokens": 200}))
+    tree = b.tree
+    assert tree.tokens.input == 1000           # from query_result, not 9999
+    assert tree.tokens.output == 200           # from query_result, not 8888
+    assert tree.tokens.cost == 0.05
+
+
+def test_anthropic_totals_still_sum_from_llm_response() -> None:
+    # Non-claude_code providers (no query_result) keep summing llm_response usage.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="m", stop_reason="end_turn",
+             usage={"input_tokens": 100, "output_tokens": 20}, raw={"content": []}))
+    b.add(ev("2", "llm_response", agent_id="step:p/s", provider="anthropic",
+             model="m", stop_reason="end_turn",
+             usage={"input_tokens": 50, "output_tokens": 5}, raw={"content": []}))
+    assert b.tree.tokens.input == 150
+    assert b.tree.tokens.output == 25
+
+
+def test_query_result_renders_without_fallback() -> None:
+    tree = nv.build_tree([
+        ev("c", "change_created", title="t"),
+        ev("s", "step_started", step="s", kind="agent", phase="p"),
+        ev("q", "query_result", agent_id="step:p/s",
+           total_cost_usd=0.0, num_turns=1, usage={}),
+    ])
+
+    def _walk(node):
+        yield node
+        for c in getattr(node, "children", []):
+            yield from _walk(c)
+
+    assert not any(isinstance(n, nv.FallbackLine) for n in _walk(tree.root))
+
+
+def test_subagent_query_result_folds_into_change_total() -> None:
+    # A subagent's authoritative per-query totals still fold into the change
+    # total (token accumulation happens before sub-routing).
+    b = nv.NarrativeBuilder()
+    b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
+             provider="claude_code"))
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+             input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(ev("p1", "query_result", agent_id="step:p/s",
+             total_cost_usd=0.01, num_turns=1,
+             usage={"input_tokens": 100, "output_tokens": 5}))
+    b.add(ev("s1", "query_result", agent_id="sub:tk1",
+             total_cost_usd=0.02, num_turns=1,
+             usage={"input_tokens": 900, "output_tokens": 7}))
+    assert b.tree.tokens.input == 1000
+    assert b.tree.tokens.output == 12
+    assert b.tree.tokens.cost == pytest.approx(0.03)
+
+
+def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
+    # The coalesced claude_code llm_response now carries a real stop_reason, so
+    # turn-end detection works through the standard frozenset path.
+    assert nv._llm_response_is_turn_end(
+        {"provider": "claude_code", "stop_reason": "end_turn"}) is True
+    assert nv._llm_response_is_turn_end(
+        {"provider": "claude_code", "stop_reason": None}) is False
