@@ -89,66 +89,70 @@ guards against.
 worktree — and this brainstorm runs read-only against the main checkout. Nothing is
 set up until you confirm the build.
 
-{% if run.non_interactive %}
-This is a **headless run** (`--non-interactive`): no human is present to answer a
-build-or-save question, so the choice is predetermined — **build**. Once the design is
-settled, **do not** solicit a build-or-save choice from the user. Set up the workspace directly: call
-`create_and_enter_worktree` (it takes no arguments). It forks the branch and worktree
-from the base branch's current tip and switches this change into it — your subsequent
-`Read`/`Bash`/edit tools operate in the new worktree immediately. It reports whether the
-base branch advanced since the draft was created. **If it reports `head_changed=true`,
-re-ground the spec against current code in this same turn** — re-read the files the
-brainstorm assumed and reconcile any drift — before writing the spec. Then proceed to
-front-door's **Going live** section to write and commit the spec. (A genuine intent-fork
-escalation at the "Ask vs. decide" high bar still parks for a human even headless —
-only this build-or-save gate auto-builds.)
-{% elif run.scope_only %}
+This is a **recommendation-bearing gate**: it has a safe, input-driven **default**, so
+it sits below the human-decision "Ask vs. decide" bar.
+{% if run.scope_only %}
 This is a **scope-for-backlog** session (`imp new --backlog`): the user reached for
-"save it for later," so the recommendation is reversed. Once the design is settled
-(the user has approved it) and **before you write and commit the spec**, recommend
-saving to the backlog as the default and offer building now as the opt-in. Ask exactly
-one question at this gate — e.g. **"Want me to save this to your backlog? I can build
-it out now instead if you'd rather start."** Do not present a numbered list and do not
-script reply tokens. Surface the question in your turn text and end your turn to
-yield.
-
-- **If the user saves it for later (the default), save it as a draft.** Do **not**
-  call `create_and_enter_worktree`. Tell them it is saved to the backlog and resumable
-  later with `imp resume <id>`, then end your turn to yield. The spec phase pauses with
-  the work saved — nothing is built, no branch, no worktree. On a later resume you
-  re-offer this same choice.
-- **If the user opts to build now, build it.** Call `create_and_enter_worktree` (it
-  takes no arguments). It forks the branch and worktree from the base branch's current
-  tip and switches this change into it — your subsequent `Read`/`Bash`/edit tools
-  operate in the new worktree immediately. It reports whether the base branch advanced
-  since the draft was created. **If it reports `head_changed=true`, re-ground the spec
-  against current code in this same turn** — re-read the files the brainstorm assumed
-  and reconcile any drift — before writing the spec. Then proceed to front-door's
-  **Going live** section to write and commit the spec.
+"save it for later," so the default is **save to the backlog** (building now is the
+opt-in).
 {% else %}
-Once the design is settled (the user has approved it) and **before you write and commit
-the spec**, ask exactly one question at this gate — the bare build affirmative, e.g.
-**"Want me to build this out now?"** Do not present a numbered Build/Save list, do not
-pair it with "…, or save?", and do not script reply tokens. As a follow-on to the
-question (not a co-equal option), name plainly what declining does: it saves the work as
-a draft you can resume later with `imp resume <id>`. There is no separate "does this
-sound right?" approval question here — design approval was settled continuously through
-the brainstorm. Surface the question in your turn text and end your turn to yield.
+The default is **build it out now** (saving it as a draft you can resume later is the
+opt-in).
+{% endif %}
 
-- **If the user agrees, build it now.** Call `create_and_enter_worktree` (it takes no
-  arguments). It forks the branch and worktree from the base branch's current tip and
+Settle this only once the design is settled (the user has approved it) and **before you
+write and commit the spec**.
+
+{% if run.autonomous %}
+**Autonomous run:** take the default and proceed without yielding — state the choice
+plainly in your prose.
+{% if run.scope_only %}
+Save it as a draft: do **not** call `create_and_enter_worktree`. Say it is saved to the
+backlog and resumable later with `imp resume <id>`. The spec phase pauses with the work
+saved — nothing is built, no branch, no worktree.
+{% else %}
+Build it now: call `create_and_enter_worktree` (it takes no arguments). It forks the
+branch and worktree from the base branch's current tip and switches this change into it
+— your subsequent `Read`/`Bash`/edit tools operate in the new worktree immediately. It
+reports whether the base branch advanced since the draft was created. **If it reports
+`head_changed=true`, re-ground the spec against current code in this same turn** —
+re-read the files the brainstorm assumed and reconcile any drift — before writing the
+spec. Then proceed to front-door's **Going live** section to write and commit the spec.
+{% endif %}
+{% else %}
+**Attended run:** present the default and **end your turn to yield** to confirm it. Ask
+exactly one question at this gate —
+{% if run.scope_only %}
+the save affirmative, e.g. **"Want me to save this to your backlog? I can build it out
+now instead if you'd rather start."**
+{% else %}
+the bare build affirmative, e.g. **"Want me to build this out now?"** As a follow-on to
+the question (not a co-equal option), name plainly what declining does: it saves the
+work as a draft you can resume later with `imp resume <id>`.
+{% endif %}
+Do not present a numbered Build/Save list, do not pair it with a co-equal "…, or save?"
+alternative, and do not script reply tokens. There is no separate "does this sound
+right?" approval question here — design approval was settled continuously through the
+brainstorm. Surface the question in your turn text and end your turn to yield.
+
+- **If the user picks build, build it now.** Call `create_and_enter_worktree` (it takes
+  no arguments). It forks the branch and worktree from the base branch's current tip and
   switches this change into it — your subsequent `Read`/`Bash`/edit tools operate in the
   new worktree immediately. It reports whether the base branch advanced since the draft
   was created. **If it reports `head_changed=true`, re-ground the spec against current
   code in this same turn** — re-read the files the brainstorm assumed and reconcile any
-  drift — before writing the spec. Then proceed to front-door's **Going live** section
-  to write and commit the spec.
-- **If the user declines, save it as a draft.** Do **not** call
+  drift — before writing the spec. Then proceed to front-door's **Going live** section to
+  write and commit the spec.
+- **If the user picks save, save it as a draft.** Do **not** call
   `create_and_enter_worktree`. Tell them the draft is saved and resumable later with
-  `imp resume <id>`, then end your turn to yield. The spec phase pauses with the draft
-  saved as a distinct `draft` — nothing is built, no branch, no worktree. On a later
-  resume you re-offer this same build question.
+  `imp resume <id>`, then end your turn to yield. The spec phase pauses with the work
+  saved — nothing is built, no branch, no worktree. On a later resume you re-offer this
+  same choice.
 {% endif %}
+
+A genuine intent-fork (at or above the "Ask vs. decide" bar — no safe default without
+guessing the user's high-level intent) still parks for a human even under an autonomous
+run; only this recommendation-bearing build-or-save gate auto-resolves under autonomy.
 
 Calling `create_and_enter_worktree` a second time on an already-set-up change is a
 harmless no-op, so a resumed build is safe.

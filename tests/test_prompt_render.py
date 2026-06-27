@@ -346,3 +346,47 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
         "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",
         same)
     assert out2 == "SAME"
+
+
+def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
+    src = Path(
+        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+    ).read_text()
+    log = _log(tmp_path / "events.jsonl", [])
+    rendered = render_prompt(
+        src, build_context(change_title="t", event_log=log),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "Want me to build this out now?" in rendered
+    assert "end your turn to yield" in rendered
+    assert "take the default and proceed without yielding" not in rendered
+    assert "headless run" not in src
+    assert "--non-interactive" not in rendered
+    assert "run.non_interactive" not in src
+
+
+def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
+    src = Path(
+        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+    ).read_text()
+    log = _log(tmp_path / "events.jsonl", [])
+    rendered = render_prompt(
+        src, build_context(change_title="t", event_log=log, autonomous=True),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "take the default and proceed without yielding" in rendered
+    assert "Want me to build this out now?" not in rendered
+    assert "create_and_enter_worktree" in rendered
+
+
+def test_build_or_save_autonomous_scope_only_takes_save_default(tmp_path: Path) -> None:
+    src = Path(
+        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+    ).read_text()
+    log = _log(tmp_path / "events.jsonl", [])
+    rendered = render_prompt(
+        src,
+        build_context(change_title="t", event_log=log,
+                      scope_only=True, autonomous=True),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "take the default and proceed without yielding" in rendered
+    assert "Save it as a draft: do **not** call `create_and_enter_worktree`" in rendered
+    assert "Want me to save this to your backlog?" not in rendered
