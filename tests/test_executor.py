@@ -2556,3 +2556,48 @@ async def test_run_change_persists_configured_max_reincarnations(tmp_path):
     await run_change(change, on_event=lambda _e: None)
 
     assert State.load(change.state_dir).max_reincarnations == 5
+
+
+@pytest.mark.anyio
+async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
+    """A step whose runner hits the hard window error reincarnates fresh (Tier B
+    backstop) up to the per-session cap, then pauses — emitting one
+    `reincarnating` event and stashing the prior transcript at .attempt-1."""
+    from imp.providers import resolve
+
+    change, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    class _CtxWindowRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)   # non-empty transcript -> stashable
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _CtxWindowProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _CtxWindowRunner:
+            return _CtxWindowRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _CtxWindowProvider(model))
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1
+    assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
+    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
