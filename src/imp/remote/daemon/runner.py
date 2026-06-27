@@ -429,7 +429,8 @@ async def run_daemon(
         control_root=control_root,
         sink=lambda event: outbound.put(event),
         events=("all",),
-        title_for=lambda cid: (discover.snapshot(control_root, cid) or ("", "", ""))[2])
+        title_for=lambda cid: (discover.snapshot(control_root, cid) or ("", "", ""))[2],
+        subscriptions=subscriptions)
     control = ControlPlane(
         deliver=deliver, create=create,
         abandon=abandon, list_changes=list_changes,

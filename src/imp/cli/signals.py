@@ -1,17 +1,26 @@
-"""Signal handling: pause-and-exit on Ctrl+C / Ctrl+D / SIGTERM.
+"""Signal handling for the session client: two intents, cleanly separated.
 
-`run_signal_receiver` uses `anyio.open_signal_receiver(SIGINT, SIGTERM)`, which
-INTERCEPTS SIGINT — Python does NOT raise KeyboardInterrupt on the main thread
-for it. A CPU-bound sync tool that never yields the event loop is torn down via
-the process group instead; in-process tools cooperate via
-`coordinator.should_pause`; HTTP providers cancel their in-flight request.
+The client's signals map to two distinct intents (the keep-alive-lease design):
 
-The CLI calls `prompt_async(handle_sigint=False)`, so prompt_toolkit does NOT
-own SIGINT during a prompt: an out-of-band SIGINT then lands in this
-coordinator's loop handler (`_dispatch_signal`) and — while a prompt is being
-awaited (`_at_prompt`) — is routed through the exit path, identical to SIGTERM.
-Typed Ctrl-C at a prompt is the `c-c` KEY binding (a key event, independent of
-`handle_sigint`); only OS signals are governed here.
+  - Intent A — "interrupt the run" (Ctrl-C / SIGINT). Acts on the *run*: fire the
+    cooperative stop (runner.interrupt()). With a human here to type, the run
+    yields inline and the client stays attached; with no inline channel the stop
+    lands as a clean pause.
+  - Intent B — "this client is leaving" (SIGTERM, SIGHUP, terminal close,
+    Ctrl-D, /save). Acts on the *attachment*: release the lease, detach, exit. The
+    client does NOT decide whether the run pauses — the session daemon's lease
+    rule does.
+
+`run_signal_receiver` installs loop-level handlers via `add_signal_handler` (so
+they can be RE-ARMED after a prompt_toolkit prompt deletes SIGINT's). SIGINT is
+turned into `signal_pause(reason='ctrl-c')` via the receiver; the leave signals
+are intercepted in `_dispatch_signal` and fire the leave (escalation) hook
+directly — they never reach the receiver and never touch pause state.
+
+The CLI calls `prompt_async(handle_sigint=False)`, so prompt_toolkit does NOT own
+SIGINT during a prompt: an out-of-band SIGINT then lands in this coordinator's
+loop handler. Typed Ctrl-C at a prompt is the `c-c` KEY binding (a key event,
+independent of `handle_sigint`); only OS signals are governed here.
 """
 
 from __future__ import annotations
@@ -34,6 +43,22 @@ _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
 _PRESERVE_ON_PAUSE = ("merge_blocked", "completed", "saved", "abandoned")
+
+
+def _leave_signals() -> tuple[int, ...]:
+    """Signals meaning 'this client is leaving' (Intent B). SIGHUP is absent on
+    some platforms (Windows); include it only when present."""
+    sigs: list[int] = [signal.SIGTERM]
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None:
+        sigs.append(sighup)
+    return tuple(sigs)
+
+
+def _handled_signals() -> tuple[int, ...]:
+    """Every signal the coordinator installs a loop handler for: SIGINT (Intent A)
+    plus the Intent-B leave signals."""
+    return (signal.SIGINT, *_leave_signals())
 
 
 def _open_pause_exists(change: Change) -> bool:
@@ -89,7 +114,8 @@ class InterruptCoordinator:
 
     Lifecycle:
       - CLI spawns `await coord.run_signal_receiver()` as a sibling task that
-        subscribes to SIGINT/SIGTERM and calls `signal_pause(reason=...)`.
+        subscribes to SIGINT (plus the Intent-B leave signals SIGTERM/SIGHUP) and
+        calls `signal_pause(reason=...)`.
       - The executor checks `coord.should_pause` between events; on True it
         returns RunResult.PAUSED. The CLI then reads `coord.pause_reason`
         (default "ctrl-c") to render `paused (<reason>)`.
@@ -106,7 +132,7 @@ class InterruptCoordinator:
         self._interjects: list[str] = []
         self._first_gesture_at: float | None = None  # monotonic; suppression window
         self.escalated = False
-        self._exit_event: Any = None    # set by SIGTERM/escalation routing (C3/C4)
+        self._exit_event: Any = None    # set by the exit/escalation routing (C3/C4)
         self.escalation_event: Any = None   # anyio.Event set on escalation (C4)
         self._trigger_escalation: Any = None
         self._trigger_exit: Any = None
@@ -264,8 +290,8 @@ class InterruptCoordinator:
         self._trigger_exit = fn
 
     def request_exit(self, reason: str) -> None:
-        """Route an out-of-band stop (prompt-level SIGINT, SIGTERM) to the exit
-        path — sets pause state + fires the exit event the actuator watches."""
+        """Route an out-of-band stop (prompt-level SIGINT) to the exit path —
+        sets pause state + fires the exit event the actuator watches."""
         if self.pause_reason is None:
             self.pause_reason = reason
         self._should_pause = True
@@ -305,7 +331,8 @@ class InterruptCoordinator:
             await fn()
 
     def _install_loop_signal_handlers(self) -> None:
-        """(Re)install SIGINT/SIGTERM handlers on the running loop. Idempotent —
+        """(Re)install the coordinator's loop signal handlers (SIGINT plus the
+        Intent-B leave signals — SIGTERM/SIGHUP) on the running loop. Idempotent —
         `add_signal_handler` overwrites any existing entry.
 
         This is also the RE-ARM primitive — now DEFENSIVE-ONLY. With the CLI's
@@ -321,26 +348,27 @@ class InterruptCoordinator:
         loop = self._loop
         if loop is None:
             return
-        for sig in (signal.SIGINT, signal.SIGTERM):
+        for sig in _handled_signals():
             with _suppress(NotImplementedError, RuntimeError, ValueError):
                 loop.add_signal_handler(sig, self._dispatch_signal, sig)
 
     def _dispatch_signal(self, sig: int) -> None:
-        """Loop-thread signal callback. SIGTERM routes straight to the exit path
-        (wedge-proof: bypasses the receiver, signal_pause, and interrupt()).
-        SIGINT: if a stop is already unwinding, apply the §1 suppression/escalation
-        gate HERE (signal_pause can wedge on the cancellation-immune interrupt());
-        otherwise enqueue for the receiver as before."""
-        if sig == signal.SIGTERM:
-            # Wedge-proof exit. Set pause state HERE so the loop's post-cancellation
-            # path persists status=paused with the right reason — the exit hook only
-            # signals the event. Bypasses the receiver/signal_pause/interrupt() chain.
-            if self.pause_reason is None:
-                self.pause_reason = "sigterm"
-            self._should_pause = True
-            fn = self._trigger_exit
+        """Loop-thread signal callback, split by the two client intents.
+
+        Intent B — "this client is leaving" (the leave signals): fire the leave
+        (escalation) hook so the client releases its lease, detaches, and exits.
+        The client does NOT decide whether the run pauses — the daemon's lease
+        rule does — so this path never touches pause state and is never suppressed.
+
+        Intent A — "interrupt the run" (SIGINT): if a stop is already unwinding,
+        apply the suppression/escalation gate HERE (signal_pause can wedge on the
+        cancellation-immune interrupt()); at a prompt, route through the exit path;
+        otherwise enqueue for the receiver (→ signal_pause → runner interrupt →
+        pause-to-prompt)."""
+        if sig in _leave_signals():
+            fn = self._trigger_escalation
             if fn is not None:
-                fn("sigterm")  # reason is always "sigterm" on this branch
+                fn()
             return
         if self._should_pause:
             # A stop is already unwinding. Gate the repeat gesture synchronously.
@@ -353,10 +381,9 @@ class InterruptCoordinator:
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT
             # (handle_sigint=False), so an out-of-band SIGINT lands here. Route it
-            # through the coordinator exit path — identical to SIGTERM — instead of
-            # signal_pause/runner-interrupt (which is the DURING-A-RUN behavior).
-            # Register the gesture first so a SECOND out-of-band SIGINT still hits
-            # the escalation/suppression gate above (force-quit).
+            # through the coordinator exit path. Register the gesture first so a
+            # SECOND out-of-band SIGINT still hits the escalation/suppression gate
+            # above (force-quit).
             self._register_gesture(kind="ctrl-c")
             self.request_exit("ctrl-c")
             return
@@ -369,20 +396,21 @@ class InterruptCoordinator:
             send.send_nowait(sig)
 
     def rearm_signal_handlers(self) -> None:
-        """Re-install the loop SIGINT/SIGTERM handlers after a prompt_toolkit
+        """Re-install the loop SIGINT/SIGTERM/SIGHUP handlers after a prompt_toolkit
         prompt deleted SIGINT's on exit. Safe no-op before the receiver starts or
         after it stops (`_loop is None`). Called from the interactive-prompt choke
         point (`ask_line_with_slash`) so mid-run Ctrl-C survives every prompt."""
         self._install_loop_signal_handlers()
 
     async def run_signal_receiver(self) -> None:
-        """Long-running task: install SIGINT/SIGTERM loop handlers. SIGINT is
-        turned into `signal_pause(reason='ctrl-c')` via this receiver. SIGTERM is
-        intercepted in `_dispatch_signal` BEFORE the stream — it sets pause state
-        and fires the exit hook directly (wedge-proof) and never reaches this loop.
+        """Long-running task: install the coordinator's loop signal handlers.
+        SIGINT (Intent A) is turned into `signal_pause(reason='ctrl-c')` via this
+        receiver. The leave signals (Intent B) are intercepted in
+        `_dispatch_signal` BEFORE the stream — they fire the leave (escalation)
+        hook directly and never reach this loop.
 
-        Replaces `anyio.open_signal_receiver` with directly-managed loop handlers
-        so they can be RE-ARMED (`rearm_signal_handlers`) after prompt_toolkit
+        Uses directly-managed loop handlers (not `anyio.open_signal_receiver`) so
+        they can be RE-ARMED (`rearm_signal_handlers`) after prompt_toolkit
         prompts delete the SIGINT handler. Cancel this task to stop receiving."""
         import anyio
 
@@ -397,7 +425,7 @@ class InterruptCoordinator:
         finally:
             loop = self._loop
             if loop is not None:
-                for sig in (signal.SIGINT, signal.SIGTERM):
+                for sig in _handled_signals():
                     with _suppress(NotImplementedError, RuntimeError, ValueError):
                         loop.remove_signal_handler(sig)
             self._loop = None

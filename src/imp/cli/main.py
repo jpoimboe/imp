@@ -620,7 +620,7 @@ async def _run_tui_session(
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only,
-        autonomous=autonomous)
+        autonomous=autonomous, lease=True)
     leave_state = {} if leave_state is None else leave_state
 
     async def _solicit(_prompt: str) -> str:

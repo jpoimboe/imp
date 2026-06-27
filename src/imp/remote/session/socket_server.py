@@ -25,6 +25,7 @@ from imp.remote.session.protocol import (
     Attach,
     Control,
     Input,
+    SetLease,
     encode_event,
     parse_client_message,
 )
@@ -69,6 +70,7 @@ class _Client:
     stream: Any
     send: MemoryObjectSendStream[dict[str, Any]]
     scope: Any
+    leased: bool = False
 
 
 class SessionSocket:
@@ -81,12 +83,14 @@ class SessionSocket:
         ] | None = None,
         on_detach: Callable[[], None] | None = None,
         on_control: Callable[[str], None] | None = None,
+        on_lease_change: Callable[[], None] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
     ) -> None:
         self._path = path
         self._on_attach = on_attach
         self._on_detach = on_detach
         self._on_control = on_control
+        self._on_lease_change = on_lease_change
         self._client_buffer = client_buffer
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
@@ -131,6 +135,10 @@ class SessionSocket:
     def attached_count(self) -> int:
         return len(self._clients)
 
+    @property
+    def leased_count(self) -> int:
+        return sum(1 for c in self._clients if c.leased)
+
     def broadcast(self, event: dict[str, Any]) -> None:
         for client in list(self._clients):
             self._send_one(client, event)
@@ -174,12 +182,16 @@ class SessionSocket:
             send.close()
             recv.close()
 
-    def _dispatch(self, message: object) -> None:
+    def _dispatch(self, client: _Client, message: object) -> None:
         if isinstance(message, Input) and self._input_send is not None:
             with contextlib.suppress(anyio.WouldBlock):
                 self._input_send.send_nowait(message.text)
         elif isinstance(message, Control) and self._on_control is not None:
             self._on_control(message.action)
+        elif isinstance(message, SetLease):
+            client.leased = message.value
+            if self._on_lease_change is not None:
+                self._on_lease_change()
 
     async def _handle(self, stream: SocketStream) -> None:
         buf = BufferedByteReceiveStream(stream)
@@ -192,7 +204,9 @@ class SessionSocket:
             send, recv = anyio.create_memory_object_stream[dict[str, Any]](
                 max_buffer_size=self._client_buffer)
             async with anyio.create_task_group() as ctg:
-                client = _Client(stream=stream, send=send, scope=ctg.cancel_scope)
+                client = _Client(
+                    stream=stream, send=send, scope=ctg.cancel_scope,
+                    leased=hello.lease)
                 self._clients.add(client)
                 snapshot: ReplaySnapshot | None = None
                 if self._on_attach is not None:
@@ -210,7 +224,7 @@ class SessionSocket:
                         line = (await buf.receive_until(
                             b"\n", _MAX_FRAME)).decode("utf-8")
                         with contextlib.suppress(ValueError, KeyError):
-                            self._dispatch(parse_client_message(line))
+                            self._dispatch(client, parse_client_message(line))
                 except (anyio.IncompleteRead, anyio.EndOfStream,
                         anyio.ClosedResourceError, anyio.DelimiterNotFound,
                         anyio.BrokenResourceError, ValueError, KeyError):

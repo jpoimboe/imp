@@ -9,6 +9,7 @@ from typing import Any
 import anyio
 
 from imp.remote.daemon.directory import resident_session_ids
+from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.relay import SessionRelay
 
@@ -22,12 +23,14 @@ class RelaySupervisor:
         events: tuple[str, ...],
         title_for: Callable[[str], str],
         poll_gap: float = 0.5,
+        subscriptions: Subscriptions | None = None,
     ) -> None:
         self._control_root = control_root
         self._sink = sink
         self._events = events
         self._title_for = title_for
         self._poll_gap = poll_gap
+        self._subscriptions = subscriptions
         self._running: set[str] = set()
         self._gated: set[str] = set()
 
@@ -46,6 +49,12 @@ class RelaySupervisor:
                         tg.start_soon(self._relay_one, change_id)
                 await anyio.sleep(self._poll_gap)
 
+    def _subscribed_probe(self, change_id: str) -> Callable[[], bool] | None:
+        subs = self._subscriptions   # local so mypy narrows past the None-return
+        if subs is None:
+            return None
+        return lambda: subs.contains(change_id)
+
     async def _relay_one(self, change_id: str) -> None:
         relay = SessionRelay(
             socket_path=str(session_socket_path(self._control_root, change_id)),
@@ -53,6 +62,7 @@ class RelaySupervisor:
             title=self._title_for(change_id),
             events=self._events,
             sink=self._sink,
+            is_subscribed=self._subscribed_probe(change_id),
         )
         try:
             await relay.run()

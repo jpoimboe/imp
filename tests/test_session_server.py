@@ -26,7 +26,7 @@ def anyio_backend() -> str:
 
 async def _attach(sock_path: str, change_id: str) -> SocketStream:
     client = await anyio.connect_unix(sock_path)
-    await client.send((encode_attach(change_id, "T") + "\n").encode())
+    await client.send((encode_attach(change_id, "T", True) + "\n").encode())
     return client
 
 
@@ -1052,4 +1052,197 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
         assert delivered == ["here is my answer"]
         assert result2["r"] == "here is my answer"   # run continued on reattach+reply
         await client2.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_lease_less_client_does_not_satisfy_keep_alive_gate(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True, first_attach_timeout=0.2)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        try:
+            return await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await anyio.connect_unix(sock)
+        await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        # No leased attachment ever arrives: the gate hibernates on the
+        # first-leased-attach timeout despite a live lease-less attachment.
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "hibernated"
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_last_leased_detach_pauses_mid_step(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    release = anyio.Event()
+    server = SessionServer(sock, coordinator=coord, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await release.wait()   # mid-step: no gate is open
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await anyio.connect_unix(sock)
+        await client.send((encode_attach("c1", "T", True) + "\n").encode())  # leased
+        with anyio.fail_after(5):
+            while server.leased_count != 1:
+                await anyio.sleep(0.02)
+        assert not coord.should_pause
+        await client.aclose()   # last leased client detaches mid-step
+        with anyio.fail_after(5):
+            while not coord.should_pause:
+                await anyio.sleep(0.02)
+        assert coord.should_pause
+        assert coord.pause_reason == "detached"
+        release.set()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_lease_less_detach_does_not_pause(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    release = anyio.Event()
+    server = SessionServer(sock, coordinator=coord, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await release.wait()
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await anyio.connect_unix(sock)
+        await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.aclose()
+        await anyio.sleep(0.2)
+        assert not coord.should_pause   # never leased -> detach is not a keep-alive loss
+        release.set()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_no_pause_enqueued_during_wait_for_turn(tmp_path: Path) -> None:
+    # A last-leased detach while parked in the between-turns wait is resolved by
+    # wait_for_turn itself (its own hibernate -> AwaitingUserInput); the detach
+    # pulse must NOT also enqueue a coordinator pause (which would race a
+    # conflicting pause-reason).
+    from imp.cli.signals import InterruptCoordinator
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    server = SessionServer(sock, coordinator=coord)
+    server._first_leased_attach_fired = True   # a keep-alive client attached + left
+    server._in_wait_for_turn = True            # parked in the between-turns wait
+    server._on_detach_pulse()                  # leased_count == 0 (no socket clients)
+    with pytest.raises(anyio.WouldBlock):
+        server._control_recv.receive_nowait()  # nothing was enqueued
+
+
+@pytest.mark.anyio
+async def test_no_pause_enqueued_while_solicit_gate_open(tmp_path: Path) -> None:
+    # A last-leased detach while a solicit gate is open (_pending_prompt set) is
+    # resolved by the gate itself (_wait_until_unleased -> AwaitingUserInput); the
+    # detach pulse must NOT also enqueue a coordinator pause.
+    from imp.cli.signals import InterruptCoordinator
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    server = SessionServer(sock, coordinator=coord)
+    server._first_leased_attach_fired = True   # a keep-alive client attached + left
+    server.set_pending_prompt({"type": "awaiting_user_input"})  # solicit gate open
+    server._on_detach_pulse()                  # leased_count == 0 (no socket clients)
+    with pytest.raises(anyio.WouldBlock):
+        server._control_recv.receive_nowait()  # nothing was enqueued
+
+
+@pytest.mark.anyio
+async def test_lease_less_input_at_hibernating_gate_is_delivered_not_dropped(
+    tmp_path: Path,
+) -> None:
+    # The remote deliver-reply path: deliver_session_reply attaches LEASE-LESS and
+    # the rehydrate daemon runs hibernate=True. Leases gate KEEP-ALIVE, never the
+    # input channel — so the gate must still open next_input() and consume the
+    # injected reply rather than routing to hibernation and silently dropping it.
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True, first_attach_timeout=2.0)
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        gate_reached.set()
+        try:
+            return await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await anyio.connect_unix(sock)
+        await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less reply
+        await gate_reached.wait()
+        await client.send((encode_input("the reply") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "the reply"   # consumed, NOT dropped to hibernation
+        await client.aclose()
         tg.cancel_scope.cancel()

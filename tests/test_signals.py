@@ -153,8 +153,8 @@ def test_dispatch_signal_escalates_after_window_with_wedged_signal_pause() -> No
 def test_dispatch_sigint_at_prompt_routes_to_exit_not_receiver() -> None:
     """An out-of-band SIGINT while AT a prompt (handle_sigint=False so it lands
     in the coordinator's loop handler, not as a prompt_toolkit KBI) must take the
-    exit path — identical to SIGTERM — NOT the receiver/signal_pause/runner path
-    (that is the DURING-A-RUN behavior)."""
+    exit path — NOT the receiver/signal_pause/runner path (that is the
+    DURING-A-RUN behavior)."""
     import signal as _sig
     coord = InterruptCoordinator()
     coord.set_at_prompt(True)
@@ -235,14 +235,43 @@ def test_dispatch_second_sigint_at_prompt_still_escalates_after_window() -> None
     assert esc_fired["v"] is True
 
 
-def test_dispatch_sigterm_routes_to_exit_immediately() -> None:
+def test_dispatch_sighup_fires_leave_not_pause() -> None:
     import signal as _sig
     coord = InterruptCoordinator()
+    left = {"v": False}
+    coord.set_escalation_hook(lambda: left.__setitem__("v", True))
+
+    coord._dispatch_signal(_sig.SIGHUP)
+
+    assert left["v"] is True             # SIGHUP is a leave (escalation) gesture
+    assert coord.should_pause is False   # never touches pause state
+
+
+@pytest.mark.anyio
+async def test_run_signal_receiver_installs_sighup_handler() -> None:
+    import anyio
+    coord = InterruptCoordinator()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(coord.run_signal_receiver)
+        await asyncio.sleep(0.1)   # let the receiver install loop handlers
+        loop = asyncio.get_running_loop()
+        assert signal.SIGINT in loop._signal_handlers
+        assert signal.SIGTERM in loop._signal_handlers
+        assert signal.SIGHUP in loop._signal_handlers
+        tg.cancel_scope.cancel()
+
+
+def test_dispatch_sigterm_fires_leave_not_pause() -> None:
+    import signal as _sig
+    coord = InterruptCoordinator()
+    left = {"v": False}
+    coord.set_escalation_hook(lambda: left.__setitem__("v", True))
     exited = {"v": False}
-    coord._trigger_exit = lambda reason: exited.__setitem__("v", reason)
+    coord.set_exit_hook(lambda _reason: exited.__setitem__("v", True))
+
     coord._dispatch_signal(_sig.SIGTERM)
-    assert exited["v"] == "sigterm"       # bypasses receiver/signal_pause/interrupt()
-    # The SIGTERM branch sets pause state synchronously (the loop's
-    # post-cancellation path reads these to persist status=paused).
-    assert coord._should_pause is True
-    assert coord.pause_reason == "sigterm"
+
+    assert left["v"] is True             # SIGTERM is a leave (escalation) gesture
+    assert exited["v"] is False          # NOT the old pause/exit path
+    assert coord.should_pause is False   # the client does not decide the run's fate
+    assert coord.pause_reason is None

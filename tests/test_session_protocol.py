@@ -11,10 +11,12 @@ from imp.remote.session.protocol import (
     Attach,
     Control,
     Input,
+    SetLease,
     encode_attach,
     encode_control,
     encode_event,
     encode_input,
+    encode_set_lease,
     parse_client_message,
     parse_event,
 )
@@ -27,7 +29,22 @@ def test_encode_attach_is_single_line_kind_tagged_json() -> None:
         "kind": "attach",
         "change_id": "2026-06-15-abc",
         "title": "Add dark mode",
+        "lease": False,
     }
+
+
+def test_encode_attach_carries_lease_flag() -> None:
+    leased = json.loads(encode_attach("c1", "T", lease=True))
+    assert leased["lease"] is True
+    unleased = json.loads(encode_attach("c1", "T"))
+    assert unleased["lease"] is False
+
+
+def test_parse_client_message_recovers_attach_lease() -> None:
+    assert parse_client_message(
+        encode_attach("c1", "T", lease=True)) == Attach("c1", "T", True)
+    assert parse_client_message(
+        encode_attach("c1", "T")) == Attach("c1", "T", False)
 
 
 def test_encode_input_is_single_line_kind_tagged_json() -> None:
@@ -117,3 +134,16 @@ def test_encode_control_accepts_archive_and_discard_and_round_trips() -> None:
         line = encode_control(action)
         assert json.loads(line) == {"kind": "control", "action": action}
         assert parse_client_message(line) == Control(action)
+
+
+def test_encode_set_lease_round_trips() -> None:
+    for value in (True, False):
+        line = encode_set_lease(value)
+        assert "\n" not in line
+        assert json.loads(line) == {"kind": "set-lease", "value": value}
+        assert parse_client_message(line) == SetLease(value)
+
+
+def test_set_lease_missing_value_is_rejected() -> None:
+    with pytest.raises(ValueError, match="missing required field"):
+        parse_client_message('{"kind": "set-lease"}')
