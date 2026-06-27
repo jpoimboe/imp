@@ -67,6 +67,27 @@ def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
     assert "no cost gating" in out
 
 
+def test_delegate_exploration_partial_exists_and_carries_the_rule() -> None:
+    from pathlib import Path
+    p = Path("src/imp/assets/workflows/imp/partials/delegate-exploration.md")
+    text = p.read_text()
+    # The default rule: delegate to explorer/researcher; read inline only what you edit.
+    assert "read inline only what you will edit" in text.lower()
+    assert 'sub_agent(subagent_name="explorer"' in text
+    assert "researcher" in text
+
+
+def test_brainstorm_dialogue_includes_partial_and_drops_inline_duplication() -> None:
+    from pathlib import Path
+    body = Path(
+        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
+    ).read_text()
+    assert '{% include "partials/delegate-exploration.md" %}' in body
+    # The extracted delegation specifics no longer live inline in brainstorm-dialogue.
+    assert "prefer dispatching\nparallel" not in body
+    assert "fan deep mapping out to the subagents" not in body
+
+
 def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
     body = _wf().agents["front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")

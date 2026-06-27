@@ -33,9 +33,10 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     assert "Yielding to the human" not in text
     # the dialogue partial now pulls in the shared live-gate posture
     assert '{% include "partials/live-gate-dialogue.md" %}' in text
-    # research before you converge (with the explorer dispatch idiom)
+    # research before you converge — the explorer dispatch idiom moved into the
+    # shared delegate-exploration partial (included here), so assert the include.
     assert "Research before you converge" in text
-    assert 'sub_agent(subagent_name="explorer"' in text
+    assert '{% include "partials/delegate-exploration.md" %}' in text
     assert "no cost gating" in text
     # propose 2-3 + design-then-approve in sections
     assert "present it in sections" in text

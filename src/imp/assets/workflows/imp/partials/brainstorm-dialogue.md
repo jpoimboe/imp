@@ -47,14 +47,11 @@ you want?".
 
 **Explore context once intent is in hand.** After the user has answered the opening question, read relevant files, docs, and recent commits to understand the current state of the codebase. This prevents asking follow-ups the code already answers.
 
-**Research before you converge.** Once the intent is in hand, prefer dispatching
-parallel `explorer` subagents to map the relevant code before settling questions
-or proposing a design — issuing multiple `sub_agent(subagent_name="explorer", …)`
-calls in a single message runs them concurrently. Use `researcher` when a
-question turns on an external fact (does a library exist, what is current best
-practice, how does an API behave). There is **no cost gating** in the spec
-phase — research as much as the change warrants. Inline `bash`/`grep` stays fine
-for quick checks; fan deep mapping out to the subagents.
+**Research before you converge.** Once the intent is in hand, map the relevant code
+before settling questions or proposing a design. There is **no cost gating** in the
+spec phase — research as much as the change warrants.
+
+{% include "partials/delegate-exploration.md" %}
 
 **Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let them confirm.
 
