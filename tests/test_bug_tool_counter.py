@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 
-from imp.cli import narrative as nv
+from imp.cli.narrative import NarrativeBuilder
 from tests.conftest import FIXTURES
 
 _FIXTURE = FIXTURES / "cc_tool_counter_burst.jsonl"
@@ -30,13 +30,14 @@ def _events() -> list[dict]:
 
 
 def test_consecutive_tools_accumulate_into_one_burst() -> None:
-    builder = nv.NarrativeBuilder()
+    builder = NarrativeBuilder()
     max_count = 0
     for event in _events():
         builder.add(event)
         if event.get("type") == "tool_call":
-            activity = nv.activity_to_text(builder.current_activity())
-            m = re.search(r"(\d+)\s*calls?", activity)
+            act = builder.current_activity()
+            detail = act.detail if act is not None else ""
+            m = re.search(r"(\d+)\s*calls?", detail or "")
             if m:
                 max_count = max(max_count, int(m.group(1)))
 

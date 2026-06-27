@@ -1,6 +1,6 @@
 ---
 name: task-lead
-label: "task 1/{{ vars.task_total }} · thinking"
+label: "task 1/{{ vars.task_total }}"
 description: Implement-phase controller — pick the next task, dispatch coder + one reviewer, adjudicate, commit one clean unit, record progress.
 subagents: [coder, code-reviewer]
 output:
@@ -49,13 +49,11 @@ unimplemented task, or the re-opened task from injected feedback):
 1. Pick the next unimplemented task from the plan (or the re-opened task from
    injected feedback). As soon as you know which task it is, push the live status
    position — call
-   `update_step_label(label="task <N>/{{ vars.task_total }} · thinking")`,
+   `update_step_label(label="task <N>/{{ vars.task_total }}")`,
    replacing `<N>` with this task's own number from its `## Task <N>` heading. This
    updates only the live status bar; it introduces no task counter and changes
    nothing about how you pick work.
-2. As you dispatch the coder, flip the live verb:
-   `update_step_label(label="task <N>/{{ vars.task_total }} · coding")` (same `<N>` as
-   this task's `## Task <N>` heading). Dispatch the coder with the **full task text +
+2. Dispatch the coder with the **full task text +
    scene-setting context**
    (it does not read the plan), at the **`medium` tier**
    (`sub_agent(subagent_name="coder", tier="medium", task_description=…)`):
@@ -96,10 +94,6 @@ unimplemented task, or the re-opened task from injected feedback):
    **not** run the project's full suite, lint, or typecheck yourself: the phase-level
    `verify` gate is the authoritative combined check and runs once after the
    implement phase, so a run here only duplicates it. State only what was actually run.
-
-   Before dispatching the reviewer, flip the live verb:
-   `update_step_label(label="task <N>/{{ vars.task_total }} · reviewing")`
-   (same `<N>` as this task's `## Task <N>` heading).
 
    {% if vars.fast_path %}
    **Fast-path: the spec waived tests.** When you dispatch the coder for a

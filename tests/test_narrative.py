@@ -519,9 +519,9 @@ def test_current_activity_reports_open_burst() -> None:
         b.add(e)
     assert b.current_burst is not None
     act = b.current_activity()
-    assert act.count == "1 call"
-    assert act.detail == "read_file config.py"
-    assert act.step_label is None
+    assert act.detail == "1 call · read_file config.py"
+    assert act.verb == "thinking"
+    assert act.position is None
 
 
 def test_current_activity_idle_gap_between_nodes() -> None:
@@ -533,7 +533,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity(model="m")
+    assert b.current_activity() == nv.Activity(verb="thinking", model="m")
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -551,7 +551,7 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(model="m")
+    assert b.current_activity() == nv.Activity(verb="thinking", model="m")
 
 
 
@@ -568,8 +568,9 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
     ]:
         b.add(e)
     act = b.current_activity()
-    assert act is not None and act.label is not None
-    assert "subagent(coder)" in act.label and "executor.py" in act.label
+    assert act is not None
+    assert act.verb == "subagent(coder)"
+    assert act.detail is not None and "executor.py" in act.detail
 
 
 def test_subagent_activity_uses_label_when_present() -> None:
@@ -586,11 +587,11 @@ def test_subagent_activity_uses_label_when_present() -> None:
     ]:
         b.add(e)
     act = b.current_activity()
-    assert act is not None and act.label is not None
-    assert "exploring codebase" in act.label
-    assert "executor.py" in act.label
-    assert "task →" not in act.label
-    assert "subagent(" not in act.label
+    assert act is not None
+    assert act.verb == "exploring codebase"
+    assert "executor.py" in (act.detail or "")
+    assert "task →" not in (act.verb or "")
+    assert "subagent(" not in (act.verb or "")
 
 
 def test_subagent_activity_falls_back_to_subagent_name() -> None:
@@ -604,9 +605,9 @@ def test_subagent_activity_falls_back_to_subagent_name() -> None:
     ]:
         b.add(e)
     act = b.current_activity()
-    assert act is not None and act.label is not None
-    assert "subagent(explorer)" in act.label
-    assert "task →" not in act.label
+    assert act is not None
+    assert act.verb == "subagent(explorer)"
+    assert "task →" not in (act.verb or "")
 
 
 def test_summarize_result_flattens_text_block_list_in_burst() -> None:
@@ -724,15 +725,15 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     # current_activity sits on the running subagent before the parent resumes.
-    assert "subagent(reviewer)" in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" in (b.current_activity().verb or "")
     # Parent resumes (same agent_id) with NO task tool_result — resume-close fires.
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn", usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
     # Status line advanced off the subagent (no running fold left).
-    act = nv.activity_to_text(b.current_activity())
-    assert "subagent(reviewer)" not in act
+    act = b.current_activity()
+    assert act is None or "subagent(reviewer)" not in (act.verb or "")
 
 
 def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
@@ -751,12 +752,13 @@ def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    assert "subagent(reviewer)" in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" in (b.current_activity().verb or "")
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="codex",
               model="m", stop_reason=None, usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
-    assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
+    act2 = b.current_activity()
+    assert act2 is None or "subagent(reviewer)" not in (act2.verb or "")
 
 
 def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
@@ -796,12 +798,13 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    assert "subagent(reviewer)" in nv.activity_to_text(b.current_activity())
+    assert "subagent(reviewer)" in (b.current_activity().verb or "")
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="openai",
               model="m", stop_reason="completed", usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
-    assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
+    act3 = b.current_activity()
+    assert act3 is None or "subagent(reviewer)" not in (act3.verb or "")
 
 
 def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
@@ -959,7 +962,7 @@ def test_current_activity_collapses_multiline_bash_command() -> None:
     assert "\n" not in act.detail                    # single line only
     assert "…" in act.detail                         # truncated
     assert len(act.detail) < 120                      # not the whole script
-    assert act.detail.startswith("bash ")             # name + sanitized arg, no step prefix
+    assert "bash " in act.detail                     # name + sanitized arg present
 
 
 def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
@@ -1263,9 +1266,8 @@ def test_current_activity_burst_form_count_and_named_on_visible_basis() -> None:
              input={"command": "make test"}))
     act = b.current_activity()
     assert isinstance(act, nv.Activity)
-    assert act.count == "1 call"
-    assert act.detail == "bash make test"
-    assert act.label is None
+    assert act.detail == "1 call · bash make test"
+    assert act.verb == "thinking"
 
 
 def test_current_activity_all_killed_basis_is_bare_count() -> None:
@@ -1274,27 +1276,20 @@ def test_current_activity_all_killed_basis_is_bare_count() -> None:
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash", input={}))
     b.add(ev("k1", "tool_killed", agent_id="a", id="c1", name="bash"))
     act = b.current_activity()
-    assert act.count == "1 call"          # count keeps killed
-    assert act.detail is None             # named call excludes killed → bare count
+    assert act.detail == "1 call"         # count keeps killed; no named tool (all killed)
+    assert act.verb == "thinking"
 
 
 def test_current_activity_agent_step_no_burst_is_thinking() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(verb="thinking")
 
 
 def test_current_activity_chrome_step_is_running() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="g", kind="merge_and_exit_worktree", phase="p"))
     assert b.current_activity() == nv.Activity()
-
-
-def test_activity_to_text_flattens_segments() -> None:
-    assert nv.activity_to_text(nv.Activity(count="3 calls", detail="bash x")) == \
-        "3 calls · bash x"
-    assert nv.activity_to_text(nv.Activity(label="thinking")) == "thinking"
-    assert nv.activity_to_text(None) == ""
 
 
 def _wfu_step(b):
@@ -1555,7 +1550,8 @@ def test_workflow_resumed_finalizes_dangling_folds_as_interrupted() -> None:
     assert dangling.running is False
     assert dangling.terminal_state == "interrupted"
     # current_activity no longer shadowed by the dangling fold.
-    assert "subagent(reviewer)" not in nv.activity_to_text(b.current_activity())
+    act4 = b.current_activity()
+    assert act4 is None or "subagent(reviewer)" not in (act4.verb or "")
 
     # Resumed turn re-enters the step and opens a fresh running fold.
     b.add(_ev("st2", "step_started", step="s", kind="agent", phase="p",
@@ -1603,19 +1599,19 @@ def test_current_activity_suffix_counts_extra_running_subagents() -> None:
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
     b.add(_task("tk1", "b1", "reviewer"))
-    one = nv.activity_to_text(b.current_activity())
-    assert "subagent(reviewer)" in one
-    assert "(+" not in one                                # single fold: no suffix
+    one = b.current_activity()
+    assert one.verb == "subagent(reviewer)"
+    assert one.detail is None or "+" not in (one.detail or "")   # single fold: no suffix
 
     b.add(_task("tk2", "b2", "tester"))
-    two = nv.activity_to_text(b.current_activity())
-    assert "subagent(reviewer)" in two                   # first running fold's detail
-    assert "(+1 subagent)" in two                         # singular
-    assert "(+1 subagents)" not in two
+    two = b.current_activity()
+    assert "subagent(reviewer)" in (two.verb or "")       # first running fold's verb
+    assert "+1 subagent" in (two.detail or "")            # singular (no parens in new model)
+    assert "+1 subagents" not in (two.detail or "")
 
     b.add(_task("tk3", "b3", "researcher"))
-    three = nv.activity_to_text(b.current_activity())
-    assert "(+2 subagents)" in three                      # plural
+    three = b.current_activity()
+    assert "+2 subagents" in (three.detail or "")         # plural
 
 
 def test_interrupt_config_event_suppresses_error_and_marks_step() -> None:
@@ -1797,7 +1793,7 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(model="m")
+    assert b.current_activity() == nv.Activity(verb="thinking", model="m")
 
 
 def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
@@ -1814,16 +1810,15 @@ def test_current_activity_agent_no_burst_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="spec", kind="agent", phase="design",
              label="speccing"))
-    # The step label rides through; the activity word is dropped entirely.
-    assert b.current_activity() == nv.Activity(step_label="speccing", label=None)
+    assert b.current_activity() == nv.Activity(verb="speccing")
 
 
 def test_current_activity_script_step_names_the_command() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="gate", kind="script", phase="verify",
              label="testing", command="make check"))
-    assert b.current_activity() == nv.Activity(step_label="testing",
-                                               label="make check")
+    # Label wins over command as the verb; in the new model verb = label
+    assert b.current_activity() == nv.Activity(verb="testing")
 
 
 def test_subagent_activity_has_no_step_prefix() -> None:
@@ -1837,7 +1832,7 @@ def test_subagent_activity_has_no_step_prefix() -> None:
         ev("s1", "thinking", agent_id="sub:tk1", content="reviewing"),
     ]:
         b.add(e)
-    assert b.current_activity().label == "subagent(plan-reviewer) · 1 events"
+    assert b.current_activity().verb == "subagent(plan-reviewer)"
 
 
 def test_step_label_and_resumed_land_on_step_and_breadcrumb() -> None:
@@ -1873,6 +1868,23 @@ def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
                 for c in p.children if isinstance(c, nv.StepNode))
     assert step.label == "reviewing code"
     assert step.resumed is True
+
+
+def test_resume_reentry_updates_position_label_on_step_node() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="task-lead", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           position_label=False),
+        ev("3", "workflow_paused", reason="ctrl-c"),
+        ev("4", "workflow_resumed"),
+        ev("5", "step_started", step="task-lead", kind="agent",
+           phase="implement", model="m", provider="anthropic",
+           position_label=True),
+    ])
+    step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                for c in p.children if isinstance(c, nv.StepNode))
+    assert step.position_label is True
 
 
 def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
@@ -2377,3 +2389,90 @@ def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
              raw={"content": []}, context_pct=88.0, context_window=200_000))
     assert b.latest_context_pct == 20.0          # frozen at the parent's value
     assert b.latest_context_window == 1_000_000
+
+
+def test_step_node_reads_position_label_from_step_started() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 1/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    top = b._step_stack[-1]
+    assert top.position_label is True
+
+
+def test_step_node_position_label_defaults_false() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+             model="m", provider="anthropic", label="writing plan",
+             phase_label="planning phase · plan 1/1"))
+    assert b._step_stack[-1].position_label is False
+
+
+def test_current_activity_burst_detail_concatenates_count_and_inflight_tool() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+             model="m", provider="anthropic", label="writing plan",
+             phase_label="planning phase · plan 1/1"))
+    b.add(ev("3", "tool_call", agent_id="a", id="b1", name="read_file",
+             input={"path": "config.py"}))
+    act = b.current_activity()
+    assert act.verb == "writing plan"               # static activity label (verb step)
+    assert act.detail == "1 call · read_file config.py"
+    assert act.position == "planning phase · plan 1/1"
+
+
+def test_current_activity_position_step_is_thinking_with_counter_on_position() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 2/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    act = b.current_activity()
+    assert act.verb == "thinking"                   # position step, no static verb
+    assert act.position == "implementation phase · plan 1/1 · task 2/3"
+    assert act.detail is None
+
+
+def test_current_activity_running_subagent_label_is_verb_nested_tool_is_detail() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 1/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    b.add(ev("3", "tool_call", agent_id="step:code/task-lead", id="t1", name="sub_agent",
+             input={"subagent_name": "coder"}, label="coding"))
+    b.add(ev("4", "tool_call", agent_id="sub:3", id="n1", name="bash",
+             input={"command": "pytest"}))
+    act = b.current_activity()
+    assert act.verb == "coding"                     # subagent frontmatter label
+    assert act.detail is not None and "bash pytest" in act.detail
+    assert act.position == "implementation phase · plan 1/1 · task 1/3"
+
+
+def test_current_activity_script_step_verb_is_the_label() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="verify", kind="script", phase="code",
+             label="running tests", phase_label="implementation phase · plan 1/1",
+             command="pytest -q"))
+    act = b.current_activity()
+    assert act.verb == "running tests"
+    assert act.position == "implementation phase · plan 1/1"
+
+
+def test_current_activity_extra_running_subagents_append_to_detail() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 1/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    b.add(ev("3", "tool_call", agent_id="step:code/task-lead", id="t1", name="sub_agent",
+             input={"subagent_name": "coder"}, label="coding"))
+    b.add(ev("4", "tool_call", agent_id="step:code/task-lead", id="t2", name="sub_agent",
+             input={"subagent_name": "code-reviewer"}, label="reviewing"))
+    act = b.current_activity()
+    assert act.verb == "coding"
+    assert act.detail is not None and "+1 subagent" in act.detail

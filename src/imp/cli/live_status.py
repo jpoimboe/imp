@@ -1,13 +1,14 @@
 # src/imp/cli/live_status.py
-"""The single mutable bottom status line for the live run view.
+"""Fixed multi-row footer block for the live run view.
 
 TTY-only: on a non-TTY stream (pipe / CI) every method is inert, so output is
-just the permanent folded blocks the driver prints (design Part 3). Exactly one
-line is ever rewritten — `\\r` + erase-to-EOL — never an alternate screen.
+just the permanent folded blocks the driver prints (design Part 3). The footer
+owns one blank line above the block (the status-owned blank); _erase() always
+lands the cursor on that blank so the next permanent print overwrites it.
 
 LiveStatus knows nothing about NarrativeBuilder: the driver supplies a `compose`
-callback `(frame: int, elapsed: float) -> str | None` that renders the current
-line. compose returning None means "nothing to show" (the line is erased)."""
+callback `(frame: int, elapsed: float) -> list[str] | None` that renders the
+footer rows (top→bottom). compose returning None means "nothing to show"."""
 from __future__ import annotations
 
 import contextlib
@@ -19,6 +20,7 @@ from typing import Any
 from imp.cli import palette as pal
 
 _ERASE = "\r\x1b[K"     # carriage return + clear-to-end-of-line
+_UP = "\x1b[1A"         # cursor up one row
 _DIM = "\x1b[2m"        # SGR 2 (dim)
 _RESET_SGR = "\x1b[0m"  # SGR 0 (reset all attributes)
 _ACK_MAX_WIDTH = 120    # clip the transient ack line so it never wraps
@@ -41,45 +43,36 @@ class LiveStatus:
         self._stream = stream
         self._enabled = bool(getattr(stream, "isatty", lambda: False)())
         self._now = now
-        self._compose: Callable[[int, float], str | None] | None = None
+        self._compose: Callable[[int, float], list[str] | None] | None = None
         self._session_start: float | None = None
         self._visible = False
         self._suspended = False
         self._frame = 0
         self._prev_width: int | None = None     # display width of the last drawn frame
         self._width_fn: Callable[[], int] = term_width
+        self._rows = 0                          # number of footer rows currently on screen
 
-    def update(self, compose: Callable[[int, float], str | None]) -> None:
+    def update(self, compose: Callable[[int, float], list[str] | None]) -> None:
         """Set/refresh the compose fn and redraw. Starts the session timer on the
         first call after a reset, and keeps it across hide()/update() cycles so
-        `elapsed` grows monotonically rather than resetting per-event. In practice
-        the driver's `current_activity()` stays non-None from the first phase to
-        the end of the run (it falls back to the phase name between steps), so the
-        timer effectively measures elapsed run time until finish()."""
+        `elapsed` grows monotonically rather than resetting per-event."""
         self._compose = compose
         if self._session_start is None:
             self._session_start = self._now()
         self._draw()
 
     def hide(self) -> None:
-        """Erase the on-screen line but KEEP the session timer — used before
-        printing a permanent block; the next update() re-shows with the same
-        elapsed."""
+        """Erase the footer block but KEEP the session timer."""
         self._erase()
 
     def reset(self) -> None:
-        """Erase AND end the session, restarting the timer on the next update().
-        Driven by the driver's `_refresh_status` when `current_activity()` is None
-        (an idle gap with no active phase — in practice only before the first
-        phase and after the run ends, which is when `finish()` calls it)."""
+        """Erase AND end the session, restarting the timer on the next update()."""
         self._erase()
         self._compose = None
         self._session_start = None
 
     def restart_span(self) -> None:
-        """Reset the elapsed timer to zero for a new activity span (§7). Unlike
-        reset(), this keeps the compose fn — the line keeps drawing, just from a
-        fresh t0."""
+        """Reset the elapsed timer to zero for a new activity span."""
         self._session_start = self._now()
         self._draw()
 
@@ -90,8 +83,7 @@ class LiveStatus:
         return self._now() - self._session_start
 
     async def tick(self, interval: float = 0.1) -> None:
-        """Background spinner: advance the frame and redraw on an interval so the
-        line animates during long LLM/tool waits with no events."""
+        """Background spinner: advance the frame and redraw on an interval."""
         import anyio
         while True:
             await anyio.sleep(interval)
@@ -100,18 +92,10 @@ class LiveStatus:
 
     @contextlib.contextmanager
     def suspend(self) -> Iterator[None]:
-        """Clear the line and SUPPRESS drawing around terminal I/O (a prompt or a
-        banner). Setting `_suspended` is load-bearing: the concurrent `tick` task
-        (started via tg.start_soon(status.tick)) keeps firing `_draw()` every
-        interval while `prompt.ask_async` awaits keystrokes; without this guard it
-        would write the spinner line over the user's input.
+        """Clear the footer and suppress drawing around terminal I/O (a prompt).
 
-        On exit the span timer is RESET (§7): the suspend block only ever wraps the
-        interactive solicit loop, so the suspended interval was a human at the
-        prompt — the agent was not working. Resetting here ensures the `thinking`
-        timer counts from the reply rather than from before the prompt (which would
-        fold in the human's read/type time — the `imp new` first-turn "thinking 26s" bug).
-        An unstarted timer is left unstarted (update() owns first-start)."""
+        On exit the span timer is reset: the suspended interval was a human at the
+        prompt — the agent was not working. An unstarted timer is left unstarted."""
         self._suspended = True
         self._erase()
         try:
@@ -123,21 +107,27 @@ class LiveStatus:
             self._draw()
 
     def show_stop_ack(self, text: str) -> None:
-        """Render a transient dim stop-acknowledgment line in the status-line
-        area (console-only chrome: width-clipped, erased in place, never
-        journaled). Uses the same `_ERASE` + stream-write path as the normal
-        status line draw. No-op on non-TTY or while suspended (a prompt owns the
-        tty then — writing would corrupt it, matching `_draw`'s discipline).
-        Called by the ack hook wired in E4 via
-        `coord.set_ack_hook(status.show_stop_ack)`."""
+        """Render a transient dim stop-acknowledgment line in the status area.
+
+        No-op on non-TTY or while suspended."""
         if not self._enabled or self._suspended:
             return
         if len(text) > _ACK_MAX_WIDTH:
             text = text[:_ACK_MAX_WIDTH]
-        # The _ERASE at the start also erases any prior status line.
-        self._stream.write(f"{_ERASE}{_DIM}{text}{_RESET_SGR}")
+        # Erase the WHOLE current footer block first (it may be multi-row) before drawing
+        # the single-row ack, so the upper rows never leak into scroll-back. _erase() lands
+        # the cursor on the status-owned blank and is a strict no-op when nothing is visible.
+        was_visible = self._visible
+        self._erase()
+        # When a block was erased the cursor now sits ON the owned blank; draw the ack one
+        # row BELOW it (lead "\n") so the blank is preserved and the next _erase climbs back
+        # onto it — not one row too high onto committed scroll-back. On a fresh status
+        # (_erase was a no-op) draw in place, identical to the single-line path.
+        lead = "\n" if was_visible else ""
+        self._stream.write(f"{lead}{_ERASE}{_DIM}{text}{_RESET_SGR}")
         self._stream.flush()
         self._visible = True
+        self._rows = 1
 
     # -- internals ------------------------------------------------------------
     def _draw(self) -> None:
@@ -145,37 +135,55 @@ class LiveStatus:
             return
         start = self._session_start if self._session_start is not None else self._now()
         elapsed = self._now() - start
-        text = self._compose(self._frame, elapsed)
-        if text is None:
+        block = self._compose(self._frame, elapsed)
+        if not block:
             self._erase()
             return
         width = self._width_fn()
-        # Clip to width-1 (§5b): a status that fills the whole width can
-        # auto-wrap and resurrect committed-spinner artifact.
-        clipped = pal.clip_display(text, width - 1)
-        new_w = _display_width(clipped)
-        if self._visible and self._prev_width is not None and (width - 1) < self._prev_width:
-            # Narrowing transition: reflow-safe abandon. Erase current row only,
-            # do NOT cursor-up, mark hidden, redraw fresh below.
-            self._stream.write(_ERASE)
+        rows = [pal.clip_display(r, width - 1) for r in block]
+        new_w = max((_display_width(r) for r in rows), default=0)
+        if (self._visible and self._prev_width is not None
+                and (width - 1) < self._prev_width):
+            # Narrowing: abandon the current block in place (no climb), redraw fresh below.
+            self._clear_rows_in_place()
             self._visible = False
             self._prev_width = None
-        if self._visible:
-            # Already showing: rewrite in place on the same row.
-            self._stream.write(f"{_ERASE}{clipped}")
+        if self._visible and self._rows == len(rows):
+            self._stream.write("\r")
+            if self._rows > 1:
+                self._stream.write(f"\x1b[{self._rows - 1}A")
+            self._stream.write("\n".join(_ERASE + r for r in rows))
         else:
-            # First draw after hidden: own the blank line, then status below it.
-            self._stream.write(f"\n{clipped}")
+            if self._visible:
+                self._erase()
+            self._stream.write("\n" + "\n".join(_ERASE + r for r in rows))
         self._stream.flush()
         self._visible = True
         self._prev_width = new_w
+        self._rows = len(rows)
+
+    def _clear_rows_in_place(self) -> None:
+        # Clear every drawn row WITHOUT climbing onto the owned blank (narrowing reflow).
+        if not (self._enabled and self._visible):
+            return
+        self._stream.write("\r")
+        if self._rows > 1:
+            self._stream.write(f"\x1b[{self._rows - 1}A")
+        for i in range(self._rows):
+            self._stream.write("\x1b[K")
+            if i < self._rows - 1:
+                self._stream.write("\n")
+        self._stream.flush()
+        self._rows = 0
 
     def _erase(self) -> None:
         if self._enabled and self._visible:
-            # Erase the status text, then climb onto the status-owned blank so
-            # the next printed block overwrites it. The cursor-up lives INSIDE the
-            # visibility guard — from the not-visible state this is a strict no-op.
-            self._stream.write(_ERASE + "\x1b[1A")
+            # From the end of the last row, clear each row bottom-up and climb one line
+            # per row, ending on the status-owned blank above the block.
+            self._stream.write("\r")
+            for _ in range(self._rows):
+                self._stream.write("\x1b[K" + _UP)
             self._stream.flush()
         self._visible = False
         self._prev_width = None
+        self._rows = 0

@@ -22,7 +22,7 @@ def _stream() -> list[dict]:
            action={"verb": "goto", "target": "task-lead"}, var_mutations={"task_total": 2}),
         ev("7", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/2 · thinking",
-           phase_label="implementation phase · plan 1/2"),
+           phase_label="implementation phase · plan 1/2", position_label=True),
         ev("8", "step_label_updated", agent_id="step:code/task-lead",
            label="task 1/2 · coding"),
         ev("9", "step_label_updated", agent_id="step:code/task-lead",
@@ -31,7 +31,7 @@ def _stream() -> list[dict]:
            action={"verb": "continue"}, var_mutations={}),
         ev("11", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/3 · thinking",
-           phase_label="implementation phase · plan 2/2"),
+           phase_label="implementation phase · plan 2/2", position_label=True),
         ev("12", "step_label_updated", agent_id="step:code/task-lead",
            label="task 1/3 · coding"),
     ]
@@ -47,10 +47,10 @@ def test_golden_status_bar_tracks_live_task_position() -> None:
     stream = _stream()
     for e in stream[:8]:   # through the first live push (task 1/2 · coding)
         b.add(e)
-    assert b.current_activity().step_label == "task 1/2 · coding"
+    assert "task 1/2 · coding" in (b.current_activity().position or "")
     for e in stream[8:]:
         b.add(e)
-    assert b.current_activity().step_label == "task 1/3 · coding"
+    assert "task 1/3 · coding" in (b.current_activity().position or "")
 
 
 def test_golden_breadcrumbs_show_frozen_label_not_live_position() -> None:

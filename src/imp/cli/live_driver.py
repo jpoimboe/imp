@@ -71,54 +71,40 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
     return f"{fill}{track} {pct}%"
 
 
-def _toolbar_step_segment(activity: nv.Activity, *, color: bool, over_bg: bool) -> str | None:
-    parts: list[str] = []
-    if activity.step_label:
-        parts.append(_paint(activity.step_label, "wordmark", color=color, over_bg=over_bg))
-    if activity.count is not None:
-        parts.append(_paint(activity.count, "gray", color=color, over_bg=over_bg))
-        if activity.detail:
-            parts.append(_paint(activity.detail, "gray", color=color, over_bg=over_bg))
-    elif activity.label:
-        parts.append(_paint(activity.label, "gray", color=color, over_bg=over_bg))
-    return rt.compose_label(parts) or None
+def compose_activity_line(*, activity: nv.Activity, elapsed: float,
+                          frame: int, color: bool) -> str:
+    """Activity line: spinner + verb + detail + elapsed (always animated)."""
+    spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=False)
+    parts: list[str | None] = []
+    if activity.verb:
+        parts.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
+    if activity.detail:
+        parts.append(_paint(activity.detail, "gray", color=color, over_bg=False))
+    parts.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=False))
+    return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 
-def compose_toolbar(*, activity: nv.Activity, change_id: str | None, title: str,
-                    prompt_tokens: int | None, elapsed: float, frame: int,
-                    color: bool, width: int, context_pct: float | None = None) -> str:
-    """The single pure toolbar composer. Live-activity fields (spinner · phase · step ·
-    elapsed) sit left; identity/usage fields (id · name · model · context bar) are
-    padded flush-right within `width - 2` columns so they survive the status-line's
-    `clip_display(_, width - 1)`. Below a fit threshold the bar degrades to a single
-    left-to-right line and lets the clip handle overflow. The slate background, when
-    present, wraps the whole padded line."""
+def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
+                         title: str, prompt_tokens: int | None, color: bool,
+                         width: int, context_pct: float | None = None,
+                         pad_slate: bool = True) -> str:
+    """Position bar: id · title · position · model · context bar (no spinner, no elapsed)."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
-    spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=over)
     id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
     title_seg = title if title else None
+    position_seg = (_paint(activity.position, "blue", color=color, over_bg=over)
+                    if activity.position else None)
     model_seg = (_paint(activity.model, "magenta", color=color, over_bg=over)
                  if activity.model else None)
-    phase_seg = (_paint(activity.phase_label,
-                        "blue" if activity.step_label else "wordmark",
-                        color=color, over_bg=over)
-                 if activity.phase_label else None)
-    step_seg = _toolbar_step_segment(activity, color=color, over_bg=over)
-    elapsed_seg = _paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=over)
     bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                       color=color, over_bg=over)
-
-    left = f"{spin} " + rt.compose_label([phase_seg, step_seg, elapsed_seg])
-    right = rt.compose_label([id_seg, title_seg, model_seg, bar])
-    target = width - 2          # largest width clip_display(_, width-1) returns intact
-    left_w = pal.display_width(left)
-    right_w = pal.display_width(right)
-    if right and left_w + right_w + 1 <= target:
-        body = f"{left}{' ' * (target - left_w - right_w)}{right}"
-    else:
-        body = f"{spin} " + rt.compose_label(
-            [id_seg, title_seg, model_seg, phase_seg, step_seg, elapsed_seg, bar])
+    body = rt.compose_label([id_seg, title_seg, position_seg, model_seg, bar])
+    if pad_slate and bg:
+        body_dw = pal.display_width(body)
+        target = width - 2
+        if body_dw < target:
+            body = body + " " * (target - body_dw)
     return f"{bg}{body}{_RESET}" if bg else body
 
 
@@ -126,16 +112,19 @@ def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
     width: int | None = None,
 ) -> str | None:
+    """Single combined status line for the TUI status bar: the activity line joined with
+    the position bar. The streaming live view uses the multi-row footer instead."""
     activity = builder.current_activity()
     if activity is None:
         return None
     root = builder.tree.root
-    return compose_toolbar(
+    w = term_width() if width is None else width
+    bar = compose_position_bar(
         activity=activity, change_id=root.id, title=root.title,
-        prompt_tokens=builder.latest_prompt_tokens, elapsed=elapsed,
-        frame=frame, color=color,
-        width=term_width() if width is None else width,
-        context_pct=builder.latest_context_pct)
+        prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
+        context_pct=builder.latest_context_pct, pad_slate=False)
+    line = compose_activity_line(activity=activity, frame=frame, elapsed=elapsed, color=color)
+    return rt.compose_label([line, bar])
 
 
 @dataclass
@@ -189,6 +178,7 @@ class LiveDriver:
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
         self._emitted_any = False
+        self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
@@ -226,6 +216,7 @@ class LiveDriver:
                         and not self._builder.has_running_subagent):
                     self._status.restart_span()
         self._walk()
+        self._maybe_reemit_header()
         self._refresh_status()
 
     def finish(self) -> None:
@@ -234,18 +225,31 @@ class LiveDriver:
         self._walk(force=True)
         self._status.reset()
 
-    def compose_status(self, frame: int, elapsed: float) -> str | None:
-        # The transient status line renders flush-left at the margin (it reads as
-        # narration, not as a bullet child).
-        return compose_activity_status(
-            self._builder, frame=frame, elapsed=elapsed, color=self._color)
+    def compose_status(self, frame: int, elapsed: float) -> list[str] | None:
+        activity = self._builder.current_activity()
+        if activity is None:
+            return None
+        a_line = compose_activity_line(activity=activity, elapsed=elapsed,
+                                       frame=frame, color=self._color)
+        root = self._builder.tree.root
+        p_bar = compose_position_bar(
+            activity=activity, change_id=root.id, title=root.title,
+            prompt_tokens=self._builder.latest_prompt_tokens,
+            color=self._color, width=term_width(),
+            context_pct=self._builder.latest_context_pct)
+        return [a_line, "", p_bar]
 
     def compose_toolbar_static(self) -> str | None:
-        # The prompt-mode toolbar: the same composed content with a STATIC spinner
-        # (frame 0) and the work span's current elapsed, so prompt_toolkit's native
-        # bottom_toolbar renders identically to the work-mode line.
-        return compose_activity_status(
-            self._builder, frame=0, elapsed=self._status.elapsed(), color=self._color)
+        # Position bar only — no spinner, no elapsed (AC5).
+        activity = self._builder.current_activity()
+        if activity is None:
+            return None
+        root = self._builder.tree.root
+        return compose_position_bar(
+            activity=activity, change_id=root.id, title=root.title,
+            prompt_tokens=self._builder.latest_prompt_tokens,
+            color=self._color, width=term_width(),
+            context_pct=self._builder.latest_context_pct)
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:
@@ -295,6 +299,10 @@ class LiveDriver:
                         rt.header_line(child, depth=cur.depth, color=self._color,
                                        gutters=gutters),
                         depth=cur.depth, gutters=gutters)
+                    if isinstance(child, nv.StepNode):
+                        entry_act = self._builder.current_activity()
+                        self._last_header_position = (
+                            entry_act.position if entry_act is not None else None)
                 if not suppress and isinstance(child, (nv.StepNode, nv.PhaseNode)):
                     self._prev_prose = True
                 child_depth = cur.depth
@@ -486,6 +494,28 @@ class LiveDriver:
         deferred, self._deferred = self._deferred, []
         for lines, prose, sep in deferred:
             self._emit_now(lines, prose=prose, separator_indent=sep)
+
+    def _maybe_reemit_header(self) -> None:
+        # On a mid-step POSITION change, emit a fresh position-only header into the
+        # scrollback (deduped). A verb push or the internal phrase rotation does not
+        # move the position, so it never re-emits.
+        if not self._builder._step_stack:
+            return
+        activity = self._builder.current_activity()
+        position = activity.position if activity is not None else None
+        if position is None or position == self._last_header_position:
+            return
+        top = self._builder._step_stack[-1]
+        if top.quiet or rt.chrome_suppressed(top):
+            return
+        self._prev_prose = True
+        self._print_lines(
+            [rt.header_line(top, depth=self._frontier_depth(), color=self._color,
+                            gutters=self._gutters())],
+            prose=True,
+            separator_indent=rt._gutter_indent(
+                self._frontier_depth(), self._gutters(), self._color))
+        self._last_header_position = position
 
     def _refresh_status(self) -> None:
         # The status line is TRANSIENT: it draws on the line just below the last

@@ -31,39 +31,41 @@ def test_position_vars_declared_with_defaults() -> None:
     assert d["task_total"] == 0
 
 
-def test_plan_writer_label_renders_position(tmp_path: Path) -> None:
+def test_plan_writer_label_is_counter_free(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     label = _label("plan-writer")
-    full = render_label(label, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
-    assert full == "writing plan 2/4"
-    single = render_label(label, ch, ch.event_log(), _state(plan_index=1, plan_total=1))
-    assert single == "writing plan 1/1"
+    assert render_label(label, ch, ch.event_log(),
+                        _state(plan_index=2, plan_total=4)) == "writing plan"
 
 
-def test_plan_reviewer_label_renders_position(tmp_path: Path) -> None:
+def test_plan_reviewer_label_is_counter_free(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     label = _label("plan-reviewer")
-    full = render_label(label, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
-    assert full == "reviewing plan 2/4"
-    single = render_label(label, ch, ch.event_log(), _state(plan_index=1, plan_total=1))
-    assert single == "reviewing plan 1/1"
+    assert render_label(label, ch, ch.event_log(),
+                        _state(plan_index=2, plan_total=4)) == "reviewing plan"
 
 
-def test_plan_finalized_label_renders_position(tmp_path: Path) -> None:
+def test_plan_finalized_label_is_counter_free(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     label = _label("plan-finalized")
-    full = render_label(label, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
-    assert full == "finalizing plan 2/4"
-    single = render_label(label, ch, ch.event_log(), _state(plan_index=1, plan_total=1))
-    assert single == "finalizing plan 1/1"
+    assert render_label(label, ch, ch.event_log(),
+                        _state(plan_index=2, plan_total=4)) == "finalizing plan"
 
 
-def test_task_lead_label_is_static_task_fallback(tmp_path: Path) -> None:
+def test_planning_phase_label_renders_plan_counter(tmp_path: Path) -> None:
+    ch = _change(tmp_path)
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    raw = {p.name: p for p in wf.phases}["plan"].label
+    out = render_label(raw, ch, ch.event_log(), _state(plan_index=2, plan_total=4))
+    assert out == "planning phase · plan 2/4"
+
+
+def test_task_lead_label_is_position_only(tmp_path: Path) -> None:
     ch = _change(tmp_path)
     out = render_label(_label("task-lead"), ch, ch.event_log(), _state(task_total=6))
-    assert out == "task 1/6 · thinking"
+    assert out == "task 1/6"
     single = render_label(_label("task-lead"), ch, ch.event_log(), _state(task_total=1))
-    assert single == "task 1/1 · thinking"
+    assert single == "task 1/1"
 
 
 def test_plan_writer_frontmatter_label_removed() -> None:

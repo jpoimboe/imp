@@ -10,7 +10,7 @@ def _build() -> nv.NarrativeBuilder:
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/6 · thinking",
-           phase_label="implementation phase · plan 2/4"),
+           phase_label="implementation phase · plan 2/4", position_label=True),
     ]:
         b.add(e)
     return b
@@ -20,12 +20,12 @@ def test_live_label_takes_precedence_in_current_activity() -> None:
     b = _build()
     b.add(ev("3", "step_label_updated", agent_id="step:code/task-lead",
              label="task 3/6 · coding"))
-    assert b.current_activity().step_label == "task 3/6 · coding"
+    assert "task 3/6 · coding" in (b.current_activity().position or "")
 
 
 def test_current_activity_falls_back_to_frozen_label() -> None:
     b = _build()
-    assert b.current_activity().step_label == "task 1/6 · thinking"
+    assert "task 1/6 · thinking" in (b.current_activity().position or "")
 
 
 def test_breadcrumb_reads_frozen_label_not_live_label() -> None:
@@ -48,9 +48,10 @@ def test_live_label_cleared_on_resume() -> None:
     # Push a live label
     b.add(ev("3", "step_label_updated", agent_id="step:code/task-lead",
              label="task 3/6 · coding"))
-    assert b.current_activity().step_label == "task 3/6 · coding"
+    assert "task 3/6 · coding" in (b.current_activity().position or "")
     # Resume the same step — live_label must reset to the frozen label
     b.add(ev("4", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/6 · thinking",
-             phase_label="implementation phase · plan 2/4", resumed=True))
-    assert b.current_activity().step_label == "task 1/6 · thinking"
+             phase_label="implementation phase · plan 2/4", resumed=True,
+             position_label=True))
+    assert "task 1/6 · thinking" in (b.current_activity().position or "")

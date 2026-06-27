@@ -32,7 +32,7 @@ def test_phase_node_carries_label() -> None:
 
 
 def test_current_activity_exposes_phase_label() -> None:
-    assert _build().current_activity().phase_label == "implementation phase · plan 2/4"
+    assert _build().current_activity().position == "implementation phase · plan 2/4"
 
 
 def test_step_completed_copies_phase_label_to_breadcrumb() -> None:
@@ -71,7 +71,7 @@ def test_current_activity_burst_exposes_phase_label() -> None:
            name="bash", input={"command": "make test"}),
     ]:
         b.add(e)
-    assert b.current_activity().phase_label == "implementation phase · plan 2/4"
+    assert b.current_activity().position == "implementation phase · plan 2/4"
 
 
 def test_current_activity_subagent_running_exposes_phase_label() -> None:
@@ -85,7 +85,7 @@ def test_current_activity_subagent_running_exposes_phase_label() -> None:
            name="sub_agent", input={"subagent_name": "coder"}),
     ]:
         b.add(e)
-    assert b.current_activity().phase_label == "implementation phase · plan 2/4"
+    assert b.current_activity().position == "implementation phase · plan 2/4"
 
 
 def test_current_activity_chrome_step_exposes_phase_label() -> None:
@@ -97,4 +97,4 @@ def test_current_activity_chrome_step_exposes_phase_label() -> None:
            phase_label="implementation phase · plan 2/4"),
     ]:
         b.add(e)
-    assert b.current_activity().phase_label == "implementation phase · plan 2/4"
+    assert b.current_activity().position == "implementation phase · plan 2/4"

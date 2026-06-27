@@ -123,6 +123,7 @@ class StepNode:
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
+    position_label: bool = False       # step label is a position counter, not a verb
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
     chrome: str | None = None          # "none" → suppress this step's header
@@ -213,25 +214,20 @@ def display_tool_name(name: str) -> str:
 
 @dataclass
 class Activity:
-    """The structured live-status description (§3): step display label spine,
-    a count phrase, gray detail (tool name + arg), and a fallback label. Any field may
-    be None. Plain text — the driver colors the segments (live_driver.compose_status).
-    The phase label, when present, leads the composed status (the live line joins
-    `<phase label> · <step/live label> · <activity>` via compose_label)."""
-    count: str | None = None
+    """The structured live-status description, split into distinct values so the
+    renderer never re-slices a composed ` · ` string (design): `position` is the
+    phase + step position breadcrumb (never a verb); `verb` is the reality-derived
+    activity verb head; `detail` is the live tool/burst tail (it rides alongside the
+    verb, never replaces it). Plain text — the driver colors the segments."""
+    position: str | None = None
+    verb: str | None = None
     detail: str | None = None
-    label: str | None = None
-    step_label: str | None = None    # step DISPLAY label; None for a quiet/unlabeled step
-    phase_label: str | None = None   # owning phase's rendered label; None when absent
-    model: str | None = None         # current step's resolved model id; None when no step
+    model: str | None = None
 
 
-def activity_to_text(activity: Activity | None) -> str:
-    """Flatten an Activity to one plain (no-ANSI) line — used by SubagentFold to
-    fold its nested builder's activity into its own status text."""
-    if activity is None:
-        return ""
-    return " · ".join(p for p in (activity.count, activity.detail, activity.label) if p)
+def _join(*parts: str | None) -> str | None:
+    out = " · ".join(p for p in parts if p)
+    return out or None
 
 
 @dataclass
@@ -276,12 +272,6 @@ class SubagentFold:
     @property
     def tree(self) -> NarrativeTree:
         return self.nested.tree
-
-    def current_activity(self) -> str:
-        detail = activity_to_text(self.nested.current_activity())
-        tail = f" · {detail}" if detail else ""
-        head = self.label if self.label else f"subagent({self.subagent_name})"
-        return f"{head} · {self.event_count} events{tail}"
 
 
 @dataclass
@@ -489,54 +479,66 @@ class NarrativeBuilder:
         return any(f.running for f in self._open_sub_by_event.values())
 
     def current_activity(self) -> Activity | None:
-        """Current activity for the live status line; None when idle."""
+        """Current activity for the live status footer; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
-        step_label = (
-            (top.live_label or top.rotated_phrase or top.label) if top is not None else None)
-        phase_label = top.phase_label if top is not None else None
-        model = top.model if top is not None else None
+        if top is not None:
+            model = top.model
+            if top.position_label:
+                # A position step's label is a counter — never a phrase. rotated_phrase is
+                # a verb-phrase concept, so it is deliberately excluded here so a rotating
+                # phrase can never land a verb on the position breadcrumb.
+                position = _join(top.phase_label, top.live_label or top.label)
+                static_verb: str | None = None
+            else:
+                position = top.phase_label
+                static_verb = top.live_label or top.rotated_phrase or top.label
+        else:
+            model = None
+            position = None
+            static_verb = None
+
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
-            label = running[0].current_activity()
+            f = running[0]
+            verb = f.label if f.label else f"subagent({f.subagent_name})"
+            nested = f.nested.current_activity()
+            detail = nested.detail if nested is not None else None
             extra = len(running) - 1
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
-                label = f"{label} (+{extra} {noun})"
-            return Activity(step_label=step_label, label=label, phase_label=phase_label,
-                            model=model)
+                detail = _join(detail, f"+{extra} {noun}")
+            return Activity(position=position, verb=verb, detail=detail, model=model)
+
+        detail = None
         burst = self._current_burst
         if burst is not None:
-            basis = visible_calls(burst)         # keeps killed (recap parity)
+            basis = visible_calls(burst)
             if basis:
                 n = len(basis)
                 count = f"{n} call{'s' if n != 1 else ''}"
-                # In-flight = the call actually still running: no result AND not
-                # killed (a killed call keeps result is None), so the timer anchors
-                # to the wedged call, not a resolved or killed one.
                 inflight = next(
                     (c for c in reversed(basis)
                      if c.result is None and not c.killed), None)
-                detail = None
+                tool = None
                 if inflight is not None:
                     arg = _sanitize_activity_arg(
                         next(iter((inflight.input or {}).values()), ""))
-                    detail = f"{display_tool_name(inflight.name)} {arg}".rstrip()
-                return Activity(count=count, detail=detail, step_label=step_label,
-                                phase_label=phase_label, model=model)
-            # empty filtered basis → fall through to the per-kind rule
-        if self._step_stack:
-            top = self._step_stack[-1]
+                    tool = f"{display_tool_name(inflight.name)} {arg}".rstrip()
+                detail = _join(count, tool)
+
+        if top is not None:
             if top.kind in CHROME_KINDS:
-                # Name the running command (script steps carry one); command-less
-                # chrome kinds fall back to a bare label + timer.
-                return Activity(step_label=step_label, label=top.command,
-                                phase_label=phase_label, model=model)
-            # Pure-thinking agent turn: the spinner + step label already imply it,
-            # so emit no activity word.
-            return Activity(step_label=step_label, label=None, phase_label=phase_label,
-                            model=model)
+                return Activity(position=position, verb=static_verb or top.command,
+                                detail=detail, model=model)
+            return Activity(position=position, verb=static_verb or "thinking",
+                            detail=detail, model=model)
+        # No step on this builder. A dispatched subagent's nested builder reaches
+        # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
+        # and concatenate it onto the subagent's verb.
+        if detail is not None:
+            return Activity(detail=detail)
         if self._current_phase is not None:
-            return Activity(label="working")
+            return Activity(verb="working")
         return None
 
     def seed_opening_intent(self, text: str) -> None:
@@ -875,6 +877,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.resumed = bool(p.get("resumed", False))
             existing.route_label = p.get("route_label")
             existing.rotate_phrase = bool(p.get("rotate_phrase", False))
+            existing.position_label = bool(p.get("position_label", False))
             existing.rotated_phrase = None
             if existing is self._first_step:
                 _inject_opening_intent(self, existing)
@@ -888,6 +891,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
                     quiet=bool(p.get("quiet", False)),
+                    position_label=bool(p.get("position_label", False)),
                     label=p.get("label"),
                     chrome=p.get("chrome"),
                     phase_label=p.get("phase_label"),

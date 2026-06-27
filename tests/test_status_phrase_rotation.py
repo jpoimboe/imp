@@ -36,12 +36,12 @@ def test_phrase_rotates_after_each_tool_work_segment(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = _front_door_builder()
     b.add(_tool("3", "c1"))
-    seg1 = b.current_activity().step_label
+    seg1 = b.current_activity().verb
     b.add(_prose("4"))
-    seg2 = b.current_activity().step_label
+    seg2 = b.current_activity().verb
     b.add(_tool("5", "c2"))
     b.add(_prose("6"))
-    seg3 = b.current_activity().step_label
+    seg3 = b.current_activity().verb
     assert seg1 == "frozen0"          # initial frozen phrase shows through segment 1
     assert seg2 == "rot1"             # fresh draw at the first segment boundary
     assert seg3 == "rot2"             # a different fresh draw at the second
@@ -53,14 +53,14 @@ def test_pure_thinking_segment_advances_the_phrase(monkeypatch) -> None:
     b = _front_door_builder()
     b.add(ev("3", "thinking", agent_id="a", content="hmm"))
     b.add(_prose("4"))
-    assert b.current_activity().step_label == "rot1"
+    assert b.current_activity().verb == "rot1"
 
 
 def test_no_rotation_when_a_segment_has_no_work(monkeypatch) -> None:
     monkeypatch.setattr(_PHRASE_FN, lambda: "SHOULD_NOT_DRAW")
     b = _front_door_builder()
     b.add(_prose("3"))                # prose boundary, no tool_call/thinking before it
-    assert b.current_activity().step_label == "frozen0"
+    assert b.current_activity().verb == "frozen0"
 
 
 def test_pushed_live_label_beats_the_rotated_phrase(monkeypatch) -> None:
@@ -69,7 +69,7 @@ def test_pushed_live_label_beats_the_rotated_phrase(monkeypatch) -> None:
     b.add(_tool("3", "c1"))
     b.add(_prose("4"))                # rotated_phrase == "rot1"
     b.add(ev("5", "step_label_updated", agent_id="a", label="pushed"))
-    assert b.current_activity().step_label == "pushed"
+    assert b.current_activity().verb == "pushed"
 
 
 def test_rotation_leaves_the_frozen_journal_label_untouched(monkeypatch) -> None:
@@ -90,7 +90,7 @@ def test_step_without_rotate_phrase_keeps_its_label(monkeypatch) -> None:
              model="m", provider="anthropic", label="task 1/6"))
     b.add(_tool("3", "c1"))
     b.add(_prose("4"))
-    assert b.current_activity().step_label == "task 1/6"
+    assert b.current_activity().verb == "task 1/6"
 
 
 def test_phrase_rotates_at_a_user_message_boundary(monkeypatch) -> None:
@@ -99,7 +99,7 @@ def test_phrase_rotates_at_a_user_message_boundary(monkeypatch) -> None:
     b.add(_tool("3", "c1"))
     b.add(ev("4", "user_message", agent_id="a", role="user",
              content=[{"type": "text", "text": "go"}]))
-    assert b.current_activity().step_label == "rot1"
+    assert b.current_activity().verb == "rot1"
 
 
 def test_resume_reentry_resets_rotate_phrase_and_rotated_phrase(monkeypatch) -> None:

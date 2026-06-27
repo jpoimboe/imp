@@ -80,13 +80,13 @@ phases:
           - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 
   - name: plan
-    label: "planning phase"
+    label: "planning phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     steps:
       # plan-writer is the plan-phase entry: the spec phase routes here, and supercycle/rework goto plan-writer directly.
       - name: plan-writer
         file: agents/plan-writer.md
         tier: high
-        label: "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+        label: "writing plan"
         rules:
           # First plan only: seed the running total from plan-writer's estimate. On later
           # plans plan-cycle-check owns plan_total, so this capture must not re-fire.
@@ -104,7 +104,7 @@ phases:
       - name: plan-reviewer
         file: agents/plan-reviewer.md
         tier: high
-        label: "reviewing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+        label: "reviewing plan"
         read_only: ["."]
         # A single plan-reviewer runs directly as the step at its own high tier (the
         # prior medium tier was only the coordinator's dispatch-and-collapse cost); the
@@ -125,7 +125,7 @@ phases:
       - name: plan-finalized
         file: agents/plan-finalized.md
         tier: medium
-        label: "finalizing plan {{ vars.plan_index }}/{{ vars.plan_total }}"
+        label: "finalizing plan"
         read_only: ["."]
         rules:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
@@ -134,9 +134,10 @@ phases:
     label: "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     steps:
       - name: task-lead
+        position_label: true
         file: agents/task-lead.md
         tier: high
-        label: "task 1/{{ vars.task_total }} · thinking"
+        label: "task 1/{{ vars.task_total }}"
         rules:
           - {if: {verify_tolerated: true}, goto: cleanup-implement}
           - {else: true, continue: true}

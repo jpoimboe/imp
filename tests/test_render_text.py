@@ -1562,18 +1562,20 @@ def test_route_reason_rides_target_step_header() -> None:
     assert hdr.strip().endswith("· addressing review feedback")
 
 
-def test_header_line_uses_step_label_and_falls_back_to_id() -> None:
+def test_header_line_falls_back_to_name_when_no_phase_or_position() -> None:
+    # With no phase_label and position_label=False the header collapses to node.name.
     labeled = nv.StepNode(name="code-reviewer", kind="agent", label="reviewing code")
-    assert rt.header_line(labeled, depth=1, color=False) == "  reviewing code"
+    assert rt.header_line(labeled, depth=1, color=False) == "  code-reviewer"
     unlabeled = nv.StepNode(name="commit-check", kind="script")
     assert rt.header_line(unlabeled, depth=1, color=False) == "  commit-check"
 
 
 def test_header_line_appends_gray_resume_marker() -> None:
+    # No phase_label, position_label=False: base collapses to node.name.
     node = nv.StepNode(name="code-reviewer", kind="agent",
                        label="reviewing code", model="opus", resumed=True)
-    # plain text: marker sits after the label, before the model suffix.
-    assert rt.header_line(node, depth=0, color=False) == "reviewing code (resume) · opus"
+    # plain text: marker sits after the name, before the model suffix.
+    assert rt.header_line(node, depth=0, color=False) == "code-reviewer (resume) · opus"
     # color: the " (resume)" span is chrome gray (theme-resolved).
     colored = rt.header_line(node, depth=0, color=True)
     assert pal.ansi(" (resume)", "gray") in colored
@@ -1584,7 +1586,7 @@ def test_header_line_appends_gray_resume_marker() -> None:
     # a resumed step with no model has no model tail.
     no_model = nv.StepNode(name="commit-check", kind="script",
                            label="checking commit", resumed=True)
-    assert rt.header_line(no_model, depth=0, color=False) == "checking commit (resume)"
+    assert rt.header_line(no_model, depth=0, color=False) == "commit-check (resume)"
 
 
 def test_caret_escape_maps_control_bytes_to_caret_notation() -> None:
@@ -1991,17 +1993,18 @@ def test_warning_node_renders_warning_wordmark_in_all_themes() -> None:
 
 
 def test_header_line_appends_route_label_suffix() -> None:
+    # No phase_label, position_label=False: base collapses to node.name.
     # Forward-routed header: yellow " · <reason>" rides last, after the model.
     fwd = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
                       model="opus", route_label="addressing review feedback")
     assert rt.header_line(fwd, depth=0, color=False) == \
-        "implementing the plan · opus · addressing review feedback"
+        "task-lead · opus · addressing review feedback"
     # Resume header: " (resume)", then the model, then the reason — always last.
     res = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
                       model="opus", resumed=True,
                       route_label="addressing review feedback")
     assert rt.header_line(res, depth=0, color=False) == \
-        "implementing the plan (resume) · opus · addressing review feedback"
+        "task-lead (resume) · opus · addressing review feedback"
     # The reason segment is painted lifecycle (yellow), distinct from the step color.
     colored = rt.header_line(fwd, depth=0, color=True)
     assert pal.ansi(" · addressing review feedback",
@@ -2009,7 +2012,7 @@ def test_header_line_appends_route_label_suffix() -> None:
     # No route_label → byte-identical to today (no trailing segment).
     bare = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
                        model="opus")
-    assert rt.header_line(bare, depth=0, color=False) == "implementing the plan · opus"
+    assert rt.header_line(bare, depth=0, color=False) == "task-lead · opus"
 
 
 def test_phase_end_rule_collapses_when_subsecond() -> None:
@@ -2044,11 +2047,12 @@ def test_compose_label_joins_present_segments() -> None:
 
 
 def test_header_line_composes_phase_label_into_step_header() -> None:
+    # With position_label=False the verb label drops; only phase_label remains.
     step = nv.StepNode(name="finalize", kind="agent",
                        phase_label="implementation phase · plan 1/3",
                        label="finalizing")
     assert rt.header_line(step, depth=1, color=False) == (
-        "  implementation phase · plan 1/3 · finalizing")
+        "  implementation phase · plan 1/3")
 
 
 def test_phase_divider_uses_phase_label() -> None:
@@ -2156,3 +2160,32 @@ def test_render_tree_caps_hr_while_prose_stays_unwrapped() -> None:
     assert any(long_line in ln for ln in out)          # prose unwrapped
     assert any(ln.count("─") == 40 for ln in out)      # HR capped to display width
     assert not any(ln.count("─") > 40 for ln in out)
+
+
+def test_step_header_drops_verb_label_for_verb_step() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import header_line
+    node = nv.StepNode(name="plan-writer", kind="agent", label="writing plan",
+                       phase_label="planning phase · plan 2/4", position_label=False)
+    line = header_line(node, depth=0, color=False)
+    assert line.strip() == "planning phase · plan 2/4"
+    assert "writing plan" not in line
+
+
+def test_step_header_keeps_position_label_for_position_step() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import header_line
+    node = nv.StepNode(name="task-lead", kind="agent", label="task 2/3",
+                       phase_label="implementation phase · plan 1/1",
+                       position_label=True)
+    line = header_line(node, depth=0, color=False)
+    assert line.strip() == "implementation phase · plan 1/1 · task 2/3"
+
+
+def test_step_header_position_label_without_phase_falls_to_label() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import header_line
+    node = nv.StepNode(name="task-lead", kind="agent", label="task 2/3",
+                       phase_label=None, position_label=True)
+    line = header_line(node, depth=0, color=False)
+    assert line.strip() == "task 2/3"

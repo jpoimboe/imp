@@ -708,12 +708,11 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks(monkeypatch) -> N
 
 
 def test_refresh_status_injects_no_newline_and_preserves_prev_prose() -> None:
-    """The status line is transient: _refresh_status draws it (a \\r-rewritten
-    line, no newline) and must NOT inject a separating "\\n". That injected
-    newline used to (a) commit the visible spinner line into scroll-back — a stray
-    `name · working` above each breadcrumb — and (b) stack with _print_lines' own
-    separator into double blanks. Permanent spacing is _print_lines' job alone, so
-    `_prev_prose` is left untouched and the status writes no bare newline."""
+    """The status block is transient: _refresh_status draws it (\\r-rewritten rows,
+    no trailing newline) and must NOT append a separating "\\n" after the last row.
+    A trailing newline commits the block into scroll-back and stacks with
+    _print_lines' own separator into double blanks. Permanent spacing is
+    _print_lines' job alone; `_prev_prose` is left untouched."""
     out = _TTYPipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     # Set up a builder activity so current_activity() returns non-None.
@@ -725,7 +724,7 @@ def test_refresh_status_injects_no_newline_and_preserves_prev_prose() -> None:
     drv._prev_prose = True
     drv._refresh_status()
     written = out.getvalue()
-    assert "\n" not in written, f"status must not inject a newline; got {written!r}"
+    assert not written.endswith("\n"), f"status must not end with a newline; got {written!r}"
     assert drv._prev_prose is True   # preserved → the NEXT block still gets one blank
 
 
@@ -804,18 +803,6 @@ def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
     ]:
         drv.on_event(e)
     assert calls == ["restart"]                                          # only step_started
-
-
-def test_compose_status_colors_count_detail_label() -> None:
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
-    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-                    input={"command": "ls"}))
-    line = drv.compose_status(0, 1.0)
-    assert "1 call" in line
-    assert "bash ls" in line
-    assert "\x1b[90m" in line          # detail painted gray
 
 
 def test_chrome_step_header_streams_live_and_matches_log() -> None:
@@ -1013,40 +1000,28 @@ def test_compose_activity_status_paints_count_detail_label() -> None:
                    input={"command": "ls"}))
     line = compose_activity_status(builder, frame=0, elapsed=1.0, color=True)
     assert line is not None
+    assert "thinking" in line           # verb head for unlabeled agent step
     assert "1 call" in line
     assert "bash ls" in line
     assert "\x1b[90m" in line          # detail painted gray
-
-
-def test_compose_status_returns_activity_content() -> None:
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
-    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
-                    input={"command": "ls"}))
-    result = drv.compose_status(0, 1.0)
-    assert result is not None
-    assert "bash ls" in result
-    assert "1 call" in result
-    assert "\x1b[90m" in result    # gray detail segment
+    assert "|" not in line             # no old ASCII spinner
 
 
 def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
     """The transient status line renders flush-left — no gutter indent — even
     while a step is streaming at a deeper frontier."""
-    from imp.cli.live_driver import compose_activity_status
-
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
     drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
     assert drv._frontier_depth() == 0                  # streaming flush at column 0
-    raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
     result = drv.compose_status(0, 1.0)
-    assert result == raw                                # no indent added
-    assert not result.startswith(" ")                  # spinner at column 0
-    assert result[0] == "⠋"
+    assert isinstance(result, list) and len(result) == 3
+    assert not result[0].startswith(" ")               # spinner at column 0
+    assert result[0][0] == "⠋"
+    # position bar is on result[-1]
+    assert not result[-1].startswith(" ")
 
 
 
@@ -1238,7 +1213,6 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
 def test_status_spinner_uses_braille_glyph() -> None:
     from imp.cli.live_driver import compose_activity_status
     from imp.cli.narrative import NarrativeBuilder
-    from tests._event_fixtures import ev
 
     builder = NarrativeBuilder()
     builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
@@ -1246,8 +1220,11 @@ def test_status_spinner_uses_braille_glyph() -> None:
                    input={"command": "ls"}))
     status = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
     assert status is not None
-    assert status[0] == "⠋"          # braille frame 0, not the old ASCII spinner
+    assert status[0] == "⠋"          # braille frame 0 is the first character
     assert "|" not in status          # the "|/-\\" cycle is gone
+    assert "thinking" in status       # verb head for unlabeled agent step
+    assert "1 call" in status         # burst count in detail
+    assert "bash ls" in status        # in-flight tool in detail
 
 
 def test_status_line_shows_step_then_activity_then_elapsed() -> None:
@@ -1359,9 +1336,9 @@ def test_current_activity_detail_anchors_to_in_flight_call() -> None:
     b.add(ev("k3", "tool_killed", agent_id="a", id="c3", name="grep"))
     act = b.current_activity()
     assert act is not None
-    assert act.step_label == "searching"
-    assert act.detail == "bash ls"       # in-flight call (c2), not killed c3
-    assert act.count == "3 calls"        # count basis keeps killed
+    assert act.verb == "searching"
+    assert "bash ls" in (act.detail or "")   # in-flight call (c2), not killed c3
+    assert "3 calls" in (act.detail or "")   # count basis keeps killed
 
 
 def test_compose_activity_status_has_no_per_call_timer() -> None:
@@ -1381,8 +1358,7 @@ def test_compose_activity_status_has_no_per_call_timer() -> None:
 def test_status_spine_label_activity_elapsed() -> None:
     from imp.cli.live_driver import compose_activity_status
 
-    # labeled agent step: step_label · elapsed (no thinking verb).
-    # The phase is deliberately omitted (it lives in the scrollback phase header).
+    # labeled agent step: verb · elapsed in the activity line (no phase, no thinking).
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1392,13 +1368,14 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         b.add(e)
     line = compose_activity_status(b, frame=0, elapsed=18.0, color=False, width=80)
-    # Right-align layout: the activity group (step · elapsed) leads flush-left and the
-    # identity group (title · model) is padded flush-right. No phase_label here -> no
-    # phase field; no thinking verb. change_created sets title "x"; the step carries "m".
-    assert line.startswith("⠋ reviewing plan · 18s")   # activity group (step · elapsed) leads
-    assert line.endswith("x · m")                      # identity group (title · model) flush right
+    # Activity line: spinner · verb · elapsed. Identity (title/model) is in the
+    # position bar — not in the activity line.
+    assert line.startswith("⠋ reviewing plan · 18s")
+    suffix = line[len("⠋ reviewing plan · 18s"):]
+    assert "x" in suffix   # title appears in position bar (later in combined line)
+    assert "m" in suffix   # model appears in position bar (later in combined line)
 
-    # quiet/unlabeled script step: no display label, no command -> bare timer.
+    # quiet/unlabeled script step: no display label, no command → bare timer.
     q = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -1407,10 +1384,8 @@ def test_status_spine_label_activity_elapsed() -> None:
     ]:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False, width=80)
-    # quiet/unlabeled script step: a bare timer leads (no model, step, or phase field);
-    # only the title sits in the right group, flush right.
-    assert qline.startswith("⠋ 4s")                    # bare timer leads
-    assert qline.endswith("x")                         # title flush right
+    assert qline.startswith("⠋ 4s")     # bare timer leads (no verb, no detail)
+    assert "x" in qline                 # title appears in position bar (joined into combined line)
 
 
 def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
@@ -1744,10 +1719,13 @@ def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
             b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
             line = compose_activity_status(b, frame=0, elapsed=1.0, color=True)
             assert line is not None
-            # The toolbar opens with the user-message slate (empty under ansi), then the
-            # gold wordmark spinner — never cyan.
-            assert line.startswith(pal.user_bg_open(enabled=True) + pal._ANSI["wordmark"])
+            # The activity line uses the wordmark color for the spinner — never cyan.
+            # No background prefix on the activity line (background is on the position bar).
+            assert pal._ANSI["wordmark"] in line             # wordmark spinner present
             assert pal._ANSI["cyan"] not in line             # no longer cyan
+            bg = pal.user_bg_open(enabled=True)
+            if bg:  # only check when the theme has a bg color
+                assert not line.startswith(bg)               # no bg prefix on activity line
     finally:
         pal.set_theme("ansi")
 
@@ -1820,183 +1798,42 @@ def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:
     assert context_bar("sonnet", None, color=False, over_bg=False) is None
 
 
-def _toolbar_activity() -> nv.Activity:
-    return nv.Activity(step_label="task-lead", phase_label="implement",
-                       count="2 calls", detail="bash ls", model="claude-sonnet-4-5")
-
-
-def test_compose_toolbar_shows_all_seven_fields_plain() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                           title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=False, width=80)
-    assert line[0] == "⠋"                       # spinner glyph leads (no bg when plain)
-    assert "z9gixx" in line                      # change id
-    assert "streaming toolbar" in line           # title
-    assert "claude-sonnet-4-5" in line           # model
-    assert "implement" in line                   # phase
-    assert "task-lead" in line                   # step
-    assert "2 calls" in line and "bash ls" in line   # transient activity detail kept
-    assert "5s" in line                          # elapsed
-    assert "█" in line and "13%" in line         # context bar
-
-
-def test_compose_toolbar_paints_field_accents_under_ansi_theme() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                           title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=True, width=80)
-    assert "\x1b[33m" in line          # wordmark: spinner, change id, active step label
-    assert "\x1b[90m" in line          # gray: call-count phrase + context-bar track
-    assert "\x1b[34m" in line          # blue: phase (a step is present)
-    assert "\x1b[35m" in line          # model magenta
-    assert "\x1b[2m" in line           # elapsed dim
-
-
-def test_compose_toolbar_change_id_and_active_label_are_orange() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                           title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=True, width=80)
-    assert "\x1b[33mz9gixx\x1b[0m" in line          # id painted wordmark (was gray)
-    assert "\x1b[33mtask-lead\x1b[0m" in line        # active step label wordmark (was step-blue)
-    assert "\x1b[34mimplement\x1b[0m" in line        # phase stays blue when a step is present
-
-
-def test_compose_toolbar_tool_detail_counts_recede_gray() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                           title="t", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=True, width=80)
-    assert "\x1b[90m2 calls\x1b[0m" in line          # call-count phrase recedes gray
-    assert "\x1b[90mbash ls\x1b[0m" in line          # tool name/arg detail stays gray
-
-
-def test_compose_toolbar_phase_is_orange_when_no_step_label() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    act = nv.Activity(phase_label="implement", model="claude-sonnet-4-5")  # no step_label
-    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
-                           prompt_tokens=26000, elapsed=5.0, frame=0, color=True, width=80)
-    assert "\x1b[33mimplement\x1b[0m" in line        # most-specific active label (phase) is orange
-
-
-def test_compose_toolbar_wears_user_slate_background_under_dark_theme() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_toolbar
-    try:
-        pal.set_theme("dark")
-        line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                               title="streaming toolbar", prompt_tokens=26000,
-                               elapsed=5.0, frame=0, color=True, width=80)
-        assert line.startswith("\x1b[48;2;43;47;58m")   # opens with the user-message slate
-        assert line.endswith("\x1b[0m")                  # closes the bar with a full reset
-        # The dim elapsed segment (SGR 2) must close with SGR 22, not a bare \x1b[39m, or
-        # the dim bleeds into the trailing context bar (the dim-bleed bug). This exact
-        # substring fails if _FG_RESET reverts to a foreground-only reset.
-        assert "\x1b[2m5s\x1b[22;39m" in line
-    finally:
-        pal.set_theme("ansi")
-
-
-def test_compose_toolbar_omits_bar_for_unknown_model() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    act = nv.Activity(step_label="s", phase_label="p", model="unlisted-model")
-    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
-                           prompt_tokens=99, elapsed=1.0, frame=0, color=False, width=80)
-    assert "%" not in line             # bar omitted
-    assert "z9gixx" in line and "p" in line and "s" in line   # rest still renders
-
-
-def test_compose_toolbar_step_segment_uses_label_when_no_count() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    # count is None -> the step segment falls back to activity.label, not count/detail.
-    act = nv.Activity(step_label="task-lead", label="reviewing plan",
-                      phase_label="implement", model="claude-sonnet-4-5")
-    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
-                           prompt_tokens=26000, elapsed=5.0, frame=0, color=False, width=80)
-    assert "task-lead" in line          # step label still present
-    assert "reviewing plan" in line     # fallback label used when count is None
-
-
-def test_compose_toolbar_label_fallback_recedes_gray() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    act = nv.Activity(step_label="task-lead", label="reviewing plan",
-                      model="claude-sonnet-4-5")  # label fallback, no count
-    line = compose_toolbar(activity=act, change_id="z9gixx", title="t",
-                           prompt_tokens=26000, elapsed=5.0, frame=0,
-                           color=True, width=80)
-    assert "\x1b[90mreviewing plan\x1b[0m" in line   # label fallback recedes gray
-
-
-def test_compose_activity_status_now_includes_change_id_and_title() -> None:
-    from imp.cli.live_driver import compose_activity_status
-    builder = nv.NarrativeBuilder()
+def test_compose_position_bar_includes_change_id_title_position_model() -> None:
+    import imp.cli.narrative as nv_mod
+    from imp.cli.live_driver import compose_position_bar
+    builder = nv_mod.NarrativeBuilder()
     builder.add(ev("1", "change_created", id="z9gixx", title="streaming toolbar"))
-    # phase_label= populates Activity.phase_label and label= the step field — the
-    # `phase=` key is the phase NAME (PhaseNode.name), NOT the rendered phase label.
     builder.add(ev("2", "step_started", step="s", kind="agent", phase="p",
                    model="sonnet", phase_label="implement", label="task-lead"))
-    line = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
-    assert line is not None
-    assert "z9gixx" in line and "streaming toolbar" in line
-    assert "implement" in line and "task-lead" in line   # phase + step fields render
+    activity = builder.current_activity()
+    root = builder.tree.root
+    bar = compose_position_bar(activity=activity, change_id=root.id, title=root.title,
+                               prompt_tokens=None, color=False, width=80)
+    # Identity (id, title) and breadcrumb (position=phase_label, model) all appear.
+    assert "z9gixx" in bar and "streaming toolbar" in bar
+    assert "implement" in bar    # position = phase_label for non-position_label step
+    assert "sonnet" in bar       # model appears in position bar
 
 
 def test_compose_toolbar_static_uses_frame_zero_and_status_elapsed() -> None:
     out = _Pipe()
     status = LiveStatus(out, now=lambda: 7.0)
     drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p", model="sonnet"))
-    # update() starts the span at now()=7.0; elapsed stays 0 with a frozen clock.
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="sonnet", phase_label="impl phase"))
     static = drv.compose_toolbar_static()
     assert static is not None
-    assert static[0] == "⠋"            # frame 0 spinner glyph
-    assert "0s" in static              # status.elapsed() == 0 under the frozen clock
+    assert "⠋" not in static          # position bar has no spinner (AC5)
+    assert "0s" not in static          # position bar has no elapsed (AC5)
+    assert "sonnet" in static          # model appears in position bar
+    assert "impl phase" in static      # position breadcrumb present
 
 
 def test_compose_toolbar_static_none_when_idle() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     assert drv.compose_toolbar_static() is None    # no activity -> no toolbar
-
-
-def test_compose_toolbar_right_aligns_identity_group_flush_right() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_toolbar
-    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                           title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=False, width=140)
-    # left group (phase/step/elapsed) precedes the right group (id/title/model/bar)
-    assert line.index("implement") < line.index("z9gixx")    # phase (left) before id (right)
-    assert line.index("5s") < line.index("z9gixx")           # elapsed (left) before id (right)
-    assert line.endswith("13%")                              # context bar is flush right
-    assert pal.display_width(line) == 138                    # padded to width-2
-    assert pal.clip_display(line, 139) == line               # survives the width-1 clip intact
-
-
-def test_compose_toolbar_narrow_falls_back_to_single_line_order() -> None:
-    from imp.cli.live_driver import compose_toolbar
-    line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                           title="streaming toolbar", prompt_tokens=26000,
-                           elapsed=5.0, frame=0, color=False, width=80)
-    # too narrow to right-align: today's single left-to-right order (id before phase)
-    assert line.index("z9gixx") < line.index("implement")
-    assert " · " in line
-
-
-def test_compose_toolbar_slate_background_covers_full_padded_line() -> None:
-    from imp.cli import palette as pal
-    from imp.cli.live_driver import compose_toolbar
-    try:
-        pal.set_theme("dark")
-        line = compose_toolbar(activity=_toolbar_activity(), change_id="z9gixx",
-                               title="streaming toolbar", prompt_tokens=26000,
-                               elapsed=5.0, frame=0, color=True, width=140)
-        assert line.startswith("\x1b[48;2;43;47;58m")        # slate opens the line
-        assert line.endswith("\x1b[0m")                      # full reset closes it
-        assert pal.display_width(line) == 138                # padding included under the bg
-    finally:
-        pal.set_theme("ansi")
 
 
 def test_live_driver_caps_hr_at_display_width() -> None:
@@ -2016,3 +1853,142 @@ def test_live_driver_caps_hr_at_display_width() -> None:
     assert any(long_line in ln for ln in body)        # prose unwrapped (wrap width)
     assert any(ln.count("─") == 40 for ln in body)    # HR capped to the display width
     assert not any(ln.count("─") > 40 for ln in body)
+
+
+def test_compose_position_bar_is_flush_left_with_position_and_bar() -> None:
+    from imp.cli.live_driver import compose_position_bar
+    act = nv.Activity(position="implementation phase · plan 1/1 · task 2/3",
+                      model="claude-sonnet-4-5")
+    line = compose_position_bar(activity=act, change_id="z9gixx", title="Fix bug",
+                                prompt_tokens=1000, color=False, width=120)
+    assert line.lstrip().startswith("z9gixx")
+    assert "implementation phase · plan 1/1 · task 2/3" in line
+    assert "Fix bug" in line
+
+
+def test_compose_position_bar_never_contains_the_verb() -> None:
+    from imp.cli.live_driver import compose_position_bar
+    act = nv.Activity(position="planning phase · plan 2/4", verb="writing plan",
+                      detail="3 calls", model="claude-sonnet-4-5")
+    line = compose_position_bar(activity=act, change_id="z9gixx", title="t",
+                                prompt_tokens=1000, color=False, width=120)
+    assert "writing plan" not in line
+    assert "3 calls" not in line
+    assert "planning phase · plan 2/4" in line
+
+
+def test_compose_activity_line_is_verb_detail_elapsed_with_spinner() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="coding", detail="bash pytest", model="m")
+    line = compose_activity_line(activity=act, frame=0, elapsed=14.0, color=False)
+    assert line is not None
+    assert "coding" in line and "bash pytest" in line and "14s" in line
+
+
+def test_compose_activity_line_animates_spinner_and_elapsed_when_verbless() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(position="implementation phase · plan 1/1", verb=None, detail=None)
+    line = compose_activity_line(activity=act, frame=0, elapsed=4.0, color=False)
+    assert line == "⠋ 4s"
+
+
+def test_compose_position_bar_slate_survives_livestatus_clip_under_dark_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_position_bar
+    act = nv.Activity(position="planning phase · plan 1/1", model="claude-sonnet-4-5")
+    try:
+        pal.set_theme("dark")
+        line = compose_position_bar(activity=act, change_id="z9gixx", title="t",
+                                    prompt_tokens=1000, color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    assert line.startswith("\x1b[48;2;43;47;58m")
+    assert line.endswith("\x1b[0m")
+    assert pal.display_width(line) == 118
+    clipped = pal.clip_display(line, 120 - 1)
+    assert clipped == line
+    assert "…" not in clipped
+
+
+def test_compose_activity_status_combined_line_does_not_overflow_under_slate() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_activity_status
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="t"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    try:
+        pal.set_theme("dark")
+        line = compose_activity_status(b, frame=0, elapsed=5.0, color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    assert line is not None
+    assert pal.display_width(line) <= 120 - 1
+    assert pal.clip_display(line, 120 - 1) == line
+
+
+def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    block = drv.compose_status(0, 5.0)
+    assert isinstance(block, list) and len(block) == 3
+    assert "thinking" in block[0]
+    assert block[1] == ""
+    assert "implementation phase · plan 1/1 · task 1/3" in block[2]
+    assert "thinking" not in block[2]
+
+
+def test_compose_toolbar_static_is_position_bar_only() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar is not None
+    assert "implementation phase · plan 1/1 · task 1/3" in toolbar
+    assert "thinking" not in toolbar
+
+
+def test_mid_step_position_change_re_emits_a_header() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="m", provider="anthropic", label="task 1/2",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+                     label="task 2/2"))
+    body = "\n".join(_body(out))
+    assert "implementation phase · plan 1/1 · task 2/2" in body
+
+
+def test_unchanged_position_push_emits_no_duplicate_header() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+                     model="m", provider="anthropic", label="task 1/2",
+                     phase_label="implementation phase · plan 1/1", position_label=True))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+                     label="task 1/2"))           # same position re-pushed
+    assert _body(out) == []                       # no duplicate header
+
+
+def test_verb_step_label_push_emits_no_header() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+                     model="m", provider="anthropic", label="writing plan",
+                     phase_label="planning phase · plan 2/4"))
+    out.truncate(0)
+    out.seek(0)
+    drv.on_event(ev("3", "step_label_updated", agent_id="step:plan/plan-writer",
+                     label="addressing plan review feedback"))   # a verb push, not position
+    assert _body(out) == []                       # position unchanged → no header

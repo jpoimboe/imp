@@ -17,11 +17,16 @@ def _render_task_lead(**var_overrides) -> str:
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 
 
-def test_task_lead_instructs_the_three_live_label_verbs() -> None:
+def test_task_lead_pushes_position_only_no_verbs() -> None:
     out = _render_task_lead()
-    assert "task <N>/6 · thinking" in out      # at task pick
-    assert "task <N>/6 · coding" in out         # at coder dispatch
-    assert "task <N>/6 · reviewing" in out      # before the reviewer
+    assert "task <N>/6" in out          # the one position push at task pick
+    # Exactly one position push: the spec decision is "push once per task". A
+    # regression that de-verbed a flip instead of deleting it would leave extra
+    # pushes, so lock the count at one.
+    assert out.count('update_step_label(label="task <N>/') == 1
+    assert "· thinking" not in out
+    assert "· coding" not in out
+    assert "· reviewing" not in out
 
 
 def test_task_lead_live_label_drops_the_phase_prefix() -> None:
