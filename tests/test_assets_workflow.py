@@ -19,7 +19,7 @@ _BASE_VARS = {
     "plan_minors_integrated": False,
     "review_scope": "plan",
     "review_base": "",
-    "change_panel_done": False,
+    "coverage_settled": False,
     "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
@@ -123,11 +123,11 @@ def test_review_step_declares_high_tier():
     assert by["plan-code-reviewer"].tier == "high"
 
 
-def test_plan_cycle_check_declares_high_tier() -> None:
+def test_gap_check_declares_high_tier() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["plan-cycle-check"].tier == "high"
+    assert by["gap-check"].tier == "high"
 
 
 def test_default_workflow_loads() -> None:
@@ -269,7 +269,8 @@ def test_finalize_tails_the_implement_phase() -> None:
     assert "stamp-trailers" not in names
     assert names[-1] == "finalize"
     assert names[-2] == "summarizer"
-    assert names[-3] == "review-base-repin"
+    assert names[-3] == "gap-check"
+    assert names[-4] == "review-base-repin"
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -419,7 +420,7 @@ def test_review_cadence_vars_declared() -> None:
     assert "tasks_since_review" not in d   # removed: review is per-plan, no counter
     assert "review_batch_size" not in d
     assert "panel_done" not in d            # removed: review-panel keys on review_scope only
-    assert "multi_plan" not in d            # removed: plan-cycle-check owns coverage
+    assert "multi_plan" not in d            # removed: gap-check owns coverage
 
 
 def test_integration_fork_var_declared_default_empty() -> None:
@@ -533,48 +534,39 @@ def test_verify_red_resumes_task_lead() -> None:
     assert m.action.target == "task-lead" and m.action.resume is True
 
 
-def test_change_panel_done_var_declared_default_false() -> None:
+def test_coverage_settled_var_declared_and_change_panel_done_absent() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    assert wf.vars.defaults()["change_panel_done"] is False
+    d = wf.vars.defaults()
+    assert d["coverage_settled"] is False
+    assert "change_panel_done" not in d
+    body = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
+    assert "change_panel_done" not in body
 
 
-def test_plan_cycle_first_coverage_complete_runs_full_panel_and_latches() -> None:
+def test_gap_check_first_coverage_complete_multi_plan_runs_panel_and_latches() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["plan-cycle-check"].rules
-    # Coverage completes for the first time (panel not yet run): the full whole-change
-    # panel fires (review_scope=change) and the once-only guard is latched true.
+    rules = _steps(wf)["gap-check"].rules
+    # Multi-plan change, coverage complete: the change-wide panel fires
+    # (review_scope=change) and coverage_settled latches true.
     m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "change_panel_done": False},
-        output={"more_plans": False, "rationale": "done", "plan_total": 1})
+        rules, vars={**_BASE_VARS, "plan_total": 2},
+        output={"status": "Success", "more_plans": False, "rationale": "done",
+                "plan_total": 2})
     assert isinstance(m.action, Goto) and m.action.target == "plan-code-reviewer"
     assert m.var_mutations["review_scope"] == "change"
-    assert m.var_mutations["change_panel_done"] is True
-
-
-def test_plan_cycle_coverage_complete_after_panel_reviews_per_batch() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["plan-cycle-check"].rules
-    # The panel already ran once (guard latched): a corrective plan completing after a
-    # rework is reviewed as a per-batch diff (review_scope=plan), NOT a fresh full panel.
-    m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "change_panel_done": True},
-        output={"more_plans": False, "rationale": "corrective", "plan_total": 1})
-    assert isinstance(m.action, Goto) and m.action.target == "plan-code-reviewer"
-    assert m.var_mutations["review_scope"] == "plan"
-    assert "change_panel_done" not in m.var_mutations
+    assert m.var_mutations["coverage_settled"] is True
 
 
 def test_review_base_repin_corrective_batch_routes_to_summarizer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["review-base-repin"].rules
-    # A per-batch review settling AFTER the full panel (guard latched) means coverage
-    # is complete: route to summarizer (which then routes to finalize), NOT plan-writer.
+    # A per-plan settle AFTER coverage latched means coverage is complete: route to
+    # summarizer (which then routes to finalize), NOT plan-writer or gap-check.
     m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": True},
+        rules, vars={**_BASE_VARS, "review_scope": "plan", "coverage_settled": True},
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "summarizer"
 
@@ -583,12 +575,13 @@ def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["review-base-repin"].rules
-    # A normal mid-change per-batch review (panel not yet run) loops back to plan-writer
-    # for the next plan -- unchanged behavior, guarded against regression.
+    # More outline plans remain (plan_index < plan_total): loop back to plan-writer.
     m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "review_scope": "plan", "change_panel_done": False},
+        rules, vars={**_BASE_VARS, "review_scope": "plan", "plan_index": 1,
+                     "plan_total": 3, "coverage_settled": False},
         output={"exit": 0, "stdout": "abc123", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    assert m.var_mutations["plan_index"] == 2
 
 
 def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
@@ -789,7 +782,7 @@ def test_summarizer_step_between_repin_and_finalize() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
-    assert names[-3:] == ["review-base-repin", "summarizer", "finalize"]
+    assert names[-3:] == ["gap-check", "summarizer", "finalize"]
 
 
 def test_summarizer_declares_medium_tier() -> None:
@@ -908,3 +901,67 @@ def test_plan_writer_consumes_outline_with_express_carveout() -> None:
     # The supercycle sentence is refreshed to the outline-driven loop + gap-check.
     assert "outline-driven plan loop" in low
     assert "gap-check" in low
+
+
+def test_plan_cycle_check_gone_gap_check_present_and_reachable() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    by = _steps(wf)
+    # The retired guard is gone from steps and disk; gap-check replaces it.
+    assert "plan-cycle-check" not in by
+    agents_dir = bundled_workflow_dir("imp") / "agents"
+    assert not (agents_dir / "plan-cycle-check.md").exists()
+    assert (agents_dir / "gap-check.md").exists()
+    assert "gap-check" in by and by["gap-check"].tier == "high"
+    # gap-check is reachable: review-base-repin routes to it on the last outline plan.
+    rules = by["review-base-repin"].rules
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "plan_index": 1, "plan_total": 1},
+                       output={"exit": 0, "stdout": "abc", "stderr": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "gap-check"
+
+
+def test_gap_check_routing_and_latch() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["gap-check"].rules
+    # Gap found -> author a corrective via plan-writer; latch stays false.
+    gap = evaluate_rules(rules, vars={**_BASE_VARS, "plan_index": 2, "plan_total": 2},
+                         output={"status": "Success", "more_plans": True,
+                                 "plan_total": 3, "rationale": "x"})
+    assert isinstance(gap.action, Goto) and gap.action.target == "plan-writer"
+    assert gap.var_mutations["plan_index"] == 3
+    assert gap.var_mutations["review_scope"] == "plan"
+    assert "coverage_settled" not in gap.var_mutations
+    # Clean + multi-plan -> latch coverage_settled + change-wide plan-code-reviewer.
+    multi = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 2},
+                           output={"status": "Success", "more_plans": False,
+                                   "plan_total": 2, "rationale": "done"})
+    assert isinstance(multi.action, Goto) and multi.action.target == "plan-code-reviewer"
+    assert multi.var_mutations["coverage_settled"] is True
+    assert multi.var_mutations["review_scope"] == "change"
+    # Clean + single-plan -> latch + straight to summarizer, no change-wide panel.
+    single = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
+                            output={"status": "Success", "more_plans": False,
+                                    "plan_total": 1, "rationale": "done"})
+    assert isinstance(single.action, Goto) and single.action.target == "summarizer"
+    assert single.var_mutations["coverage_settled"] is True
+
+
+def test_gap_check_agent_is_end_of_change_backstop() -> None:
+    text = (Path("src/imp/assets/workflows/imp/agents") / "gap-check.md").read_text()
+    low = text.lower()
+    assert "name: gap-check" in text
+    assert "end-of-change" in low or "end of change" in low
+    assert "once" in low
+    assert "outline" in low
+    assert "plan-cycle-check" not in low          # no residual old name
+    assert "task-lead" not in low                 # the dropped agent is not referenced
+    assert "plan-code-reviewer" in text           # the code-reviewer rename target
+    assert "sole" in low and "completeness" in low
+    assert "uncovered" in low
+    assert "needs-decision" in low and "suppress" in low
+    assert "more_plans" in low
+    # Clamp rules survive verbatim.
+    assert "the current plan number" in low
+    assert "strictly greater" in low
+    assert "coverage complete" in low

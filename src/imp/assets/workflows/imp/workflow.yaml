@@ -4,11 +4,13 @@ description: |
 
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
-# reviewer judging the medium-tier coder's work), not by vendor. Review fires
-# PER PLAN: plan-cycle-check, the sole coverage guard, routes each settled plan
-# through a single `plan-code-reviewer` step over review_base..HEAD, plus once over the
-# whole change at change end (review_scope=change, cur_base_head..HEAD). deferred-sweep
-# is paired with each review; verify and plan-reviewer stay per-plan.
+# reviewer judging the coder's work), not by vendor. Review fires PER PLAN: a
+# single `plan-code-reviewer` step reviews each settled plan over review_base..HEAD,
+# plus once over the whole change at change end (review_scope=change,
+# cur_base_head..HEAD) when the change spanned more than one plan. deferred-sweep is
+# paired with each review; verify and plan-reviewer stay per-plan. The spec's
+# ## Plan outline drives the plan loop and seeds plan_total; gap-check is the sole
+# end-of-change coverage backstop and latches coverage_settled on success.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -16,10 +18,10 @@ vars:
   plan_minors_integrated: {type: bool, default: false}
   review_scope:           {type: string, default: plan}  # plan | change — per-plan vs end-of-change review
   review_base:            {type: string, default: ""}    # SHA defining the per-plan review diff range
-  change_panel_done:      {type: bool, default: false}   # latched after the once-only end-of-change full panel; a later rework re-entry is reviewed per-plan, not re-paneled
+  coverage_settled:       {type: bool, default: false}   # latched once gap-check is clean; gates the once-only end-of-change gap-check AND the change-wide review; a later rework re-entry is reviewed per-plan, not re-paneled
   integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
   plan_index:             {type: int, default: 1}         # current plan number, rendered in plan/task step labels
-  plan_total:             {type: int, default: 1}         # anticipated total plans; always >= plan_index. plan-cycle-check refines/clamps it each lap.
+  plan_total:             {type: int, default: 1}         # total plans for the run; seeded from the spec's ## Plan outline (via plan-writer's plan-1 echo). >= plan_index. gap-check bumps it only when authoring a corrective.
   task_total:             {type: int, default: 0}         # tasks in the current plan, set by plan-finalized
 
 defaults:
@@ -88,8 +90,9 @@ phases:
         tier: high
         label: "writing plan"
         rules:
-          # First plan only: seed the running total from plan-writer's estimate. On later
-          # plans plan-cycle-check owns plan_total, so this capture must not re-fire.
+          # First plan only: seed plan_total from plan-writer's outline-derived count.
+          # On later plans gap-check owns plan_total (it bumps it only when authoring a
+          # corrective), so this capture must not re-fire.
           - {if: {plan_index: 1}, set: {plan_total: output.plan_total}, continue: true}
           - {else: true, continue: true}
 
@@ -158,7 +161,7 @@ phases:
         quiet: true
         command: './scripts/cleanup.sh "{{ vars.review_base }}"'
         rules:
-          - {if: {exit: 0}, goto: plan-cycle-check}     # clean fold+stamp -> coverage check
+          - {if: {exit: 0}, goto: plan-code-reviewer}   # clean fold+stamp -> per-plan review
           - {if: {exit: 2}, continue: true}             # resolvable fold conflict -> resolver
           - {if: {exit: 3}, resume: task-lead}          # dirty tree: the agent left work
           - {else: true, pause: true}                   # hard failure / out-of-range fixup
@@ -171,35 +174,10 @@ phases:
         rules:
           - {else: true, goto: cleanup-implement}
 
-      # SOLE coverage guard. First-match-wins: the more_plans:true rule is tested first,
-      # so a plan with uncovered scope remaining is reviewed before the coverage-complete
-      # branches are considered. It no longer arbitrates review cadence or increments any
-      # task counter — review now fires once per plan.
-      - name: plan-cycle-check
-        file: agents/plan-cycle-check.md
-        tier: high
-        label: checking plan coverage
-        rules:
-          # More scope remains -> review THIS plan (review_base..HEAD) before the next plan.
-          # Force review_scope back to 'plan' so a stale 'change' from a prior end-of-change
-          # pass (e.g. a finalize-rework that re-opens coverage) can never mislabel this
-          # per-plan review as the full panel.
-          - {if: {more_plans: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: plan-code-reviewer}
-          # coverage complete, trivial change -> no panel, straight to finalize
-          # (the per-plan cleanup already folded+stamped this plan)
-          - {if: {fast_path: true}, set: {plan_total: "output.plan_total"}, goto: finalize}
-          # coverage complete AND the full panel already ran once -> a corrective/gap-fix plan
-          # (after a finalize/integration rework) is reviewed over its OWN review_base..HEAD
-          # diff (review_scope='plan'), not a fresh whole-change panel each round.
-          - {if: {change_panel_done: true}, set: {review_scope: "'plan'", plan_total: "output.plan_total"}, goto: plan-code-reviewer}
-          # FIRST coverage-complete -> end-of-change FULL panel over the whole-change diff, exactly
-          # once. Latch change_panel_done so a later rework re-entry never re-fires the full panel.
-          - {else: true, set: {review_scope: "'change'", change_panel_done: true, plan_total: "output.plan_total"}, goto: plan-code-reviewer}
-
       # The review step IS the plan-code-reviewer (no coordinator/panel): per-plan it
       # reviews review_base..HEAD; at change end (review_scope==change) it reviews
       # cur_base_head..HEAD. It routes — verdict is approve | task_gap only (coverage is
-      # plan-cycle-check's call, never the reviewer's).
+      # gap-check's call, never the reviewer's).
       - name: plan-code-reviewer
         file: agents/plan-code-reviewer.md
         tier: high
@@ -246,25 +224,34 @@ phases:
         rules:
           - {else: true, goto: cleanup-sweep}
 
-      # After a plan's review + sweep settle, advance the diff base to HEAD. The
-      # end-of-change pass (review_scope==change) is the last review, so route it to
-      # summarizer (which writes the summary, then hands off to finalize; the per-plan
-      # cleanup already stamped); a per-plan pass returns to plan-writer for the next plan.
+      # After a plan's review + sweep settle, advance the diff base to HEAD and route:
+      #  - the change-wide pass just ran (review_scope==change) -> summarizer;
+      #  - a post-settlement corrective (coverage_settled already latched) -> summarizer,
+      #    reviewed per-plan over its own diff, never re-gap-checked or re-paneled;
+      #  - more outline plans remain (plan_index < plan_total) -> the next plan-writer;
+      #  - the last outline plan was implemented -> the once-only end-of-change gap-check.
       - name: review-base-repin
         quiet: true
         command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
         rules:
           - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout}, goto: summarizer}
-          # Invariant: once the full panel has run, spec coverage is complete, so plan-cycle-check
-          # never re-enters with more_plans:true; every post-panel per-plan settle is therefore
-          # terminal -> route a corrective/gap-fix plan to summarizer (then finalize), not the next
-          # plan. (This keys solely on change_panel_done; it is correct only while more_plans means
-          # uncovered SPEC scope. If a post-panel corrective could ever legitimately span a
-          # multi-plan supercycle, this rule would need a more_plans guard to avoid dropping the
-          # remaining corrective plans.)
-          - {if: {exit: 0, change_panel_done: true}, set: {review_base: output.stdout}, goto: summarizer}
-          - {if: {exit: 0}, set: {review_base: output.stdout, plan_index: "var.plan_index + 1"}, goto: plan-writer}
+          - {if: {exit: 0, coverage_settled: true}, set: {review_base: output.stdout}, goto: summarizer}
+          - {if: "output.exit == 0 and var.plan_index < var.plan_total", set: {review_base: output.stdout, plan_index: "var.plan_index + 1"}, goto: plan-writer}
+          - {if: {exit: 0}, set: {review_base: output.stdout}, goto: gap-check}
           - {else: true, pause: true}
+
+      # End-of-change coverage backstop — runs ONCE (the outline drives the plan loop, not
+      # gap-check). Gap found -> author a corrective via plan-writer (fixpoint loop, latch
+      # stays false). Clean -> latch coverage_settled; then run the change-wide review
+      # (review_scope=change) iff the change spanned >1 plan, else go straight to summarizer.
+      - name: gap-check
+        file: agents/gap-check.md
+        tier: high
+        label: checking plan coverage
+        rules:
+          - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1", review_scope: "'plan'"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
+          - {if: "var.plan_total > 1", set: {coverage_settled: true, review_scope: "'change'"}, goto: plan-code-reviewer}
+          - {else: true, set: {coverage_settled: true}, goto: summarizer}
 
       - name: summarizer
         file: agents/summarizer.md
@@ -283,7 +270,7 @@ phases:
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}
-          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1", review_scope: "'plan'"}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── integrate: the FIFO merge queue. Only the head touches the base. ───────

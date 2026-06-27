@@ -34,7 +34,7 @@ def test_cleanup_implement_routes_by_exit_code() -> None:
     from imp.engine.gates import evaluate_rules
     r = step.rules
     m0 = evaluate_rules(r, vars={}, output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m0.action, Goto) and m0.action.target == "plan-cycle-check"
+    assert isinstance(m0.action, Goto) and m0.action.target == "plan-code-reviewer"
     m2 = evaluate_rules(r, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
     assert isinstance(m2.action, Continue)            # fall through into the resolver
     m3 = evaluate_rules(r, vars={}, output={"exit": 3, "stdout": "", "stderr": ""})
@@ -53,7 +53,7 @@ def test_autosquash_resolve_implement_loops_back_to_cleanup() -> None:
     assert step.max_loops == 6
 
 
-def test_cleanup_implement_precedes_its_resolver_and_plan_cycle_check() -> None:
+def test_cleanup_implement_precedes_its_resolver_and_reviewer() -> None:
     names = [s.name for s in _wf().flat_steps()]
     assert names.index("cleanup-implement") < names.index("autosquash-resolve-implement")
-    assert names.index("autosquash-resolve-implement") < names.index("plan-cycle-check")
+    assert names.index("autosquash-resolve-implement") < names.index("plan-code-reviewer")

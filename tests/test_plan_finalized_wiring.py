@@ -13,7 +13,7 @@ _BASE = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "review_scope": "plan",
     "review_base": "",
-    "change_panel_done": False, "plan_index": 1, "plan_total": 0, "task_total": 0,
+    "coverage_settled": False, "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
 

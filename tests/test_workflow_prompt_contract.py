@@ -112,7 +112,7 @@ def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
 
 TURN_TERMINAL_REVIEWERS = [
     "plan-code-reviewer.md", "code-reviewer.md", "plan-reviewer.md",
-    "spec-reviewer.md",
+    "spec-reviewer.md", "gap-check.md",
 ]
 
 

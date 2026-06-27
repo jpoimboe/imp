@@ -169,6 +169,14 @@ def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     assert "leave its `deferred.md` line `needs-decision`" in fin
     assert "other than the `deferred.md` line rewrites above" in fin
 
+    gc = _imp("gap-check.md")
+    # gap-check reads the needs-decision items (the backstop-suppression source) from
+    # deferred.md, alongside progress.md.
+    assert (
+        "`{{ change.home }}/progress.md`, `{{ change.home }}/deferred.md`,"
+        " and the committed code"
+    ) in gc
+
     ir = _imp("integration-review.md")
     assert "`{{ change.home }}/deferred.md` carries any `## Deferred Followups`" in ir
 

@@ -9,7 +9,7 @@ _BASE = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "review_scope": "plan",
     "review_base": "",
-    "change_panel_done": False, "plan_index": 3, "plan_total": 3, "task_total": 0,
+    "coverage_settled": False, "plan_index": 3, "plan_total": 3, "task_total": 0,
 }
 
 
@@ -20,7 +20,7 @@ def _steps():
 
 def test_per_batch_settle_advances_plan_index() -> None:
     rules = _steps()["review-base-repin"].rules
-    m = evaluate_rules(rules, vars={**_BASE, "review_scope": "plan"},
+    m = evaluate_rules(rules, vars={**_BASE, "review_scope": "plan", "plan_total": 4},
                        output={"exit": 0, "stdout": "cafef00d", "stderr": ""})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
     assert m.var_mutations["plan_index"] == 4

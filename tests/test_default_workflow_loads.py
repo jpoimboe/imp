@@ -34,8 +34,8 @@ def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
 def test_supercycle_back_edges_present() -> None:
     # Spot-check the load-bearing loop edges survive parsing.
     steps = {s.name: s for p in _wf().phases for s in p.steps}
-    # plan-cycle-check loops to plan-writer; the merged review + deferred-sweep run per plan.
-    assert "plan-cycle-check" in steps
+    # The outline drives the plan loop; gap-check is the end-of-change backstop.
+    assert "gap-check" in steps
     assert "plan-code-reviewer" in steps
     assert "deferred-sweep" in steps
     assert "task-lead" in steps and "finalize" in steps
@@ -146,7 +146,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "verify": "running tests",
         "autosquash-resolve-implement": "resolving task fixups",
         "autosquash-resolve-merge": "resolving merge fixups",
-        "plan-cycle-check": "checking plan coverage",
+        "gap-check": "checking plan coverage",
         "plan-code-reviewer": "batch code review",
         "deferred-sweep": "sweeping deferred tasks",
         "sweep-verify": "running tests",

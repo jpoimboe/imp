@@ -1,9 +1,10 @@
 """Per-batch review cadence: cleanup-implement / autosquash-resolve-implement run
-INSIDE the per-plan implement loop; plan-cycle-check decides coverage AND cadence — a
-single `plan-code-reviewer` runs as the `plan-code-reviewer` step directly, over review_base..HEAD
-per batch and over merge-base..HEAD once at change end (review_scope=change).
-deferred-sweep + sweep-verify + review-base-repin trail each review batch.
-review-base-repin and finalize tail the implement phase (no separate review phase)."""
+INSIDE the per-plan implement loop; a single `plan-code-reviewer` step reviews
+review_base..HEAD per plan and merge-base..HEAD once at change end
+(review_scope=change). The outline drives the plan loop; gap-check is the
+once-per-change coverage backstop. deferred-sweep + sweep-verify + review-base-repin
+trail each review batch; review-base-repin, gap-check and finalize tail the implement
+phase (no separate review phase)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +26,7 @@ _TIERS = frozenset({"low", "medium", "high"})
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False,
-    "change_panel_done": False,
+    "coverage_settled": False,
     "review_scope": "plan",
     "review_base": "",
     "plan_index": 1, "plan_total": 0, "task_total": 0,
@@ -44,10 +45,10 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
         "task-lead", "verify",
-        "cleanup-implement", "autosquash-resolve-implement", "plan-cycle-check",
+        "cleanup-implement", "autosquash-resolve-implement",
         "plan-code-reviewer", "deferred-sweep", "sweep-verify",
         "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
-        "summarizer", "finalize",
+        "gap-check", "summarizer", "finalize",
     ]
 
 
@@ -56,7 +57,7 @@ def test_no_separate_review_phase_stamp_and_finalize_tail_code() -> None:
     assert not any(p.name == "review" for p in wf.phases)
     impl = next(p for p in wf.phases if p.name == "implement")
     assert [s.name for s in impl.steps][-3:] == [
-        "review-base-repin", "summarizer", "finalize"]
+        "gap-check", "summarizer", "finalize"]
     names = {s.name for s in wf.flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers",
@@ -156,37 +157,29 @@ def test_deferred_sweep_step_then_sweep_verify() -> None:
     assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 
 
-def test_plan_cycle_check_routes_coverage_per_plan() -> None:
-    rules = _steps(_wf())["plan-cycle-check"].rules
-    # More scope remains -> review THIS plan first; review_scope forced to 'plan'.
-    m_more = evaluate_rules(rules, vars=_BASE_VARS,
+def test_gap_check_routes_coverage_at_change_end() -> None:
+    rules = _steps(_wf())["gap-check"].rules
+    # More scope remains -> author a corrective via plan-writer; review_scope forced 'plan'.
+    m_more = evaluate_rules(rules, vars={**_BASE_VARS, "plan_index": 2, "plan_total": 2},
                             output={"status": "Success", "more_plans": True,
-                                    "rationale": "x", "plan_total": 9})
-    assert isinstance(m_more.action, Goto) and m_more.action.target == "plan-code-reviewer"
+                                    "rationale": "x", "plan_total": 3})
+    assert isinstance(m_more.action, Goto) and m_more.action.target == "plan-writer"
     assert m_more.var_mutations["review_scope"] == "plan"
-    assert m_more.var_mutations["plan_total"] == 9
-    assert "tasks_since_review" not in m_more.var_mutations
-    # Coverage complete + trivial change -> straight to finalize.
-    m_fast = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
-                            output={"status": "Success", "more_plans": False,
-                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_fast.action, Goto) and m_fast.action.target == "finalize"
-    assert m_fast.var_mutations["plan_total"] == 1
-    # First coverage-complete -> end-of-change full panel, latched.
-    m_cov = evaluate_rules(rules, vars=_BASE_VARS,
+    assert m_more.var_mutations["plan_total"] == 3
+    assert m_more.var_mutations["plan_index"] == 3
+    # Coverage complete + multi-plan -> change-wide panel, latched.
+    m_multi = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 2},
+                             output={"status": "Success", "more_plans": False,
+                                     "rationale": "x", "plan_total": 2})
+    assert isinstance(m_multi.action, Goto) and m_multi.action.target == "plan-code-reviewer"
+    assert m_multi.var_mutations["review_scope"] == "change"
+    assert m_multi.var_mutations["coverage_settled"] is True
+    # Coverage complete + single-plan -> straight to summarizer, no panel.
+    m_one = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                            output={"status": "Success", "more_plans": False,
                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_cov.action, Goto) and m_cov.action.target == "plan-code-reviewer"
-    assert m_cov.var_mutations["review_scope"] == "change"
-    assert m_cov.var_mutations["change_panel_done"] is True
-    assert m_cov.var_mutations["plan_total"] == 1
-    # Coverage complete after the panel already ran -> per-plan corrective review.
-    m_corr = evaluate_rules(rules, vars={**_BASE_VARS, "change_panel_done": True},
-                            output={"status": "Success", "more_plans": False,
-                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_corr.action, Goto) and m_corr.action.target == "plan-code-reviewer"
-    assert m_corr.var_mutations["review_scope"] == "plan"
-    assert m_corr.var_mutations["plan_total"] == 1
+    assert isinstance(m_one.action, Goto) and m_one.action.target == "summarizer"
+    assert m_one.var_mutations["coverage_settled"] is True
 
 
 def test_plan_code_reviewer_reads_review_scope_not_integration_pass() -> None:
@@ -251,10 +244,12 @@ def test_review_base_repin_routes_by_scope() -> None:
     assert isinstance(m_change.action, Goto) and m_change.action.target == "summarizer"
     assert m_change.var_mutations["review_base"] == "deadbeef"
     assert "tasks_since_review" not in m_change.var_mutations
-    m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan"},
+    m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan",
+                                          "plan_index": 1, "plan_total": 3},
                              output={"exit": 0, "stdout": "cafef00d", "stderr": ""})
     assert isinstance(m_batch.action, Goto) and m_batch.action.target == "plan-writer"
     assert m_batch.var_mutations["review_base"] == "cafef00d"
+    assert m_batch.var_mutations["plan_index"] == 2
     assert "tasks_since_review" not in m_batch.var_mutations
 
 
@@ -274,6 +269,7 @@ def test_finalize_rework_routes_to_plan_writer() -> None:
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={**base, "decision": "rework", "comments": "fix X"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    assert m.var_mutations["review_scope"] == "plan"
     m_merge = evaluate_rules(rules, vars=_BASE_VARS,
                              output={**base, "decision": "merge"})
     assert isinstance(m_merge.action, Goto) and m_merge.action.target == "wait-for-head"

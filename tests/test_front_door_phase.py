@@ -11,7 +11,7 @@ _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "review_scope": "plan",
     "review_base": "",
-    "change_panel_done": False, "integration_fork": "",
+    "coverage_settled": False, "integration_fork": "",
 }
 
 
