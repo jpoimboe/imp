@@ -368,3 +368,40 @@ def test_enumerate_dir_gitignore_aware(tmp_path) -> None:
     assert ".gitignore" in rels
     assert "ignored/secret.py" not in rels
     assert all(not r.startswith(".git/") for r in rels)
+
+
+def test_scan_file_python(tmp_path) -> None:
+    f = tmp_path / "foo.py"
+    f.write_text(_PY)
+    e = anyio.run(so.scan_file, f, tmp_path)
+    assert e.rel == "foo.py"
+    assert [s.name for s in e.symbols] == ["Foo", "run_change"]
+
+
+def test_scan_file_unsupported_extension_has_no_symbols(tmp_path) -> None:
+    f = tmp_path / "notes.txt"
+    f.write_text("hello world")
+    e = anyio.run(so.scan_file, f, tmp_path)
+    assert e.symbols == ()
+
+
+def test_scan_file_supported_but_empty_outline(tmp_path) -> None:
+    # A grammar exists for Makefile but it yields zero structure items, so the
+    # entry has no symbols — downstream this renders as "(no outline)".
+    f = tmp_path / "Makefile"
+    f.write_text("all:\n\techo hi\n")
+    e = anyio.run(so.scan_file, f, tmp_path)
+    assert e.symbols == ()
+
+
+def test_scan_file_swallows_parse_failure(tmp_path, monkeypatch) -> None:
+    f = tmp_path / "foo.py"
+    f.write_text(_PY)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("parse exploded")
+
+    monkeypatch.setattr(so, "extract_cached", _boom)
+    e = anyio.run(so.scan_file, f, tmp_path)
+    assert e.rel == "foo.py"
+    assert e.symbols == ()

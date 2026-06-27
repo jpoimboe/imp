@@ -23,6 +23,7 @@ from imp.agents.tools.limits import (
     EXCLUDED_DIRS,
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
+    read_text_capped,
     tool_checkpoint,
 )
 
@@ -260,3 +261,30 @@ async def _enumerate_dir(
             continue
         result.append(p)
     return result
+
+
+@dataclass(frozen=True)
+class FileEntry:
+    rel: str  # worktree-relative posix path (absolute for an external target)
+    symbols: tuple[Symbol, ...]  # () when unsupported, unparseable, or empty
+
+
+async def scan_file(
+    path: Path,
+    root: Path,
+    *,
+    coordinator: object | None = None,
+    deadline: float | None = None,
+) -> FileEntry:
+    """A FileEntry for one on-disk file: its rel path and parsed symbol tree
+    (empty when the language is unsupported or parsing fails). Never raises."""
+    rel = path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix()
+    lang = detect_language(path)
+    if lang is None:
+        return FileEntry(rel, ())
+    try:
+        source, _ = await read_text_capped(path, coordinator=coordinator, deadline=deadline)
+        symbols = extract_cached(path, source, lang)
+    except Exception:
+        return FileEntry(rel, ())
+    return FileEntry(rel, tuple(symbols))
