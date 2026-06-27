@@ -308,6 +308,22 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     assert "save this to your backlog" not in rendered
 
 
+def test_renders_run_autonomous_true(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log, autonomous=True)
+    assert render_prompt("{{ run.autonomous }}", ctx) == "True"
+    assert render_prompt(
+        "{% if run.autonomous %}take{% else %}confirm{% endif %}", ctx) == "take"
+
+
+def test_renders_run_autonomous_false_default(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    assert render_prompt("{{ run.autonomous }}", ctx) == "False"
+    assert render_prompt(
+        "{% if run.autonomous %}take{% else %}confirm{% endif %}", ctx) == "confirm"
+
+
 def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.engine.state import JsonlEventLog
