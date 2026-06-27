@@ -362,7 +362,7 @@ def _register_tool(
         # Every other tool stays unannotated.
         annotations=(
             _task_annotations() if tool.name == "sub_agent"
-            else _readonly_annotations() if tool_ref.read_only
+            else _readonly_annotations() if tool.read_only
             else None
         ),
     )
