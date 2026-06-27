@@ -128,6 +128,7 @@ def _register_builtins() -> None:
         query_events,
         rename_change,
         step_label,
+        symbol_outline,
     )
 
 
