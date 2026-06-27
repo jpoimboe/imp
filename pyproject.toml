@@ -24,6 +24,7 @@ dependencies = [
   "pillow>=10.0",
   "fonttools>=4.0",
   "mcp>=1.27,<2.0",
+  "tree-sitter-language-pack>=1.10,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -105,4 +106,8 @@ ignore_missing_imports = true
 # cmap for the glyph-fallback chain. Treat it as a missing import.
 [[tool.mypy.overrides]]
 module = "fontTools.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tree_sitter_language_pack.*"
 ignore_missing_imports = true
