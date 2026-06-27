@@ -30,7 +30,7 @@ class _RecLog:
         self.events.append(("tool_call", {"id": block.id, "name": block.name}))
         return {"id": "e", "type": "tool_call"}
 
-    def append_tool_result(self, *, agent_id, block, citations=None):
+    def append_tool_result(self, *, agent_id, block, citations=None, duration_ms=None):
         self.events.append(("tool_result", {"id": block.tool_use_id}))
         return {"id": "e", "type": "tool_result"}
 
