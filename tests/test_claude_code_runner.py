@@ -2630,3 +2630,62 @@ async def test_cooperative_steer_drive_invocation_not_paused(
     r = result_holder["r"]
     assert r.paused is False
     assert r.output == {"status": "Success"}
+
+
+@pytest.mark.anyio
+async def test_second_interrupt_during_steer_skips_requery(
+    tmp_path: Path,
+) -> None:
+    """A second interrupt that fires _hard_interrupt while the run is blocked
+    in await steer() sets _cancel=True. The guard after steer() returns must
+    exit cleanly without re-querying the now-disconnected client."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [assistant(text("unused")), result()]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner_ref: dict[str, Any] = {}
+
+    def _input_fn(_prompt: str) -> str:
+        # Simulate a second interrupt arriving while blocked in the steer:
+        # set _cancel directly (what _hard_interrupt does) and return a reply.
+        runner_ref["r"]._cancel = True
+        return "redirect"
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=_input_fn)
+    runner_ref["r"] = runner
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    # Guard fired: no second query() after the steer.
+    # The client had only the initial query() — no re-query after _cancel.
+    assert len(holder["c"].queries) == 1
+    assert runner._cancel is True

@@ -1613,6 +1613,8 @@ class ClaudeCodeAgentRunner:
                             # Raises AwaitingUserInput when no human is attached;
                             # the balanced session makes a resume continue with no 400.
                             reply = await steer(last_text)
+                            if self._cancel:
+                                return
                             user_msg = Message(
                                 role="user",
                                 content=(TextBlock(text=reply),))
