@@ -7,7 +7,7 @@ import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.subagents import make_task_tool
-from imp.agents.tools import Tool
+from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.context import ToolContext
 from imp.providers.codex_mcp import RunState, _register_tool, start_server
 
@@ -174,7 +174,38 @@ def test_codex_task_annotation_derived_from_bypass(
         reset_parallelism_cache()
 
 
+def test_codex_read_only_tool_annotated_when_parallel(tmp_path: Path, monkeypatch) -> None:
+    """Part B3: a read_only tool (read_file) registers with readOnlyHint=True at width > 1."""
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        mcp_tool = _register(get_registry()["read_file"], _ctx(tmp_path))
+        assert mcp_tool.annotations is not None
+        assert mcp_tool.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
 
+
+def test_codex_read_only_annotation_dropped_by_kill_switch(tmp_path: Path, monkeypatch) -> None:
+    """Part B3: IMP_MAX_PARALLEL_TASKS=1 drops the read-only hint (single kill switch)."""
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        mcp_tool = _register(get_registry()["read_file"], _ctx(tmp_path))
+        assert mcp_tool.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_codex_mutating_tool_not_annotated(tmp_path: Path, monkeypatch) -> None:
+    """Part B3: a mutating tool (write_file) is never annotated, even at width > 1."""
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        mcp_tool = _register(get_registry()["write_file"], _ctx(tmp_path))
+        assert mcp_tool.annotations is None
+    finally:
+        reset_parallelism_cache()
 
 
 @pytest.mark.anyio

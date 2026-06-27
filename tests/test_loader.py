@@ -45,7 +45,7 @@ def test_parse_agent_subagents(tmp_path: Path) -> None:
         tmp_path / "stub.md",
         frontmatter="""
 name: stub
-tools: [complete_step, task]
+tools: [complete_step, sub_agent]
 subagents: [reviewer, summarizer]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -819,12 +819,12 @@ def test_parse_agent_deny_tools_real_name_other_context_ok(tmp_path: Path) -> No
     p = write_agent_md(
         tmp_path / "x.md",
         frontmatter=(
-            "name: x\ndeny_tools: [rename_change, task]\n"
+            "name: x\ndeny_tools: [rename_change, sub_agent]\n"
             "output:\n  status: {type: enum, values: [Success, Error]}"
         ),
     )
     agent = parse_agent_file(p)
-    assert agent.deny_tools == frozenset({"rename_change", "task"})
+    assert agent.deny_tools == frozenset({"rename_change", "sub_agent"})
 
 
 def test_parse_agent_deny_tools_not_list_of_strings(tmp_path: Path) -> None:
@@ -914,7 +914,7 @@ def test_resolution_assigns_position_appropriate_tools(tmp_path: Path) -> None:
                             "create_and_enter_worktree"}
     assert w.agents["worker"].tools == BASE_CAPS                     # subagent
     assert w.agents["leaf"].tools == top_leaf                       # top-level leaf
-    assert w.agents["lead"].tools == top_leaf | {"task"}           # declares subagents
+    assert w.agents["lead"].tools == top_leaf | {"sub_agent"}           # declares subagents
     assert w.agents["denier"].tools == top_leaf - {"bash"}        # deny subtracts
     assert w.agents["explicit"].tools == frozenset({"read_file"})  # verbatim
     for agent in w.agents.values():

@@ -53,6 +53,15 @@ def _task_annotations() -> Any | None:
     return None
 
 
+def _readonly_annotations() -> Any | None:
+    """ToolAnnotations(readOnlyHint=True) for a read_only tool. Honest hint, so
+    NO posture gate (width-only). IMP_MAX_PARALLEL_TASKS=1 drops it."""
+    from mcp.types import ToolAnnotations
+    if max_parallel_tasks() > 1:
+        return ToolAnnotations(readOnlyHint=True)
+    return None
+
+
 @dataclass
 class RunState:
     """Shared state between the MCP tool wrappers and the runner's consume loop.
@@ -121,7 +130,7 @@ async def dispatch_tool(
         # nullable, so a None here always means "field not provided".
         state.complete_step_args = {k: v for k, v in args.items() if v is not None}
         return "step complete"
-    if tool.name == "task":
+    if tool.name == "sub_agent":
         # task special-case: never goes through async_invoke (its _invoke raises
         # TaskMustBeAwaited by design). Run the subagent and return its structured
         # output JSON. dispatch_tool does NOT touch the event log for the task
@@ -349,9 +358,13 @@ def _register_tool(
         fn_metadata=fn_meta,
         is_async=True,
         context_kwarg=None,
-        # task ONLY — derived from the bypass posture + width knob (Decision 5 /
-        # §2 annotation). Every other tool stays unannotated.
-        annotations=(_task_annotations() if tool.name == "task" else None),
+        # task: posture+width gated. read_only tools: width-only honest hint.
+        # Every other tool stays unannotated.
+        annotations=(
+            _task_annotations() if tool.name == "sub_agent"
+            else _readonly_annotations() if tool.read_only
+            else None
+        ),
     )
     mcp_app._tool_manager._tools[tool.name] = mcp_tool
 

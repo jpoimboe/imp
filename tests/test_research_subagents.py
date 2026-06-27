@@ -16,7 +16,7 @@ def test_explorer_agent_is_read_only_leaf() -> None:
     tools = set(a.tools)
     assert tools == {"read_file", "glob", "grep", "bash", "query_events"}
     for forbidden in ("write_file", "edit_file", "web_search", "web_fetch",
-                      "task", "wait_for_user"):
+                      "sub_agent", "wait_for_user"):
         assert forbidden not in tools
     assert a.subagents == ()
     fields = {f.name for f in a.output_schema.fields}
@@ -42,13 +42,13 @@ def test_subagents_have_no_static_tier() -> None:
 
 def test_plan_writer_declares_research_subagents() -> None:
     a = _wf().agents["plan-writer"]
-    assert "task" in a.tools
+    assert "sub_agent" in a.tools
     assert set(a.subagents) == {"explorer", "researcher"}
 
 
 def test_spec_writer_declares_research_subagents() -> None:
     a = _wf().agents["spec-finalizer"]
-    assert "task" in a.tools
+    assert "sub_agent" in a.tools
     assert set(a.subagents) == {"explorer", "researcher"}
 
 
@@ -62,7 +62,7 @@ def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
     assert "no more than 3 question rounds" not in out
     assert "Do not over-research a clear request" not in out
     assert "Research before you converge" in out
-    assert 'task(subagent_name="explorer"' in out
+    assert 'sub_agent(subagent_name="explorer"' in out
     assert "researcher" in out
     assert "no cost gating" in out
 

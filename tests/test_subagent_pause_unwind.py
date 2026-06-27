@@ -85,13 +85,13 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
 
     # Parent: a real anthropic runner whose first turn calls `task`.
     fake = FakeAsyncAnthropic([response(
-        tool_use("t1", "task",
+        tool_use("t1", "sub_agent",
                  {"subagent_name": "reviewer", "task_description": "review"}))])
     runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
 
     from imp.agents.runner import AgentInvocation
     inv = AgentInvocation(
-        agent_def=_e2e_agent_def("lead", tools={"complete_step", "task"},
+        agent_def=_e2e_agent_def("lead", tools={"complete_step", "sub_agent"},
                                  subagents=("reviewer",)),
         provider_name="fake", model_name="m",        # subagent inherits -> fake
         system_prompt="be terse",

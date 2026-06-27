@@ -38,7 +38,7 @@ def test_codex_task_description_has_elicitation_language(tmp_path: Path) -> None
     )
     app = FastMCP("imp")
     _register_tool(app, make_task_tool(), ctx=ctx, state=RunState(cap=10))
-    desc = app._tool_manager._tools["task"].description
+    desc = app._tool_manager._tools["sub_agent"].description
     assert _CONCURRENT in desc
     assert _UNSPECIFIED in desc
 
@@ -54,6 +54,6 @@ def test_claude_code_task_description_has_elicitation_language(
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
-    wrapped = _wrap_one("task", make_task_tool(), ctx, _RunState(), sdk_tool)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, _RunState(), sdk_tool)
     assert _CONCURRENT in wrapped.description
     assert _UNSPECIFIED in wrapped.description

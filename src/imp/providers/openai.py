@@ -134,7 +134,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     for name in invocation.agent_def.tools:
         if name == "complete_step":
             continue
-        if name == "task":
+        if name == "sub_agent":
             continue
         if name in WEB_TOOL_NAMES:
             # Reserved native-capability names (§4): never registry-looked-up;
@@ -146,8 +146,8 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
-    if "task" in invocation.agent_def.tools:
-        out["task"] = make_task_tool(invocation.tiers)
+    if "sub_agent" in invocation.agent_def.tools:
+        out["sub_agent"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "bash" in invocation.agent_def.tools:

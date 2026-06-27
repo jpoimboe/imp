@@ -18,7 +18,7 @@ def anyio_backend():
 
 def _agent(name: str, subagents=()) -> AgentDef:
     return AgentDef(
-        name=name, description="", tools=frozenset({"complete_step", "task"}),
+        name=name, description="", tools=frozenset({"complete_step", "sub_agent"}),
         subagents=tuple(subagents),
         output_schema=OutputSchema(
             fields=(OutputField(name="status", type="enum",

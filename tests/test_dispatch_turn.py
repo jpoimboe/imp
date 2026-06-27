@@ -50,7 +50,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
 
 
 def _task_tu(tu_id: str, desc: str = "go") -> ToolUseBlock:
-    return ToolUseBlock(id=tu_id, name="task",
+    return ToolUseBlock(id=tu_id, name="sub_agent",
                         input={"subagent_name": "reviewer", "task_description": desc})
 
 

@@ -268,14 +268,14 @@ def test_tool_killed_marks_the_matching_call_in_burst() -> None:
 
 
 def test_read_task_grep_splits_into_three_nodes() -> None:
-    # design §5.3 edge (a): a run [read_file, task, grep] yields
+    # design §5.3 edge (a): a run [read_file, sub_agent, grep] yields
     # ToolBurstFold(read_file), SubagentFold, ToolBurstFold(grep).
     tree = nv.build_tree(_step_events(
         _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="read_file",
             input={"path": "x"}),
         _ev("2", "tool_result", agent_id="step:p/s", id="b1", content="data", error=False),
         # task tool_call: EVENT id "tk1", tool_use block id "b2".
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "review it"}),
         _ev("3", "tool_result", agent_id="step:p/s", id="b2",
             content='{"status":"Success"}', error=False),
@@ -299,7 +299,7 @@ def test_interleaved_sub_events_route_into_fold_without_breaking_burst() -> None
     # task tool_call and its tool_result. They must build the nested tree and
     # must NOT corrupt the parent's surrounding content.
     tree = nv.build_tree(_step_events(
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         # subagent's own stream (agent_id = sub:tk1):
         _ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
@@ -334,7 +334,7 @@ def test_subagent_running_until_task_result_arrives() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
               stop_reason="end_turn", usage={}, raw={"content": []}))
@@ -394,7 +394,7 @@ INTERLEAVED_LOG = [
     _ev("b1c", "tool_call", agent_id="step:impl/build", id="b1", name="read_file",
         input={"path": "x"}),
     _ev("b1r", "tool_result", agent_id="step:impl/build", id="b1", content="data", error=False),
-    _ev("tk1", "tool_call", agent_id="step:impl/build", id="b2", name="task",
+    _ev("tk1", "tool_call", agent_id="step:impl/build", id="b2", name="sub_agent",
         input={"subagent_name": "reviewer", "task_description": "review"}),
     _ev("su1", "step_context", agent_id="sub:tk1", provider="anthropic", model="m",
         system_prompt="S", tools_schema=[], params={}, max_tool_calls=50),
@@ -562,7 +562,7 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="step:design/spec", id="t1",
-           name="task", input={"subagent_name": "coder"}),
+           name="sub_agent", input={"subagent_name": "coder"}),
         ev("5", "tool_call", agent_id="sub:4", id="n1",
            name="edit_file", input={"path": "executor.py"}),
     ]:
@@ -579,7 +579,7 @@ def test_subagent_activity_uses_label_when_present() -> None:
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
-            name="task", input={"subagent_name": "explorer"},
+            name="sub_agent", input={"subagent_name": "explorer"},
             label="exploring codebase"),
         ev("5", "tool_call", agent_id="sub:4", id="n1",
            name="edit_file", input={"path": "executor.py"}),
@@ -600,7 +600,7 @@ def test_subagent_activity_falls_back_to_subagent_name() -> None:
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
-            name="task", input={"subagent_name": "explorer"}),
+            name="sub_agent", input={"subagent_name": "explorer"}),
     ]:
         b.add(e)
     act = b.current_activity()
@@ -662,7 +662,7 @@ def test_summarize_result_flattens_subagent_fold_outcome() -> None:
     # The parent's task tool_result closes the subagent fold; its content can be
     # a block list and must flatten into the fold outcome, not a repr.
     tree = nv.build_tree(_step_events(
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content=[{"type": "text", "text": "subagent done"}], error=False),
@@ -681,7 +681,7 @@ def test_task_result_present_canonical_close_carries_outcome_no_orphan() -> None
     # canonical _h_tool_result path carrying the outcome (is_error/glyph), NOT via
     # resume-close, and there must be NO orphan "tool" burst line.
     tree = nv.build_tree(_step_events(
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
             model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -715,7 +715,7 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id=block_id, name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id=block_id, name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
               model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -743,7 +743,7 @@ def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="codex"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="codex",
               model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -767,7 +767,7 @@ def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="claude_code"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
               model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -788,7 +788,7 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="openai"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="openai",
               model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -817,7 +817,7 @@ def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="claude_code"))
-    b.add({**_ev("tk1", "tool_call", agent_id="step:p/s", id="blk", name="task",
+    b.add({**_ev("tk1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",
                  input={"subagent_name": "reviewer", "task_description": "go"},
                  id_ns="block"),
            "timestamp": "2026-06-23T16:14:14+00:00"})
@@ -852,7 +852,7 @@ def test_openai_non_terminal_status_does_not_salvage_close() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="openai"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="openai",
               model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -872,7 +872,7 @@ def test_anthropic_tool_use_midturn_does_not_salvage_close() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
               model="m", system_prompt="SYS", tools_schema=[], params={},
@@ -1087,7 +1087,7 @@ def test_task_result_with_matching_id_closes_fold_carrying_outcome() -> None:
            "payload": {"step": "task-lead", "kind": "agent", "phase": "implement"},
            "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"})
     b.add({"type": "tool_call", "agent_id": "step:implement/task-lead",
-           "payload": {"name": "task", "id": "toolu_minted",
+           "payload": {"name": "sub_agent", "id": "toolu_minted",
                        "input": {"subagent_name": "coder", "task_description": "go"}},
            "id": "e2"})
     # Navigate: root -> PhaseNode -> StepNode -> children (SubagentFold lives here)
@@ -1405,9 +1405,9 @@ def test_concurrent_inprocess_folds_close_independently_by_block_ns() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="task",
+    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
               input={"subagent_name": "tester", "task_description": "go"}))
     step = b._step_stack[-1]
     folds = {f.subagent_name: f for f in step.children
@@ -1429,9 +1429,9 @@ def test_concurrent_codex_folds_close_by_event_ns_no_empty_block_collision() -> 
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="", name="task",
+    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="", name="sub_agent",
               input={"subagent_name": "tester", "task_description": "go"}))
     step = b._step_stack[-1]
     folds = {f.subagent_name: f for f in step.children
@@ -1451,7 +1451,7 @@ def test_stamped_result_missing_its_namespace_renders_warning_not_close() -> Non
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     step = b._step_stack[-1]
     fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -1475,7 +1475,7 @@ def test_late_result_after_resume_close_is_benign_not_a_warning() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="m1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="m1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     step = b._step_stack[-1]
     fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -1505,7 +1505,7 @@ def test_late_result_after_pause_resume_finalize_is_benign() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="m1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="m1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     step = b._step_stack[-1]
     fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -1524,7 +1524,7 @@ def test_unstamped_legacy_result_closes_via_ordered_two_dict_probe() -> None:
     # AC38: a legacy (id_ns absent) result still closes its fold via the ordered
     # block-id-then-event-id probe — no regression for pre-upgrade logs.
     tree = nv.build_tree(_step_events(
-        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
@@ -1543,7 +1543,7 @@ def test_workflow_resumed_finalizes_dangling_folds_as_interrupted() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     step = b._step_stack[-1]
     dangling = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -1560,7 +1560,7 @@ def test_workflow_resumed_finalizes_dangling_folds_as_interrupted() -> None:
     # Resumed turn re-enters the step and opens a fresh running fold.
     b.add(_ev("st2", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="b9", name="task",
+    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="b9", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "again"}))
     fresh = [c for c in b._step_stack[-1].children
              if isinstance(c, nv.SubagentFold) and c.block_id == "b9"]
@@ -1575,7 +1575,7 @@ def test_resume_drops_interrupted_fold_membership_so_late_events_dont_reattach()
     b = nv.NarrativeBuilder()
     b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
               model="m", provider="anthropic"))
-    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     step = b._step_stack[-1]
     dangling = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -1596,7 +1596,7 @@ def test_current_activity_suffix_counts_extra_running_subagents() -> None:
     # "(+2 subagents)" (singular/plural). The named detail is the FIRST
     # running fold's; the suffix counts the rest.
     def _task(eid: str, bid: str, name: str) -> dict:
-        return _ev(eid, "tool_call", agent_id="step:p/s", id=bid, name="task",
+        return _ev(eid, "tool_call", agent_id="step:p/s", id=bid, name="sub_agent",
                    input={"subagent_name": name, "task_description": "go"})
 
     b = nv.NarrativeBuilder()
@@ -1733,7 +1733,7 @@ def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
     bid = f"b{eid}"
     return [
         _ev(f"c{eid}", "tool_call", agent_id="step:review/review", id=bid,
-            name="task", input={"subagent_name": f"member-{eid}",
+            name="sub_agent", input={"subagent_name": f"member-{eid}",
                                  "task_description": "review"}),
         _ev(f"r{eid}", "tool_result", agent_id="step:review/review", id=bid,
             content=json.dumps(
@@ -1832,7 +1832,7 @@ def test_subagent_activity_has_no_step_prefix() -> None:
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
            model="m", provider="anthropic"),
-        ev("tk1", "tool_call", agent_id="step:review/plan-review", id="b2", name="task",
+        ev("tk1", "tool_call", agent_id="step:review/plan-review", id="b2", name="sub_agent",
            input={"subagent_name": "plan-reviewer", "task_description": "go"}),
         ev("s1", "thinking", agent_id="sub:tk1", content="reviewing"),
     ]:
@@ -1884,10 +1884,10 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
-    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"},
              timestamp="2026-06-19T10:00:00+00:00"))
-    b.add(ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="task",
+    b.add(ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
              input={"subagent_name": "tester", "task_description": "go"},
              timestamp="2026-06-19T10:00:01+00:00"))
     step = b._step_stack[-1]
@@ -2011,7 +2011,7 @@ def test_lost_task_result_resume_closed_at_step_completed() -> None:
     b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic",
              timestamp="2026-06-19T11:00:00+00:00"))
-    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"},
              timestamp="2026-06-19T11:00:01+00:00"))
     step = b._step_stack[-1]
@@ -2236,7 +2236,7 @@ def test_subagent_llm_response_does_not_move_latest_prompt_tokens() -> None:
              usage={"input_tokens": 100, "output_tokens": 5}, raw={"content": []}))
     assert b.latest_prompt_tokens == 100
     # Open a subagent fold so the sub: turn routes through a registered child.
-    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
     # The subagent turn carries usage but a sub: agent_id — the bar must not move.
     b.add(ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic",
@@ -2370,7 +2370,7 @@ def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
     assert b.latest_context_pct == 20.0
     assert b.latest_context_window == 1_000_000
     # Open a subagent fold so the sub: turn routes through a registered child.
-    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+    b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(ev("s1", "llm_response", agent_id="sub:tk1", provider="claude_code",
              model="opus-1m", stop_reason="end_turn", usage={},

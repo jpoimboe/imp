@@ -38,7 +38,7 @@ async def test_independent_subtasks_elicit_parallel_task_calls(provider: str) ->
         ),
     )
     task_uses = [b for b in tool_uses
-                 if isinstance(b, ToolUseBlock) and b.name == "task"]
+                 if isinstance(b, ToolUseBlock) and b.name == "sub_agent"]
     assert len(task_uses) >= 2
     if provider == "openai":
         for b in task_uses:

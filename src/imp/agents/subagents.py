@@ -1,7 +1,7 @@
 """task tool (spec §6.13) — async dispatch.
 
 `task` is special: the runner doesn't call `.invoke()` on it. The runner's
-dispatch loop detects `tool_use.name == "task"` and `await dispatch_task(...)`
+dispatch loop detects `tool_use.name == "sub_agent"` and `await dispatch_task(...)`
 directly — this is the only path that crosses the sync→async boundary, and
 making it explicit avoids the run_coroutine_threadsafe-from-loop-thread
 deadlock that would otherwise hit.
@@ -63,7 +63,7 @@ def raise_if_suspended(exc: BaseException) -> None:
 def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
     def _invoke(ctx: Any, **kwargs: Any) -> str:
         raise TaskMustBeAwaited(
-            "runner must special-case tool_use.name=='task' and call "
+            "runner must special-case tool_use.name=='sub_agent' and call "
             "agents.subagents.dispatch_task; do not invoke as a regular tool"
         )
 
@@ -90,16 +90,16 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         }
 
     return Tool(
-        name="task",
+        name="sub_agent",
         description=(
             "Dispatch a subtask to a named subagent. "
             "Returns the subagent's structured output as a JSON string. "
-            "Independent subtasks issued as multiple task calls in ONE "
+            "Independent subtasks issued as multiple sub_agent calls in ONE "
             "assistant message run concurrently; issue dependent subtasks "
-            "sequentially across turns. The relative ordering of task "
-            "calls and non-task tools issued in the same message is "
-            "unspecified: do not place a non-task tool that depends on a "
-            "task's effects (or vice versa) in the same message as task calls."
+            "sequentially across turns. The relative ordering of sub_agent "
+            "calls and non-sub_agent tools issued in the same message is "
+            "unspecified: do not place a non-sub_agent tool that depends on a "
+            "sub_agent's effects (or vice versa) in the same message as sub_agent calls."
         ),
         input_schema=schema,
         fn=_invoke,

@@ -143,7 +143,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
 
     state = _RunState()
     wrapped = _wrap_one(
-        "task", make_task_tool(), ctx, state, _passthrough_decorator,
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
     )
     out = await wrapped({"subagent_name": "sub", "task_description": "do"})
     assert state.complete_step_called is False  # routed to dispatch_task, not capture
@@ -200,7 +200,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
     state = _RunState()
     state.agent_id = "step:p/task-lead"
     wrapped = _wrap_one(
-        "task", make_task_tool(), ctx, state, _passthrough_decorator,
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator,
     )
     # The SDK passes the (empty) __tool_use_id__; the mint must ignore it.
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
@@ -209,7 +209,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
 
     events = elog._events
     calls = [e for e in events
-             if e["type"] == "tool_call" and e["payload"]["name"] == "task"]
+             if e["type"] == "tool_call" and e["payload"]["name"] == "sub_agent"]
     assert len(calls) == 1, "expected exactly one task tool_call"
     call_id = calls[0]["payload"]["id"]
     assert call_id, "minted block id must be non-empty"
@@ -295,17 +295,17 @@ def test_cc_task_tool_annotated_readonly_when_parallel(
     reset_parallelism_cache()
     try:
         wrapped = _wrap_one(
-            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
         assert wrapped.annotations is not None
         assert wrapped.annotations.readOnlyHint is True
     finally:
         reset_parallelism_cache()
 
 
-def test_cc_non_task_tool_not_annotated(
+def test_cc_read_only_tool_annotated_when_parallel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC23: ONLY `task` is annotated — read_file wraps with annotations=None."""
+    """Part B3: a read_only tool (read_file) wraps with readOnlyHint=True at width > 1."""
     from claude_agent_sdk import tool as sdk_tool
 
     from imp.agents.tools import get_registry
@@ -314,6 +314,43 @@ def test_cc_non_task_tool_not_annotated(
     try:
         wrapped = _wrap_one(
             "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is not None
+        assert wrapped.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_read_only_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: IMP_MAX_PARALLEL_TASKS=1 drops the read-only hint (single kill switch)."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_mutating_tool_not_annotated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: a mutating tool (write_file) is never annotated, even at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "write_file", get_registry()["write_file"], _ctx(tmp_path),
             _RunState(), sdk_tool)
         assert wrapped.annotations is None
     finally:
@@ -332,7 +369,7 @@ def test_cc_task_annotation_dropped_by_kill_switch(
     reset_parallelism_cache()
     try:
         wrapped = _wrap_one(
-            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
         assert wrapped.annotations is None
     finally:
         reset_parallelism_cache()
@@ -352,7 +389,7 @@ def test_cc_task_annotation_derived_from_allowlist(
         "imp.providers.claude_code.CLAUDE_CODE_ALLOWLIST_MODE", False)
     try:
         wrapped = _wrap_one(
-            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+            "sub_agent", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
         assert wrapped.annotations is None
     finally:
         reset_parallelism_cache()
@@ -396,7 +433,7 @@ async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> No
 
     state = _RunState()
     state.agent_id = "step:p/task-lead"
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
     assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
@@ -434,7 +471,7 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
 
     state = _RunState()
     state.agent_id = "step:p/task-lead"
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
     assert out.get("isError") is True
@@ -472,7 +509,7 @@ async def test_wrap_task_suspension_marks_result_interrupted(
 
     state = _RunState()
     state.agent_id = "step:p/task-lead"
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     with pytest.raises(SubagentSuspended):
         await wrapped({"subagent_name": "sub", "task_description": "do",
                        "__tool_use_id__": ""})
@@ -505,7 +542,7 @@ async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
     monkey = cc_mod.dispatch_task
     cc_mod.dispatch_task = _fake  # type: ignore[assignment]
     try:
-        wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+        wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
         out = await wrapped({"subagent_name": "reviewer", "task_description": "go"})
     finally:
         cc_mod.dispatch_task = monkey  # type: ignore[assignment]
@@ -534,7 +571,7 @@ async def test_impl_raises_when_dispatched_off_the_runner_loop(
         state = _RunState()
         state.agent_id = "step:p/task-lead"
         state.runner_loop = foreign      # not the loop this test runs on
-        wrapped = _wrap_one("task", make_task_tool(), ctx, state,
+        wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state,
                             _passthrough_decorator)
         with pytest.raises(RuntimeError, match="runner loop"):
             await wrapped({"subagent_name": "sub", "task_description": "do",

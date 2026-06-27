@@ -20,14 +20,14 @@ from tests.codex_fakes import (
 )
 
 
-def _started(sdk_id: str, args: dict, *, tool: str = "task") -> Any:
+def _started(sdk_id: str, args: dict, *, tool: str = "sub_agent") -> Any:
     item = _types.SimpleNamespace(
         type="mcp_tool_call", tool=tool, name=tool, id=sdk_id,
         arguments=args, status="in_progress")
     return _types.SimpleNamespace(type="item.started", item=item)
 
 
-def _completed(sdk_id: str, args: dict, *, result: str = "{}", tool: str = "task",
+def _completed(sdk_id: str, args: dict, *, result: str = "{}", tool: str = "sub_agent",
                error: Any = None, status: str = "completed") -> Any:
     item = _types.SimpleNamespace(
         type="mcp_tool_call", tool=tool, name=tool, id=sdk_id,
@@ -48,7 +48,7 @@ def test_task_item_started_opens_fold_keyed_on_sdk_id() -> None:
     calls = [e for e in elog.read() if e["type"] == "tool_call"]
     assert len(calls) == 1
     assert calls[0]["payload"]["id"] == "item_1"
-    assert calls[0]["payload"]["name"] == "task"
+    assert calls[0]["payload"]["name"] == "sub_agent"
     assert [e for e in elog.read() if e["type"] == "tool_result"] == []
 
 
@@ -172,7 +172,7 @@ def test_task_item_started_stamps_subagent_label() -> None:
         **_pe_kwargs(elog, run_state, {}),
         subagent_defs={"explorer": _labeled_def("explorer", "exploring codebase")})
     call = next(e for e in elog.read() if e["type"] == "tool_call")
-    assert call["payload"]["name"] == "task"
+    assert call["payload"]["name"] == "sub_agent"
     assert call["payload"]["label"] == "exploring codebase"
 
 

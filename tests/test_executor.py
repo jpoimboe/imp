@@ -575,7 +575,7 @@ async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
 
 
 class _FatalToolErrorRunner:
-    def __init__(self, *, tool: str = "task", message: str = "boom") -> None:
+    def __init__(self, *, tool: str = "sub_agent", message: str = "boom") -> None:
         self._tool = tool
         self._message = message
         self.run_count = 0
@@ -600,7 +600,7 @@ async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
     resolve.reset_providers_for_tests()
 
     runner = _FatalToolErrorRunner(
-        tool="task",
+        tool="sub_agent",
         message="subagent task spawn requested but no spawn fn installed",
     )
 
@@ -625,7 +625,7 @@ async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
                     if e["type"] == "error"
                     and e.get("payload", {}).get("kind") == "fatal_tool_error"]
     assert len(fatal_events) == 1
-    assert fatal_events[0]["payload"]["tool"] == "task"
+    assert fatal_events[0]["payload"]["tool"] == "sub_agent"
 
 
 class _CategoryErrorRunner:

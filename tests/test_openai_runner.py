@@ -261,7 +261,7 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
         source=SourceLoc(file=Path("sub.md"), line=1),
     )
 
-    parent_def = _agent_def(tools=frozenset({"complete_step", "task"}))
+    parent_def = _agent_def(tools=frozenset({"complete_step", "sub_agent"}))
     inv = _inv(tmp_path)
     inv = replace(
         inv,
@@ -277,7 +277,7 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
         # parent turn 1
         resp_response(
             resp_message("dispatching"),
-            resp_function_call("p1", "task",
+            resp_function_call("p1", "sub_agent",
                                '{"subagent_name": "sub",'
                                ' "task_description": "do work"}'),
         ),

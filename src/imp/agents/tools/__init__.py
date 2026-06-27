@@ -27,6 +27,7 @@ class Tool:
     description: str
     input_schema: dict[str, Any]
     fn: Callable[..., Any]
+    read_only: bool = False
 
     def invoke(self, ctx: Any, args: dict[str, Any]) -> Any:
         result = self.fn(ctx, **args)
@@ -75,13 +76,16 @@ def _build_input_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     return schema
 
 
-def imp_tool(*, name: str, description: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def imp_tool(
+    *, name: str, description: str, read_only: bool = False
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register the wrapped function as `name` in the global registry."""
 
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
         schema = _build_input_schema(fn)
         _REGISTRY[name] = Tool(
             name=name, description=description, input_schema=schema, fn=fn,
+            read_only=read_only,
         )
         return fn
 

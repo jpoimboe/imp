@@ -49,7 +49,7 @@ you want?".
 
 **Research before you converge.** Once the intent is in hand, prefer dispatching
 parallel `explorer` subagents to map the relevant code before settling questions
-or proposing a design — issuing multiple `task(subagent_name="explorer", …)`
+or proposing a design — issuing multiple `sub_agent(subagent_name="explorer", …)`
 calls in a single message runs them concurrently. Use `researcher` when a
 question turns on an external fact (does a library exist, what is current best
 practice, how does an API behave). There is **no cost gating** in the spec

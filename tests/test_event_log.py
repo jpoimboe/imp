@@ -136,7 +136,7 @@ def test_append_tool_call_stamps_label_as_sibling(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     c = log.append_tool_call(
         agent_id="A",
-        block=ToolUseBlock(id="t1", name="task",
+        block=ToolUseBlock(id="t1", name="sub_agent",
                            input={"subagent_name": "explorer"}),
         label="exploring codebase")
     assert c["payload"]["label"] == "exploring codebase"

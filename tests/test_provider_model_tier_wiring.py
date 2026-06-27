@@ -17,7 +17,7 @@ def _invocation(tmp_path: Path, provider: str) -> AgentInvocation:
                             values=("Success", "Error")),),
         source=SourceLoc(file=Path("a.md"), line=1))
     agent = AgentDef(
-        name="parent", description="", tools=frozenset({"task", "complete_step"}),
+        name="parent", description="", tools=frozenset({"sub_agent", "complete_step"}),
         subagents=("reviewer",), output_schema=schema,
         prompt_template_source="hi", source_path=Path("a.md"),
         source=SourceLoc(file=Path("a.md"), line=1))
@@ -42,5 +42,5 @@ def test_build_tools_threads_tiers(module, provider, tmp_path: Path) -> None:
     mod = importlib.import_module(module)
     inv = _invocation(tmp_path, provider)
     tools = mod._build_tools(inv)
-    schema = tools["task"].input_schema
+    schema = tools["sub_agent"].input_schema
     assert schema["properties"]["tier"]["enum"] == ["low", "high"]

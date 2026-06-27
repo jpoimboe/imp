@@ -49,6 +49,7 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
         "carriage return that IS file content — preserve it when copying "
         "multi-line text into edit_file's `old`/`new` or write_file."
     ),
+    read_only=True,
 )
 async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int = 2000) -> str:
     if type(offset) is not int or offset < 1:

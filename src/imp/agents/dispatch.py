@@ -66,7 +66,7 @@ async def dispatch_one_tool_use(
     subagent-suspension exceptions propagate (terminal — no heartbeat; the
     generator ends by raising).
     """
-    if tu.name == "task":
+    if tu.name == "sub_agent":
         # §1: task tus route through dispatch_task_batch (concurrent path) or the
         # kill-switch inline path, never here. raise (NOT assert) so a routing
         # regression is caught even under `python -O`.
@@ -335,7 +335,7 @@ async def dispatch_turn_tool_uses(
         # sequentially in document order; results are already document-ordered, so
         # no reorder is applied (and none is needed).
         for tu in tool_uses:
-            if tu.name == "task":
+            if tu.name == "sub_agent":
                 await _dispatch_one_task_inline(
                     ctx=ctx, elog=elog, aid=aid, tu=tu,
                     tool_results=tool_results, state=state, ceiling=ceiling)
@@ -350,10 +350,10 @@ async def dispatch_turn_tool_uses(
             yield {"type": "tool_heartbeat", "payload": {}}
         return
 
-    task_tus = [tu for tu in tool_uses if tu.name == "task"]
+    task_tus = [tu for tu in tool_uses if tu.name == "sub_agent"]
     batch_started = False
     for tu in tool_uses:
-        if tu.name == "task":
+        if tu.name == "sub_agent":
             if not batch_started:
                 batch_started = True
                 async for ev in dispatch_task_batch(

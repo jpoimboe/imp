@@ -111,6 +111,15 @@ def test_base_has_numbered_options_convention() -> None:
         assert banned not in low, banned
 
 
+def test_core_tail_emphasizes_parallel_tool_batching() -> None:
+    # Spec Part A: the multi-tool bullet must restore the "maximize parallel
+    # tool calls" emphasis and the concrete "read several known files in one
+    # batch" cue, while still scoping sequencing to genuine dependencies.
+    assert "maximize parallel tool calls" in _CORE_TAIL
+    assert "read them in one batch" in _CORE_TAIL
+    assert "a later call genuinely depends" in _CORE_TAIL
+
+
 def test_base_has_recommendation_anchored_and_no_jargon_conventions() -> None:
     low = _CORE_TAIL.lower()
     assert "plain affirmative" in low

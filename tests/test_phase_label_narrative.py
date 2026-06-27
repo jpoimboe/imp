@@ -82,7 +82,7 @@ def test_current_activity_subagent_running_exposes_phase_label() -> None:
            model="m", provider="anthropic",
            phase_label="implementation phase · plan 2/4"),
         ev("3", "tool_call", agent_id="step:code/task-lead", id="t1",
-           name="task", input={"subagent_name": "coder"}),
+           name="sub_agent", input={"subagent_name": "coder"}),
     ]:
         b.add(e)
     assert b.current_activity().phase_label == "implementation phase · plan 2/4"

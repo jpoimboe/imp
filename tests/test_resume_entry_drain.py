@@ -793,14 +793,14 @@ def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
     from imp.engine.agent_run import drain_all_interjects_at_resume
 
     # Simulate parent transcript state AFTER SubagentSuspended unwind and
-    # repair_dangling_tool_use_on_resume: assistant had a "task" tool_use (t1),
+    # repair_dangling_tool_use_on_resume: assistant had a "sub_agent" tool_use (t1),
     # paused mid-dispatch, synthetic tool_result was appended, so the transcript
     # ends with a user message → SEND_TO_LLM state → drain is called.
     parent_messages: list = [
         Message(role="user", content=(TextBlock(text="begin"),)),
         Message(role="assistant", content=(
             ToolUseBlock(
-                id="t1", name="task",
+                id="t1", name="sub_agent",
                 input={"subagent_name": "sub", "task_description": "go"},
             ),
         )),

@@ -83,7 +83,7 @@ def test_reassemble_codex_turn_builds_full_turn_raw() -> None:
 
 def test_reassemble_task_tool_use_keeps_sdk_id() -> None:
     """Task tool_use blocks keep their SDK item id."""
-    items = [FakeMcpToolCallItem(tool="task", arguments={"subagent_name": "impl"},
+    items = [FakeMcpToolCallItem(tool="sub_agent", arguments={"subagent_name": "impl"},
                                  id="sdk-task-9")]
     raw = reassemble_codex_turn(items)
     assert raw["content"][0]["id"] == "sdk-task-9"
