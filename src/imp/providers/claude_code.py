@@ -470,6 +470,16 @@ def _task_annotations() -> Any | None:
     return None
 
 
+def _readonly_annotations() -> Any | None:
+    """ToolAnnotations(readOnlyHint=True) for a read_only tool. The hint is
+    literally true, so it needs NO posture gate (Part B gating: width-only).
+    IMP_MAX_PARALLEL_TASKS=1 drops it — the single serialize kill switch."""
+    from mcp.types import ToolAnnotations
+    if max_parallel_tasks() > 1:
+        return ToolAnnotations(readOnlyHint=True)
+    return None
+
+
 def _wrap_one(
     name: str, t: Tool, ctx: ToolContext, state: _RunState, sdk_tool: Any,
 ) -> Any:
@@ -609,9 +619,14 @@ def _wrap_one(
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
 
-    # task ONLY — derived from the allowlist posture + width knob (Decision 5 /
-    # §2 annotation). Every other tool wraps unannotated.
-    annotations = _task_annotations() if name == "task" else None
+    # task: posture+width gated (Decision 5 / §2). read_only tools: width-only
+    # honest readOnlyHint. Everything else wraps unannotated.
+    if name == "task":
+        annotations = _task_annotations()
+    elif t.read_only:
+        annotations = _readonly_annotations()
+    else:
+        annotations = None
     return sdk_tool(name, t.description, schema, annotations=annotations)(_impl)
 
 

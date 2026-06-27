@@ -302,10 +302,10 @@ def test_cc_task_tool_annotated_readonly_when_parallel(
         reset_parallelism_cache()
 
 
-def test_cc_non_task_tool_not_annotated(
+def test_cc_read_only_tool_annotated_when_parallel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AC23: ONLY `task` is annotated — read_file wraps with annotations=None."""
+    """Part B3: a read_only tool (read_file) wraps with readOnlyHint=True at width > 1."""
     from claude_agent_sdk import tool as sdk_tool
 
     from imp.agents.tools import get_registry
@@ -314,6 +314,43 @@ def test_cc_non_task_tool_not_annotated(
     try:
         wrapped = _wrap_one(
             "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is not None
+        assert wrapped.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_read_only_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: IMP_MAX_PARALLEL_TASKS=1 drops the read-only hint (single kill switch)."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_mutating_tool_not_annotated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Part B3: a mutating tool (write_file) is never annotated, even at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "write_file", get_registry()["write_file"], _ctx(tmp_path),
             _RunState(), sdk_tool)
         assert wrapped.annotations is None
     finally:
