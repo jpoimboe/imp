@@ -13,6 +13,7 @@ from imp.remote.session.protocol import (
     encode_attach,
     encode_control,
     encode_input,
+    encode_set_lease,
     parse_event,
 )
 from imp.remote.session.socket_server import SessionSocket, _Client
@@ -286,3 +287,57 @@ def test_emit_drops_a_client_whose_bounded_buffer_overflows() -> None:
     assert client not in session._clients
     assert cancelled == [True]
     _recv.close()
+
+
+async def _attach_leased(sock_path: str, change_id: str, lease: bool) -> SocketStream:
+    client = await anyio.connect_unix(sock_path)
+    await client.send((encode_attach(change_id, "T", lease) + "\n").encode())
+    return client
+
+
+@pytest.mark.anyio
+async def test_leased_count_tracks_attach_lease_flag(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        leased = await _attach_leased(sock, "c1", True)
+        unleased = await _attach_leased(sock, "c2", False)
+        with anyio.fail_after(5):
+            while session.attached_count != 2:
+                await anyio.sleep(0.02)
+        assert session.leased_count == 1   # only the leased attachment counts
+        await leased.aclose()
+        await unleased.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_set_lease_frame_mutates_only_issuing_client(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    changes: list[bool] = []
+    session = SessionSocket(sock, on_lease_change=lambda: changes.append(True))
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        a = await _attach_leased(sock, "c1", False)
+        b = await _attach_leased(sock, "c2", True)
+        with anyio.fail_after(5):
+            while session.attached_count != 2:
+                await anyio.sleep(0.02)
+        assert session.leased_count == 1
+        await a.send((encode_set_lease(True) + "\n").encode())    # a: False -> True
+        with anyio.fail_after(5):
+            while session.leased_count != 2:
+                await anyio.sleep(0.02)
+        await b.send((encode_set_lease(False) + "\n").encode())   # b: True -> False
+        with anyio.fail_after(5):
+            while session.leased_count != 1:
+                await anyio.sleep(0.02)
+        assert len(changes) == 2   # on_lease_change fired once per live lease mutation
+        await a.aclose()
+        await b.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()

@@ -77,6 +77,7 @@ class SessionServer:
             on_attach=self._on_attach_pulse,
             on_detach=self._on_detach_pulse,
             on_control=self._enqueue_control,
+            on_lease_change=self._on_lease_change,
         )
         ctl_send, ctl_recv = anyio.create_memory_object_stream[str](
             max_buffer_size=_CONTROL_QUEUE_DEPTH)
@@ -237,6 +238,9 @@ class SessionServer:
         return snapshot
 
     def _on_detach_pulse(self) -> None:
+        self._pulse_attach_change()
+
+    def _on_lease_change(self) -> None:
         self._pulse_attach_change()
 
     def _enqueue_control(self, action: str) -> None:
