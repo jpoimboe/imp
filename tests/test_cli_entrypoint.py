@@ -168,3 +168,63 @@ async def test_run_fresh_session_threads_autonomous(
         SimpleNamespace(id="x", title="t"), args=args, seed_opening=None)
     assert rc == 0
     assert captured["autonomous"] is True
+
+
+@pytest.mark.anyio
+async def test_run_fresh_session_tui_branch_threads_autonomous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import imp.cli.main as m
+
+    captured: dict[str, object] = {}
+
+    async def _fake_tui(change: object, **kw: object) -> int:
+        captured.update(kw)
+        return 0
+
+    async def _fake_clear_loop(control: object, *, tui: bool, first: object) -> int:
+        return await first({})
+
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
+    monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)
+    monkeypatch.setattr(m, "_run_tui_session", _fake_tui)
+
+    args = m._build_parser().parse_args(["new", "--tui", "--autonomous"])
+    rc = await m._run_fresh_session(
+        SimpleNamespace(id="x", title="t", control_root=None),
+        args=args, seed_opening=None)
+    assert rc == 0
+    assert captured.get("autonomous") is True
+
+
+@pytest.mark.anyio
+async def test_run_fresh_session_interactive_branch_threads_autonomous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import imp.cli.main as m
+
+    captured: dict[str, object] = {}
+
+    async def _fake_rsc(change: object, **kw: object) -> int:
+        captured.update(kw)
+        return 0
+
+    async def _fake_clear_loop(control: object, *, tui: bool, first: object) -> int:
+        return await first({})
+
+    monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
+    monkeypatch.setattr(m, "_tui_requested", lambda _a: False)
+    monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: (lambda _: None))
+    monkeypatch.setattr(m, "run_session_client", _fake_rsc)
+
+    args = m._build_parser().parse_args(["new", "--autonomous"])
+    rc = await m._run_fresh_session(
+        SimpleNamespace(id="x", title="t", control_root=None),
+        args=args, seed_opening=None)
+    assert rc == 0
+    assert captured.get("autonomous") is True
