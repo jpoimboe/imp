@@ -198,9 +198,9 @@ unimplemented task, or the re-opened task from injected feedback):
 
    | Note type | Meaning | Downstream consumer |
    |---|---|---|
-   | **resolved-forward** | You fixed it (dispatch the coder); tree green. Informational, plus an optional `— needs-decision:` if it crossed a spec/AC boundary and wants ratification. | `finalize` ratifies the needs-decision, if any; `plan-cycle-check` ignores it for coverage. |
-   | **needs-decision** | A genuine human call, no code action taken; recorded as a `— needs-decision:` Deferred Followup. | `finalize` gate's needs-decision walk; suppresses the `plan-cycle-check` backstop for its scope. |
-   | **needs-replan** | You couldn't fix forward; a corrective plan is required. | `plan-cycle-check` → `more_plans: true` → `plan-writer` authors `N+1`. |
+   | **resolved-forward** | You fixed it (dispatch the coder); tree green. Informational, plus an optional `— needs-decision:` if it crossed a spec/AC boundary and wants ratification. | `finalize` ratifies the needs-decision, if any; `gap-check` ignores it for coverage. |
+   | **needs-decision** | A genuine human call, no code action taken; recorded as a `— needs-decision:` Deferred Followup. | `finalize` gate's needs-decision walk; suppresses the `gap-check` backstop for its scope. |
+   | **needs-replan** | You couldn't fix forward; a corrective plan is required. | `gap-check` → `more_plans: true` → `plan-writer` authors `N+1`. |
 
    What makes a finding a **needs-decision** (a genuine human call) rather than a
    **resolved-forward** you should just make and log is the shared bar:
@@ -218,14 +218,14 @@ unimplemented task, or the re-opened task from injected feedback):
      carries the redo.
 
    You **never** yield to the human — a genuine intent-fork is deferred to the
-   `plan-writer` invocation that `plan-cycle-check` triggers. All commits go through
+   `plan-writer` invocation that `gap-check` triggers. All commits go through
    the coder; you never commit, amend, or rebase yourself.
 
    Record both new note types by appending to `{{ change.home }}/deferred.md` — the
    append-only ledger, alongside the `## Deferred Followups` / `— needs-decision:`
    lines and never the wholesale-rewritten `progress.md` status. `deferred.md` is
    never collapsed, so a note there survives every end-of-plan `progress.md` rewrite
-   and is intact when `plan-cycle-check` reads it. The EXACT shapes:
+   and is intact when `gap-check` reads it. The EXACT shapes:
 
    - resolved-forward: `- resolved-forward task-lead: <one-line description of what you fixed>`
    - needs-replan (a checkbox, so its open/addressed state is explicit):
@@ -234,7 +234,7 @@ unimplemented task, or the re-opened task from injected feedback):
 
    The `NEEDS-REPLAN` checkbox is the lifecycle handle: it is born open (`[ ]`); the
    `plan-writer` invocation that authors the covering `N+1` marks it `[x]`, so the
-   next `plan-cycle-check` lap does not re-fire on a consumed note.
+   next `gap-check` run does not re-fire on a consumed note.
 7. Loop back to step 1 for the next task. Return only when the plan is fully
    implemented — every task committed — at which point the engine advances to the
    `verify` gate.
