@@ -31,7 +31,10 @@ def completion_instruction(schema: OutputSchema) -> str:
     return (
         "To finish this step you MUST call the `complete_step` tool with: "
         f"{fields_text}. Structured arguments are not shown to the user, so "
-        "state your conclusion in your turn text as prose; then call the tool."
+        "state your conclusion as prose in the same turn that calls "
+        "`complete_step` — do not give your summary in one turn and call the "
+        "tool in the next, because a turn that ends on prose alone is read as "
+        "yielding control, not as finishing the step."
     )
 
 
