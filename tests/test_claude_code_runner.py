@@ -2576,3 +2576,57 @@ async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
     # The steer, not a stale tool result, drives the next turn.
     assert holder["c"].queries[-1] == "go look elsewhere"
     assert events[-1]["type"] == "agent_output"
+
+
+@pytest.mark.anyio
+async def test_cooperative_steer_drive_invocation_not_paused(
+    tmp_path: Path,
+) -> None:
+    """AC3 integration: drive_invocation returns non-paused after a cooperative
+    steer — the daemon layer never sees a PAUSED result, so _hold_prompt never
+    shows the re-prompt for an attended steer."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.agent_run import drive_invocation
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("taking the redirect"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "redirect here")
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    result_holder: dict[str, Any] = {}
+
+    async def do_drive() -> None:
+        result_holder["r"] = await drive_invocation(
+            inv, runner, coordinator=coord, log=None, emit_events=False)
+
+    task = asyncio.create_task(do_drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    r = result_holder["r"]
+    assert r.paused is False
+    assert r.output == {"status": "Success"}
