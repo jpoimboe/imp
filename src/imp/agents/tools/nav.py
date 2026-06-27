@@ -166,6 +166,7 @@ async def _grep_file_source(target: Path, root: Path, inside: bool,
         "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
         "stays relative; search elsewhere via `path`, not an absolute pattern."
     ),
+    read_only=True,
 )
 async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
     base = ctx.authorize_fs(("read",), path)
@@ -277,6 +278,7 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "matches as absolute paths); an external-directory search stops after a "
         "fixed file-count cap, disclosed in the output."
     ),
+    read_only=True,
 )
 async def grep(
     ctx: ToolContext,
