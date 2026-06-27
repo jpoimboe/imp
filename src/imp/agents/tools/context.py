@@ -23,6 +23,18 @@ from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
 from imp.engine.types import AgentDef
 
 
+@dataclass(frozen=True)
+class ReadRecord:
+    """Per-step record of a successful read, for the read-before-write gate.
+
+    content_sha256 hashes the RAW file bytes (not read_file's lossy decoded
+    text). full is True iff the read reached EOF and was not cap-truncated."""
+
+    mtime: float
+    content_sha256: str
+    full: bool
+
+
 @dataclass
 class ToolContext:
     project_root: Path
@@ -39,6 +51,9 @@ class ToolContext:
     # tool_killed from the result; routing a background proc through it would
     # produce the wrong kill_reason, no tombstone, and a spurious tool_killed.
     background_processes: dict[str, Any] = field(default_factory=dict)
+    # Per-step read-before-write gate: resolved path -> last read record. A fresh
+    # ToolContext is built per agent run, so the map is naturally per-step.
+    read_state: dict[Path, ReadRecord] = field(default_factory=dict)
     # Background-execution opt-in. Only providers that wire the FULL bg
     # surface (bash_output/bash_kill injection, _sweep_bg sites, teardown in
     # interrupt + run()-finally) may set this — all four current providers

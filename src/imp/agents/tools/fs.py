@@ -7,6 +7,7 @@ sandbox mirror like `bash` (allow-all when unsandboxed).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import stat
 import tempfile
@@ -15,13 +16,12 @@ from pathlib import Path
 import anyio
 
 from imp.agents.tools import imp_tool
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ReadRecord, ToolContext
 from imp.agents.tools.limits import (
     FILE_READ_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
     read_bytes_capped,
-    read_text_capped,
     tool_checkpoint,
 )
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
@@ -60,7 +60,7 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
     try:
-        text, read_truncated = await read_text_capped(
+        data, read_truncated = await read_bytes_capped(
             resolved,
             coordinator=coordinator,
             deadline=deadline,
@@ -70,11 +70,24 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
         raise FileNotFoundError(f"no such file: {path}") from None
     except IsADirectoryError:
         raise IsADirectoryError(f"is a directory: {path}") from None
-    if not text:
-        return "[empty file]"  # wins regardless of offset — never past-EOF
     # st_size sampled AFTER the read (growth during the read must classify as
     # cap-truncated; a before-read sample would fabricate a final line).
     cap_truncated = file_is_cap_truncated(read_truncated, resolved)
+    # Skip recording (but still return the window) if the file vanished between
+    # the read and this stat — the parallel-shared-tree race file_is_cap_truncated
+    # already tolerates. An unguarded stat would turn a successful read into a
+    # FileNotFoundError; contextlib.suppress (already imported) restores prior
+    # behavior, leaving read_state without a record (a later write_file then
+    # refuses with "hasn't been read this step", which is correct).
+    with contextlib.suppress(OSError):
+        ctx.read_state[resolved] = ReadRecord(
+            mtime=resolved.stat().st_mtime,
+            content_sha256=hashlib.sha256(data).hexdigest(),
+            full=not cap_truncated,
+        )
+    text = data.decode("utf-8", "replace")
+    if not text:
+        return "[empty file]"  # wins regardless of offset — never past-EOF
     # Seam: the bounded read checkpoints per chunk, but the split/number/render
     # of up to 5 MB below is one synchronous stretch — checkpoint once between.
     await tool_checkpoint(coordinator, deadline)
@@ -126,6 +139,44 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     return f"{body}\n{notice}" if notice else body
 
 
+def _hash_file_capped(resolved: Path) -> str | None:
+    """sha256 over the first FILE_READ_CAP_BYTES bytes of `resolved`; None if the
+    file is larger than the cap (it cannot match a full read's hash, so the
+    content-equality fast-path must fail). Bounded: reads at most cap+1 bytes."""
+    with open(resolved, "rb") as fh:
+        data = fh.read(FILE_READ_CAP_BYTES + 1)
+    if len(data) > FILE_READ_CAP_BYTES:
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
+def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
+    """Read-before-write gate. Raises ValueError on a blind or stale overwrite
+    of an existing file; returns silently when the write may proceed."""
+    if not resolved.exists():
+        return
+    record = ctx.read_state.get(resolved)
+    if record is None:
+        raise ValueError(
+            f"{display_path} hasn't been read this step — read_file it before "
+            f"overwriting (or use edit_file to change part of it)."
+        )
+    try:
+        current_mtime = resolved.stat().st_mtime
+    except OSError:
+        return  # vanished between exists() and stat() — treat as new-file write
+    if current_mtime > record.mtime:
+        # False-positive guard: a touch / sync / formatter that rewrote
+        # byte-identical content bumped mtime but not content. Only a FULL read
+        # has a hash over the whole file, so only it may take this fast-path.
+        if record.full and _hash_file_capped(resolved) == record.content_sha256:
+            return
+        raise ValueError(
+            f"{display_path} changed since you read it — read it again before "
+            f"overwriting."
+        )
+
+
 @imp_tool(
     name="write_file",
     description=(
@@ -138,8 +189,15 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
 )
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
     resolved = ctx.authorize_fs(("write",), path)
+    _gate_write(ctx, resolved, path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content)
+    data = resolved.read_bytes()
+    ctx.read_state[resolved] = ReadRecord(
+        mtime=resolved.stat().st_mtime,
+        content_sha256=hashlib.sha256(data).hexdigest(),
+        full=True,
+    )
     return f"wrote {len(content)} bytes to {path}"
 
 
@@ -261,9 +319,15 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
         raise ValueError(f"{_short_repr(old)} not unique in {path!r} "
                          f"(found {count} occurrences)")
     edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
+    new_bytes = edited.encode("utf-8")
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
-    _atomic_write_bytes(resolved, edited.encode("utf-8"), display_path=path)
+    _atomic_write_bytes(resolved, new_bytes, display_path=path)
+    ctx.read_state[resolved] = ReadRecord(
+        mtime=resolved.stat().st_mtime,
+        content_sha256=hashlib.sha256(new_bytes).hexdigest(),
+        full=True,
+    )
     if replace_all:
         return f"replaced {count} occurrences in {path}"
     return f"replaced 1 occurrence in {path}"

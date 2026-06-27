@@ -286,22 +286,26 @@ def test_vanished_file_stat_split(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     # truncated=True + stat failure -> cap-truncated vocabulary, no total.
     import imp.agents.tools.fs as fs
 
-    async def fake_read_complete(path: Path, **kw: object) -> tuple[str, bool]:
+    async def fake_read_complete(path: Path, **kw: object) -> tuple[bytes, bool]:
         path.unlink()  # vanish between read and the st_size sample
-        return ("a\nb\n", False)
+        return (b"a\nb\n", False)
 
-    async def fake_read_truncated(path: Path, **kw: object) -> tuple[str, bool]:
+    async def fake_read_truncated(path: Path, **kw: object) -> tuple[bytes, bool]:
         path.unlink()
-        return ("a\nb\npartial", True)
+        return (b"a\nb\npartial", True)
 
     (tmp_path / "v.txt").write_text("a\nb\n")
-    monkeypatch.setattr(fs, "read_text_capped", fake_read_complete)
-    out = _read(_ctx(tmp_path), path="v.txt")
+    monkeypatch.setattr(fs, "read_bytes_capped", fake_read_complete)
+    ctx = _ctx(tmp_path)
+    out = _read(ctx, path="v.txt")
     assert out == f"{_num(1, 'a')}\n{_num(2, 'b')}"  # complete: silent, not a flake
+    assert ctx.read_state == {}  # vanished file leaves no record
 
     (tmp_path / "v.txt").write_text("a\nb\npartial")
-    monkeypatch.setattr(fs, "read_text_capped", fake_read_truncated)
-    out = _read(_ctx(tmp_path), path="v.txt")
+    monkeypatch.setattr(fs, "read_bytes_capped", fake_read_truncated)
+    ctx = _ctx(tmp_path)
+    out = _read(ctx, path="v.txt")
+    assert ctx.read_state == {}  # vanished file leaves no record
     # partial fragment dropped, window ends at the readable edge
     assert out.rsplit("\n", 1)[1] == (
         "[showing lines 1-2; end of the readable window (first 5 MB) "

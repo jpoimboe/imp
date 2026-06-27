@@ -17,7 +17,7 @@ is no `## Plan outline` and you re-derive coverage from the spec + code directly
 way, your only job is the same final backstop: did the implemented plans miss real
 *code* scope? Read the spec (including its `## Plan outline` when present), every plan
 `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`,
-`{{ change.home }}/progress.md`, and the committed code (use glob/grep to spot-check).
+`{{ change.home }}/progress.md`, `{{ change.home }}/deferred.md`, and the committed code (use glob/grep to spot-check).
 
 ## Coverage decision — you are the SOLE completeness guard
 

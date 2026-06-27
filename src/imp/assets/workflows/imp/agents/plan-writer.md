@@ -113,7 +113,7 @@ is scoped to its own `review_base..HEAD` diff; the settled work is neither re-pl
 nor re-reviewed.
 
 **Consume the lifecycle handle.** When this `N+1` covers an open `NEEDS-REPLAN
-task-lead:` note in `{{ change.home }}/progress.md` (a `task-lead` needs-replan that
+task-lead:` note in `{{ change.home }}/deferred.md` (a `task-lead` needs-replan that
 the coverage guard surfaced), mark that checkbox addressed (`[ ]` → `[x]`) as part of
 authoring the plan. This consumes the handle so the next `plan-cycle-check` lap does
 not re-fire on an already-covered note.
@@ -137,7 +137,7 @@ spec-finalizer's. **Decide-and-record is the default even for a call that
 *contradicts* an explicit spec scope/AC boundary**, as long as a reasonable
 default exists: decide the correct call, implement it in the plan, record the
 rationale in `## Decisions`, and — because it crosses a spec scope/AC boundary —
-surface it as **one** `— needs-decision:` open item in `progress.md` (the reader
+surface it as **one** `— needs-decision:` open item in `{{ change.home }}/deferred.md` (the reader
 form under "Surfacing a decision you cannot resolve", which is load-bearing). Do
 **not** yield to the human for it. The human ratifies it exactly once, at the
 merge gate, where `finalize` already walks `— needs-decision:` items: that gate
@@ -175,7 +175,7 @@ pass is unchanged.
 
 When a concern clears that bar and you cannot settle it from the spec or the codebase,
 do not bury it in prose. Append it to the **Deferred Followups** list in
-`{{ change.home }}/progress.md` (create the `## Deferred Followups` heading if absent)
+`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)
 in `finalize`'s exact reader form, the same `— needs-decision:` line shape the merge
 gate already walks:
 

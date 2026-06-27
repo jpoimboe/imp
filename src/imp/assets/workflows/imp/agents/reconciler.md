@@ -82,8 +82,8 @@ reconciled.
 {% include "partials/human-decision.md" %}
 
 For a reconciliation that clears that bar — you resolved it defensively but a human
-should still ratify it — append a line to the `## Deferred Followups` section in reader
-form (create the heading if absent):
+should still ratify it — append a line to the `## Deferred Followups` section in
+`{{ change.home }}/deferred.md` in reader form (create the file/heading if absent):
 
 `- [ ] DEFERRED reconciler: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
 

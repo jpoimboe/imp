@@ -31,7 +31,7 @@ def test_deferred_sweep_loads_as_part_of_the_workflow() -> None:
     assert "deferred-sweep" in wf.agents
 
 
-def test_deferred_sweep_prunes_and_records_fixes_durably() -> None:
+def test_deferred_sweep_checks_off_and_records_fixes_durably() -> None:
     low = SWEEP.read_text().lower()
     # Three dispositions of the risk-gated model survive.
     assert "record it `fixed`" in low and "needs-decision" in low and "dismissed" in low
@@ -44,21 +44,24 @@ def test_deferred_sweep_prunes_and_records_fixes_durably() -> None:
     pos = low.find("non-trivial")
     assert pos >= 0 and "code-reviewer" in low[pos : pos + 250]
     assert "one clean commit" in low
-    # #4: a FIXED item is recorded durably under ## Completed plans, then the
-    # transient line is PRUNED (not left as a checked line).
+    # A FIXED item is recorded durably under ## Completed plans, then the ledger
+    # line is CHECKED OFF (append-only: flipped to - [x] with a terminal marker,
+    # never deleted).
     assert "## completed plans" in low
     assert "fixed <" in low                          # durable opportunistic line carries the sha
-    assert "opportunistic (" in low               # durable line prefix that finalize parses
-    assert "prune" in low or "remove the transient line" in low
-    # A DISMISSED item is pruned with NO durable record; needs-decision STAYS.
+    assert "opportunistic (" in low                  # durable line prefix that finalize parses
+    assert "check off" in low and "append-only" in low
+    assert "- [x] deferred" in low                   # the checked-off terminal shape
+    assert "prune" not in low                        # the old delete model must not return
+    # A DISMISSED item is checked off with NO durable record; needs-decision STAYS open.
     assert "no durable record" in low
-    assert "stays in the transient" in low
+    assert "stays open" in low
     # Fail-safe: malformed lines untouched; polish never marks the run degraded.
     assert "malformed" in low
     assert "degraded" in low
     # The terminal gate markers stay inert.
     assert "seeded <change" in low and "ignored-at-gate" in low
-    assert "needs-decision:" in low               # parseable format that finalize reads
+    assert "needs-decision:" in low                  # parseable format that finalize reads
     assert "never grow the change" not in low
     assert "auto-route" not in low
 
