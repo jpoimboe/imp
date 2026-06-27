@@ -407,6 +407,64 @@ def test_scan_file_swallows_parse_failure(tmp_path, monkeypatch) -> None:
     assert e.symbols == ()
 
 
+def _render_entries():
+    foo = so.FileEntry(
+        "pkg/foo.py",
+        (
+            Symbol("Foo", "data", 4, "class Foo:",
+                   (Symbol("method", "fn", 5, "def method(self, a: int) -> str:"),)),
+            Symbol("run_change", "fn", 9, "def run_change(change, config=None) -> int:"),
+        ),
+    )
+    util = so.FileEntry("pkg/util.py", (Symbol("helper", "fn", 1, "def helper():"),))
+    mk = so.FileEntry("Makefile", ())
+    return [mk, foo, util]
+
+
+def test_render_dir_counts() -> None:
+    tree = so.build_tree(".", _render_entries())
+    assert so.render_dir(tree, detail="counts") == (
+        "./ — 1 dir, 3 files, 4 symbols\n"
+        "  Makefile — (no outline)\n"
+        "  pkg/ — 2 files, 4 symbols\n"
+        "    foo.py — 2 fn, 1 data\n"
+        "    util.py — 1 fn"
+    )
+
+
+def test_render_dir_signatures() -> None:
+    tree = so.build_tree(".", _render_entries())
+    assert so.render_dir(tree, detail="signatures") == (
+        "./ — 1 dir, 3 files, 4 symbols\n"
+        "  Makefile — (no outline)\n"
+        "  pkg/ — 2 files, 4 symbols\n"
+        "    foo.py — 2 fn, 1 data\n"
+        "      4: class Foo:\n"
+        "      5:   def method(self, a: int) -> str:\n"
+        "      9: def run_change(change, config=None) -> int:\n"
+        "    util.py — 1 fn\n"
+        "      1: def helper():"
+    )
+
+
+def test_render_dir_max_depth_collapses_subdir() -> None:
+    tree = so.build_tree(".", _render_entries())
+    # max_depth=1: list the root's children, but collapse pkg/ to its recursive
+    # rollup line (its file lines are not shown, the count still is).
+    assert so.render_dir(tree, detail="signatures", max_depth=1) == (
+        "./ — 1 dir, 3 files, 4 symbols\n"
+        "  Makefile — (no outline)\n"
+        "  pkg/ — 2 files, 4 symbols"
+    )
+
+
+def test_render_dir_unknown_detail_defaults_to_signatures() -> None:
+    # AC#4: any unrecognized detail value behaves as "signatures" (counts plus
+    # signatures), not "counts".
+    tree = so.build_tree(".", _render_entries())
+    assert so.render_dir(tree, detail="bogus") == so.render_dir(tree, detail="signatures")
+
+
 def test_build_tree_groups_and_counts_recursively() -> None:
     foo = so.FileEntry(
         "pkg/foo.py",

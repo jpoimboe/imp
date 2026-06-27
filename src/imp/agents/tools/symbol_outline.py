@@ -321,6 +321,65 @@ def _sort_tree(node: DirNode) -> None:
         _sort_tree(sub)
 
 
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _dir_phrase(n_dirs: int, n_files: int, n_symbols: int) -> str:
+    """'N dirs, M files, K symbols' for a directory line; the dir term is omitted
+    when zero. Always reflects the recursive subtree totals."""
+    parts: list[str] = []
+    if n_dirs:
+        parts.append(_plural(n_dirs, "dir"))
+    parts.append(_plural(n_files, "file"))
+    parts.append(_plural(n_symbols, "symbol"))
+    return ", ".join(parts)
+
+
+def _file_phrase(entry: FileEntry) -> str:
+    if not entry.symbols:
+        return "(no outline)"
+    return count_phrase(*_entry_counts(entry))
+
+
+def _dir_text(node: DirNode) -> str:
+    nd, nf, ns = dir_counts(node)
+    return f"{node.rel}/ — {_dir_phrase(nd, nf, ns)}"
+
+
+def _basename(rel: str) -> str:
+    return rel.rsplit("/", 1)[-1]
+
+
+def _render_dir_node(
+    node: DirNode, lines: list[str], depth: int, detail: str, max_depth: int | None,
+) -> None:
+    lines.append(f"{'  ' * depth}{_dir_text(node)}")
+    if max_depth is not None and depth >= max_depth:
+        return
+    child_indent = "  " * (depth + 1)
+    for f in node.files:
+        lines.append(f"{child_indent}{_basename(f.rel)} — {_file_phrase(f)}")
+        if detail != "counts" and f.symbols:
+            width = len(str(_max_lineno(f.symbols)))
+            body: list[str] = []
+            _render_lines(f.symbols, body, 0, width)
+            for bl in body:
+                lines.append(f"{child_indent}  {bl}")
+    for sub in node.subdirs:
+        _render_dir_node(sub, lines, depth + 1, detail, max_depth)
+
+
+def render_dir(tree: DirNode, *, detail: str = "signatures", max_depth: int | None = None) -> str:
+    """The directory outline: a recursive-count line per directory and a count
+    (plus signatures, when detail='signatures') line per file, hierarchy shown by
+    indentation. `max_depth` caps how deep the listing expands; a collapsed
+    directory still shows its recursive totals."""
+    lines: list[str] = []
+    _render_dir_node(tree, lines, 0, detail, max_depth)
+    return "\n".join(lines)
+
+
 def build_tree(root_rel: str, entries: list[FileEntry]) -> DirNode:
     """Group `entries` (each carrying its worktree-relative rel) into a directory
     tree rooted at `root_rel`. Intermediate directories become DirNodes whose
