@@ -2330,13 +2330,13 @@ def test_step_started_payload_carries_command_only_for_script() -> None:
 
 
 @pytest.mark.anyio
-async def test_executor_passes_run_mode_to_prompt(tmp_path: Path) -> None:
+async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
     wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "headless={{ run.non_interactive }}\n"
+        "autonomous={{ run.autonomous }}\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -2350,10 +2350,10 @@ async def test_executor_passes_run_mode_to_prompt(tmp_path: Path) -> None:
     _register_prompt_capturing({"status": "Success"}, sink)
 
     result = await run_change(
-        change, on_event=lambda _e: None, non_interactive=True,
+        change, on_event=lambda _e: None, autonomous=True,
     )
     assert result is RunResult.COMPLETED
-    assert any("headless=True" in p for p in sink)
+    assert any("autonomous=True" in p for p in sink)
 
 
 @pytest.mark.anyio
