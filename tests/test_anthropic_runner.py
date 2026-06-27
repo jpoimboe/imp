@@ -914,3 +914,22 @@ async def test_anthropic_resume_creates_no_native_session_store(tmp_path: Path) 
     assert events[-1]["type"] == "agent_output"
     # Scope guard: the anthropic path never materializes a claude_session/ store dir.
     assert not (inv.transcript_dir / "claude_session").exists()
+
+
+@pytest.mark.anyio
+async def test_anthropic_llm_response_records_served_model(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        text("done"),
+        tool_use("c1", "complete_step", {"status": "Success"}),
+        stop_reason="end_turn", model="claude-served-fallback")])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ev in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert resp["payload"]["model"] == "claude-served-fallback"   # served, not configured
+    assert "duration_ms" in resp["payload"]
+    assert resp["payload"]["duration_ms"] >= 0

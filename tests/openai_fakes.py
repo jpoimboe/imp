@@ -49,11 +49,15 @@ def resp_web_search_call(item_id: str, *, query: str) -> dict[str, Any]:
 
 
 def resp_response(*output_items: dict[str, Any],
-                  usage: dict[str, Any] | None = None) -> _Dumpable:
-    return _Dumpable({
+                  usage: dict[str, Any] | None = None,
+                  model: str | None = None) -> _Dumpable:
+    dump: dict[str, Any] = {
         "output": list(output_items),
         "usage": usage or {"input_tokens": 1, "output_tokens": 1},
-    })
+    }
+    if model is not None:
+        dump["model"] = model
+    return _Dumpable(dump)
 
 
 class _FakeResponses:

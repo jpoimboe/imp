@@ -20,6 +20,7 @@ import hashlib
 import inspect
 import json
 import os
+import time
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
@@ -601,6 +602,7 @@ class OpenAIAgentRunner:
             # N4 race note: an interrupt() between the loop-head _cancel check and
             # this assignment leaves this one request uncancelled (loop exits next
             # iteration via _cancel). One extra in-flight request, worst case.
+            _t0 = time.perf_counter()
             self._cancel_scope = anyio.CancelScope()
             response = None
             try:
@@ -636,9 +638,12 @@ class OpenAIAgentRunner:
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
             elog.append_llm_response(
-                agent_id=aid, provider=invocation.provider_name, model=self.model,
+                agent_id=aid, provider=invocation.provider_name,
+                model=raw.get("model") or self.model,
                 raw=raw, usage=raw.get("usage") or {},
-                stop_reason=_openai_stop_reason(raw))
+                stop_reason=_openai_stop_reason(raw),
+                request_id=getattr(response, "_request_id", None),
+                duration_ms=(time.perf_counter() - _t0) * 1000.0)
             _emit_openai_web_events(raw, elog, aid)
             # Post-API sweep + heartbeat (Decision 10): the model-API call is
             # the longest awaitable with no registry access — sweeping here
