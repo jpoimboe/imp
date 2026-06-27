@@ -192,7 +192,8 @@ def _thin_file(header: str, body: list[str]) -> str:
     for i, line in enumerate(body):
         notice = f"… +{len(body) - i} not shown"
         # +3 accounts for the three join newlines: after header, after this line, after notice.
-        if size + len(line.encode()) + len(notice.encode()) + len(marker.encode()) + 3 > TOOL_OUTPUT_CAP_BYTES:
+        line_bytes = len(line.encode()) + len(notice.encode()) + len(marker.encode()) + 3
+        if size + line_bytes > TOOL_OUTPUT_CAP_BYTES:
             break
         kept.append(line)
         size += len(line.encode()) + 1
