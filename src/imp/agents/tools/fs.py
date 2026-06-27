@@ -319,9 +319,15 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
         raise ValueError(f"{_short_repr(old)} not unique in {path!r} "
                          f"(found {count} occurrences)")
     edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
+    new_bytes = edited.encode("utf-8")
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
-    _atomic_write_bytes(resolved, edited.encode("utf-8"), display_path=path)
+    _atomic_write_bytes(resolved, new_bytes, display_path=path)
+    ctx.read_state[resolved] = ReadRecord(
+        mtime=resolved.stat().st_mtime,
+        content_sha256=hashlib.sha256(new_bytes).hexdigest(),
+        full=True,
+    )
     if replace_all:
         return f"replaced {count} occurrences in {path}"
     return f"replaced 1 occurrence in {path}"

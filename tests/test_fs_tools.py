@@ -271,3 +271,18 @@ def test_write_refused_when_bytes_differ_but_decode_to_same_text(tmp_path: Path)
     os.utime(p, (rec.mtime + 10, rec.mtime + 10))
     with pytest.raises(ValueError, match="changed since you read it"):
         _write_file(ctx, path="p.md", content="new")
+
+
+def test_edit_file_with_no_prior_read_still_works(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a = 1\n")
+    ctx = _ctx(tmp_path, "read", "write")
+    _edit_file(ctx, path="x.py", old="a = 1", new="a = 2")
+    assert (tmp_path / "x.py").read_text() == "a = 2\n"
+
+
+def test_write_after_edit_without_reread_allowed(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a = 1\n")
+    ctx = _ctx(tmp_path, "read", "write")
+    _edit_file(ctx, path="x.py", old="a = 1", new="a = 2")  # refreshes the record
+    _write_file(ctx, path="x.py", content="a = 3\n")        # record present -> allowed
+    assert (tmp_path / "x.py").read_text() == "a = 3\n"
