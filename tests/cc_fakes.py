@@ -61,6 +61,10 @@ FakeThinkingBlock.__name__ = "ThinkingBlock"
 @dataclass
 class FakeAssistantMessage:
     content: list[Any]
+    message_id: str | None = None
+    model: str | None = None
+    usage: dict[str, Any] | None = None
+    stop_reason: Any = None
 
 
 FakeAssistantMessage.__name__ = "AssistantMessage"
@@ -146,8 +150,12 @@ class FakeClaudeSDKClient:
         self.closed = True
 
 
-def assistant(*blocks: Any) -> FakeAssistantMessage:
-    return FakeAssistantMessage(content=list(blocks))
+def assistant(*blocks: Any, message_id: str | None = None,
+              model: str | None = None, usage: dict[str, Any] | None = None,
+              stop_reason: Any = None) -> FakeAssistantMessage:
+    return FakeAssistantMessage(
+        content=list(blocks), message_id=message_id, model=model,
+        usage=usage, stop_reason=stop_reason)
 
 
 def user(*blocks: Any) -> FakeUserMessage:
