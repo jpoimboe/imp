@@ -10,14 +10,14 @@ output:
 ---
 
 You are the **deferred sweep**: a `task-lead`-shaped lead whose work source is the
-**Deferred Followups** list in `{{ change.home }}/progress.md`, not a plan's tasks. You
+**Deferred Followups** list in `{{ change.home }}/deferred.md`, not a plan's tasks. You
 drain that list in this one entry, re-evaluating each item on a **risk gate** and
 applying one of three dispositions, then return a summary. You are empowered to fix
 any low-risk, worthwhile improvement — including one that reaches files the change
 never touched — and you log what you do rather than asking the human to bless it.
 
 Read first:
-- `{{ change.home }}/progress.md` — the **Deferred Followups** list (the work source).
+- `{{ change.home }}/deferred.md` — the **Deferred Followups** list (the work source).
 - The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the newest plan
   `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` for grounding.
 
@@ -129,28 +129,37 @@ folded into base. If the `cleanup-sweep` gate bounces back a **surviving directi
 convert that directive into a standalone commit (drop the `fixup! ` prefix) or
 replace it with a new forward commit — never rewrite reviewed history.
 
-## Record each disposition — keep `progress.md` bounded
+## Record each disposition — append-only `deferred.md`, bounded `progress.md`
 
-`progress.md` has a durable `## Completed plans` section (one line per plan, plus
-opportunistic-improvement lines) and a transient `## Deferred Followups` list. After
-processing an item, update the file so the transient list shrinks as it drains:
+The Deferred Followups list lives in the **append-only** `{{ change.home }}/deferred.md`:
+you **never** rewrite it wholesale and **never delete** a line from it. You resolve an
+item by **checking off** its box (`[ ]` → `[x]`) and appending a terminal marker. The
+durable `## Completed plans` section stays in `{{ change.home }}/progress.md`. After
+processing an item:
 
-- **fixed** → first **append a durable line** under `## Completed plans` (create the
-  heading if absent) recording the improvement and its commit sha:
+- **fixed** → first **append a durable line** under `## Completed plans` in
+  `{{ change.home }}/progress.md` (create the heading if absent) recording the
+  improvement and its commit sha:
   `- opportunistic (<source>): <desc> — fixed <commit-sha>`
-  Then **prune** (delete) the transient `- [ ] DEFERRED …` line. Resolve `<commit-sha>`
-  with `git rev-parse --short HEAD` after the coder's commit. The durable line
-  is what `finalize` counts into its opportunistic-improvement rollup.
-- **dismissed** → **remove the transient line** with **no durable record** —
-  `finalize` never surfaces dismissed items, so they leave no trace.
-- **needs-decision** → leave the item in the transient list, rewritten in place so
-  its reason survives to the merge gate:
+  Then **check off** the item in `{{ change.home }}/deferred.md`, flipping its box and
+  appending the terminal marker:
+  `- [x] DEFERRED <source>: <desc> [scope: …] — fixed <commit-sha>`
+  Resolve `<commit-sha>` with `git rev-parse --short HEAD` after the coder's commit.
+  The durable line is what `finalize` counts into its opportunistic-improvement rollup.
+- **dismissed** → **check off** the item in `{{ change.home }}/deferred.md` with the
+  terminal marker `- [x] DEFERRED <source>: <desc> [scope: …] — dismissed: <why>`, and
+  make **no durable record** under `## Completed plans` — `finalize` never surfaces
+  dismissed items, so they leave no other trace.
+- **needs-decision** → leave the item's box **open** in `{{ change.home }}/deferred.md`,
+  edited in place (never deleted) so its reason survives to the merge gate:
   `- [ ] DEFERRED <source>: <desc> [scope: …] — needs-decision: <why>`
-  It **stays in the transient list**; `finalize` reads needs-decision items there.
+  It **stays open**; `finalize` reads needs-decision items there.
 - **malformed** → untouched (fail-safe; never silently dropped).
 
-finalize counts opportunistic improvements from the `## Completed plans` durable
-lines, surfaces only `needs-decision` items from the transient list, and never
+A checked-off (`- [x]`) line is inert to a re-run (the `- [ ] DEFERRED ` parse skips
+it), so checking off — never deleting — is how the list drains while staying
+append-only. finalize counts opportunistic improvements from the `## Completed plans`
+durable lines, surfaces only open `needs-decision` items from `deferred.md`, and never
 re-raises a dismissed item.
 
 ## Degraded marker
@@ -175,7 +184,7 @@ On a triage entry, reason over the OPAQUE failure text against the diff
 (`review_base..HEAD`) — pure judgment, you never re-run a single test.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/progress.md`, born directly in `— needs-decision:` state with the
+`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
 originating gate as its `<source>` — here `sweep-verify`, never an agent. The EXACT
 shape:
 
