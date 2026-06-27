@@ -7,6 +7,7 @@ sandbox mirror like `bash` (allow-all when unsandboxed).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import stat
 import tempfile
@@ -15,13 +16,12 @@ from pathlib import Path
 import anyio
 
 from imp.agents.tools import imp_tool
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ReadRecord, ToolContext
 from imp.agents.tools.limits import (
     FILE_READ_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
     read_bytes_capped,
-    read_text_capped,
     tool_checkpoint,
 )
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
@@ -60,7 +60,7 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
     try:
-        text, read_truncated = await read_text_capped(
+        data, read_truncated = await read_bytes_capped(
             resolved,
             coordinator=coordinator,
             deadline=deadline,
@@ -70,11 +70,24 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
         raise FileNotFoundError(f"no such file: {path}") from None
     except IsADirectoryError:
         raise IsADirectoryError(f"is a directory: {path}") from None
-    if not text:
-        return "[empty file]"  # wins regardless of offset — never past-EOF
     # st_size sampled AFTER the read (growth during the read must classify as
     # cap-truncated; a before-read sample would fabricate a final line).
     cap_truncated = file_is_cap_truncated(read_truncated, resolved)
+    # Skip recording (but still return the window) if the file vanished between
+    # the read and this stat — the parallel-shared-tree race file_is_cap_truncated
+    # already tolerates. An unguarded stat would turn a successful read into a
+    # FileNotFoundError; contextlib.suppress (already imported) restores prior
+    # behavior, leaving read_state without a record (a later write_file then
+    # refuses with "hasn't been read this step", which is correct).
+    with contextlib.suppress(OSError):
+        ctx.read_state[resolved] = ReadRecord(
+            mtime=resolved.stat().st_mtime,
+            content_sha256=hashlib.sha256(data).hexdigest(),
+            full=not cap_truncated,
+        )
+    text = data.decode("utf-8", "replace")
+    if not text:
+        return "[empty file]"  # wins regardless of offset — never past-EOF
     # Seam: the bounded read checkpoints per chunk, but the split/number/render
     # of up to 5 MB below is one synchronous stretch — checkpoint once between.
     await tool_checkpoint(coordinator, deadline)

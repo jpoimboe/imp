@@ -1,12 +1,15 @@
 # tests/test_fs_tools.py
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 
 import anyio
 import pytest
 
-import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
+import imp.agents.tools.fs as fs_tools
+import imp.agents.tools.lines as lines_mod
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
@@ -134,3 +137,28 @@ def test_write_out_of_worktree_denied_when_sandboxed_and_uncovered(tmp_path: Pat
     )
     with pytest.raises(PermissionDenied):
         _write_file(ctx, path="/usr/lib/imp_should_not_write.txt", content="x")
+
+
+def test_read_file_records_full_read(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_bytes(b"hello world\n")
+    ctx = _ctx(tmp_path, "read")
+    _read_file(ctx, path="a.txt")
+    rec = ctx.read_state[ctx.resolve_path("a.txt")]
+    assert rec.full is True
+    assert rec.content_sha256 == hashlib.sha256(b"hello world\n").hexdigest()
+
+
+def test_read_file_records_partial_read_as_not_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Shrink BOTH the fs read cap (what read_file passes to the bounded reader)
+    # and the lines threshold (what classifies the file as cap-truncated) so a
+    # 16-byte file reads as a partial, cap-truncated read.
+    monkeypatch.setattr(fs_tools, "FILE_READ_CAP_BYTES", 8)
+    monkeypatch.setattr(lines_mod, "FILE_READ_CAP_BYTES", 8)
+    (tmp_path / "big.txt").write_bytes(b"0123456789abcdef")  # 16 bytes > cap 8
+    ctx = _ctx(tmp_path, "read")
+    _read_file(ctx, path="big.txt")
+    rec = ctx.read_state[ctx.resolve_path("big.txt")]
+    assert rec.full is False
+    assert rec.content_sha256 == hashlib.sha256(b"01234567").hexdigest()
