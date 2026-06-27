@@ -30,6 +30,7 @@ _CONTROL_ACTIONS = frozenset({
 class Attach:
     change_id: str
     title: str
+    lease: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,8 +46,9 @@ class Control:
 ClientMessage = Attach | Input | Control
 
 
-def encode_attach(change_id: str, title: str) -> str:
-    return json.dumps({"kind": "attach", "change_id": change_id, "title": title})
+def encode_attach(change_id: str, title: str, lease: bool = False) -> str:
+    return json.dumps(
+        {"kind": "attach", "change_id": change_id, "title": title, "lease": lease})
 
 
 def encode_input(text: str) -> str:
@@ -70,7 +72,7 @@ def parse_client_message(line: str) -> ClientMessage:
     kind = obj.get("kind")
     try:
         if kind == "attach":
-            return Attach(obj["change_id"], obj["title"])
+            return Attach(obj["change_id"], obj["title"], bool(obj.get("lease", False)))
         if kind == "input":
             return Input(obj["text"])
         if kind == "control":

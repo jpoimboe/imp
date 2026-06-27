@@ -27,7 +27,22 @@ def test_encode_attach_is_single_line_kind_tagged_json() -> None:
         "kind": "attach",
         "change_id": "2026-06-15-abc",
         "title": "Add dark mode",
+        "lease": False,
     }
+
+
+def test_encode_attach_carries_lease_flag() -> None:
+    leased = json.loads(encode_attach("c1", "T", lease=True))
+    assert leased["lease"] is True
+    unleased = json.loads(encode_attach("c1", "T"))
+    assert unleased["lease"] is False
+
+
+def test_parse_client_message_recovers_attach_lease() -> None:
+    assert parse_client_message(
+        encode_attach("c1", "T", lease=True)) == Attach("c1", "T", True)
+    assert parse_client_message(
+        encode_attach("c1", "T")) == Attach("c1", "T", False)
 
 
 def test_encode_input_is_single_line_kind_tagged_json() -> None:
