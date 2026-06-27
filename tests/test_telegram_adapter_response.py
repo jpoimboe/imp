@@ -17,12 +17,13 @@ def _adapter(sent: list, subs: Subscriptions | None = None) -> TelegramNorthAdap
 def test_render_listresult_one_line_per_change() -> None:
     out = render_response(ListResult([
         ChangeInfo(id="k3f9qa", title="Dark mode",
-                   status="running", step="implement")]))
+                   status="running", step="implement")],
+        frozenset({"k3f9qa"})))
     assert out == "@k3f9qa  Dark mode — running · implement"
 
 
-def test_render_empty_listresult_says_no_changes() -> None:
-    assert render_response(ListResult([])) == "No changes."
+def test_render_empty_listresult_says_nothing_running() -> None:
+    assert render_response(ListResult([])) == "Nothing running."
 
 
 def test_render_notice_is_plain_text() -> None:
@@ -45,10 +46,30 @@ def test_render_listresult_marks_every_subscribed_change() -> None:
     out = render_response(ListResult([
         ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
         ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement"),
-    ]), ["bbbbbb"])
+    ], frozenset({"aaaaaa", "bbbbbb"})), ["bbbbbb"])
     assert out == (
         "@aaaaaa  Alpha — paused · plan\n"
         "● @bbbbbb  Beta — running · implement")
+
+
+def test_render_hides_change_neither_resident_nor_subscribed() -> None:
+    out = render_response(ListResult([
+        ChangeInfo(id="cccccc", title="Gamma", status="paused", step="plan")]))
+    assert out == "Nothing running."
+
+
+def test_render_shows_resident_unsubscribed_without_mark() -> None:
+    out = render_response(ListResult([
+        ChangeInfo(id="dddddd", title="Delta", status="running", step="plan")],
+        frozenset({"dddddd"})))
+    assert out == "@dddddd  Delta — running · plan"
+
+
+def test_render_shows_subscribed_not_resident_with_mark() -> None:
+    out = render_response(ListResult([
+        ChangeInfo(id="eeeeee", title="Epsilon", status="paused", step="plan")]),
+        ["eeeeee"])
+    assert out == "● @eeeeee  Epsilon — paused · plan"
 
 
 def test_on_response_marks_subscribed_rows() -> None:

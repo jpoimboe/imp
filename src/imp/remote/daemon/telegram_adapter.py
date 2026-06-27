@@ -118,11 +118,14 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
 
 def render_response(response: Response, subscribed_ids: Iterable[str] = ()) -> str:
     if isinstance(response, ListResult):
-        if not response.changes:
-            return "No changes."
         subscribed = set(subscribed_ids)
+        visible = [
+            c for c in response.changes
+            if c.id in response.resident or c.id in subscribed]
+        if not visible:
+            return "Nothing running."
         lines = []
-        for c in response.changes:
+        for c in visible:
             mark = "● " if c.id in subscribed else ""
             lines.append(
                 f"{mark}@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}")
