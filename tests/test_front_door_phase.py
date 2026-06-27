@@ -130,7 +130,7 @@ def test_front_door_renders_full_brainstorm_depth(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", non_interactive=False,
+        change_home=".imp/changes/abc",
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
@@ -158,7 +158,7 @@ def test_front_door_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", non_interactive=False,
+        change_home=".imp/changes/abc",
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "spec-writer" not in out
@@ -230,7 +230,7 @@ def test_front_door_live_gate_conventions_relocated_to_partial(tmp_path) -> None
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", non_interactive=False,
+        change_home=".imp/changes/abc",
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "no co-equal dangling alternative" in out

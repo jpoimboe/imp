@@ -1013,7 +1013,6 @@ async def _run_agent_invocation(
             orig_base_head=change.orig_base_head,
             event_log=log, vars=state.vars,
             project_facts=project_facts, guidance=guidance,
-            non_interactive=non_interactive,
             scope_only=scope_only,
             autonomous=autonomous,
         )

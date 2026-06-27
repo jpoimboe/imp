@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.prompts import build_context, render_prompt
+from imp.agents.prompts import PromptRenderError, build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
@@ -781,3 +781,27 @@ def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
         assert "observable/external behavior" not in md.read_text(), (
             f"{md.name}: still carries the removed standalone "
             "'observable/external behavior' escalation trigger")
+
+
+def test_no_prompt_references_transport_non_interactive() -> None:
+    roots = [Path("src/imp/assets/workflows/imp"),
+             Path("src/imp/assets/workflows/imp-flat")]
+    offenders = [str(p) for root in roots for p in root.rglob("*.md")
+                 if "run.non_interactive" in p.read_text()]
+    assert offenders == [], offenders
+
+
+def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    ctx = build_context(change_title="t", event_log=log)
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ run.non_interactive }}", ctx)
+
+
+def test_finalize_parks_needs_decision_without_autonomy_escape() -> None:
+    for tree in ("imp", "imp-flat"):
+        text = Path(
+            f"src/imp/assets/workflows/{tree}/agents/finalize.md").read_text()
+        assert "run.non_interactive" not in text
+        assert "run.autonomous" not in text   # the needs-decision walk never auto-resolves
+        assert "needs-decision" in text       # the per-item walk exists

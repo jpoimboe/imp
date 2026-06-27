@@ -210,24 +210,6 @@ def test_change_home_defaults_empty(tmp_path: Path) -> None:
     assert render_prompt("{{ change.home }}", ctx) == ""
 
 
-def test_renders_run_namespace_true(tmp_path: Path) -> None:
-    log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log, non_interactive=True)
-    assert render_prompt("{{ run.non_interactive }}", ctx) == "True"
-    assert render_prompt(
-        "{% if run.non_interactive %}headless{% else %}interactive{% endif %}", ctx,
-    ) == "headless"
-
-
-def test_renders_run_namespace_false_default(tmp_path: Path) -> None:
-    log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
-    assert render_prompt("{{ run.non_interactive }}", ctx) == "False"
-    assert render_prompt(
-        "{% if run.non_interactive %}headless{% else %}interactive{% endif %}", ctx,
-    ) == "interactive"
-
-
 def test_renders_run_scope_only_true(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(change_title="t", event_log=log, scope_only=True)
@@ -301,8 +283,7 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
         src,
-        build_context(change_title="t", event_log=log,
-                      non_interactive=False, scope_only=False),
+        build_context(change_title="t", event_log=log, scope_only=False),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "Want me to build this out now?" in rendered
     assert "save this to your backlog" not in rendered
