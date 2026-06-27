@@ -766,8 +766,8 @@ def test_authoring_agent_renders_human_decision_partial(
             change_title="t", event_log=log, change_id="abc",
             change_home=".imp/changes/abc",
             cur_base_head="X", orig_base_head="X",
-            vars={"fast_path": False, "plan_total": 1, "task_total": 1,
-                  "integration_fork": "P"},
+            vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
+                  "task_total": 1, "integration_fork": "P"},
             project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     # Sentinel lives entirely on one partial line (the canonical sentence wraps

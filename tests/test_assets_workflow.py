@@ -888,3 +888,23 @@ def test_spec_finalizer_authors_plan_outline() -> None:
     assert "Author the plan outline" in body
     # spec-finalizer never emits plan_total — the outline (echoed by plan-writer) seeds it.
     assert "plan_total" not in wf.agents["spec-finalizer"].output_schema.field_names()
+
+
+def test_plan_writer_consumes_outline_with_express_carveout() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    text = wf.agents["plan-writer"].prompt_template_source
+    low = text.lower()
+    # Full path: read the outline, find this plan's slice, write only the HOW.
+    assert "## Plan outline" in text
+    assert "slice" in low
+    assert "only the **HOW**" in text or "only the how" in low
+    # plan_total is the outline count, not an estimate, on the full path.
+    assert "outline-derived" in low or "from the outline" in low
+    # Express carve-out: no spec-finalizer / no outline -> self-scope, default to 1.
+    assert "express" in low
+    assert "hard-depend" in low
+    assert "self-scope" in low
+    # The supercycle sentence is refreshed to the outline-driven loop + gap-check.
+    assert "outline-driven plan loop" in low
+    assert "gap-check" in low
