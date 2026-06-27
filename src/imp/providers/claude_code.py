@@ -38,6 +38,7 @@ import json
 import re
 import shutil
 import signal
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -364,6 +365,9 @@ class _RunState:
     # Runner's event loop, recorded at _run_loop entry. _impl raises on a foreign
     # loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
+    # Per-tool wall-time (ms) keyed by SDK tool_use_id, written by the MCP
+    # wrapper and read once by the receive loop when it appends the tool_result.
+    tool_durations: dict[str, float] = field(default_factory=dict)
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -598,7 +602,14 @@ def _wrap_one(
                 state.complete_step_called = True
                 state.complete_step_args = args
                 return _tool_response("step complete", is_error=False)
-            raw = await t.async_invoke(ctx, args)
+            tuid = args.get("__tool_use_id__", "")
+            clean_args = {k: v for k, v in args.items()
+                          if not (k.startswith("__") and k.endswith("__"))}
+            start = time.perf_counter()
+            raw = await t.async_invoke(ctx, clean_args)
+            dur_ms = (time.perf_counter() - start) * 1000.0
+            if tuid:
+                state.tool_durations[tuid] = dur_ms
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if name == "bash":
                 try:
@@ -1606,7 +1617,9 @@ class ClaudeCodeAgentRunner:
                                         cites = _parse_cc_web_citations(
                                             norm, call_input, b.content)
                                         elog.append_tool_result(
-                                            agent_id=aid, block=b, citations=cites)
+                                            agent_id=aid, block=b, citations=cites,
+                                            duration_ms=state.tool_durations.pop(
+                                                b.tool_use_id, None))
                                         continue
                                     # SUPPRESS the SDK's duplicate `task` result.
                                     # _impl already appended the canonical
@@ -1624,7 +1637,10 @@ class ClaudeCodeAgentRunner:
                                     pend = pending_tools.get(b.tool_use_id)
                                     is_task = pend is not None and pend.name == "sub_agent"
                                     if not is_task:
-                                        elog.append_tool_result(agent_id=aid, block=b)
+                                        elog.append_tool_result(
+                                            agent_id=aid, block=b,
+                                            duration_ms=state.tool_durations.pop(
+                                                b.tool_use_id, None))
                                     if pend is not None:
                                         pend.is_error = b.is_error
                                         pend.result_preview = \
