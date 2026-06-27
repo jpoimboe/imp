@@ -3312,3 +3312,44 @@ async def test_claude_code_tool_result_carries_recorded_duration(
     u1 = next(k for k in captured_calls
               if getattr(k["block"], "tool_use_id", None) == "u1")
     assert "duration_ms" in u1                  # keyword always passed; None when unrun
+
+
+@pytest.mark.anyio
+async def test_claude_code_tool_result_duration_non_none_e2e(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.providers.claude_code as cc_mod
+    orig_cls = cc_mod._RunState
+    def _seeded_state():
+        s = orig_cls()
+        s.tool_durations["u1"] = 99.0
+        return s
+    monkeypatch.setattr(cc_mod, "_RunState", _seeded_state)
+
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "file body")),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    tr = next(
+        e for e in log.read()
+        if e["type"] == "tool_result" and e["payload"]["id"] == "u1"
+    )
+    assert tr["payload"]["duration_ms"] == 99.0
