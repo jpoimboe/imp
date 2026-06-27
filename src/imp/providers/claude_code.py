@@ -1032,7 +1032,8 @@ class ClaudeCodeAgentRunner:
                        *, session_store: Any = None,
                        session_id: str | None = None,
                        resume: str | None = None,
-                       config_dir: Path | None = None) -> Any:
+                       config_dir: Path | None = None,
+                       disable_tool_search: bool = False) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions, SdkBeta
 
         from imp.providers.catalog import CLAUDE_CODE, model_info
@@ -1068,6 +1069,10 @@ class ClaudeCodeAgentRunner:
             # resume/replay keep the flags so they don't write ~/.claude
             env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
             extra_args = {"no-session-persistence": None}
+        if disable_tool_search:
+            # Standard tool mode declares replayed MCP tool_use blocks up front;
+            # the default ToolSearch deferral leaves them undeclared and 400s.
+            env["ENABLE_TOOL_SEARCH"] = "false"
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
@@ -1285,7 +1290,8 @@ class ClaudeCodeAgentRunner:
             opts = self._build_options(
                 invocation, mcp_server, list(tools), impty_server=impty_server,
                 session_store=opt_store, session_id=opt_session_id,
-                resume=opt_resume, config_dir=config_dir)
+                resume=opt_resume, config_dir=config_dir,
+                disable_tool_search=bool(existing) and not native_resume)
         else:
             opts = None
 

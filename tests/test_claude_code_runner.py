@@ -2891,3 +2891,88 @@ async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
     assert len(reconciled) == 4
     assert reconciled[-1]["type"] == "assistant"
     assert reconciled[-1]["message"]["content"][0]["text"] == "done early"
+
+
+@pytest.mark.anyio
+async def test_fallback_replay_disables_tool_search(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    # No session store → stream-json fallback. The transcript ends on a balanced
+    # user tool_result (SEND_TO_LLM) so the replay carries an MCP tool_use block.
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=False),)))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    # Confirm this really is the fallback path (no native session).
+    assert opts.resume is None
+    assert opts.session_store is None
+    # Part C: the fallback declares deferred MCP tools up front via standard mode.
+    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
+
+
+@pytest.mark.anyio
+async def test_native_resume_keeps_tool_search_deferred(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    # A prior fresh run mirrored its session into the store → native resume.
+    store = session_store_for(inv.transcript_dir)
+    await store.append(
+        session_key(inv.change_context.project_root, "step:p/s"),
+        [{"type": "user", "uuid": "m0",
+          "message": {"role": "user", "content": "go"}}])
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=False),)))
+    # Bare turn-end → AWAITING_USER → native resume (store has the body).
+    t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "keep going")
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    # Confirm this really is the native path.
+    assert opts.resume == resume_session_id("step:p/s")
+    # Native resume keeps deferral: the env knob is NOT set, so token-saving
+    # ToolSearch deferral stays in effect for normal operation.
+    assert "ENABLE_TOOL_SEARCH" not in opts.env
