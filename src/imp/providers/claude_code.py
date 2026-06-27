@@ -1611,6 +1611,7 @@ class ClaudeCodeAgentRunner:
                             {**_subprocess_diag(client),
                              "stderr_tail": self._stderr_sink.tail()})
                         if term is not None:
+                            _roll_back_error_turn(messages, transcript)
                             yield perr.make_error_event(
                                 term, kind=getattr(term, "kind", ""))
                             return
