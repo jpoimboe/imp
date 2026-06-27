@@ -56,9 +56,20 @@ unimplemented task, or the re-opened task from injected feedback):
    updates only the live status bar; it introduces no task counter and changes
    nothing about how you pick work.
 2. Dispatch the coder with the **full task text +
-   scene-setting context**
-   (it does not read the plan), at the **`medium` tier**
+   scene-setting context** (it does not read the plan), at the **tier set by the
+   plan's structure**. The plan's task count is `task_total` — the number of
+   `## Task <N>` headings, fixed when the plan was finalized. A **single-task plan**
+   is the atomic single-commit shape that carries the most irreducible context, so its
+   coder gets the higher tier; a **multi-task plan** splits the work across tasks, so
+   each coder gets the default tier. Name tiers, never specific model names — the
+   configured provider may not be Anthropic.
+   {% if vars.task_total == 1 %}
+   This plan has one task — dispatch the coder at the higher tier
+   (`sub_agent(subagent_name="coder", tier="high", task_description=…)`):
+   {% else %}
+   This plan has several tasks — dispatch the coder at the default tier
    (`sub_agent(subagent_name="coder", tier="medium", task_description=…)`):
+   {% endif %}
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
      trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
@@ -111,9 +122,9 @@ unimplemented task, or the re-opened task from injected feedback):
    Dispatch the `code-reviewer` at the **`medium` tier**:
    `sub_agent(subagent_name="code-reviewer", tier="medium", …)`.
    {% endif %}
-   Give the reviewer the task text + spec. (coder → the `medium` tier;
-   the reviewer and your own judgment → the `medium` tier. Name tiers, never
-   specific model names — the configured provider may not be Anthropic.)
+   Give the reviewer the task text + spec. (coder → the tier set by the plan's
+   structure, per step 2; the reviewer and your own judgment → the `medium` tier.
+   Name tiers, never specific model names — the configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are
    valid. **Critical/Major are mandatory** — address them before you move on; a
