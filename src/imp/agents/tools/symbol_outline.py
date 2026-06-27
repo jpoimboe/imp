@@ -56,6 +56,32 @@ def _pack() -> Any:
     return _PACK
 
 
+# The pack downloads each language's grammar from GitHub on first use (~19 MB
+# bundle, cached under ~/.cache). A network/cache failure to OBTAIN a grammar is
+# distinct from a genuine parse/unsupported error and is surfaced as such, so the
+# agent isn't misled into reading "offline" as "this file type is unsupported".
+_DOWNLOAD_ERROR_NAMES = (
+    "DownloadError",
+    "CacheLockError",
+    "ChecksumMismatchError",
+    "LockPoisonedError",
+)
+
+
+def _is_download_error(exc: BaseException) -> bool:
+    """True when `exc` is the grammar pack failing to fetch/extract a grammar
+    (download or cache fault), as opposed to a real parse error. Tolerant of any
+    of the names being absent in a future pack version."""
+    if _PACK is None:
+        return False
+    classes = tuple(
+        c
+        for c in (getattr(_PACK, name, None) for name in _DOWNLOAD_ERROR_NAMES)
+        if isinstance(c, type)
+    )
+    return bool(classes) and isinstance(exc, classes)
+
+
 def detect_language(path: Path) -> str | None:
     """The tree-sitter language name for `path`, or None when unsupported.
 
@@ -302,6 +328,7 @@ async def _enumerate_dir(
 class FileEntry:
     rel: str  # worktree-relative posix path (absolute for an external target)
     symbols: tuple[Symbol, ...]  # () when unsupported, unparseable, or empty
+    download_failed: bool = False  # symbols empty because the grammar couldn't be fetched
 
 
 async def scan_file(
@@ -312,7 +339,8 @@ async def scan_file(
     deadline: float | None = None,
 ) -> FileEntry:
     """A FileEntry for one on-disk file: its rel path and parsed symbol tree
-    (empty when the language is unsupported or parsing fails). Never raises."""
+    (empty when the language is unsupported, parsing fails, or the grammar can't
+    be downloaded — the last flagged via download_failed). Never raises."""
     rel = path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix()
     lang = detect_language(path)
     if lang is None:
@@ -320,8 +348,8 @@ async def scan_file(
     try:
         source, _ = await read_text_capped(path, coordinator=coordinator, deadline=deadline)
         symbols = extract_cached(path, source, lang)
-    except Exception:
-        return FileEntry(rel, ())
+    except Exception as e:
+        return FileEntry(rel, (), download_failed=_is_download_error(e))
     return FileEntry(rel, tuple(symbols))
 
 
@@ -472,6 +500,9 @@ def build_tree(root_rel: str, entries: list[FileEntry]) -> DirNode:
 
 
 _UNSUPPORTED_FILE = " — no outline (unsupported); read directly"
+_DOWNLOAD_FAILED_FILE = (
+    " — outline unavailable (grammar download failed; check network); read directly"
+)
 
 
 def _display(target: Path, root: Path) -> str:
@@ -492,7 +523,9 @@ async def _outline_file(
     try:
         source, _ = await read_text_capped(target, coordinator=coordinator, deadline=deadline)
         symbols = extract_cached(target, source, lang)
-    except Exception:
+    except Exception as e:
+        if _is_download_error(e):
+            return f"{disp}{_DOWNLOAD_FAILED_FILE}"
         return f"{disp}{_UNSUPPORTED_FILE}"
     if not symbols:
         return f"{disp}{_UNSUPPORTED_FILE}"
@@ -511,7 +544,14 @@ async def _outline_dir(
     for p in files:
         entries.append(await scan_file(p, root, coordinator=coordinator, deadline=deadline))
     tree = build_tree(disp, entries)
-    return _render_dir_thinned(tree, detail=detail, max_depth=max_depth)
+    out = _render_dir_thinned(tree, detail=detail, max_depth=max_depth)
+    n_failed = sum(1 for e in entries if e.download_failed)
+    if n_failed:
+        out += (
+            f"\n(note: {_plural(n_failed, 'file')} not outlined — grammar download "
+            "failed; check network)"
+        )
+    return out
 
 
 @imp_tool(

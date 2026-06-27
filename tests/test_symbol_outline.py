@@ -616,6 +616,49 @@ def test_tool_file_mode_unsupported(tmp_path) -> None:
     assert out == "notes.txt — no outline (unsupported); read directly"
 
 
+def test_is_download_error_classifies_acquisition_vs_parse() -> None:
+    pack = so._pack()
+    assert so._is_download_error(pack.DownloadError("offline"))
+    assert so._is_download_error(pack.CacheLockError("locked"))
+    # Genuine parse / non-pack errors are NOT acquisition failures.
+    assert not so._is_download_error(RuntimeError("parse boom"))
+    assert not so._is_download_error(pack.ParseFailedError("bad syntax"))
+
+
+def test_tool_file_mode_download_failure_message(tmp_path, monkeypatch) -> None:
+    # A grammar that can't be downloaded (offline) must read distinctly from an
+    # unsupported file, so the agent isn't misled into treating "offline" as
+    # "this file type isn't supported".
+    (tmp_path / "foo.py").write_text(_PY)
+    dl_error = so._pack().DownloadError("network down")
+
+    def _boom(*_a, **_k):
+        raise dl_error
+
+    monkeypatch.setattr(so, "extract_cached", _boom)
+    out = _outline(_ctx(tmp_path), path="foo.py")
+    assert "grammar download failed" in out
+    assert "unsupported" not in out
+
+
+def test_tool_dir_mode_download_failure_note(tmp_path, monkeypatch) -> None:
+    (tmp_path / "a.py").write_text(_PY)
+    (tmp_path / "b.py").write_text(_PY)
+    dl_error = so._pack().DownloadError("network down")
+
+    def _boom(*_a, **_k):
+        raise dl_error
+
+    async def _no_repo(_p):
+        return None
+
+    monkeypatch.setattr(so, "repo_root", _no_repo)
+    monkeypatch.setattr(so, "extract_cached", _boom)
+    out = _outline(_ctx(tmp_path), path=".")
+    assert "grammar download failed; check network" in out
+    assert "2 files not outlined" in out
+
+
 def test_tool_not_found(tmp_path) -> None:
     out = _outline(_ctx(tmp_path), path="missing.py")
     assert out == "missing.py: no such file or directory"

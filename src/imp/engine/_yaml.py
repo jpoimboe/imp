@@ -29,7 +29,11 @@ def _construct_mapping(loader: LineLoader, node: yaml.MappingNode) -> dict[str, 
     mapping["__line__"] = node.start_mark.line + 1  # 1-indexed
     key_lines: dict[Any, int] = {}
     for key_node, _value_node in node.value:
-        key_lines[loader.construct_object(key_node)] = key_node.start_mark.line + 1
+        # construct_object is unannotated in some types-PyYAML versions but typed
+        # in others; cast the loader to Any so this type-checks under either stub
+        # set (avoids both no-untyped-call and unused-ignore across environments).
+        key = cast(Any, loader).construct_object(key_node)
+        key_lines[key] = key_node.start_mark.line + 1
     mapping["__key_lines__"] = key_lines
     return mapping
 
