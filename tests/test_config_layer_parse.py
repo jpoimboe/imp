@@ -201,3 +201,22 @@ def test_context_max_reincarnations_zero_accepted(tmp_path: Path) -> None:
     p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: 0\n")
     out, _ = parse_config_layer(p)  # type: ignore[misc]
     assert out["context"] == {"max_reincarnations": 0}
+
+
+def test_context_merges_one_level(tmp_path: Path) -> None:
+    # user layer sets max_reincarnations; project sets checkpoint_threshold — both survive.
+    src = SourceLoc(file=tmp_path / "x", line=1)
+    merged, _ = merge_layers([
+        ({"context": {"checkpoint_threshold": 0.75}}, src),
+        ({"context": {"max_reincarnations": 4}}, src),
+    ])
+    assert merged["context"] == {"checkpoint_threshold": 0.75, "max_reincarnations": 4}
+
+
+def test_config_exposes_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    assert isinstance(eff.config.context, dict)
+    # With no config files, accessors fall back to documented defaults.
+    assert eff.config.context_checkpoint_threshold() == 0.8
+    assert eff.config.context_max_reincarnations() == 2

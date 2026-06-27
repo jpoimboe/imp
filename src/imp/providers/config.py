@@ -53,6 +53,7 @@ class Config:
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
+    context: dict[str, Any] = field(hash=False, default_factory=dict)
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = field(hash=False, default="")
 
@@ -63,6 +64,15 @@ class Config:
         """Env-var name for `provider` — `provider_envs[provider]` if present,
         else `<PROVIDER>_API_KEY`."""
         return self.provider_envs.get(provider, f"{provider.upper()}_API_KEY")
+
+    def context_checkpoint_threshold(self) -> float | int:
+        """Window fraction (0 < x <= 1) or absolute token cap (x > 1). Default 0.8."""
+        threshold: float | int = self.context.get("checkpoint_threshold", 0.8)
+        return threshold
+
+    def context_max_reincarnations(self) -> int:
+        reincarnations: int = self.context.get("max_reincarnations", 2)
+        return reincarnations
 
 
 _FACT_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
