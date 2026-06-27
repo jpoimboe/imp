@@ -39,3 +39,23 @@ def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
 
     prv = _imp("plan-reviewer.md")
     assert "Deferred Followup open item in `{{ change.home }}/deferred.md`:" in prv
+
+
+def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
+    tl = _imp("task-lead.md")
+    # The deferred-finding append target is deferred.md.
+    assert "under a\n   `## Deferred Followups` heading in the append-only `{{ change.home }}/deferred.md`" in tl
+    # Forward notes are appended to deferred.md, never the rewritable progress.md.
+    assert "by appending to `{{ change.home }}/deferred.md` — the" in tl
+    assert "append-only ledger" in tl
+    # The verify-triage toleration is recorded in deferred.md.
+    assert "Record a toleration as a normal `## Deferred Followups` entry in\n`{{ change.home }}/deferred.md`" in tl
+    # progress.md keeps the per-task commit-subject ledger and the Completed-plans collapse.
+    assert "keep each task's **commit subject** in `progress.md`" in tl
+    assert "it into a single `## Completed plans` line" in tl
+    # The forward-note shapes still exist (they just live in deferred.md now).
+    assert "- [ ] NEEDS-REPLAN task-lead:" in tl
+    assert "- resolved-forward task-lead:" in tl
+    # The step-5 lead-in no longer reads as if DEFERRED items go to progress.md.
+    assert "(create it if missing) the **transient" in tl
+    assert "does **not** live in" in tl

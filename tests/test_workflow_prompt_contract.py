@@ -326,8 +326,8 @@ def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
     # It always returns a green tree, reverting forward through the coder.
     assert "revert it forward" in low
     assert "green tree" in low
-    # The notes live in the durable region that survives the end-of-plan collapse.
-    assert "survives the end-of-plan collapse" in low
+    # The notes live in the append-only deferred.md, untouched by the progress.md collapse.
+    assert "survives every end-of-plan `progress.md` rewrite" in low
     # The TRANSIENT per-task narrative (dropped at collapse) must carry NO durable
     # note: step 5 records commit subjects so buried tasks can be re-found for a fixup,
     # and per-task entries are kept only while the plan is in flight.

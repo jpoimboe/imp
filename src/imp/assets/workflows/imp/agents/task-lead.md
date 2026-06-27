@@ -19,12 +19,16 @@ reads, what is already committed, and progress notes. (A failing `verify` or
 Read first, every entry:
 - The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`
   (highest N — find it with glob).
-- `{{ change.home }}/progress.md` if it exists. It is **bounded**: a durable
-  `## Completed plans` section (one line per plan: what landed + a representative
-  commit) plus the transient `## Deferred Followups` list. While you implement the
-  current plan, keep each task's **commit subject** here (so a buried task can be
-  re-found for a fixup); do NOT carry the verbose per-task narrative of plans already
-  completed.
+- `{{ change.home }}/progress.md` if it exists. It is **bounded** and **rewritable**:
+  a durable `## Completed plans` section (one line per plan: what landed + a
+  representative commit) plus the transient in-flight per-task entries. The durable
+  `## Deferred Followups` list and the `resolved-forward` / `NEEDS-REPLAN` forward
+  notes live in the append-only `{{ change.home }}/deferred.md`, never here. While you
+  implement the current plan, keep each task's **commit subject** in `progress.md` (so
+  a buried task can be re-found for a fixup); do NOT carry the verbose per-task
+  narrative of plans already completed.
+- `{{ change.home }}/deferred.md` if it exists — the append-only ledger of deferred
+  followups and forward notes (you append to it; it is never collapsed or rewritten).
 - The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
@@ -129,7 +133,7 @@ unimplemented task, or the re-opened task from injected feedback):
      design question).
    - **Defer** when the change **needs judgment or design**, is **out of scope**
      for this task, or is **non-local** (ripples into unrelated code). Deferred
-     findings go to progress.md's Deferred Followups list (step 5), where the
+     findings go to deferred.md's Deferred Followups list (step 5), where the
      **empowered** `deferred-sweep` picks them up: it is risk-gated, not
      scope-gated, so it **may fix** an out-of-scope or non-local improvement that
      the human never needs to see. You defer to that sweep, not to the human.
@@ -155,25 +159,33 @@ unimplemented task, or the re-opened task from injected feedback):
    correctness; see step 5). When a round carries blocking findings, re-review
    until none remain. All fixes go through the coder — you never commit,
    amend, or rebase yourself.
-5. Append to `{{ change.home }}/progress.md` (create it if missing): the task
-   completed, **its commit subject** (the ledger entry from step 2, so a buried
-   task can be re-found for a fixup). **Record qualifying
+5. Append to `{{ change.home }}/progress.md` (create it if missing) the **transient
+   status** only: the task completed, **its commit subject** (the ledger entry from
+   step 2, so a buried task can be re-found for a fixup). **Record qualifying
    nits you fixed inline as fixed-inline** — they rode the task's fixup and need no
-   follow-up. The **Deferred Followups** list is reserved for the judgment-call /
-   out-of-scope findings the fixability bar deferred.
+   follow-up. The **Deferred Followups** list — reserved for the judgment-call /
+   out-of-scope findings the fixability bar deferred — does **not** live in
+   `progress.md`; append it to the append-only `{{ change.home }}/deferred.md` (see
+   *Pin the format* below).
 
    **Pin the format.** Each deferred finding is one line under a
-   `## Deferred Followups` heading, in this EXACT shape so the `deferred-sweep` step
-   can parse it (the sweep, not the human, is now the consumer of this list):
+   `## Deferred Followups` heading in the append-only `{{ change.home }}/deferred.md`
+   (append it there; create the file/heading if absent), in this EXACT shape so the
+   `deferred-sweep` step can parse it (the sweep, not the human, is now the consumer
+   of this list):
 
    `- [ ] DEFERRED task-lead: <one-line description> [scope: task]`
 
-   **Keep `progress.md` bounded.** Record the current plan's per-task entries
-   (task done + its commit subject) only while that plan is in
-   flight. When the plan is fully implemented and you return, **collapse** it into a single
-   `## Completed plans` line — `- Plan <N>: <what landed> (<commit-sha>)` — and
-   **drop the verbose per-task narrative** for that completed plan. One line per plan
-   is the durable record; the in-flight per-task detail is transient working state.
+   **Keep `progress.md` bounded — it holds status only.** The per-task commit-subject
+   entries and the `## Completed plans` collapse are `progress.md`'s job; the durable
+   ledger and forward notes are appends to `deferred.md`. Record the current plan's
+   per-task entries (task done + its commit subject) in `progress.md` only while that
+   plan is in flight. When the plan is fully implemented and you return, **collapse**
+   it into a single `## Completed plans` line — `- Plan <N>: <what landed> (<commit-sha>)`
+   — and **drop the verbose per-task narrative** for that completed plan. One line per
+   plan is the durable status record; the in-flight per-task detail is transient
+   working state. This collapse rewrites `progress.md` freely — it cannot touch the
+   append-only `deferred.md`.
 
    **Record an `open_items` note
    whenever a round was NOT clean on first pass** — any of: a reviewer raised a
@@ -215,11 +227,11 @@ unimplemented task, or the re-opened task from injected feedback):
    `plan-writer` invocation that `plan-cycle-check` triggers. All commits go through
    the coder; you never commit, amend, or rebase yourself.
 
-   Record both new note types in the **durable** region of `progress.md` — the same
-   region as the `## Deferred Followups` / `— needs-decision:` lines.
-   That region **survives the end-of-plan collapse** — so never use the transient
-   per-task narrative (a note buried there is dropped before `plan-cycle-check` ever
-   reads it). The EXACT shapes:
+   Record both new note types by appending to `{{ change.home }}/deferred.md` — the
+   append-only ledger, alongside the `## Deferred Followups` / `— needs-decision:`
+   lines and never the wholesale-rewritten `progress.md` status. `deferred.md` is
+   never collapsed, so a note there survives every end-of-plan `progress.md` rewrite
+   and is intact when `plan-cycle-check` reads it. The EXACT shapes:
 
    - resolved-forward: `- resolved-forward task-lead: <one-line description of what you fixed>`
    - needs-replan (a checkbox, so its open/addressed state is explicit):
@@ -245,7 +257,7 @@ failure output. Reason over the OPAQUE failure text against the diff
 (`review_base..HEAD`) — you never re-run a single test; this is pure judgment.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/progress.md`, born directly in `— needs-decision:` state with the
+`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
 originating gate as its `<source>` — here `verify`, never an agent. The EXACT shape:
 
 `- [ ] DEFERRED verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
