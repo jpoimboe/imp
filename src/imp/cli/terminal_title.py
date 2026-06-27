@@ -29,6 +29,16 @@ class TerminalTitle:
         self._stream.flush()
         self._current = None
 
+    def update_name(self, name: str) -> None:
+        if name == self._name:
+            return
+        self._name = name
+        glyph = self._current if self._current is not None else GLYPH_WORKING
+        # A rename does not change the working/waiting state, so _set would
+        # short-circuit on the unchanged glyph; clear _current to force a re-emit.
+        self._current = None
+        self._set(glyph)
+
     def _set(self, glyph: str) -> None:
         if not self._enabled:
             return
