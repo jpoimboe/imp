@@ -50,7 +50,7 @@ async def test_resume_routes_to_inert_for_bare_turn_end(
     monkeypatch.setattr(m, "bare_turn_end_question", lambda change: "Pending Q?")
     seen: dict[str, str] = {}
 
-    async def fake_inert(change, question):
+    async def fake_inert(change, question, *, autonomous=False):
         seen["question"] = question
         return 0
 
@@ -134,3 +134,25 @@ async def test_inert_ask_line_maps_ctrl_c_to_none(
     monkeypatch.setattr(
         m, "Prompt", lambda **kwargs: _RaisingPrompt(KeyboardInterrupt, **kwargs))
     assert await m._inert_ask_line(ch) is None
+
+
+@pytest.mark.anyio
+async def test_resume_inert_receives_autonomous(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    _patch_common(monkeypatch, tmp_path, ch)
+    monkeypatch.setattr(m, "bare_turn_end_question", lambda change: "Pending Q?")
+    seen: dict[str, object] = {}
+
+    async def fake_inert(change, question, *, autonomous=False):
+        seen["autonomous"] = autonomous
+        return 0
+
+    monkeypatch.setattr(m, "_resume_inert", fake_inert)
+
+    args = argparse.Namespace(
+        token="c", message=None, non_interactive=False, autonomous=True)
+    rc = await m._async_cmd_resume(args)
+
+    assert rc == 0
+    assert seen["autonomous"] is True
