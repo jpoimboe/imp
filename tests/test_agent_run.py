@@ -932,3 +932,29 @@ def test_with_outcome_field_is_idempotent() -> None:
     twice = with_outcome_field(once)
     names = [f.name for f in twice.output_schema.fields]
     assert names.count("outcome") == 1
+
+
+@pytest.mark.anyio
+async def test_inline_solicit_raises_awaiting_when_no_channel() -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.agent_run import build_inline_solicit
+
+    fn = build_inline_solicit(user_input_fn=None)
+    with pytest.raises(AwaitingUserInput):
+        await fn("the agent's last words")
+
+
+@pytest.mark.anyio
+async def test_inline_solicit_returns_reply_and_emits_awaiting() -> None:
+    from imp.engine.agent_run import build_inline_solicit
+    from imp.engine.state import InMemoryEventLog
+
+    log = InMemoryEventLog()
+    fn = build_inline_solicit(
+        user_input_fn=lambda _prompt: "redirect now",
+        event_log=log, agent_id="step:p/s")
+
+    reply = await fn("the agent's last words")
+
+    assert reply == "redirect now"
+    assert any(e["type"] == "awaiting_user_input" for e in log.read())
