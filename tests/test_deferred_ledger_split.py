@@ -169,14 +169,6 @@ def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     assert "leave its `deferred.md` line `needs-decision`" in fin
     assert "other than the `deferred.md` line rewrites above" in fin
 
-    pcc = _imp("plan-cycle-check.md")
-    assert "logs what it could not fix as durable notes in\n`{{ change.home }}/deferred.md`" in pcc
-    # The read-list now includes deferred.md alongside progress.md.
-    assert (
-        "`{{ change.home }}/deferred.md`,"
-        " and the committed code (use glob/grep to spot-check)."
-    ) in pcc
-
     ir = _imp("integration-review.md")
     assert "`{{ change.home }}/deferred.md` carries any `## Deferred Followups`" in ir
 
@@ -203,9 +195,6 @@ def test_imp_forward_notes_survive_progress_md_rewrite() -> None:
     assert "`deferred.md` is\n   never collapsed" in tl
     # progress.md's collapse is explicitly scoped to status only.
     assert "Keep `progress.md` bounded — it holds status only." in tl
-    # The consumer reads the forward notes from deferred.md.
-    pcc = _imp("plan-cycle-check.md")
-    assert "durable notes in\n`{{ change.home }}/deferred.md`" in pcc
 
 
 def test_imp_completed_plans_and_per_task_status_stay_on_progress_md() -> None:

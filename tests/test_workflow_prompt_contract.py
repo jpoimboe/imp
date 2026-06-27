@@ -112,7 +112,7 @@ def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
 
 TURN_TERMINAL_REVIEWERS = [
     "plan-code-reviewer.md", "code-reviewer.md", "plan-reviewer.md",
-    "spec-reviewer.md", "plan-cycle-check.md",
+    "spec-reviewer.md",
 ]
 
 
@@ -257,41 +257,6 @@ def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
             f"reintroduced stale finalize vocabulary: {stale!r}")
 
 
-PLAN_CYCLE_CHECK = AGENTS_DIR / "plan-cycle-check.md"
-
-
-def test_plan_cycle_check_emits_no_task_counter() -> None:
-    low = PLAN_CYCLE_CHECK.read_text().lower()
-    # The accumulated-task review counter is gone: per-plan review needs no count.
-    assert "running_tasks" not in low
-    assert "tasks_since_review" not in low
-    assert "review_batch_size" not in low
-
-
-
-def test_plan_cycle_check_owns_coverage_no_plan_gap_reopen() -> None:
-    text = PLAN_CYCLE_CHECK.read_text()
-    # The review can no longer re-open the cycle via plan_gap; that sentence is gone.
-    assert "plan_gap" not in text
-    assert "re-open the cycle" not in text
-    # It is the SOLE completeness guard now.
-    assert "sole" in text.lower() and "completeness" in text.lower()
-
-
-def test_plan_cycle_check_consumes_deviation_notes() -> None:
-    text = PLAN_CYCLE_CHECK.read_text()
-    low = text.lower()
-    # Both forward note types are recognized.
-    assert "needs-replan" in low
-    assert "resolved-forward" in low
-    # An open needs-replan checkbox triggers more_plans; a consumed one does not.
-    assert "[ ]" in text and "[x]" in text
-    # A needs-decision item suppresses the backstop for its scope.
-    assert "needs-decision" in low and "suppress" in low
-    # The backstop overrides only upward.
-    assert "upward" in low
-
-
 CODE_REVIEWER = AGENTS_DIR / "plan-code-reviewer.md"
 
 
@@ -361,21 +326,6 @@ def test_plan_writer_states_soft_task_size_target() -> None:
     # Per-plan review motivates the floor; atomicity stays sacrosanct.
     assert "per-plan review" in low
     assert "atomicity hard rule" in low
-
-
-def test_plan_cycle_check_projects_total_under_greedy_bundling() -> None:
-    text = (AGENTS_DIR / "plan-cycle-check.md").read_text()
-    low = text.lower()
-    # The plan_total projection assumes the SAME greedy ~5-8 bundling plan-writer
-    # now carves: re-derive the still-uncovered scope and bundle it to the target.
-    assert "greedy" in low
-    assert "5\u20138" in text
-    assert "still-uncovered scope" in low
-    # The existing clamp rules remain stated and unchanged - all three pinned.
-    assert "the current plan number" in low  # first clamp rule (>= plan_index)
-    assert "strictly greater" in low          # second clamp rule (more_plans true)
-    assert "coverage complete" in low         # third clamp rule (more_plans false)
-    assert "more_plans" in low
 
 
 def test_task_lead_documents_verify_triage() -> None:
