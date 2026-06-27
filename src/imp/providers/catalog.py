@@ -14,6 +14,7 @@ Hand-maintained: no provider exposes context-window size via an endpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 DEFAULT_WINDOW = 200_000
 
@@ -101,3 +102,25 @@ def checkpoint_fraction(
     if window is None or window <= 0:
         return None
     return threshold / window
+
+
+def context_threshold_crossed(
+    usage: dict[str, Any] | None, model: str | None,
+    threshold: float | int | None,
+) -> bool:
+    """True when a turn's prompt-token occupancy has reached the checkpoint cutoff.
+
+    Occupancy is `input + cache_read + cache_creation` (the prompt side of the
+    window, matching the context gauge's `usage_prompt_tokens`). The cutoff is
+    `checkpoint_fraction(threshold, window)` of the model window. Returns False
+    whenever the threshold, window, or usage is unavailable — the watch simply
+    never fires rather than guessing.
+    """
+    window = window_for_model(model)
+    frac = checkpoint_fraction(threshold, window)
+    if frac is None or window is None or window <= 0 or not usage:
+        return False
+    occupancy = (int(usage.get("input_tokens", 0) or 0)
+                 + int(usage.get("cache_read_input_tokens", 0) or 0)
+                 + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    return occupancy / window >= frac

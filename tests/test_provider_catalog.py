@@ -71,3 +71,46 @@ def test_checkpoint_fraction_unresolvable_returns_none() -> None:
     assert checkpoint_fraction(150_000, None) is None        # absolute cap, unknown window
     assert checkpoint_fraction(150_000, 0) is None           # absolute cap, zero window
     assert checkpoint_fraction(-1, 200_000) is None        # negative threshold
+
+
+def test_context_threshold_crossed_fires_at_fraction() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 170000/200000 = 0.85 >= 0.8 -> crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 170_000}, "sonnet", 0.8) is True
+
+
+def test_context_threshold_crossed_not_before_fraction() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 150000/200000 = 0.75 < 0.8 -> not crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 150_000}, "sonnet", 0.8) is False
+
+
+def test_context_threshold_crossed_sums_cache_tokens() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 100000 + 60000 + 5000 = 165000 / 200000 = 0.825 >= 0.8.
+    assert context_threshold_crossed(
+        {"input_tokens": 100_000, "cache_read_input_tokens": 60_000,
+         "cache_creation_input_tokens": 5_000}, "sonnet", 0.8) is True
+
+
+def test_context_threshold_crossed_unknown_window_never_fires() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    assert context_threshold_crossed(
+        {"input_tokens": 999_999}, "mystery-model", 0.8) is False
+
+
+def test_context_threshold_crossed_absolute_cap_divides_by_window() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # Absolute cap 150000 on a 200000 window -> warn fraction 0.75; 160000/200000
+    # = 0.80 >= 0.75 -> crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 160_000}, "sonnet", 150_000) is True
+
+
+def test_context_threshold_crossed_no_threshold_or_usage_never_fires() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    assert context_threshold_crossed({"input_tokens": 999_999}, "sonnet", None) is False
+    assert context_threshold_crossed(None, "sonnet", 0.8) is False
+    assert context_threshold_crossed({}, "sonnet", 0.8) is False
