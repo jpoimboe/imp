@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
+
+import anyio
 
 import imp.agents.tools.symbol_outline as so
 from imp.agents.tools.symbol_outline import (
@@ -327,3 +330,41 @@ def test_extract_cached_reparses_after_mtime_change(tmp_path, monkeypatch) -> No
     os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
     so.extract_cached(f, _PY, "python")
     assert calls["n"] == 2
+
+
+def test_enumerate_dir_walk_fallback_excludes_control_dirs(tmp_path, monkeypatch) -> None:
+    (tmp_path / "a.py").write_text("x")
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "b.py").write_text("y")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "c.py").write_text("z")
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "d.py").write_text("w")
+
+    async def _no_repo(_p):
+        return None
+
+    monkeypatch.setattr(so, "repo_root", _no_repo)
+    # _enumerate_dir resolves its target and returns resolved paths, so assert
+    # against the RESOLVED root (a symlinked TMPDIR, e.g. macOS, otherwise breaks
+    # relative_to) — the both-sides-resolved pattern from tests/test_ignore.py.
+    root = tmp_path.resolve()
+    files = anyio.run(so._enumerate_dir, root, root)
+    rels = sorted(p.relative_to(root).as_posix() for p in files)
+    assert rels == ["a.py", "pkg/b.py"]
+
+
+def test_enumerate_dir_gitignore_aware(tmp_path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_text("ignored/\n")
+    (tmp_path / "keep.py").write_text("x")
+    (tmp_path / "ignored").mkdir()
+    (tmp_path / "ignored" / "secret.py").write_text("s")
+
+    root = tmp_path.resolve()
+    files = anyio.run(so._enumerate_dir, root, root)
+    rels = sorted(p.relative_to(root).as_posix() for p in files)
+    assert "keep.py" in rels
+    assert ".gitignore" in rels
+    assert "ignored/secret.py" not in rels
+    assert all(not r.startswith(".git/") for r in rels)

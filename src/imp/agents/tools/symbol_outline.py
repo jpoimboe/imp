@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from tree_sitter_language_pack import (
     ProcessConfig,
@@ -16,7 +18,13 @@ from tree_sitter_language_pack import (
     process,
 )
 
-from imp.agents.tools.limits import OUTPUT_TRUNCATION_MARKER, TOOL_OUTPUT_CAP_BYTES
+from imp.agents.tools.ignore import is_ignored, list_unignored, repo_root
+from imp.agents.tools.limits import (
+    EXCLUDED_DIRS,
+    OUTPUT_TRUNCATION_MARKER,
+    TOOL_OUTPUT_CAP_BYTES,
+    tool_checkpoint,
+)
 
 # Filenames the pack's path-based detector misses but whose grammars exist.
 _FILENAME_LANGS = {"Makefile": "make", "Dockerfile": "dockerfile"}
@@ -199,3 +207,56 @@ def _thin_file(header: str, body: list[str]) -> str:
         size += len(line.encode()) + 1
     omitted = len(body) - len(kept)
     return "\n".join([header, *kept, f"… +{omitted} not shown", marker])
+
+
+def _walk_files(target: Path) -> list[Path]:
+    """Regular files under `target`, pruning control/VCS dirs. The no-git
+    fallback for _enumerate_dir; not gitignore-aware (git is the gitignore route)."""
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(target):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS]
+        base = Path(dirpath)
+        for name in filenames:
+            p = base / name
+            if p.is_file():
+                out.append(p)
+    return out
+
+
+async def _enumerate_dir(
+    target: Path,
+    root: Path,
+    policy: Any = None,
+    coordinator: object | None = None,
+    deadline: float | None = None,
+) -> list[Path]:
+    """Unignored regular files under `target`, sorted. Git-aware via ignore.py
+    (so node_modules/.venv/build and every other gitignored path is skipped);
+    falls back to a control-dir-pruned walk when git is unavailable. Under an
+    active sandbox policy, files failing allows_read are dropped (grep/glob parity).
+
+    `target` is resolved first so its prefix matches git's resolved toplevel and
+    the resolved paths list_unignored returns — the same both-sides-resolved
+    guard tests/test_ignore.py uses (a symlinked TMPDIR, e.g. macOS's
+    /var -> /private/var, otherwise mismatches)."""
+    target = target.resolve()
+    repo = await repo_root(target)
+    files: list[Path]
+    if repo is not None and not await is_ignored(repo, target):
+        unignored = await list_unignored(repo, target)
+        if unignored is not None:
+            # git's `-- <target>` already scopes the listing to target; no extra
+            # is_relative_to filter (it only re-introduced the resolve mismatch).
+            files = [p for p in unignored if p.is_file()]
+        else:
+            files = _walk_files(target)
+    else:
+        files = _walk_files(target)
+    masking = policy is not None and policy.active
+    result: list[Path] = []
+    for p in sorted(files):
+        await tool_checkpoint(coordinator, deadline)
+        if masking and not policy.allows_read(p.resolve()):
+            continue
+        result.append(p)
+    return result
