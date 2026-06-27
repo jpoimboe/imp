@@ -182,12 +182,15 @@ def test_imp_consumers_read_ledger_from_deferred_md() -> None:
 
 
 def test_no_prompt_overwrites_deferred_md_wholesale() -> None:
-    # deferred.md is append-only: no agent prompt may instruct a write_file of it.
+    # deferred.md is append-only: no prompt may instruct a write_file of it,
+    # even with the path split across lines.
     for base in (IMP, FLAT):
-        for p in sorted(base.glob("*.md")):
-            for line in p.read_text().splitlines():
+        for p in sorted(base.parent.glob("**/*.md")):
+            lines = p.read_text().splitlines()
+            for i, line in enumerate(lines):
                 if "write_file" in line:
-                    assert "deferred.md" not in line, (
+                    window = "\n".join(lines[i : i + 5])
+                    assert "deferred.md" not in window, (
                         f"{p.name}: write_file targets the append-only deferred.md"
                     )
 
