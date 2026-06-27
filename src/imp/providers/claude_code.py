@@ -1243,21 +1243,24 @@ class ClaudeCodeAgentRunner:
         skey = session_key(invocation.change_context.project_root, aid)
         # Native resume is sound ONLY when existing's final turn was actually
         # flushed to the store. The SDK mirror batcher flushes solely at a `result`
-        # boundary, so the only resume shape whose final turn carries a result is
-        # AWAITING_USER (the agent ended its turn on assistant prose — a bare
-        # turn-end yield). Every other shape leaves its final turn UNflushed and
-        # outside the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
-        # DANGLING_TOOL_USE (and the balance_on_resume flag's path) ends on an
-        # unflushed, interrupted assistant tool_use whose id lives in neither
-        # claude-p's loaded session nor the slice — so the surgery's tool_result
-        # would be orphaned (the unmatched-tool_use 400 this change targets). Those
+        # boundary, so AWAITING_USER (the agent ended its turn on assistant prose —
+        # a bare turn-end yield) is the only shape whose tail is already flushed.
+        # SEND_TO_LLM ends on an unflushed user turn but is handled on the native
+        # path via reconcile-and-overwrite: the unflushed tail is written into the
+        # store before claude-p loads its native session. DANGLING_TOOL_USE (and the
+        # balance_on_resume flag's path) ends on an unflushed, interrupted assistant
+        # tool_use whose id lives in neither claude-p's loaded session nor the slice
+        # — so the surgery's tool_result would be orphaned (the unmatched-tool_use
+        # 400 this change targets). Only the no-store fallback and balance_on_resume
         # downgrade to stream-json replay, which re-streams the whole balanced
         # history in position.
         store_body = await store.load(skey)
         native_resume = (
             (not is_fresh)
+            and not invocation.balance_on_resume
             and store_has_conversation_body(store_body)
-            and classify_resume(existing) is ResumeState.AWAITING_USER
+            and classify_resume(existing) in (
+                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM)
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
@@ -1297,7 +1300,7 @@ class ClaudeCodeAgentRunner:
                 balance_success_on_resume(
                     messages, transcript, elog, aid,
                     wrapper_text=invocation.retry_feedback)
-            else:
+            elif not native_resume:
                 synth = repair_dangling_tool_use_on_resume(messages, transcript)
                 if synth is not None:
                     for rb in synth:
