@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from imp.agents.tools.limits import OUTPUT_TRUNCATION_MARKER, TOOL_OUTPUT_CAP_BYTES
 from tree_sitter_language_pack import (
     ProcessConfig,
     StructureItem,
@@ -156,4 +157,23 @@ def render_file(display: str, symbols: list[Symbol], *, detail: str = "signature
     width = len(str(_max_lineno(symbols)))
     body: list[str] = []
     _render_lines(symbols, body, 0, width)
-    return "\n".join([header, *body])
+    full = "\n".join([header, *body])
+    if len(full) <= TOOL_OUTPUT_CAP_BYTES:
+        return full
+    return _thin_file(header, body)
+
+
+def _thin_file(header: str, body: list[str]) -> str:
+    """Header plus as many leading symbol lines as the budget allows, then a '… +N not shown' notice and the truncation marker."""
+    marker = OUTPUT_TRUNCATION_MARKER.strip()
+    kept: list[str] = []
+    size = len(header)
+    for i, line in enumerate(body):
+        notice = f"… +{len(body) - i} not shown"
+        # +3 accounts for the three join newlines: after header, after this line, after notice.
+        if size + len(line) + len(notice) + len(marker) + 3 > TOOL_OUTPUT_CAP_BYTES:
+            break
+        kept.append(line)
+        size += len(line) + 1
+    omitted = len(body) - len(kept)
+    return "\n".join([header, *kept, f"… +{omitted} not shown", marker])

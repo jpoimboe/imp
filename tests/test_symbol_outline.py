@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import imp.agents.tools.symbol_outline as so
 from imp.agents.tools.symbol_outline import Symbol, count_phrase, count_symbols, detect_language, extract_symbols, render_file
 
 
@@ -244,3 +245,38 @@ def test_render_file_width_from_child_lineno() -> None:
 
 def test_render_file_empty_symbol_list() -> None:
     assert render_file("x.py", []) == "x.py — 0 symbols"
+
+
+def test_render_file_thins_over_budget(monkeypatch) -> None:
+    monkeypatch.setattr(so, "TOOL_OUTPUT_CAP_BYTES", 120)
+    tree = [Symbol(f"fn_{i}", "fn", i + 1, f"def fn_{i}()") for i in range(40)]
+    out = so.render_file("big.py", tree)
+
+    assert out.splitlines()[0] == "big.py — 40 fn"
+    # The whole point of thinning: the result stays within the budget.
+    assert len(out) <= 120
+    assert out.endswith("... [output truncated at 50 KB] ...")
+    # The omission count is honest: kept signature lines + N not shown == 40.
+    kept = sum(1 for line in out.splitlines() if "def fn_" in line)
+    notice = next(line for line in out.splitlines() if "not shown" in line)
+    n_not_shown = int(notice.split("+")[1].split()[0])
+    assert 0 < n_not_shown < 40
+    assert kept + n_not_shown == 40
+    # Trailing symbols were the ones dropped.
+    assert "def fn_39()" not in out
+
+
+def test_render_file_thins_with_tiny_budget(monkeypatch) -> None:
+    # Pathological budget below even one line: still returns header + notice +
+    # marker (never raises; read_file is the floor).
+    monkeypatch.setattr(so, "TOOL_OUTPUT_CAP_BYTES", 10)
+    tree = [Symbol(f"fn_{i}", "fn", i + 1, f"def fn_{i}()") for i in range(5)]
+    out = so.render_file("big.py", tree)
+    assert "… +5 not shown" in out
+    assert out.endswith("... [output truncated at 50 KB] ...")
+
+
+def test_render_file_no_thinning_when_under_budget() -> None:
+    out = render_file("pkg/foo.py", extract_symbols(_PY, "python"))
+    assert "not shown" not in out
+    assert "output truncated" not in out
