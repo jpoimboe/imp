@@ -33,6 +33,7 @@ class FakeControl:
     def __init__(
         self, changes: list[ChangeInfo] | None = None, *, abandon_rc: int = 0,
         snapshots: dict | None = None, narratives: dict | None = None,
+        resident: frozenset[str] | None = None,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
@@ -43,6 +44,7 @@ class FakeControl:
         self._snapshots = snapshots or {}
         self._narratives = narratives or {}
         self._histories: dict = {}
+        self._resident = frozenset(resident or ())
 
     def full_history(self, change_id: str) -> list[dict]:
         return self._histories.get(change_id, [])
@@ -66,6 +68,9 @@ class FakeControl:
 
     def list_changes(self) -> list[ChangeInfo]:
         return self._changes
+
+    def resident_ids(self) -> frozenset[str]:
+        return self._resident
 
 
 @pytest.mark.anyio
@@ -112,11 +117,13 @@ async def test_abandon_running_change_enqueues_still_running_notice() -> None:
 @pytest.mark.anyio
 async def test_listchanges_calls_list_and_enqueues_a_listresult() -> None:
     rows = [ChangeInfo(id="aaaaaa", title="T", status="running", step="plan")]
-    control = FakeControl(changes=rows)
+    control = FakeControl(changes=rows, resident=frozenset({"aaaaaa"}))
     responses: queue.Queue = queue.Queue()
     await _handle_command(ListChanges(), control, responses)
     result = responses.get_nowait()
-    assert isinstance(result, ListResult) and result.changes == rows
+    assert isinstance(result, ListResult)
+    assert result.changes == rows
+    assert result.resident == frozenset({"aaaaaa"})
 
 
 @pytest.mark.anyio
