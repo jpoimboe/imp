@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from imp.providers import errors as perr
-from imp.providers.claude_code import _classify_agent_text
+from imp.providers.claude_code import _classify_agent_text, _termination_from_result
+from tests.cc_fakes import result
 
 
 def test_400_classified_as_api_error_with_http_kind() -> None:
@@ -180,3 +181,13 @@ def test_termination_connection_refused_is_network_not_terminated() -> None:
 def test_transient_phrases_constant_removed() -> None:
     import imp.providers.claude_code as cc
     assert not hasattr(cc, "_TRANSIENT_PHRASES")
+
+
+def test_429_status_result_classifies_rate_limit() -> None:
+    # last_text carries no API-error/session-limit wording, so _classify_agent_text
+    # returns None and only the api_error_status==429 branch can classify it.
+    sdk = result(is_error=True, api_error_status=429)
+    term = _termination_from_result(sdk, "some unrelated agent prose", {})
+    assert isinstance(term, perr.RateLimitError)
+    assert not isinstance(term, perr.TerminatedError)
+    assert term.detail["api_error_status"] == 429

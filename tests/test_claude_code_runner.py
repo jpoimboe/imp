@@ -1462,15 +1462,16 @@ def test_termination_api_error_status_5xx_is_network() -> None:
     assert term.detail["api_error_status"] == 500
 
 
-def test_termination_api_error_status_429_is_not_rate_limit() -> None:
-    """There is no api_error_status=429 branch: a 429 status with code-less text
-    stays TerminatedError (the only 429 retry path is the text classifier)."""
+def test_termination_api_error_status_429_is_rate_limit() -> None:
+    """A 429 api_error_status classifies as RateLimitError (recoverable backoff),
+    not TerminatedError, even when the agent text carries no routable code."""
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr
 
     term = cc._termination_from_result(
         result(is_error=True, api_error_status=429), "the request failed", {})
-    assert isinstance(term, perr.TerminatedError)
+    assert isinstance(term, perr.RateLimitError)
+    assert not isinstance(term, perr.TerminatedError)
 
 
 def test_termination_text_label_wins_over_api_error_status() -> None:

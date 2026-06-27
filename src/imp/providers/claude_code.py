@@ -215,6 +215,8 @@ def _termination_from_result(
     if labeled is None and status in (401, 403):
         labeled = perr.AuthError(f"claude_code: api_error_status={status}")
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
+    if labeled is None and status == 429:
+        labeled = perr.RateLimitError(f"claude_code: api_error_status={status}")
     if isinstance(labeled, (perr.QuotaError, perr.AuthError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
