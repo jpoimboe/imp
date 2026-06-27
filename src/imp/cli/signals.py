@@ -6,9 +6,10 @@ The client's signals map to two distinct intents (the keep-alive-lease design):
     cooperative stop (runner.interrupt()). With a human here to type, the run
     yields inline and the client stays attached; with no inline channel the stop
     lands as a clean pause.
-  - Intent B — "this client is leaving" (SIGTERM, terminal close, Ctrl-D,
-    /save). Acts on the *attachment*: release the lease, detach, exit. The client
-    does NOT decide whether the run pauses — the session daemon's lease rule does.
+  - Intent B — "this client is leaving" (SIGTERM, SIGHUP, terminal close,
+    Ctrl-D, /save). Acts on the *attachment*: release the lease, detach, exit. The
+    client does NOT decide whether the run pauses — the session daemon's lease
+    rule does.
 
 `run_signal_receiver` installs loop-level handlers via `add_signal_handler` (so
 they can be RE-ARMED after a prompt_toolkit prompt deletes SIGINT's). SIGINT is
@@ -45,8 +46,13 @@ _PRESERVE_ON_PAUSE = ("merge_blocked", "completed", "saved", "abandoned")
 
 
 def _leave_signals() -> tuple[int, ...]:
-    """Signals meaning 'this client is leaving' (Intent B)."""
-    return (signal.SIGTERM,)
+    """Signals meaning 'this client is leaving' (Intent B). SIGHUP is absent on
+    some platforms (Windows); include it only when present."""
+    sigs: list[int] = [signal.SIGTERM]
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None:
+        sigs.append(sighup)
+    return tuple(sigs)
 
 
 def _handled_signals() -> tuple[int, ...]:
@@ -108,7 +114,8 @@ class InterruptCoordinator:
 
     Lifecycle:
       - CLI spawns `await coord.run_signal_receiver()` as a sibling task that
-        subscribes to SIGINT/SIGTERM and calls `signal_pause(reason=...)`.
+        subscribes to SIGINT (plus the Intent-B leave signals SIGTERM/SIGHUP) and
+        calls `signal_pause(reason=...)`.
       - The executor checks `coord.should_pause` between events; on True it
         returns RunResult.PAUSED. The CLI then reads `coord.pause_reason`
         (default "ctrl-c") to render `paused (<reason>)`.
@@ -324,7 +331,8 @@ class InterruptCoordinator:
             await fn()
 
     def _install_loop_signal_handlers(self) -> None:
-        """(Re)install SIGINT/SIGTERM handlers on the running loop. Idempotent —
+        """(Re)install the coordinator's loop signal handlers (SIGINT plus the
+        Intent-B leave signals — SIGTERM/SIGHUP) on the running loop. Idempotent —
         `add_signal_handler` overwrites any existing entry.
 
         This is also the RE-ARM primitive — now DEFENSIVE-ONLY. With the CLI's
@@ -388,7 +396,7 @@ class InterruptCoordinator:
             send.send_nowait(sig)
 
     def rearm_signal_handlers(self) -> None:
-        """Re-install the loop SIGINT/SIGTERM handlers after a prompt_toolkit
+        """Re-install the loop SIGINT/SIGTERM/SIGHUP handlers after a prompt_toolkit
         prompt deleted SIGINT's on exit. Safe no-op before the receiver starts or
         after it stops (`_loop is None`). Called from the interactive-prompt choke
         point (`ask_line_with_slash`) so mid-run Ctrl-C survives every prompt."""

@@ -235,6 +235,32 @@ def test_dispatch_second_sigint_at_prompt_still_escalates_after_window() -> None
     assert esc_fired["v"] is True
 
 
+def test_dispatch_sighup_fires_leave_not_pause() -> None:
+    import signal as _sig
+    coord = InterruptCoordinator()
+    left = {"v": False}
+    coord.set_escalation_hook(lambda: left.__setitem__("v", True))
+
+    coord._dispatch_signal(_sig.SIGHUP)
+
+    assert left["v"] is True             # SIGHUP is a leave (escalation) gesture
+    assert coord.should_pause is False   # never touches pause state
+
+
+@pytest.mark.anyio
+async def test_run_signal_receiver_installs_sighup_handler() -> None:
+    import anyio
+    coord = InterruptCoordinator()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(coord.run_signal_receiver)
+        await asyncio.sleep(0.1)   # let the receiver install loop handlers
+        loop = asyncio.get_running_loop()
+        assert signal.SIGINT in loop._signal_handlers
+        assert signal.SIGTERM in loop._signal_handlers
+        assert signal.SIGHUP in loop._signal_handlers
+        tg.cancel_scope.cancel()
+
+
 def test_dispatch_sigterm_fires_leave_not_pause() -> None:
     import signal as _sig
     coord = InterruptCoordinator()
