@@ -102,3 +102,33 @@ def extract_symbols(source: str, language: str) -> list[Symbol]:
     result = process(source, config)
     source_bytes = source.encode("utf-8")
     return [_to_symbol(source_bytes, item) for item in result.structure]
+
+
+def count_symbols(symbols: list[Symbol]) -> tuple[int, int, int]:
+    """(fn, data, other) totals over the whole symbol tree, recursive."""
+    fn = data = other = 0
+    for s in symbols:
+        if s.bucket == "fn":
+            fn += 1
+        elif s.bucket == "data":
+            data += 1
+        else:
+            other += 1
+        cfn, cdata, cother = count_symbols(list(s.children))
+        fn += cfn
+        data += cdata
+        other += cother
+    return fn, data, other
+
+
+def count_phrase(fn: int, data: int, other: int) -> str:
+    """The count phrase after the header dash: 'N fn, M data' (zero side omitted), or a single 'K symbol(s)' total when no recognized kind is present."""
+    if fn == 0 and data == 0:
+        total = other
+        return f"{total} symbol" if total == 1 else f"{total} symbols"
+    parts: list[str] = []
+    if fn:
+        parts.append(f"{fn} fn")
+    if data:
+        parts.append(f"{data} data")
+    return ", ".join(parts)

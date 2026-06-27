@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.tools.symbol_outline import Symbol, detect_language, extract_symbols
+from imp.agents.tools.symbol_outline import Symbol, count_phrase, count_symbols, detect_language, extract_symbols
 
 
 def test_detect_language_by_extension() -> None:
@@ -154,3 +154,35 @@ def test_extract_empty_and_unparseable_yield_no_symbols() -> None:
 def test_symbol_is_frozen() -> None:
     s = Symbol(name="x", bucket="fn", lineno=1, signature="def x()")
     assert s.children == ()
+
+
+def test_count_symbols_is_recursive() -> None:
+    tree = [
+        Symbol("a", "fn", 1, "def a()", (Symbol("b", "data", 2, "class b"),)),
+        Symbol("c", "fn", 5, "def c()"),
+    ]
+    assert count_symbols(tree) == (2, 1, 0)
+
+
+def test_count_symbols_on_extracted_python() -> None:
+    assert count_symbols(extract_symbols(_PY, "python")) == (2, 1, 0)
+
+
+def test_count_phrase_both_buckets() -> None:
+    assert count_phrase(2, 1, 0) == "2 fn, 1 data"
+
+
+def test_count_phrase_omits_zero_side() -> None:
+    assert count_phrase(2, 0, 0) == "2 fn"
+    assert count_phrase(0, 3, 0) == "3 data"
+
+
+def test_count_phrase_other_silenced_when_recognized_present() -> None:
+    assert count_phrase(2, 0, 3) == "2 fn"
+    assert count_phrase(0, 1, 4) == "1 data"
+
+
+def test_count_phrase_total_only_when_unrecognized() -> None:
+    # No recognized fn/data kinds at all -> a single total, never a wrong label.
+    assert count_phrase(0, 0, 5) == "5 symbols"
+    assert count_phrase(0, 0, 1) == "1 symbol"
