@@ -1992,3 +1992,34 @@ def test_verb_step_label_push_emits_no_header() -> None:
     drv.on_event(ev("3", "step_label_updated", agent_id="step:plan/plan-writer",
                      label="addressing plan review feedback"))   # a verb push, not position
     assert _body(out) == []                       # position unchanged → no header
+
+
+def test_context_bar_warn_cutoff_follows_checkpoint_threshold() -> None:
+    from imp.cli.live_driver import context_bar
+    # 164000/200000 = 0.82 — above the 0.80 checkpoint but below the 0.85 default.
+    warned = context_bar("sonnet", 164000, checkpoint_threshold=0.8,
+                         color=True, over_bg=False)
+    default = context_bar("sonnet", 164000, color=True, over_bg=False)
+    assert "\x1b[31m" in warned                 # red: past the configured 0.80 warn
+    assert "\x1b[31m" not in default            # default 0.85 cutoff -> still yellow
+    assert "\x1b[33m" in default
+
+
+def test_context_bar_absolute_threshold_warns_against_window() -> None:
+    from imp.cli.live_driver import context_bar
+    # Absolute cap 150000 on a 200000 window -> warn fraction 0.75. 160000 = 0.80
+    # is past it -> red.
+    bar = context_bar("sonnet", 160000, checkpoint_threshold=150000,
+                      color=True, over_bg=False)
+    assert "\x1b[31m" in bar
+
+
+def test_compose_position_bar_forwards_checkpoint_threshold() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.live_driver import compose_position_bar
+    activity = nv.Activity(model="sonnet",
+                           position="implementation phase · plan 1/1 · task 1/3")
+    line = compose_position_bar(activity=activity, change_id="abc", title="t",
+                                prompt_tokens=164000, color=True, width=200,
+                                checkpoint_threshold=0.8)
+    assert "\x1b[31m" in line                    # warn forwarded through to the bar

@@ -50,21 +50,27 @@ def _paint(text: str, *codes: str, color: bool, over_bg: bool) -> str:
 
 def context_bar(model: str | None, prompt_tokens: int | None, *,
                 context_pct: float | None = None,
+                checkpoint_threshold: float | int | None = None,
                 color: bool, over_bg: bool) -> str | None:
+    # Lazy import keeps `import live_driver` free of the providers package; the
+    # catalog is the renderer's only window source.
+    from imp.providers.catalog import checkpoint_fraction, window_for_model
+    window = window_for_model(model)
     if context_pct is not None:
         frac = context_pct / 100
     else:
-        # Lazy import keeps `import live_driver` free of the providers package;
-        # the catalog is the renderer's only window source.
-        from imp.providers.catalog import window_for_model
-        window = window_for_model(model)
         if window is None or prompt_tokens is None:
             return None
         frac = prompt_tokens / window
+    # The warn (red) cutoff tracks the configured checkpoint threshold when one is
+    # known; otherwise the static yellow->red band applies.
+    warn = checkpoint_fraction(checkpoint_threshold, window)
+    if warn is None:
+        warn = _BAR_YELLOW_MAX
     filled = max(0, min(_CONTEXT_WIDTH, round(frac * _CONTEXT_WIDTH)))
     pct = round(frac * 100)
     hue = ("green" if frac < _BAR_GREEN_MAX
-           else "wordmark" if frac < _BAR_YELLOW_MAX else "red")
+           else "wordmark" if frac < warn else "red")
     fill = _paint("█" * filled, hue, color=color, over_bg=over_bg) if filled else ""
     track = (_paint("░" * (_CONTEXT_WIDTH - filled), "gray", color=color, over_bg=over_bg)
              if filled < _CONTEXT_WIDTH else "")
@@ -87,6 +93,7 @@ def compose_activity_line(*, activity: nv.Activity, elapsed: float,
 def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
+                         checkpoint_threshold: float | int | None = None,
                          pad_slate: bool = True) -> str:
     """Position bar: id · title · position · model · context bar (no spinner, no elapsed)."""
     bg = pal.user_bg_open(enabled=color)
@@ -98,6 +105,7 @@ def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
     model_seg = (_paint(activity.model, "magenta", color=color, over_bg=over)
                  if activity.model else None)
     bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
+                      checkpoint_threshold=checkpoint_threshold,
                       color=color, over_bg=over)
     body = rt.compose_label([id_seg, title_seg, position_seg, model_seg, bar])
     if pad_slate and bg:
@@ -122,7 +130,8 @@ def compose_activity_status(
     bar = compose_position_bar(
         activity=activity, change_id=root.id, title=root.title,
         prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
-        context_pct=builder.latest_context_pct, pad_slate=False)
+        context_pct=builder.latest_context_pct,
+        checkpoint_threshold=builder.latest_checkpoint_threshold, pad_slate=False)
     line = compose_activity_line(activity=activity, frame=frame, elapsed=elapsed, color=color)
     return rt.compose_label([line, bar])
 
