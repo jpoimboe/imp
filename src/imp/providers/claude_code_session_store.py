@@ -182,7 +182,8 @@ def _session_block_to_dict(block: Any) -> dict[str, Any]:
 
 
 _SESSION_LIMIT_RE = re.compile(
-    r"session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/", re.IGNORECASE)
+    r"hit (?:your|a|the) session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/",
+    re.IGNORECASE)
 
 
 def session_record_is_error_turn(entry: Any) -> bool:

@@ -213,3 +213,8 @@ def test_scheduling_prose_with_timezone_stays_unclassified() -> None:
         "The cron job resets daily at midnight (America/Chicago) every Sunday") is None
     assert _classify_agent_text(
         "Database resets at 3am (America/New_York) each week") is None
+
+
+def test_session_limit_prose_stays_unclassified() -> None:
+    assert _classify_agent_text("The session limit is set to 1000 seconds.") is None
+    assert _classify_agent_text("I'm working on session limit handling.") is None

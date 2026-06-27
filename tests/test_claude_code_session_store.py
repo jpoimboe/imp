@@ -386,6 +386,16 @@ def test_strip_trailing_error_turn_keeps_normal_tail() -> None:
     assert strip_trailing_error_turn([]) == []
 
 
+def test_session_record_is_error_turn_benign_session_limit_prose() -> None:
+    from imp.providers.claude_code_session_store import session_record_is_error_turn
+
+    assert not session_record_is_error_turn({
+        "type": "assistant", "uuid": "x",
+        "message": {"role": "assistant",
+                    "content": [{"type": "text",
+                                 "text": "I'm working on session limit handling."}]}})
+
+
 def _three_message_transcript() -> list:
     from imp.agents.runner import (
         Message,
