@@ -86,3 +86,14 @@ def test_full_history_delegates_to_the_wired_callable() -> None:
         full_history=lambda cid: (seen.append(cid) or history))
     assert plane.full_history("alpha") == history
     assert seen == ["alpha"]
+
+
+def test_resident_ids_delegates_to_the_wired_callable() -> None:
+    calls: list[int] = []
+    plane = ControlPlane(
+        deliver=_noop_deliver, create=lambda prompt: None, abandon=lambda cid: 0,
+        list_changes=lambda: [], subscriptions=Subscriptions(),
+        snapshot=lambda cid: None, recent_narrative=lambda cid, n: [],
+        resident_ids=lambda: (calls.append(1) or frozenset({"x"})))
+    assert plane.resident_ids() == frozenset({"x"})
+    assert calls == [1]
