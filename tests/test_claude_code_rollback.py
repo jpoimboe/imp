@@ -165,3 +165,31 @@ async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
     loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
     assert [m.role for m in loaded] == ["user"]
     assert classify_resume(loaded) is ResumeState.SEND_TO_LLM
+
+
+@pytest.mark.anyio
+async def test_quota_pause_still_errors_and_rollback_is_harmless(
+    tmp_path: Path,
+) -> None:
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+
+    scripted = [
+        assistant(text("Credit balance is too low")),
+        result(),
+    ]
+
+    def factory(_opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, events
+    assert errs[0]["payload"]["category"] == "quota"
+
+    # The unconditional rollback fired for the Pause category too — harmless.
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert [m.role for m in loaded] == ["user"]
