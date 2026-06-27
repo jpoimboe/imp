@@ -812,7 +812,7 @@ def test_compose_status_colors_count_detail_label() -> None:
     drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
     drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
-    line = drv.compose_status(0, 1.0)
+    line = drv.compose_status(0, 1.0)[0]
     assert "1 call" in line
     assert "bash ls" in line
     assert "\x1b[90m" in line          # detail painted gray
@@ -1026,9 +1026,9 @@ def test_compose_status_returns_activity_content() -> None:
                     input={"command": "ls"}))
     result = drv.compose_status(0, 1.0)
     assert result is not None
-    assert "bash ls" in result
-    assert "1 call" in result
-    assert "\x1b[90m" in result    # gray detail segment
+    assert "bash ls" in result[0]
+    assert "1 call" in result[0]
+    assert "\x1b[90m" in result[0]    # gray detail segment
 
 
 def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
@@ -1044,9 +1044,9 @@ def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
     assert drv._frontier_depth() == 0                  # streaming flush at column 0
     raw = compose_activity_status(drv._builder, frame=0, elapsed=1.0, color=False)
     result = drv.compose_status(0, 1.0)
-    assert result == raw                                # no indent added
-    assert not result.startswith(" ")                  # spinner at column 0
-    assert result[0] == "⠋"
+    assert result[0] == raw                             # no indent added
+    assert not result[0].startswith(" ")               # spinner at column 0
+    assert result[0][0] == "⠋"
 
 
 

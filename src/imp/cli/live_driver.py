@@ -234,11 +234,12 @@ class LiveDriver:
         self._walk(force=True)
         self._status.reset()
 
-    def compose_status(self, frame: int, elapsed: float) -> str | None:
+    def compose_status(self, frame: int, elapsed: float) -> list[str] | None:
         # The transient status line renders flush-left at the margin (it reads as
         # narration, not as a bullet child).
-        return compose_activity_status(
+        line = compose_activity_status(
             self._builder, frame=frame, elapsed=elapsed, color=self._color)
+        return [line] if line is not None else None
 
     def compose_toolbar_static(self) -> str | None:
         # The prompt-mode toolbar: the same composed content with a STATIC spinner
