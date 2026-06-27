@@ -69,6 +69,7 @@ async def test_e2e_chat_commands_round_trip(
                 create=created.append,
                 abandon=lambda cid: (abandoned.append(cid), 0)[1],
                 list_changes=lambda: listed,
+                resident_ids=lambda: frozenset({"q1w2e3"}),
                 deliver=_capture_deliver,
                 install_signals=False, shutdown=shutdown))
 

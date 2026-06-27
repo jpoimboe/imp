@@ -23,11 +23,13 @@ class ControlPlane:
         resume: Callable[[str], str] | None = None,
         save: Callable[[str], None] | None = None,
         full_history: Callable[[str], list[dict[str, Any]]] | None = None,
+        resident_ids: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         self._deliver = deliver
         self._create = create
         self._abandon = abandon
         self._list_fn = list_changes
+        self._resident_ids = resident_ids
         self.subscriptions = subscriptions
         self._snapshot = snapshot
         self._recent_narrative = recent_narrative
@@ -70,3 +72,7 @@ class ControlPlane:
 
     def list_changes(self) -> list[ChangeInfo]:
         return self._list_fn()
+
+    def resident_ids(self) -> frozenset[str]:
+        assert self._resident_ids is not None  # run_daemon always wires it
+        return self._resident_ids()

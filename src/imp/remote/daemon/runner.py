@@ -40,6 +40,7 @@ from imp.remote.daemon.commands import (
     Unsubscribe,
 )
 from imp.remote.daemon.control import ControlPlane
+from imp.remote.daemon.directory import resident_session_ids
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.daemon.server import SouthHub
@@ -303,9 +304,10 @@ async def _handle_command(
     elif isinstance(command, ListChanges):
         try:
             changes = await anyio.to_thread.run_sync(control.list_changes)
-            responses.put(ListResult(changes))
+            resident = await anyio.to_thread.run_sync(control.resident_ids)
+            responses.put(ListResult(changes, resident))
         except Exception:
-            _log.warning("list_changes failed", exc_info=True)
+            _log.warning("list or residency probe failed", exc_info=True)
             responses.put(Notice("Error: could not list changes."))
     elif isinstance(command, Search):
         hits = await anyio.to_thread.run_sync(control.search, command.query)
@@ -391,6 +393,7 @@ async def run_daemon(
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
+    resident_ids: Callable[[], frozenset[str]] | None = None,
     search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
     resume: Callable[[str], str] | None = None,
     save: Callable[[str], None] | None = None,
@@ -404,6 +407,8 @@ async def run_daemon(
     create = create or (lambda prompt: spawn.create_change(control_root, prompt))
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
     list_changes = list_changes or (lambda: discover.list_changes(control_root))
+    resident_ids = resident_ids or (
+        lambda: frozenset(resident_session_ids(control_root)))
     search = search or (lambda q: archive_read.search_archive(control_root, q))
     resume = resume or (lambda token: spawn.resume_change(control_root, token))
     save = save or (lambda cid: _save_change(control_root, cid))
@@ -428,6 +433,7 @@ async def run_daemon(
     control = ControlPlane(
         deliver=deliver, create=create,
         abandon=abandon, list_changes=list_changes,
+        resident_ids=resident_ids,
         subscriptions=subscriptions,
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
@@ -444,13 +450,21 @@ async def run_daemon(
     try:
         write_pid(control_root)
         await hub.open()
+        # Daemon threads are not joined at interpreter shutdown, so a worker parked
+        # in a blocking long-poll syscall is reaped at process exit rather than
+        # holding the process open. stop.set() still asks them to exit cleanly at
+        # the next loop boundary; they are never joined.
+        poll_thread = threading.Thread(
+            target=_poll_worker, args=(adapter, stop), daemon=True)
+        sender_thread = threading.Thread(
+            target=_sender_worker, args=(adapter, outbound, responses, stop),
+            daemon=True)
+        poll_thread.start()
+        sender_thread.start()
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(supervisor.run)
             tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
-            tg.start_soon(anyio.to_thread.run_sync, _poll_worker, adapter, stop)
-            tg.start_soon(anyio.to_thread.run_sync,
-                          _sender_worker, adapter, outbound, responses, stop)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             try:
