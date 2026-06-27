@@ -9,8 +9,9 @@ import anyio
 import pytest
 
 from imp.engine.change import Change
-from imp.remote.session.attach import attach_or_spawn, spawn_session_daemon
+from imp.remote.session.attach import attach_or_spawn, build_session_attach, spawn_session_daemon
 from imp.remote.session.discover import session_socket_path
+from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.socket_server import SessionSocket
 
 
@@ -464,3 +465,50 @@ def test_spawn_session_daemon_omits_autonomous_when_false(
                         lambda argv, **kw: captured.update(argv=argv) or object())
     spawn_session_daemon(change)
     assert "--autonomous" not in captured["argv"]
+
+
+@pytest.mark.anyio
+async def test_build_session_attach_leases_when_requested(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-lz")
+    sock = str(session_socket_path(change.control_root, change.id))
+    seen: list[Any] = []
+    server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        attach = build_session_attach(change, lease=True)
+        client = await attach(lambda _e: None)
+        with anyio.fail_after(5):
+            while not seen:
+                await anyio.sleep(0.02)
+        assert seen[0].lease is True   # the terminal opts in to a keep-alive lease
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_deliver_session_reply_attaches_lease_less(tmp_path: Path) -> None:
+    # A remote reply goes through the DEFAULT attach (build_session_attach with no
+    # lease=). It must NOT hold a keep-alive lease, or a reply that rehydrates a
+    # hibernated change would pause the run the instant it detaches.
+    change = _make_change(tmp_path, "2026-06-15-rep")
+    sock = str(session_socket_path(change.control_root, change.id))
+    seen: list[Any] = []
+    server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+
+        async def _gate_once_attached() -> None:
+            with anyio.fail_after(5):
+                while server.attached_count == 0:
+                    await anyio.sleep(0.02)
+            server.broadcast(
+                {"type": "awaiting_user_input", "payload": {"prompt": "?"}})
+
+        tg.start_soon(_gate_once_attached)
+        await deliver_session_reply(change, "my reply")
+        assert seen and seen[0].lease is False
+        await server.close()
+        tg.cancel_scope.cancel()

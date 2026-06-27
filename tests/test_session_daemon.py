@@ -1510,7 +1510,7 @@ def test_build_session_attach_forwards_non_interactive(
 
     async def fake_attach_or_spawn(
         change: Change, *, on_event: Any, spawn_fn: Any,
-        connect_timeout: float = 10.0,
+        connect_timeout: float = 10.0, lease: bool = False,
     ) -> object:
         holder["spawn_fn"] = spawn_fn
         return object()
@@ -1540,7 +1540,7 @@ def test_build_session_attach_forwards_autonomous(
 
     async def fake_attach_or_spawn(
         change: Change, *, on_event: Any, spawn_fn: Any,
-        connect_timeout: float = 10.0,
+        connect_timeout: float = 10.0, lease: bool = False,
     ) -> object:
         holder["spawn_fn"] = spawn_fn
         return object()

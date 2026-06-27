@@ -311,8 +311,10 @@ async def test_run_session_client_threads_resume_into_attach(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
         opening_intent: str | None = None, scope_only: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
+        lease: bool = False,
     ) -> Any:
         captured["resume"] = resume
+        captured["lease"] = lease
 
         async def _attach(_on_event: Any) -> Any:  # pragma: no cover - never run
             raise AssertionError("attach must not be invoked in this test")
@@ -338,6 +340,7 @@ async def test_run_session_client_threads_resume_into_attach(
         change, driver=_Driver(), coord=coord, solicit=_solicit, resume=True)
 
     assert captured["resume"] is True
+    assert captured["lease"] is True   # the terminal path leases
     assert rc == 0
 
 
@@ -658,6 +661,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
         opening_intent: str | None = None, scope_only: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
+        lease: bool = False,
     ) -> Any:
         captured["autonomous"] = autonomous
 

@@ -58,9 +58,10 @@ async def attach_or_spawn(
     on_event: Callable[[dict[str, Any]], None],
     spawn_fn: SpawnFn = spawn_session_daemon,
     connect_timeout: float = 10.0,
+    lease: bool = False,
 ) -> SessionClient:
     socket_path = str(session_socket_path(change.control_root, change.id))
-    client = SessionClient(socket_path, change.id, change.title, on_event=on_event)
+    client = SessionClient(socket_path, change.id, change.title, on_event=on_event, lease=lease)
     try:
         await client.connect()
         return client
@@ -85,11 +86,13 @@ def build_session_attach(
     scope_only: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
+    lease: bool = False,
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         return await attach_or_spawn(
             change,
             on_event=on_event,
+            lease=lease,
             spawn_fn=lambda ch: spawn_session_daemon(
                 ch, seed_opening=seed_opening, resume=resume,
                 opening_intent=opening_intent, scope_only=scope_only,

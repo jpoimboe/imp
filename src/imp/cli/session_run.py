@@ -48,7 +48,7 @@ async def run_session_client(
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
         opening_intent=opening_intent, scope_only=scope_only,
-        non_interactive=non_interactive, autonomous=autonomous)
+        non_interactive=non_interactive, autonomous=autonomous, lease=True)
     startup_failed = False
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
