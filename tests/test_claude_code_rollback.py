@@ -137,3 +137,31 @@ async def test_termination_401_rolls_back_and_keeps_llm_event(tmp_path: Path) ->
 
     # AC4: the error turn's llm_response event remains queryable.
     assert any(e["type"] == "llm_response" for e in log.read())
+
+
+@pytest.mark.anyio
+async def test_classified_text_branch_rolls_back(tmp_path: Path) -> None:
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, log)
+
+    # No is_error / api_error_status -> _termination_from_result returns None,
+    # so the auth-prose turn is caught by the _classify_agent_text branch.
+    scripted = [
+        assistant(text("Invalid authentication credentials")),
+        result(),
+    ]
+
+    def factory(_opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(_opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, events
+    assert errs[0]["payload"]["category"] == "auth"
+
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert [m.role for m in loaded] == ["user"]
+    assert classify_resume(loaded) is ResumeState.SEND_TO_LLM

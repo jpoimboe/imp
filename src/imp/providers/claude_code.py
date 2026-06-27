@@ -1623,6 +1623,7 @@ class ClaudeCodeAgentRunner:
                         # instead of after N nudges.
                         classified = _classify_agent_text(last_text)
                         if classified is not None:
+                            _roll_back_error_turn(messages, transcript)
                             yield perr.make_error_event(
                                 classified, kind=getattr(classified, "kind", ""))
                             return
