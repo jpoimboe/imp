@@ -472,6 +472,7 @@ class AnthropicAgentRunner:
         ctx.coordinator = invocation.coordinator
         ctx.tiers = invocation.tiers
         ctx.verify_command = invocation.verify_command
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.event_log = elog                       # shared write instance

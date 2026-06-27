@@ -105,6 +105,9 @@ class ToolContext:
     # Optional combined verify gate command (config.verify_command). Threaded onto
     # the subprocess env (IMP_VERIFY_COMMAND) by the bash tool. None => no verify gate.
     verify_command: str | None = None
+    # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
+    # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
+    checkpoint_threshold: float | int | None = None
     # Resolved SandboxPolicy for shell wrapping (spec Part B). None => bare sh -c
     # (no sandbox), preserving pre-sandbox behavior. Set by the runner from
     # invocation.sandbox_policy.

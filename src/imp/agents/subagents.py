@@ -281,6 +281,7 @@ async def dispatch_task(
             verify_command=ctx.verify_command,
             non_interactive=ctx.non_interactive,
             sandbox_policy=ctx.sandbox_policy,
+            checkpoint_threshold=ctx.checkpoint_threshold,
         )
 
     sub_inv = _build_sub_inv(
@@ -345,6 +346,32 @@ async def dispatch_task(
                 if ctx.coordinator is not None and ctx.coordinator.should_pause:
                     raise SubagentSuspended("paused during subagent backoff")
 
+            # Tier A proactive handoff: the subagent approached its window and
+            # wrote a handoff note before stopping. Reborn INSIDE this dispatch
+            # (the parent still sees one resolved sub_agent call) — stash its
+            # transcript, seed a fresh instance from the handoff, and re-dispatch
+            # — up to the same per-session cap. At the cap, fall through to the
+            # is_error degrade below (result.output is None). The counter lives on
+            # the shared top-level State (ctx.change_state); a nested dispatch has
+            # none, so it falls through unchanged.
+            if (result.handoff_path is not None
+                    and ctx.change_state is not None
+                    and ctx.change_state.reincarnation_count(reincarnation_key)
+                    < ctx.change_state.max_reincarnations):
+                ctx.change_state.bump_reincarnation(reincarnation_key)
+                stashed = stash_transcript(target_dir)
+                ctx.event_log.append(
+                    agent_id=None, type="reincarnating",
+                    payload={"reason": "context threshold crossed"})
+                hp = Path(result.handoff_path)
+                seed = reincarnation_seed(
+                    stashed_dir=stashed,
+                    handoff_path=hp if hp.exists() else None)
+                _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
+                sub_inv = _build_sub_inv(
+                    target_dir,
+                    (Message(role="user", content=(TextBlock(text=seed),)),))
+                continue
             # Tier B backstop: a subagent that hit the hard window error is reborn
             # INSIDE this dispatch (the parent still sees one resolved sub_agent
             # call) — stash its transcript, seed a fresh instance from it, and
