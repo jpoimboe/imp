@@ -17,6 +17,8 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
+
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,
                          display_width: int = 80, indent: str = "") -> str:
@@ -63,7 +65,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             from prompt_toolkit.application import run_in_terminal
             # Fire-and-forget: run_in_terminal schedules via ensure_future; the
             # returned Future is intentionally not awaited from this sync handler.
-            run_in_terminal(lambda: print("press ctrl-d to exit"))
+            run_in_terminal(lambda: print(EMPTY_PROMPT_HINT))
 
     @kb.add("c-m", filter=~completion_is_selected)
     def _(event: Any) -> None:

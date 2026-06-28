@@ -68,3 +68,8 @@ def test_ask_sync_passes_handle_sigint_false() -> None:
     prompt = Prompt(_session_factory=lambda: _SpySession())
     assert prompt.ask() == "ok"
     assert captured.get("handle_sigint") is False
+
+
+def test_empty_prompt_hint_names_pause_and_exit() -> None:
+    from imp.cli.prompt import EMPTY_PROMPT_HINT
+    assert EMPTY_PROMPT_HINT == "press ctrl-d to pause & exit"
