@@ -2213,6 +2213,82 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
     assert all(e["payload"]["label"] == "implementing" for e in coder_started)
     assert coder_started[0]["payload"]["resumed"] is False
     assert coder_started[1]["payload"]["resumed"] is True
+    # A replay-resume (the coder transcript was persisted, so `keep` is True)
+    # is a continuation, not a re-run: restarted is False on both entries.
+    assert coder_started[0]["payload"]["restarted"] is False
+    assert coder_started[1]["payload"]["restarted"] is False
+
+
+@pytest.mark.anyio
+async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_path: Path) -> None:
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "coder.md").write_text(
+        "---\nname: coder\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [Accept, Reject]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: impl\n"
+        "    steps:\n"
+        "      - {name: coder, file: agents/coder.md, tier: medium, label: implementing}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: medium\n"
+        "        rules:\n"
+        "          - {if: {verdict: Reject}, resume: coder, feedback: \"findings:\"}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    reviewer_calls = {"n": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            # NOTE: coder deliberately does NOT persist its transcript, so the
+            # later resume:coder entry sees an empty transcript (keep False).
+            if invocation.agent_def.name == "reviewer":
+                _persist_initial(invocation)
+                reviewer_calls["n"] += 1
+                verdict = "Reject" if reviewer_calls["n"] == 1 else "Accept"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    coder_started = [e for e in events
+                     if e["type"] == "step_started"
+                     and e["payload"].get("step") == "coder"]
+    assert len(coder_started) == 2
+    assert coder_started[0]["payload"]["restarted"] is False   # fresh entry
+    assert coder_started[1]["payload"]["restarted"] is True    # empty-transcript resume
 
 
 # ── sandbox policy rebuild on project_root flip ─────────────────────────────
