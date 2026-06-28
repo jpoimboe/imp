@@ -170,3 +170,29 @@ def test_auth_never_pauses_in_decide() -> None:
         d = ep.decide("auth", prior_backoff_attempts=n)
         assert isinstance(d, ep.RetryWithBackoff)
     assert ep.decide("auth", prior_backoff_attempts=50).delay_seconds == 60.0
+
+
+def test_stalled_is_a_category_member() -> None:
+    assert "stalled" in get_args(Category)
+
+
+def test_stalled_decide_follows_backoff_schedule() -> None:
+    # Reuses the one delay formula min(60, 2 ** prior_backoff_attempts):
+    # 1, 2, 4, 8, 16, 32, 60, 60.
+    expected = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]
+    for i, want in enumerate(expected):
+        d = ep.decide("stalled", prior_backoff_attempts=i)
+        assert isinstance(d, ep.RetryWithBackoff)
+        assert d.delay_seconds == want
+
+
+def test_stalled_never_pauses_in_decide() -> None:
+    for n in (0, 7, 50):
+        assert isinstance(
+            ep.decide("stalled", prior_backoff_attempts=n), ep.RetryWithBackoff,
+        )
+
+
+def test_budget_for_stalled_is_1800() -> None:
+    # Same patience as the other transient budgets (network / rate_limit / auth).
+    assert ep.budget_for("stalled") == 1800.0

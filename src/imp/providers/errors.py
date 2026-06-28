@@ -22,6 +22,7 @@ Category = Literal[
     "context_window",
     "rate_limit",
     "network",
+    "stalled",
     "api",
     "loop",
     "agent_output_missing",

@@ -58,6 +58,10 @@ _POLICY: dict[str, _Policy] = {
     "context_window":       _Policy(Pause, None),
     "rate_limit":           _Policy(RetryWithBackoff, 1800.0),
     "network":              _Policy(RetryWithBackoff, 1800.0),
+    # A B.2 watchdog stall is a transient wedge: retry with budgeted backoff like
+    # network / rate_limit rather than pausing as a hard error. 1800 s matches the
+    # other transient budgets.
+    "stalled":              _Policy(RetryWithBackoff, 1800.0),
     "api":                  _Policy(Pause, None),
     "loop":                 _Policy(Pause, None),
     "agent_output_missing": _Policy(RetryNow, None),
