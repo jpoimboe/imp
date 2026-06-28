@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -72,17 +74,27 @@ def archive_change(
 
 
 def rebuild_index(control_root: Path) -> None:
-    """Reconstruct index.db from record files + locally present blobs."""
-    index_path(control_root).unlink(missing_ok=True)
-    store = LocalBlobStore(blobs_root(control_root))
-    conn = index.connect(index_path(control_root))
+    """Reconstruct index.db from record files + locally present blobs.
+
+    Builds a temp db in the archive dir and os.replaces it into position, so a
+    concurrent reader never observes a missing or half-built index.
+    """
+    archive_root(control_root).mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=archive_root(control_root), suffix=".db.tmp")
+    os.close(fd)
     try:
-        for cid in record.list_record_ids(records_root(control_root)):
-            rec = record.read_record(records_root(control_root), cid)
-            if rec is None:
-                continue
-            blob = store.get(rec["events_hash"])
-            events = _parse_events(blob) if blob is not None else []
-            index.ingest(conn, rec, events)
+        store = LocalBlobStore(blobs_root(control_root))
+        conn = index.connect(Path(tmp))
+        try:
+            for cid in record.list_record_ids(records_root(control_root)):
+                rec = record.read_record(records_root(control_root), cid)
+                if rec is None:
+                    continue
+                blob = store.get(rec["events_hash"])
+                events = _parse_events(blob) if blob is not None else []
+                index.ingest(conn, rec, events)
+        finally:
+            conn.close()
+        os.replace(tmp, index_path(control_root))
     finally:
-        conn.close()
+        Path(tmp).unlink(missing_ok=True)
