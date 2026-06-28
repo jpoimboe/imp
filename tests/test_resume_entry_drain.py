@@ -568,6 +568,9 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
         def reset(self) -> None:
             pass
 
+        def note_activity(self) -> None:
+            pass
+
     coord = _FakeCoordinator()
 
     # Scripted: one turn, completes with complete_step.
