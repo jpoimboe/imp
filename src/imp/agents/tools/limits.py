@@ -76,6 +76,8 @@ EXCLUDED_DIRS = frozenset({".imp", ".git"})
 # Consumed by src/imp/providers/history_compaction.py as defaults; the per-
 # provider tuning seams are the keep_recent_turns=... / threshold_s=... overrides.
 KEEP_RECENT_TURNS = 3                     # recent turns whose tool results are never evicted
+# wall-clock gap (s) past which a turn is cold (Anthropic ~5-min TTL)
+CACHE_COLD_THRESHOLD_S = 300
 
 
 def within_artifacts(rel: Path) -> bool:

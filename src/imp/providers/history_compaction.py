@@ -13,10 +13,13 @@ provider module), so no provider import cycle can form.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 
-from imp.agents.tools.limits import KEEP_RECENT_TURNS
+from imp.agents.tools.limits import CACHE_COLD_THRESHOLD_S, KEEP_RECENT_TURNS
 
 COMPACTABLE_TOOLS: frozenset[str] = frozenset(
     {"read_file", "grep", "glob", "bash", "bash_output"}
@@ -55,3 +58,27 @@ def results_to_evict(
         if call_names.get(r.result_id) in COMPACTABLE_TOOLS:
             evict.add(r.result_id)
     return frozenset(evict)
+
+
+def is_cold(
+    events_path: Path,
+    *,
+    now: datetime | None = None,
+    threshold_s: float = CACHE_COLD_THRESHOLD_S,
+) -> bool:
+    last = _last_llm_response_timestamp(events_path)
+    if last is None:
+        return False
+    current = now if now is not None else datetime.now(UTC)
+    return (current - last).total_seconds() > threshold_s
+
+
+def _last_llm_response_timestamp(events_path: Path) -> datetime | None:
+    for line in reversed(events_path.read_text().splitlines()):
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if rec.get("type") == "llm_response":
+            ts = rec.get("timestamp")
+            return datetime.fromisoformat(ts) if ts else None
+    return None

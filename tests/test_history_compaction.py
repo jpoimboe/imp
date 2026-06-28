@@ -1,10 +1,18 @@
 # tests/test_history_compaction.py
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
 import pytest
 
-from imp.agents.tools.limits import KEEP_RECENT_TURNS
-from imp.providers.history_compaction import HistoryRecord, results_to_evict
+from imp.agents.tools.limits import CACHE_COLD_THRESHOLD_S, KEEP_RECENT_TURNS
+from imp.providers.history_compaction import (
+    HistoryRecord,
+    is_cold,
+    results_to_evict,
+)
 
 
 def _call(turn: int, cid: str, name: str) -> HistoryRecord:
@@ -88,3 +96,58 @@ def test_mixed_conversation_evicts_only_compactable() -> None:
         records.append(_result(t, f"c{t}"))
     got = results_to_evict(records, cold=True, keep_recent_turns=3)
     assert got == frozenset({"rf"})
+
+
+_BASE = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+
+def _write_events(path: Path, records: list[dict]) -> None:
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+def _llm(ts: datetime) -> dict:
+    return {"type": "llm_response", "timestamp": ts.isoformat()}
+
+
+def test_gap_over_threshold_is_cold(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    _write_events(p, [_llm(_BASE)])
+    now = _BASE + timedelta(seconds=CACHE_COLD_THRESHOLD_S + 1)
+    assert is_cold(p, now=now) is True
+
+
+def test_gap_under_threshold_is_not_cold(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    _write_events(p, [_llm(_BASE)])
+    now = _BASE + timedelta(seconds=CACHE_COLD_THRESHOLD_S - 1)
+    assert is_cold(p, now=now) is False
+
+
+def test_gap_measured_from_llm_response_not_later_other_events(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    later = _BASE + timedelta(seconds=10_000)
+    _write_events(p, [_llm(_BASE), {"type": "tool_call", "timestamp": later.isoformat()}])
+    now = _BASE + timedelta(seconds=CACHE_COLD_THRESHOLD_S + 1)
+    assert is_cold(p, now=now) is True
+
+
+def test_uses_most_recent_llm_response(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    newer = _BASE + timedelta(seconds=10_000)
+    _write_events(p, [_llm(_BASE), _llm(newer)])
+    now = newer + timedelta(seconds=CACHE_COLD_THRESHOLD_S - 1)
+    assert is_cold(p, now=now) is False
+
+
+def test_no_llm_response_event_is_not_cold(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    _write_events(p, [{"type": "tool_call", "timestamp": _BASE.isoformat()}])
+    assert is_cold(p, now=_BASE + timedelta(seconds=10_000)) is False
+
+
+def test_gap_exactly_threshold_is_not_cold(tmp_path: Path) -> None:
+    # strict `>` => a gap of exactly the threshold is NOT cold
+    p = tmp_path / "events.jsonl"
+    _write_events(p, [_llm(_BASE)])
+    now = _BASE + timedelta(seconds=CACHE_COLD_THRESHOLD_S)
+    assert is_cold(p, now=now) is False
