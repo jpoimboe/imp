@@ -158,3 +158,52 @@ def test_archive_change_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> 
     assert set(rows) == {"alpha", "gamma"}        # 'stale' dropped by the rebuild
     assert rows["alpha"] == "2026-06-01T00:00:01+00:00"
     assert rows["gamma"] == "2026-06-02T00:00:02+00:00"
+
+
+def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> None:
+    control = tmp_path
+    seeded = [f"c{i}" for i in range(5)]
+    for i, cid in enumerate(seeded):
+        _seed_change(control, cid, f"2026-06-01T00:00:0{i}+00:00")
+    _write_legacy_v0_db(archive.index_path(control))  # force a real migration
+
+    # Pre-stage one finalize's inputs; the writer thread runs archive_change.
+    w_events = control / "writer.jsonl"
+    w_events.write_text(
+        '{"id":"writer-e0","timestamp":"2026-06-02T00:00:00+00:00",'
+        '"type":"change_created","payload":{}}\n')
+    w_change = control / "writer-change.json"
+    w_change.write_text(json.dumps({
+        "id": "writer", "title": "Writer", "base_branch": "main",
+        "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
+    w_state = control / "writer-state.json"
+    w_state.write_text(json.dumps({
+        "id": "writer", "status": "completed", "step": "finalize"}))
+
+    start = threading.Barrier(6)  # 5 readers + 1 writer start together
+    missing_db: list[bool] = []
+    missing_db_lock = threading.Lock()
+
+    def reader() -> None:
+        start.wait()
+        for _ in range(8):
+            if not archive.index_path(control).exists():
+                with missing_db_lock:
+                    missing_db.append(True)
+            read.completed_rows(control)
+
+    def writer() -> None:
+        start.wait()
+        archive.archive_change(
+            control, "writer", events_path=w_events,
+            change_json_path=w_change, state_json_path=w_state)
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futs = [ex.submit(reader) for _ in range(5)]
+        futs.append(ex.submit(writer))
+        for f in futs:
+            f.result()  # re-raises any worker exception (e.g. a crash on legacy db)
+
+    assert missing_db == []  # no reader ever saw a missing index across the swap
+    final_ids = {r[0] for r in read.completed_rows(control)}
+    assert final_ids == set(seeded) | {"writer"}  # migration lost no row, gained the finalize
