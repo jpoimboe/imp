@@ -117,6 +117,7 @@ async def serve_change_session(
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.engine.awaiting_user_input import AwaitingUserInput
 
+        resume_target: str | None = None
         if resume:
             log = change.event_log()
             state = State.load(change.state_dir)
@@ -128,6 +129,9 @@ async def serve_change_session(
             if crashed:
                 state.resume_pending = state.step
             state.save(change.state_dir)
+            # A crash replays the interrupted agent step, so it always lands in
+            # the agent regardless of the last-stamped target.
+            resume_target = None if crashed else state.resume_target
         run_kwargs: dict[str, Any] = {}
         if non_interactive:
             run_kwargs["non_interactive"] = True
@@ -136,16 +140,23 @@ async def serve_change_session(
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:
             first_kwargs["seed_opening"] = seed_opening
-        result = await run_fn(
-            change,
-            on_event=on_event,
-            user_chat_input_fn=user_chat_input_fn,
-            coordinator=coordinator,
-            wait_for_turn_fn=server.wait_for_turn,
-            **run_kwargs,
-            **first_kwargs,
-        )
-        prompt = _hold_prompt(result, coordinator, change.event_log())
+        if resume_target == "prompt":
+            # Resume back to the resteer hold prompt the user left from, before
+            # any agent run: a typed reply then interjects and runs the agent;
+            # a detach re-leaves it paused, re-stamping "prompt".
+            result: Any = RunResult.PAUSED
+            prompt: str | None = _RESUME_PROMPT
+        else:
+            result = await run_fn(
+                change,
+                on_event=on_event,
+                user_chat_input_fn=user_chat_input_fn,
+                coordinator=coordinator,
+                wait_for_turn_fn=server.wait_for_turn,
+                **run_kwargs,
+                **first_kwargs,
+            )
+            prompt = _hold_prompt(result, coordinator, change.event_log())
         while prompt is not None:
             on_event({"type": "awaiting_user_input",
                       "payload": {"prompt": prompt}})
