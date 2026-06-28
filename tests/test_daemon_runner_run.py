@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import functools
+import logging
+import signal
 import threading
 import time
 from pathlib import Path
@@ -10,7 +12,13 @@ import pytest
 
 from imp.remote.daemon.commands import Help
 from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
-from imp.remote.daemon.runner import _poll_worker, _sender_worker, pid_path, run_daemon
+from imp.remote.daemon.runner import (
+    _await_shutdown_signals,
+    _poll_worker,
+    _sender_worker,
+    pid_path,
+    run_daemon,
+)
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
@@ -226,3 +234,45 @@ async def test_run_daemon_returns_while_poll_worker_is_blocked(tmp_path: Path) -
     finally:
         block.set()   # release the parked daemon thread so it exits cleanly
     assert time.monotonic() - start < 3
+
+
+class _FakeSignals:
+    """A sync context manager (mirroring anyio.open_signal_receiver) whose
+    async-iterable body yields a controlled, finite stream of signal numbers."""
+
+    def __init__(self, signums: list[int]) -> None:
+        self._signums = list(signums)
+
+    def __enter__(self) -> _FakeSignals:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def __aiter__(self) -> _FakeSignals:
+        return self
+
+    async def __anext__(self) -> int:
+        if not self._signums:
+            raise StopAsyncIteration
+        return self._signums.pop(0)
+
+
+@pytest.mark.anyio
+async def test_await_shutdown_signals_drains_then_escalates(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        "imp.remote.daemon.runner.anyio.open_signal_receiver",
+        lambda *sigs: _FakeSignals([signal.SIGINT, signal.SIGINT]))
+    shutdown = anyio.Event()
+    exits: list[int] = []
+    caplog.set_level(logging.INFO, logger="imp.daemon")
+
+    await _await_shutdown_signals(shutdown, force_exit=exits.append)
+
+    assert shutdown.is_set()                       # first signal drained gracefully
+    assert exits == [0]                            # second signal force-exited once
+    assert any(
+        "Ctrl-C again to force-quit" in record.message
+        for record in caplog.records)
