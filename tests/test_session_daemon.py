@@ -1623,3 +1623,21 @@ async def test_resume_agent_target_runs_straight_away(
 
     assert result is RunResult.COMPLETED
     assert seen["ran"] is True
+
+
+@pytest.mark.anyio
+async def test_interrupt_leave_control_pauses_with_ctrl_d_reason(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+    from imp.remote.session.server import SessionServer
+
+    class _FakeCoord:
+        def __init__(self) -> None:
+            self.reasons: list[str] = []
+
+        async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
+            self.reasons.append(reason)
+
+    coord = _FakeCoord()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+    await server._dispatch_control(CONTROL_INTERRUPT_LEAVE)
+    assert coord.reasons == ["ctrl-d"]

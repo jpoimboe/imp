@@ -147,3 +147,10 @@ def test_encode_set_lease_round_trips() -> None:
 def test_set_lease_missing_value_is_rejected() -> None:
     with pytest.raises(ValueError, match="missing required field"):
         parse_client_message('{"kind": "set-lease"}')
+
+
+def test_interrupt_leave_control_round_trips() -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT, CONTROL_INTERRUPT_LEAVE
+    line = encode_control(CONTROL_INTERRUPT_LEAVE)
+    assert parse_client_message(line) == Control(CONTROL_INTERRUPT_LEAVE)
+    assert CONTROL_INTERRUPT_LEAVE != CONTROL_INTERRUPT  # distinct from plain interrupt
