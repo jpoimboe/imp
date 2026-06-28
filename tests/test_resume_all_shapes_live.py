@@ -162,7 +162,8 @@ async def test_send_to_llm_store_backed_native_resume(
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
 @pytest.mark.anyio
-async def test_dangling_tool_use_store_backed_native_resume(tmp_path: Path) -> None:
+async def test_dangling_tool_use_store_backed_native_resume(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert shutil.which("claude") is not None, (
         "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
         "not found on PATH"
@@ -198,6 +199,15 @@ async def test_dangling_tool_use_store_backed_native_resume(tmp_path: Path) -> N
         msgs[:2], parent_uuid=None, session_id=skey["session_id"],
         cwd=str(tmp_path), model=_MODEL, start_index=0))
 
+    # Spy on the first-query stream: native resume must STREAM the synthesized
+    # placeholder tool_result for the dangling t1 (1 turn) to kick the next turn.
+    # An empty delta would deadlock (claude-p never self-starts a loaded session).
+    streamed: list[list[Message]] = []
+    _orig_stream = claude_code._stream_history
+    monkeypatch.setattr(
+        claude_code, "_stream_history",
+        lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
+
     runner = ClaudeCodeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
@@ -205,6 +215,11 @@ async def test_dangling_tool_use_store_backed_native_resume(tmp_path: Path) -> N
     # transcript_invalid abort (which the store assertion below ties to the
     # native path).
     assert events[-1]["type"] == "agent_output", events[-1]
+    # The synthesized tool_result for t1 was streamed as the delta (not an empty
+    # query): one trailing user turn carrying a tool_result.
+    assert len(streamed) == 1, streamed
+    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
+    assert any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
     assert not any(
         e["type"] == "error" and e["payload"].get("kind") == "transcript_invalid"
         for e in events)

@@ -1353,12 +1353,14 @@ class ClaudeCodeAgentRunner:
             # ids for which repair synthesized placeholders — must not be named succeeded
             dangling_ids: set[str] = set()
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
-            # Persist a synthetic tool_result so the SEND_TO_LLM path has a
-            # balanced transcript; emit `tool_result` events so `imp log`
-            # shows what the agent sees on the next turn. Replay-path only: a
-            # native resume lets claude-p pair the tail from its own session
-            # (reconcile_store_tail brings the store up to date), so imp must NOT
-            # also inject a synthetic result — the two tail-fixups are exclusive.
+            # Synthesize a placeholder tool_result so the tail is balanced and
+            # emit `tool_result` events so `imp log` shows what the agent sees on
+            # the next turn. This applies to native resume too: claude-p does NOT
+            # auto-pair-and-generate a dangling tail from its loaded session — it
+            # parks reading stdin, so the runner deadlocks in receive_response().
+            # The synth result is appended AFTER resume_base was captured, so it
+            # streams as the delta (claude-p pairs the dangling call in the loaded
+            # session and the result kicks the next turn).
             if invocation.balance_on_resume and not native_resume:
                 balance_success_on_resume(
                     messages, transcript, elog, aid,
@@ -1369,6 +1371,11 @@ class ClaudeCodeAgentRunner:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
+            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
+                synth = repair_dangling_tool_use_on_resume(messages, transcript)
+                if synth is not None:
+                    for rb in synth:
+                        elog.append_tool_result(agent_id=aid, block=rb)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE and not native_resume:
                 yield {"type": "error", "payload": {

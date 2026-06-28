@@ -2310,11 +2310,19 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
-    assert created[0].queries[0] == []
-    # Repair was bypassed: no synthetic tool_result turn was injected into the
-    # transcript (4 original turns + 1 new assistant turn = 5).
-    assert len(t.load()) == 5
-    # The dangling t1 turn was reconciled into the store as the trailing entry.
+    # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1
+    # to kick the next turn — an empty delta would deadlock (claude-p never
+    # self-starts a loaded --resume session). claude-p pairs the dangling t1 from
+    # its loaded session against this streamed result.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
+    # The synth tool_result turn was injected (4 original + 1 synth user turn +
+    # 1 new assistant turn = 6).
+    assert len(t.load()) == 6
+    # The dangling t1 turn stays in the native session as the trailing reconciled
+    # entry; the synth result is streamed, not reconciled in.
     reconciled = await store.load(skey)
     assert len(reconciled) == 4
     assert reconciled[-1]["message"]["content"][0] == {
