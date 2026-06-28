@@ -2191,3 +2191,22 @@ def test_step_header_position_label_without_phase_falls_to_label() -> None:
                        phase_label=None, position_label=True)
     line = header_line(node, depth=0, color=False)
     assert line.strip() == "task 2/3"
+
+
+def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "workflow_paused", reason="reauth_needed"),
+    ]))
+    assert "authentication kept failing" in out
+    assert "the Change is paused and resumable" in out
+    assert "re-authenticate to Claude" in out
+    assert "then resume" in out
+    # The raw internal token never reaches the user.
+    assert "reauth_needed" not in out
+
+
+def test_other_pause_reasons_still_render_verbatim() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "workflow_paused", reason="retry_ceiling"),
+    ]))
+    assert "paused (retry_ceiling)" in out

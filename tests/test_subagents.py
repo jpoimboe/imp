@@ -913,6 +913,51 @@ def test_make_task_tool_description_has_parallel_guidance() -> None:
     assert make_task_tool(("low", "high")).description == desc
 
 
+@pytest.mark.anyio
+async def test_subagent_auth_budget_suspend_reads_as_reauth(tmp_path: Path,
+                                                            monkeypatch) -> None:
+    """AC-B: an auth-category subagent budget exhaustion raises a
+    SubagentSuspended whose message reflects the auth category (re-auth), not a
+    generic retry ceiling."""
+    import imp.agents.subagents as subagents_mod
+    import imp.engine.error_policy as ep_mod
+    from imp.agents.subagents import SubagentSuspended
+
+    monkeypatch.setattr(ep_mod, "budget_for", lambda category: 10.0)
+
+    async def _no_sleep(delay, coordinator, *, tick=0.1):
+        pass
+
+    monkeypatch.setattr(subagents_mod, "_interruptible_sleep", _no_sleep)
+
+    calls = {"n": 0}
+
+    async def _spawn(_inv):
+        calls["n"] += 1
+        # auth error carrying a 15s server hint: decide() yields
+        # delay = min(60, max(2^0, 15)) = 15.0 > budget=10 -> suspend on attempt 1.
+        return _FakeRunner([{"type": "error", "payload": {
+            "category": "auth", "kind": "http_401", "message": "401",
+            "detail": {"retry_after_seconds": 15.0}}}])
+
+    ctx = ToolContext(project_root=tmp_path,
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn
+    ctx.non_interactive = False
+    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+
+    with pytest.raises(SubagentSuspended, match="re-authentication needed") as exc:
+        await dispatch_task(ctx, "reviewer", "review it")
+    assert "category=auth" in str(exc.value)
+    assert calls["n"] == 1
+
+
 def test_dispatch_task_signature_has_no_abort_dispatch() -> None:
     import inspect
 

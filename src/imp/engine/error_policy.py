@@ -47,7 +47,11 @@ class _Policy:
 # executor/subagent loop pauses once cumulative backoff would exceed it. Pause and
 # RetryNow categories have no budget (None).
 _POLICY: dict[str, _Policy] = {
-    "auth":                 _Policy(RetryWithBackoff, 120.0),
+    # Patient: a 401 is typically a transient refresh-path failure that heals on
+    # its own — the CLI auto-refreshes OAuth per spawn, so the 401 surfaces only
+    # after its own refresh attempts transiently fail. Same budget as network /
+    # rate_limit, not a tight one that gives up mid-heal.
+    "auth":                 _Policy(RetryWithBackoff, 1800.0),
     "config":               _Policy(Pause, None),
     "quota":                _Policy(Pause, None),
     "content_filter":       _Policy(Pause, None),

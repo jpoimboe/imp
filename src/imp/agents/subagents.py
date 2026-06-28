@@ -338,8 +338,10 @@ async def dispatch_task(
                 category = result.error.category if result.error else "unknown"
                 budget = budget_for(category)
                 if budget is not None and cumulative_backoff + result.delay > budget:
+                    detail = ("re-authentication needed" if category == "auth"
+                              else "retry ceiling reached")
                     raise SubagentSuspended(
-                        "retry ceiling reached during subagent backoff")
+                        f"{detail} during subagent backoff (category={category})")
                 backoff += 1
                 await _interruptible_sleep(result.delay, ctx.coordinator)
                 cumulative_backoff += result.delay
