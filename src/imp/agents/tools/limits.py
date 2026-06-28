@@ -42,8 +42,17 @@ TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
 # runs concurrently with a foreground tool and no longer has to outlast B.1. A
 # runaway foreground tool is bounded by B.1 alone. B.2 is therefore a short
 # freeze-detection window: catch a wedged agent (no tool running, no events,
-# no progress) within ~150 s. tests/test_tool_limits.py pins the decoupling.
-AGENT_INACTIVITY_TIMEOUT_S = 150.0       # B.2: per-activity no-events window
+# no progress) within ~1100 s. tests/test_tool_limits.py pins the decoupling.
+#
+# 1100 s, not 150 s: the no-events clock only resets on a COMPLETED semantic
+# event (tool_call/tool_result/thinking-block/llm_response) appended to the
+# elog — claude_code partial-stream events are dropped, so a single long opus
+# turn (extended thinking + generation) emits no activity pulse and a 150 s
+# window false-kills it. 1100 s is the interim mitigation; the real fix is to
+# pulse note_activity on intra-turn StreamEvents (see the fix-A seed). Held
+# just under BG_WAIT_MAX_S (1200) < TOOL_WALLCLOCK_TIMEOUT_S (1800) so the
+# existing decoupling-order tests still hold.
+AGENT_INACTIVITY_TIMEOUT_S = 1100.0      # B.2: per-activity no-events window
 PROCESS_KILL_GRACE_S = 4.0               # C-ii: SIGTERM -> wait -> SIGKILL grace
 
 # --- Background execution (bg.py) -------------------------------------------
