@@ -53,9 +53,6 @@ def test_archive_change_writes_blob_record_and_index(tmp_path: Path) -> None:
         assert conn.execute(
             "SELECT status, events_hash FROM changes WHERE id='alpha'"
         ).fetchone() == ("completed", expected_hash)
-        assert conn.execute(
-            "SELECT COUNT(*) FROM events WHERE change_id='alpha'"
-        ).fetchone()[0] == 2
     finally:
         conn.close()
 
@@ -72,7 +69,6 @@ def test_archive_change_is_idempotent(tmp_path: Path) -> None:
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
     finally:
         conn.close()
 
@@ -105,9 +101,6 @@ def test_archive_change_missing_events_file(tmp_path: Path) -> None:
         assert conn.execute(
             "SELECT COUNT(*) FROM changes WHERE id='alpha'"
         ).fetchone()[0] == 1
-        assert conn.execute(
-            "SELECT COUNT(*) FROM events WHERE change_id='alpha'"
-        ).fetchone()[0] == 0
     finally:
         conn.close()
 

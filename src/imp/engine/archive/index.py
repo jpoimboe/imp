@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,12 +14,6 @@ _SCHEMA = (
     " last_event_ts TEXT)",
     "CREATE TABLE IF NOT EXISTS deps ("
     " change_id TEXT, depends_on_id TEXT)",
-    "CREATE TABLE IF NOT EXISTS events ("
-    " change_id TEXT, seq INTEGER, event_id TEXT, parent_id TEXT,"
-    " agent_id TEXT, ts TEXT, type TEXT, payload_json TEXT)",
-    "CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)",
-    "CREATE INDEX IF NOT EXISTS idx_events_change ON events(change_id)",
-    "CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id)",
 )
 
 
@@ -40,7 +33,6 @@ def ingest(
     cid = record["id"]
     conn.execute("DELETE FROM changes WHERE id = ?", (cid,))
     conn.execute("DELETE FROM deps WHERE change_id = ?", (cid,))
-    conn.execute("DELETE FROM events WHERE change_id = ?", (cid,))
     final_state = record.get("final_state") or {}
     timestamps = [ts for ev in events if (ts := ev.get("timestamp")) is not None]
     last_event_ts = max(timestamps) if timestamps else None
@@ -54,13 +46,6 @@ def ingest(
     for dep in record.get("depends_on") or []:
         conn.execute("INSERT INTO deps (change_id, depends_on_id) VALUES (?, ?)",
                      (cid, dep))
-    for seq, ev in enumerate(events):
-        conn.execute(
-            "INSERT INTO events (change_id, seq, event_id, parent_id, agent_id,"
-            " ts, type, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (cid, seq, ev.get("id"), ev.get("parent_id"), ev.get("agent_id"),
-             ev.get("timestamp"), ev.get("type"),
-             json.dumps(ev.get("payload"))))
     conn.commit()
 
 

@@ -28,12 +28,10 @@ def _archive_one(control: Path, cid: str, dep: str, etype: str) -> None:
 def _snapshot(conn) -> dict:
     return {
         "changes": sorted(conn.execute(
-            "SELECT id, title, base, created_at, status, step, events_hash"
-            " FROM changes").fetchall()),
+            "SELECT id, title, base, created_at, status, step, events_hash,"
+            " last_event_ts FROM changes").fetchall()),
         "deps": sorted(conn.execute(
             "SELECT change_id, depends_on_id FROM deps").fetchall()),
-        "events": sorted(conn.execute(
-            "SELECT change_id, seq, event_id, type FROM events").fetchall()),
     }
 
 
@@ -59,4 +57,4 @@ def test_rebuild_reproduces_index_contents(tmp_path: Path) -> None:
 
     assert after == before
     assert after["changes"]  # non-empty: the rebuild actually loaded rows
-    assert len(after["events"]) == 2
+    assert all(row[7] for row in after["changes"])  # last_event_ts populated
