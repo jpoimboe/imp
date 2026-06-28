@@ -274,3 +274,28 @@ def test_decisions_body_missing_section_returns_none(tmp_path: Path) -> None:
 def test_decisions_body_file_not_found_returns_none(tmp_path: Path) -> None:
     from imp.engine import executor
     assert executor._decisions_body(tmp_path / "nonexistent.md") is None
+
+
+def test_merge_step_recovery_exhausted_pauses(tmp_path: Path, monkeypatch) -> None:
+    # With the loop count already at the cap, a CONFLICT does NOT route to recovery:
+    # the router pauses with merge_blocked carrying the attempt-count note + git detail,
+    # one attempt before the generic max_loops backstop would fire.
+    from imp.engine import worktree
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    monkeypatch.setattr(
+        worktree, "merge_to_base",
+        lambda *a, **k: worktree.MergeResult("CONFLICT", detail="merge conflict in f"))
+    state, log = _ctx(ch)
+    state.loop_counts["merge-to-base"] = 3            # already at max_loops
+
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert isinstance(action, Pause)
+    assert action.reason == "merge_blocked" and action.kind == "conflict"
+    events = list(JsonlEventLog(ch.events_path).read())
+    assert not any(e.get("type") == "merge_retry" for e in events)
+    blocked = [e for e in events if e.get("type") == "merge_blocked"]
+    assert len(blocked) == 1
+    note = blocked[0]["payload"]["note"]
+    assert "3" in note and "recovery passes" in note
+    assert blocked[0]["payload"]["detail"] == "merge conflict in f"

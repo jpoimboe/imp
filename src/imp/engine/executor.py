@@ -763,10 +763,13 @@ def _exit_worktree(change: Change) -> None:
 
 def _merge_blocked_pause(
     log: EventLog, step: Step, change: Change, status: str, detail: str | None,
+    *, note: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     reason = "worktree_dirty" if status == "DIRTY" else status.lower()
-    _emit(log, "merge_blocked",
-          {"reason": reason, "base": change.base_branch, "detail": detail})
+    payload: dict[str, Any] = {"reason": reason, "base": change.base_branch, "detail": detail}
+    if note is not None:
+        payload["note"] = note
+    _emit(log, "merge_blocked", payload)
     pause = Pause(reason="merge_blocked", kind=reason)
     _emit(log, "step_completed",
           {"step": step.name, "kind": "merge_and_exit_worktree",
@@ -802,6 +805,11 @@ async def _route_merge_and_exit_worktree(
 
     if isinstance(match.action, Goto):                # a recovery route
         attempt = state.loop_counts.get(step.name, 0)
+        if attempt >= step.max_loops:                 # exhausted — pause one attempt early
+            note = (f"imp attempted {step.max_loops} recovery passes and the "
+                    "merge still failed.")
+            return _merge_blocked_pause(
+                log, step, change, result.status, result.detail, note=note)
         _emit(log, "merge_retry",
               {"status": result.status, "attempt": attempt + 1,
                "max": step.max_loops, "base": change.base_branch})
