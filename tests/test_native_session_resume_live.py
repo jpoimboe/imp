@@ -105,6 +105,27 @@ def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
     return False
 
 
+def _wait_for_status(state_path: Path, want: str, timeout: float) -> str:
+    """Poll state.json until status == want (or timeout); return the last status.
+
+    `imp new` runs the engine in a detached session daemon, so the SIGINT'd CLI
+    client exits (rc 130) a beat before the daemon finishes persisting the pause.
+    Reading state.json once right after proc.wait() races that write and can still
+    see the running-status ("new"); poll for the settled status instead.
+    """
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        try:
+            last = json.loads(state_path.read_text()).get("status", "")
+        except (OSError, json.JSONDecodeError):
+            last = ""
+        if last == want:
+            return last
+        time.sleep(0.2)
+    return last
+
+
 def _read_paths(events_path: Path) -> list[str]:
     """Every read_file tool_call's target path, in order.
 
@@ -163,8 +184,8 @@ def test_resumed_step_does_not_redo_prior_reads(tmp_path: Path) -> None:
             proc.kill()
             proc.wait()
 
-    state = json.loads(state_path.read_text())
-    assert state["status"] == "paused"
+    status = _wait_for_status(state_path, "paused", timeout=30.0)
+    assert status == "paused", status
 
     # Pre-resume sanity: both files were read before the mid-bash interrupt. The
     # imp-owned store is intentionally NOT asserted here — the SDK batcher flushes
@@ -238,8 +259,8 @@ def test_no_store_fallback_replays_deferred_mcp_tools_without_400(
             proc.kill()
             proc.wait()
 
-    state = json.loads(state_path.read_text())
-    assert state["status"] == "paused"
+    status = _wait_for_status(state_path, "paused", timeout=30.0)
+    assert status == "paused", status
     # Both MCP read_file tools ran before the mid-bash interrupt, and the
     # batcher flushed nothing (no result boundary) → the resume takes the
     # stream-json fallback that replays those deferred-MCP tool_use blocks.
@@ -261,15 +282,14 @@ def test_no_store_fallback_replays_deferred_mcp_tools_without_400(
     assert "tool use concurrency" not in haystack, (
         "deferred-MCP-tool fallback replay tripped the 400 Part C fixes"
     )
-    # The manifest still names the prior reads as succeeded (defuses the
-    # placeholder corruption that the fallback otherwise causes). The manifest
-    # text lives verbatim in a user_message event payload, so search the PARSED
-    # events with ensure_ascii=False: transcript.py builds the line with an
-    # em-dash (U+2014, "read_file — succeeded"), which json.dumps's default
-    # ensure_ascii=True escapes to — — so a literal substring check against
-    # the json.dumps haystack above would false-fail on correct code.
-    assert any(
-        "read_file — succeeded"
-        in json.dumps(rec.get("payload", {}), ensure_ascii=False)
-        for rec in _iter_events(events)
-    ), "fallback manifest did not name the prior read as succeeded"
+    # ckx9f5/Part C contract: the fallback replay RECALLED the prior reads instead
+    # of redoing them. ENABLE_TOOL_SEARCH=false (Part C's chosen defense — the
+    # spike picked the CLI knob over manifest priming) declares the deferred MCP
+    # tools up front, so the replayed tool_use blocks neither 400 nor get
+    # overwritten with is_error placeholders that would drive a redo. Assert that
+    # behavior, not the manifest text: the resume-manifest is intentionally NOT
+    # built on the production balance_on_resume path (claude_code.py gates it on
+    # `not balance_on_resume`, and the executor sets that True on every resume).
+    post = [Path(p).name for p in _read_paths(events)]
+    assert post.count("a.txt") == 1, post
+    assert post.count("b.txt") == 1, post
