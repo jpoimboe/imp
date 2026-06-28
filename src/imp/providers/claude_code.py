@@ -1373,6 +1373,13 @@ class ClaudeCodeAgentRunner:
             opt_store, opt_session_id, opt_resume = (
                 store, None, resume_session_id(aid))
         else:
+            # Replay disposition: no native session is handed to claude-p, so imp
+            # owns an isolated ephemeral home (removed in run()'s finally) — a pure
+            # throwaway sink for whatever claude-p writes (incl. the CC 2.x ai-title
+            # stub), never the real ~/.claude. After this, native resume is the only
+            # disposition left with config_dir = None.
+            config_dir = materialize_fresh_config_dir()
+            self._config_dir = config_dir
             opt_store, opt_session_id, opt_resume = (None, None, None)
         # Build options only when we'll use the real SDK (mcp_server is not None).
         # When a client_factory is injected (tests), skip building options to
