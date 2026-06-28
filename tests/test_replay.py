@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from imp.agents.transcript import Transcript, repair_dangling_tool_use_on_resume
 from imp.engine.replay import (
     build_messages_from_events,
     parse_message,
@@ -246,3 +248,26 @@ def test_well_formed_transcript_reconstructs_unchanged() -> None:
     assert [m.role for m in msgs] == ["user", "assistant", "user", "assistant"]
     # The matched tool_use is preserved (not stripped) in the assistant turn.
     assert any(isinstance(b, ToolUseBlock) for b in msgs[1].content)
+
+
+def test_stall_redrive_balances_torn_down_turn_no_replay(tmp_path) -> None:
+    # D5 / AC7: a torn-down turn (unmatched tool_use tail) must be repaired
+    # before re-drive, never replayed unbalanced.
+    torn_down = Message(role="assistant", content=(
+        TextBlock(text="calling a tool"),
+        ToolUseBlock(id="t1", name="bash", input={"command": "sleep 99999"})))
+    messages = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        torn_down]
+
+    # Pre-repair: replaying this tail unbalanced is the 400-triggering shape.
+    assert classify_resume(messages) is ResumeState.DANGLING_TOOL_USE
+
+    transcript = Transcript(tmp_path / "transcript.jsonl")
+    synth = repair_dangling_tool_use_on_resume(messages, transcript)
+
+    assert synth is not None
+    assert [b.tool_use_id for b in synth] == ["t1"]
+    # Post-repair: the dangling tool_use is paired, so the re-drive sends a balanced transcript.
+    assert classify_resume(messages) is not ResumeState.DANGLING_TOOL_USE
+    assert classify_resume(messages) is ResumeState.SEND_TO_LLM
