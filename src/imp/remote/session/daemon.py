@@ -90,7 +90,6 @@ async def serve_change_session(
     discard_left: Callable[[Change], None] = discard_conversation,
     seed_opening: str | None = None,
     resume: bool = False,
-    opening_intent: str | None = None,
     non_interactive: bool = False,
     autonomous: bool = False,
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
@@ -137,8 +136,6 @@ async def serve_change_session(
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:
             first_kwargs["seed_opening"] = seed_opening
-        if opening_intent is not None:
-            first_kwargs["opening_intent"] = opening_intent
         result = await run_fn(
             change,
             on_event=on_event,
@@ -207,7 +204,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--change-id", required=True)
     parser.add_argument("--seed-opening", default=None)
-    parser.add_argument("--opening-intent", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
@@ -220,8 +216,6 @@ def main(argv: list[str] | None = None) -> int:
     kwargs: dict[str, Any] = {}
     if ns.seed_opening is not None:
         kwargs["seed_opening"] = ns.seed_opening
-    if ns.opening_intent is not None:
-        kwargs["opening_intent"] = ns.opening_intent
     if ns.resume:
         kwargs["resume"] = True
     if ns.non_interactive:
