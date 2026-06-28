@@ -1,10 +1,11 @@
 """Fake openai SDK client for unit-testing OpenAIAgentRunner.
 
-The real client exposes `responses.create(...)` returning a Response whose
-`.model_dump(mode="json")` carries an `output[]` list of items (message /
-function_call / web_search_call / ...) plus `usage`. The fake returns a
-sequence of canned responses; once exhausted, an optional default is returned
-indefinitely (mirrors tests/anthropic_fakes.FakeAsyncAnthropic semantics).
+The real client exposes `responses.stream(...)` returning an async context manager
+whose `get_final_response()` returns a Response whose `.model_dump(mode="json")`
+carries an `output[]` list of items (message / function_call / web_search_call / ...)
+plus `usage`. The fake returns a sequence of canned responses; once exhausted, an
+optional default is returned indefinitely (mirrors tests/anthropic_fakes.FakeAsyncAnthropic
+semantics).
 """
 
 from __future__ import annotations
@@ -61,23 +62,59 @@ def resp_response(*output_items: dict[str, Any],
     return _Dumpable(dump)
 
 
+class _FakeHTTPResponse:
+    def __init__(self, request_id: str | None) -> None:
+        # Mirrors the openai stream's private `_response` (an httpx.Response): the
+        # real production path reads the `x-request-id` header off it.
+        self.headers = {"x-request-id": request_id} if request_id else {}
+
+
+class _FakeRespStream:
+    def __init__(self, final: Any, n_events: int) -> None:
+        self._final = final
+        self._events = [object() for _ in range(n_events)]
+        self._response = _FakeHTTPResponse(getattr(final, "_request_id", None))
+
+    async def __aenter__(self) -> _FakeRespStream:
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        return False
+
+    def __aiter__(self) -> Any:
+        return self._gen()
+
+    async def _gen(self) -> Any:
+        for ev in self._events:
+            yield ev
+
+    async def get_final_response(self) -> Any:
+        return self._final
+
+
 class _FakeResponses:
-    def __init__(self, responses: list[Any], default: Any = None) -> None:
+    def __init__(self, responses: list[Any], default: Any = None,
+                 *, stream_events: int = 0) -> None:
         self._responses = list(responses)
         self._default = default
+        self._stream_events = stream_events
         self.calls: list[dict[str, Any]] = []
 
-    async def create(self, **kwargs: Any) -> Any:
+    def stream(self, **kwargs: Any) -> _FakeRespStream:
         self.calls.append(kwargs)
         if self._responses:
-            return self._responses.pop(0)
-        if callable(self._default):
-            return self._default(**kwargs)
-        if self._default is not None:
-            return self._default
-        raise IndexError("FakeResponsesClient: out of canned responses")
+            final: Any = self._responses.pop(0)
+        elif callable(self._default):
+            final = self._default(**kwargs)
+        elif self._default is not None:
+            final = self._default
+        else:
+            raise IndexError("FakeResponsesClient: out of canned responses")
+        return _FakeRespStream(final, self._stream_events)
 
 
 class FakeResponsesClient:
-    def __init__(self, responses: list[Any], *, default_response: Any = None) -> None:
-        self.responses = _FakeResponses(responses, default_response)
+    def __init__(self, responses: list[Any], *, default_response: Any = None,
+                 stream_events: int = 0) -> None:
+        self.responses = _FakeResponses(
+            responses, default_response, stream_events=stream_events)

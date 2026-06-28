@@ -384,6 +384,9 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         def reset(self) -> None:
             pass
 
+        def note_activity(self) -> None:
+            pass
+
     coord = _FakeCoordinator()
 
     # Scripted: complete on the first call.
@@ -563,6 +566,9 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
             return self._q.pop(0) if self._q else None
 
         def reset(self) -> None:
+            pass
+
+        def note_activity(self) -> None:
             pass
 
     coord = _FakeCoordinator()

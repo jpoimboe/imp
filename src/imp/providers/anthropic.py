@@ -2,7 +2,7 @@
 
 Loop:
   1. Build messages (transcript or initial_messages)
-  2. POST to messages.create with declared tools
+  2. POST to messages.stream with declared tools; pulse coordinator per event
   3. Append assistant response to transcript; append llm_response to EventLog
   4. For each tool_use block: dispatch tool, append tool_result to EventLog
   5. complete_step catches StepComplete → validate, emit agent_output, return
@@ -604,11 +604,19 @@ class AnthropicAgentRunner:
             _t0 = time.perf_counter()
             self._cancel_scope = anyio.CancelScope()
             response = None
+            request_id: str | None = None
             try:
                 with self._cancel_scope:
-                    response = await client.messages.create(**create_kwargs)
+                    async with client.messages.stream(**create_kwargs) as stream:
+                        async for _event in stream:
+                            if invocation.coordinator is not None:
+                                invocation.coordinator.note_activity()
+                        response = await stream.get_final_message()
+                        # Streaming final messages carry no _request_id; the
+                        # public stream.request_id reads the `request-id` header.
+                        request_id = stream.request_id
             finally:
-                # N3: reset even when create() raises a genuine API error, so a
+                # N3: reset even when the request raises a genuine API error, so a
                 # later interrupt() never calls .cancel() on a stale exited scope.
                 self._cancel_scope = None
             if response is None:
@@ -634,7 +642,7 @@ class AnthropicAgentRunner:
                 raw=raw, usage=usage,
                 stop_reason=raw.get("stop_reason"),
                 context_tokens=context_tokens_from_usage(usage),
-                request_id=getattr(response, "_request_id", None),
+                request_id=request_id,
                 duration_ms=(time.perf_counter() - _t0) * 1000.0)
             _emit_anthropic_web_events(raw, elog, aid)
             # Post-API sweep + heartbeat (Decision 10): the model-API call is

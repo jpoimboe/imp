@@ -203,6 +203,45 @@ async def test_run_fails_fast_with_network_error_when_self_ping_fails(
 
 
 @pytest.mark.anyio
+async def test_streamed_events_pulse_note_activity_per_event(tmp_path: Path) -> None:
+    import dataclasses
+
+    from imp.cli.signals import InterruptCoordinator
+
+    _seed_git_and_auth(tmp_path)
+    canonical = tmp_path / "auth.json"
+    elog = InMemoryEventLog()
+
+    scripted = [[
+        thread_started("thr-1"),
+        agent_message("ok, calling complete_step"),
+        mcp_call(
+            name="complete_step", args={"answer": "42"},
+            result="step complete", item_id="cs-1",
+        ),
+        turn_completed(input_tokens=100, output_tokens=50),
+    ]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
+    )
+    runner._canonical_auth_override = canonical
+
+    coord = InterruptCoordinator()
+    pulses: list[int] = []
+    coord.add_activity_listener(lambda: pulses.append(1))
+
+    inv = dataclasses.replace(
+        _build_invocation(tmp_path, event_log=elog), coordinator=coord)
+    events = [e async for e in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+    # One pulse per streamed event in the turn: thread.started, the agent_message
+    # item, the complete_step mcp item, and turn.completed.
+    assert len(pulses) == 4
+
+
+@pytest.mark.anyio
 async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
     """Teardown site 2 under codex: aclosing run() mid-stream kills the
     backgrounded group via the new run()-finally (NOT _run_loop's existing

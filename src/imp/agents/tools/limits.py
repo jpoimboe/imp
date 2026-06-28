@@ -41,18 +41,19 @@ TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
 # see agent_run._pull_with_inactivity_watchdog and cli/signals.py), so B.2 never
 # runs concurrently with a foreground tool and no longer has to outlast B.1. A
 # runaway foreground tool is bounded by B.1 alone. B.2 is therefore a short
-# freeze-detection window: catch a wedged agent (no tool running, no events,
-# no progress) within ~1100 s. tests/test_tool_limits.py pins the decoupling.
+# freeze-detection window: catch a wedged agent (no bytes flowing from the
+# model, no tool running) fast. tests/test_tool_limits.py pins the decoupling.
 #
-# 1100 s, not 150 s: the no-events clock only resets on a COMPLETED semantic
-# event (tool_call/tool_result/thinking-block/llm_response) appended to the
-# elog — claude_code partial-stream events are dropped, so a single long opus
-# turn (extended thinking + generation) emits no activity pulse and a 150 s
-# window false-kills it. 1100 s is the interim mitigation; the real fix is to
-# pulse note_activity on intra-turn StreamEvents (see the fix-A seed). Held
-# just under BG_WAIT_MAX_S (1200) < TOOL_WALLCLOCK_TIMEOUT_S (1800) so the
-# existing decoupling-order tests still hold.
-AGENT_INACTIVITY_TIMEOUT_S = 1100.0      # B.2: per-activity no-events window
+# This window measures PROCESS LIVENESS, not semantic-event cadence: every
+# provider pulses coordinator.note_activity() once per received model event
+# (claude_code partial StreamEvents; codex streamed events; the anthropic and
+# openai streaming requests), so a long-but-streaming turn keeps resetting the
+# deadline while a genuinely wedged producer (zero bytes) trips it. 300 s gives
+# ~5x headroom over realistic model time-to-first-token while catching a true
+# wedge ~3.7x faster than the interim window. Held below
+# BG_WAIT_MAX_S (1200) < TOOL_WALLCLOCK_TIMEOUT_S (1800) so the existing
+# decoupling-order tests still hold.
+AGENT_INACTIVITY_TIMEOUT_S = 300.0       # B.2: per-activity no-events window
 PROCESS_KILL_GRACE_S = 4.0               # C-ii: SIGTERM -> wait -> SIGKILL grace
 
 # --- Background execution (bg.py) -------------------------------------------

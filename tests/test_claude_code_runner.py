@@ -3662,3 +3662,41 @@ async def test_replay_path_isolates_config_dir(tmp_path: Path) -> None:
     assert "CLAUDE_CODE_SKIP_PROMPT_HISTORY" not in opts.env
     assert opts.extra_args == {}
     assert runner._config_dir is None  # reset by the finally
+
+
+def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    opts = runner._build_options(_inv(tmp_path), object(), ["complete_step"])
+    assert opts.include_partial_messages is True
+
+
+@pytest.mark.anyio
+async def test_receive_loop_pulses_note_activity_per_message(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(
+            text("calling complete_step"),
+            tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        ),
+        result(),
+    ]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    coord = InterruptCoordinator()
+    pulses: list[int] = []
+    coord.add_activity_listener(lambda: pulses.append(1))
+
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
+    )
+    events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+    # receive_response() yields the assistant message then the ResultMessage —
+    # two received SDK messages, so two liveness pulses for this single turn.
+    assert len(pulses) == 2

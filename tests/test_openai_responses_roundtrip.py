@@ -25,7 +25,12 @@ def test_fake_responses_client_records_calls_and_returns() -> None:
     import anyio
 
     async def go():
-        return await client.responses.create(model="m", input=[], instructions="s")
+        async with client.responses.stream(
+            model="m", input=[], instructions="s"
+        ) as stream:
+            async for _ in stream:
+                pass
+            return await stream.get_final_response()
 
     out = anyio.run(go)
     assert out is canned

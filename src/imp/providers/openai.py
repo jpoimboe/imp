@@ -2,7 +2,8 @@
 
 Loop:
   1. Build messages (transcript or initial_messages)
-  2. POST to responses.create (store=False) with declared tools
+  2. Stream via responses.stream (store=False) with declared tools; pulse
+     coordinator.note_activity() per streamed event for the inactivity watchdog
   3. Append assistant response to transcript; append llm_response to EventLog
   4. For each tool_call block: dispatch tool, append tool_result to EventLog
   5. complete_step catches StepComplete → validate, emit agent_output, return
@@ -606,9 +607,10 @@ class OpenAIAgentRunner:
             _t0 = time.perf_counter()
             self._cancel_scope = anyio.CancelScope()
             response = None
+            request_id: str | None = None
             try:
                 with self._cancel_scope:
-                    response = await client.responses.create(
+                    async with client.responses.stream(
                         model=self.model,
                         instructions=invocation.system_prompt,
                         input=_imp_to_responses_input(messages),
@@ -620,7 +622,15 @@ class OpenAIAgentRunner:
                         # parallel-turn schema guarantee is backstopped by imp's
                         # invoke-time arg validation (is_error on malformed input).
                         parallel_tool_calls=True,
-                    )
+                    ) as stream:
+                        async for _event in stream:
+                            if invocation.coordinator is not None:
+                                invocation.coordinator.note_activity()
+                        response = await stream.get_final_response()
+                        # No public request-id accessor on the stream and the
+                        # final response carries no _request_id; read the
+                        # `x-request-id` header off the underlying HTTP response.
+                        request_id = stream._response.headers.get("x-request-id")
             finally:
                 # N3: reset even on a genuine API error so a later interrupt()
                 # never cancels a stale exited scope.
@@ -645,7 +655,7 @@ class OpenAIAgentRunner:
                 raw=raw, usage=usage,
                 stop_reason=_openai_stop_reason(raw),
                 context_tokens=context_tokens_from_usage(usage),
-                request_id=getattr(response, "_request_id", None),
+                request_id=request_id,
                 duration_ms=(time.perf_counter() - _t0) * 1000.0)
             _emit_openai_web_events(raw, elog, aid)
             # Post-API sweep + heartbeat (Decision 10): the model-API call is

@@ -70,12 +70,13 @@ class _CaptureMessages:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def create(self, **kwargs):
+    def stream(self, **kwargs):
         self.calls.append(kwargs)
-        from tests.anthropic_fakes import FakeResponse, tool_use
-        return FakeResponse(
+        from tests.anthropic_fakes import FakeResponse, _FakeStream, tool_use
+        final = FakeResponse(
             content=[tool_use("t1", "complete_step", {"status": "Success"})],
             stop_reason="tool_use")
+        return _FakeStream(final, 0)
 
 
 class _CaptureClient:

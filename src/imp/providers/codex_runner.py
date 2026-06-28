@@ -620,6 +620,8 @@ class CodexAgentRunner:
                         "category": "config", "kind": "interrupted",
                         "message": "runner cancelled by interrupt"}}
                     return
+                if invocation.coordinator is not None:
+                    invocation.coordinator.note_activity()
                 # Post-API-site analog (Decision 10): one sweep per streamed
                 # SDK event. Dead-server/cancel checks stay first.
                 await _bg._sweep_bg(ctx)

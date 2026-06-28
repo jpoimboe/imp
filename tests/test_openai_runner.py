@@ -453,9 +453,15 @@ async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
     class _HangingClient:
         class responses:
             @staticmethod
-            async def create(**_kw):
-                started.set()
-                await anyio.sleep(3600)
+            def stream(**_kw):
+                class _CM:
+                    async def __aenter__(self):
+                        started.set()
+                        await anyio.sleep(3600)
+
+                    async def __aexit__(self, *_exc):
+                        return False
+                return _CM()
 
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini", client_factory=lambda: _HangingClient(),
@@ -477,6 +483,36 @@ async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
     kinds = [e.get("payload", {}).get("kind")
              for e in events if e["type"] == "error"]
     assert "interrupted" in kinds
+
+
+@pytest.mark.anyio
+async def test_streaming_pulses_note_activity_per_event(tmp_path: Path) -> None:
+    import dataclasses
+
+    from imp.cli.signals import InterruptCoordinator
+
+    (tmp_path / "art").mkdir()
+    fake = FakeResponsesClient([resp_response(
+        resp_function_call("c1", "complete_step",
+                           '{"status": "Success", "note": "ok"}'),
+    )], stream_events=3)
+    coord = InterruptCoordinator()
+    pulses: list[int] = []
+    coord.add_activity_listener(lambda: pulses.append(1))
+
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), coordinator=coord)
+    events = [e async for e in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+    # 3 stream-loop pulses (one per streamed event) PLUS 2 from complete_step's
+    # dispatch: the direct-API runners route complete_step through
+    # dispatch_one_tool_use → `with suspend_inactivity_watchdog(ctx)`, whose
+    # enter/exit each call coordinator.note_activity(). The ctx.coordinator IS
+    # this test's coord, so that adds exactly 2. Removing the stream-loop pulse
+    # line would drop the count to 2 — the assertion stays falsifiable.
+    assert len(pulses) == 5
 
 
 @pytest.mark.anyio
