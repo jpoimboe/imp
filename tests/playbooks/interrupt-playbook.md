@@ -16,12 +16,16 @@ description: Fire Ctrl-C / Ctrl-D at imp across agent states and surfaces, judgi
 > while thinking — it never pauses). Work in a throwaway standalone `git clone` and
 > abandon everything at the end.
 >
-> This is the acceptance test for the **esc-and-clean-interrupt** feature
-> (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`); the TUI mode also covers the `--tui`
-> interrupt bindings from **tui-run-viewer** (`imp/specs/2026-06-11-tui-run-viewer.md`). Both
-> are **on `master`**. The "expected" behavior below is those features' target. If you somehow
-> run an older build that predates them, the pause-reason / clean-classification (and
-> `--tui`) checks are *expected* to fail — record them as to-dos, not surprises.
+> This is the acceptance test for imp's **uniform Ctrl-C / Ctrl-D interrupt and resume model**,
+> built atop the earlier **esc-and-clean-interrupt** and **tui-run-viewer** features (the TUI
+> mode covers the `--tui` interrupt bindings from the latter). The **"expected" behavior below
+> is the uniform model's target**, which **supersedes** esc-and-clean-interrupt's original
+> "materialized Ctrl-C pauses and exits (rc 130)" disposition: Ctrl-C now never exits — it drops
+> to a resteer/chat prompt and stays attached — and **Ctrl-D** is the uniform leave key, with a
+> persisted `resume_target` deciding where `imp resume` lands. If you run an older build that
+> predates the uniform model, the Ctrl-C-stays-attached, Ctrl-D-leave, `interrupt_reason ==
+> "ctrl-d"`, and resume-target checks are *expected* to fail — record them as to-dos, not
+> surprises.
 >
 > **Scope: one provider per run (default `claude_code`).** Run this playbook against a single
 > provider — `claude_code` unless the operator names another (`anthropic`, `openai`, or
