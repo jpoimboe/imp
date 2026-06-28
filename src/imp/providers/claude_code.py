@@ -256,6 +256,24 @@ def _text_of(message: Any) -> str:
     return "\n".join(parts)
 
 
+def _tail_has_complete_step(messages: list[Message]) -> bool:
+    """True when the transcript's last turn is an assistant turn whose tool_use is
+    a `complete_step` awaiting its result.
+
+    This is the one resume shape where imp MUST balance the tail itself rather
+    than native-resume: claude-p's own pairing would inject an `is_error` result
+    for the dangling `complete_step`, telling the agent its already-accepted work
+    failed. `balance_success_on_resume` instead synthesizes a SUCCESS result, so
+    these resumes (backward goto / gate handback) stay on the replay path."""
+    last = messages[-1] if messages else None
+    if last is None or last.role != "assistant":
+        return False
+    return any(
+        isinstance(b, ToolUseBlock) and b.name == "complete_step"
+        for b in last.content
+    )
+
+
 def _drain_interject_message(coordinator: Any, elog: Any,
                              agent_id: str) -> Message | None:
     """claude_code variant of agent_run.deliver_interject. The SDK is queried
@@ -1263,18 +1281,30 @@ class ClaudeCodeAgentRunner:
         # a bare turn-end yield) is the only shape whose tail is already flushed.
         # SEND_TO_LLM ends on an unflushed user turn but is handled on the native
         # path via reconcile-and-overwrite: the unflushed tail is written into the
-        # store before claude-p loads its native session. DANGLING_TOOL_USE
-        # (native with store; no-store fallback only — and the
-        # balance_on_resume flag's path) ends on an unflushed, interrupted assistant
-        # tool_use whose id lives in neither claude-p's loaded session nor the slice
-        # — so the surgery's tool_result would be orphaned (the unmatched-tool_use
-        # 400 this change targets). Only the no-store fallback and balance_on_resume
-        # downgrade to stream-json replay, which re-streams the whole balanced
-        # history in position.
+        # store before claude-p loads its native session. A genuinely DANGLING
+        # tool_use likewise resumes natively (with a store) — claude-p's own pairing
+        # injects the is_error placeholder, which is correct for an unfinished call.
+        # Only three cases downgrade to stream-json replay: the no-store fallback;
+        # a trailing complete_step (imp must inject a SUCCESS result, not the
+        # error one native pairing would give); and pending retry_feedback (the
+        # handback text must be co-located on the balancing user turn). The
+        # `balance_on_resume` flag does NOT by itself force replay — the executor
+        # sets it on every kept resume, so the actual selector is the tail shape.
         store_body = await store.load(skey)
+        # Native resume is vetoed ONLY when imp must shape the tail itself rather
+        # than let claude-p resume its own session: a trailing `complete_step`
+        # (success-override balancing) or pending retry_feedback (gate-handback
+        # text co-located on the balancing turn). `balance_on_resume` alone does
+        # NOT veto — the executor sets it on every kept resume, so using it as the
+        # veto disabled native resume for the very SEND_TO_LLM/DANGLING shapes this
+        # path exists to serve.
+        needs_imp_balance = (
+            _tail_has_complete_step(existing)
+            or bool(invocation.retry_feedback)
+        )
         native_resume = (
             (not is_fresh)
-            and not invocation.balance_on_resume
+            and not needs_imp_balance
             and store_has_conversation_body(store_body)
             and classify_resume(existing) in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
@@ -1314,8 +1344,11 @@ class ClaudeCodeAgentRunner:
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Persist a synthetic tool_result so the SEND_TO_LLM path has a
             # balanced transcript; emit `tool_result` events so `imp log`
-            # shows what the agent sees on the next turn.
-            if invocation.balance_on_resume:
+            # shows what the agent sees on the next turn. Replay-path only: a
+            # native resume lets claude-p pair the tail from its own session
+            # (reconcile_store_tail brings the store up to date), so imp must NOT
+            # also inject a synthetic result — the two tail-fixups are exclusive.
+            if invocation.balance_on_resume and not native_resume:
                 balance_success_on_resume(
                     messages, transcript, elog, aid,
                     wrapper_text=invocation.retry_feedback)

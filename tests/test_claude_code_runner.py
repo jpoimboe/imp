@@ -2981,7 +2981,65 @@ async def test_native_resume_keeps_tool_search_deferred(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_balance_on_resume_disables_tool_search(tmp_path: Path) -> None:
+async def test_complete_step_tail_replays_disables_tool_search(
+        tmp_path: Path) -> None:
+    """A resume whose tail is a `complete_step` tool_use must stay on the replay
+    path even when a store body is present: imp balances it with a SUCCESS result
+    (native resume would instead error-pair the agent's accepted work). On that
+    replay path ENABLE_TOOL_SEARCH=false declares the deferred MCP tools up
+    front."""
+    from imp.agents.runner import ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv = replace(inv, balance_on_resume=True)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    # A session store is present — but a trailing complete_step forces the replay
+    # path regardless, so ENABLE_TOOL_SEARCH=false must still be set.
+    store = session_store_for(inv.transcript_dir)
+    await store.append(
+        session_key(inv.change_context.project_root, "step:p/s"),
+        [{"type": "user", "uuid": "m0",
+          "message": {"role": "user", "content": "go"}}])
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    # Tail is a successful complete_step awaiting its result → imp must balance.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="complete_step",
+                     input={"status": "Success"}),)))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    # complete_step tail keeps stream-json replay (native_resume=False).
+    assert opts.resume is None
+    # Part C: the replay declares deferred MCP tools up front via standard mode.
+    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
+
+
+@pytest.mark.anyio
+async def test_balance_on_resume_send_to_llm_tail_native_resumes(
+        tmp_path: Path) -> None:
+    """A crash/pause resume (balance_on_resume=True) of a SEND_TO_LLM tail that has
+    a store body must NATIVE-resume, not fall back to stream-json replay. The
+    blanket balance_on_resume veto used to force replay here, which 400s on the
+    deferred MCP tool_use blocks in the re-streamed history. Native resume only
+    needs imp-side tail balancing when the tail is a complete_step (success
+    override) or carries retry_feedback — neither holds here."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
@@ -2991,8 +3049,60 @@ async def test_balance_on_resume_disables_tool_search(tmp_path: Path) -> None:
     inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    # A session store is present — but balance_on_resume forces stream-json replay
-    # regardless, so ENABLE_TOOL_SEARCH=false must still be set on this path.
+    store = session_store_for(inv.transcript_dir)
+    await store.append(
+        session_key(inv.change_context.project_root, "step:p/s"),
+        [{"type": "user", "uuid": "m0",
+          "message": {"role": "user", "content": "go"}}])
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=False),)))
+    # SEND_TO_LLM tail (ends on a balanced user tool_result); no complete_step,
+    # no retry_feedback → native resume is correct.
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+                result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    # Native path: claude-p loads its own session — no stream-json replay, no 400.
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_store is not None
+    # Native resume keeps ToolSearch deferral (the 400 only hit the replay path).
+    assert "ENABLE_TOOL_SEARCH" not in opts.env
+
+
+@pytest.mark.anyio
+async def test_send_to_llm_tail_with_feedback_replays_and_injects(
+        tmp_path: Path) -> None:
+    """A SEND_TO_LLM resume carrying retry_feedback (gate handback) must stay on
+    the replay path so balance_success_on_resume injects the feedback as the next
+    user turn. Native resume would skip that injection and lose the feedback."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers import claude_code as cc
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv = replace(inv, balance_on_resume=True,
+                  retry_feedback="REVISE: tighten the plan.")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
     store = session_store_for(inv.transcript_dir)
     await store.append(
         session_key(inv.change_context.project_root, "step:p/s"),
@@ -3019,11 +3129,13 @@ async def test_balance_on_resume_disables_tool_search(tmp_path: Path) -> None:
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
-    opts = created[0].opts
-    # balance_on_resume forces stream-json replay (native_resume=False).
-    assert opts.resume is None
-    # Part C: the replay declares deferred MCP tools up front via standard mode.
-    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
+    # retry_feedback vetoes native resume → replay path.
+    assert created[0].opts.resume is None
+    # The feedback was injected as a trailing user turn by balance_success_on_resume.
+    replayed = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert any(
+        "REVISE: tighten the plan." in cc._text_of(m)
+        for m in replayed if m.role == "user")
 
 
 @pytest.mark.anyio
