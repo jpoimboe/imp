@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from imp.engine.archive import index
@@ -145,6 +146,32 @@ def test_ingest_last_event_ts_all_malformed(tmp_path: Path) -> None:
         assert conn.execute(
             "SELECT last_event_ts FROM changes WHERE id='alpha'"
         ).fetchone()[0] is None
+    finally:
+        conn.close()
+
+
+def test_connect_stamps_fresh_db_user_version(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_connect_pre_existing_db_keeps_user_version(tmp_path: Path) -> None:
+    db = tmp_path / "index.db"
+    raw = sqlite3.connect(db)
+    raw.execute("CREATE TABLE changes (id TEXT PRIMARY KEY)")
+    raw.commit()
+    raw.close()
+    # Precondition: a legacy db reads back as version 0.
+    pre = sqlite3.connect(db)
+    assert pre.execute("PRAGMA user_version").fetchone()[0] == 0
+    pre.close()
+
+    conn = index.connect(db)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
     finally:
         conn.close()
 

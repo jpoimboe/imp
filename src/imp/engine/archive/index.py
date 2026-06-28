@@ -16,12 +16,19 @@ _SCHEMA = (
     " change_id TEXT, depends_on_id TEXT)",
 )
 
+_SCHEMA_VERSION = 2
+
 
 def connect(index_path: Path) -> sqlite3.Connection:
     index_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(index_path, timeout=30)
+    fresh = conn.execute(
+        "SELECT 1 FROM sqlite_master"
+        " WHERE type='table' AND name='changes'").fetchone() is None
     for stmt in _SCHEMA:
         conn.execute(stmt)
+    if fresh:
+        conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     conn.commit()
     return conn
 
