@@ -51,6 +51,7 @@ ANTHROPIC: dict[str, ModelInfo] = {
 OPENAI: dict[str, ModelInfo] = {
     "gpt-5": ModelInfo(window=400_000),
     "gpt-5.5": ModelInfo(window=400_000),
+    "gpt-5.4": ModelInfo(window=400_000),
     "gpt-5.4-mini": ModelInfo(window=400_000),
     "gpt-5.3-codex": ModelInfo(window=400_000),
 }

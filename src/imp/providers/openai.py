@@ -792,7 +792,7 @@ class OpenAIProvider:
 
 
 TIER_DEFAULTS: dict[str, str] = {
-    "low": "gpt-5.4-mini", "medium": "gpt-5.3-codex", "high": "gpt-5.5",
+    "low": "gpt-5.4-mini", "medium": "gpt-5.4", "high": "gpt-5.5",
 }
 ENV_VAR: str | None = "OPENAI_API_KEY"
 
