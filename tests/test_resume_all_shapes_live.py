@@ -12,6 +12,7 @@ re-execution and no `400 due to tool use concurrency issues`.
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,7 @@ def anyio_backend() -> str:
     not opted_in("claude_code"),
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
+@pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_send_to_llm_store_backed_native_resume(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,6 +105,11 @@ async def test_send_to_llm_store_backed_native_resume(
     _init_repo(tmp_path)
     (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     inv = _live_inv(tmp_path)
+    # Mirror the executor's real resume config: every kept-transcript resume
+    # carries balance_on_resume=True. The native-resume gate must engage despite
+    # it (this is the exact production path that previously fell to a 400ing
+    # stream-json replay).
+    inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
     skey = session_key(inv.change_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
@@ -161,6 +168,7 @@ async def test_send_to_llm_store_backed_native_resume(
     not opted_in("claude_code"),
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
+@pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_dangling_tool_use_store_backed_native_resume(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,6 +180,11 @@ async def test_dangling_tool_use_store_backed_native_resume(
     (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     (tmp_path / "b.txt").write_text("BRAVO-CONTENT\n")
     inv = _live_inv(tmp_path)
+    # Mirror the executor's real resume config: every kept-transcript resume
+    # carries balance_on_resume=True. The native-resume gate must engage despite
+    # it (this is the exact production path that previously fell to a 400ing
+    # stream-json replay).
+    inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
     skey = session_key(inv.change_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
