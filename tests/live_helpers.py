@@ -95,6 +95,12 @@ async def _call_openai(prompt: str, tool_description: str) -> list[ContentBlock]
     client = openai.AsyncOpenAI(api_key=key)
     try:
         response = await client.responses.create(
+            # gpt-4o-mini ON PURPOSE — don't "standardize" this onto the gpt-5.4
+            # family. This drives the parallel-elicitation test, where the MODEL
+            # is effectively under test (does imp's task-tool description elicit
+            # >=2 parallel sub_agent calls in one message?). gpt-4o-mini reliably
+            # emits 2; gpt-5.4-mini intermittently emits only 1 and fails the
+            # >=2 assertion.
             model="gpt-4o-mini",
             instructions="You have two subagents named 'a' and 'b'. Use the task tool.",
             input=[{

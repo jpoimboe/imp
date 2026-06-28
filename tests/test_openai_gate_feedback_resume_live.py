@@ -120,9 +120,9 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
         "default-workflow: imp\n"
         "providers: [openai]\n"
         "tiers:\n"
-        "  low:    {openai: gpt-4o-mini}\n"
-        "  medium: {openai: gpt-4o-mini}\n"
-        "  high:   {openai: gpt-4o-mini}\n"
+        "  low:    {openai: gpt-5.4-mini}\n"
+        "  medium: {openai: gpt-5.4-mini}\n"
+        "  high:   {openai: gpt-5.4-mini}\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
