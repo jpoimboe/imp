@@ -100,12 +100,14 @@ class _FakePrompt:
         self._lines = list(lines)
         self.questions: list[str] = []
         self.bottom_toolbars: list[object] = []
+        self.hints: list[str | None] = []
 
     async def ask_async(self, prompt_text: str | None = None, *,
                         question: str = "", width: int = 80, indent: str = "",
-                        bottom_toolbar=None) -> str:
+                        bottom_toolbar=None, hint: str | None = None) -> str:
         self.questions.append(question)
         self.bottom_toolbars.append(bottom_toolbar)
+        self.hints.append(hint)
         return self._lines.pop(0)
 
 

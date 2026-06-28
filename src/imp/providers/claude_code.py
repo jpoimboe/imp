@@ -90,6 +90,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
+    INTERRUPT_STEER_HINT,
     _resolve_wait_reply,
     build_inline_solicit,
     drain_all_interjects_at_resume,
@@ -1828,7 +1829,8 @@ class ClaudeCodeAgentRunner:
                             steer = build_inline_solicit(
                                 user_input_fn=self._user_input_fn,
                                 coordinator=invocation.coordinator,
-                                event_log=elog, agent_id=aid)
+                                event_log=elog, agent_id=aid,
+                                steer_prompt=INTERRUPT_STEER_HINT)
                             # Raises AwaitingUserInput when no human is attached;
                             # the balanced session makes a resume continue with no 400.
                             reply = await steer(last_text)

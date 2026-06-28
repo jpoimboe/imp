@@ -119,9 +119,12 @@ def make_interactive_solicit(
         color=should_use_color(sys.stdout))
 
     async def _solicit(_prompt: str) -> str:
+        # The gate's prompt (the interrupt-steer hint, or the daemon's resume
+        # prompt) surfaces as the field placeholder; an empty prompt — the bare
+        # turn-end yield — falls back to the default "type your reply".
         return await ask_line_with_slash(
             prompt, status, change,
             color=should_use_color(sys.stdout), width=_term_width(),
-            coord=coord, driver=driver)
+            coord=coord, driver=driver, hint=_prompt or None)
 
     return _solicit

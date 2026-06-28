@@ -3,7 +3,8 @@
 IMP_LIVE_PROVIDERS=claude_code-gated. Drives, over a real pty via impty's
 TerminalSession Python API:
 
-  start → poll events.jsonl for the bash tool_call → SIGINT (paused gate renders)
+  start → poll events.jsonl for the bash tool_call → SIGINT (the cooperative
+  interrupt-steer gate renders on the pty; the run stays live, not yet paused)
   → SIGQUIT (daemon pid gone, flock released, state paused)
   → imp resume (workflow_resumed + a fresh daemon holds the flock).
 
@@ -157,11 +158,14 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         assert _wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
         time.sleep(_CC_STARTUP_GRACE)
 
-        # SIGINT → daemon pauses, the resume-prompt gate renders on the pty.
+        # SIGINT mid-turn is the cooperative interrupt: the run yields inline to
+        # the human (it does NOT pause yet — that happens on the SIGQUIT detach
+        # below). The steer gate renders INTERRUPT_STEER_HINT on the pty, so the
+        # human can redirect or detach. Anchor on that hint, not "paused".
         s.send_signal(signal.SIGINT)
         assert _poll(
-            lambda: "paused" in "\n".join(s.lines()).lower(), timeout=30.0
-        ), "paused gate never rendered"
+            lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=30.0
+        ), "interrupt-steer gate never rendered"
         daemon_pid = int(lock_path.read_text().strip())  # holder PID, read before detach
 
         # SIGQUIT → deliberate detach: daemon hibernates, flock released, paused.

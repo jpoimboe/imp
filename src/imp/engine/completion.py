@@ -40,6 +40,12 @@ def completion_instruction(schema: OutputSchema) -> str:
 
 NUDGE_LIMIT = 2
 
+# Placeholder shown at the cooperative-interrupt steer gate (Ctrl-C mid-turn).
+# The bare turn-end yield keeps an empty prompt — its preceding prose IS the
+# question — but an interrupt has no such framing, so it needs to orient the
+# human: redirect inline, or detach (Ctrl-D) to leave the run paused.
+INTERRUPT_STEER_HINT = "interrupted — type to redirect, or Ctrl-D to leave it paused"
+
 
 def _cancelled_exc() -> type[BaseException]:
     import anyio
@@ -53,19 +59,24 @@ def build_inline_solicit(
     coordinator: Any = None,
     event_log: Any = None,
     agent_id: str | None = None,
+    steer_prompt: str = "",
 ) -> Callable[[str], Awaitable[str]]:
     """The turn-end yield-to-human tail, shared by BOTH the bare-turn-end
     continuation (build_continuation_fn) and the cooperative-interrupt steer.
     Emits awaiting_user_input, then either solicits the human inline — freezing
     the inactivity watchdog for the blocked await, and turning a mid-solicit
     detach/cancel into a clean AwaitingUserInput pause — and returns the reply,
-    or (no human attached) raises AwaitingUserInput(last_text)."""
+    or (no human attached) raises AwaitingUserInput(last_text).
+
+    `steer_prompt` rides in the awaiting_user_input payload and surfaces as the
+    gate placeholder. The bare turn-end leaves it "" (its prose is the question);
+    the interrupt steer passes INTERRUPT_STEER_HINT so the human is oriented."""
     from imp.agents.tools.wait_for_user import AwaitingUserInput
 
     def _emit_awaiting() -> None:
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
-                             payload={"prompt": ""})
+                             payload={"prompt": steer_prompt})
 
     async def _solicit() -> str:
         assert user_input_fn is not None

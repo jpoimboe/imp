@@ -256,9 +256,10 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The interactive solicit reads one slash-aware line from the tty and returns
-    it as the gate reply, ignoring the daemon's prompt-text argument (the renderer
-    already showed that prompt). It threads the run's change, status, driver, and
-    coordinator through to ask_line_with_slash."""
+    it as the gate reply. The gate's prompt text (the interrupt-steer hint or the
+    daemon's resume prompt) is threaded through to ask_line_with_slash as the
+    field `hint`; it also threads the run's change, status, driver, and
+    coordinator."""
     change = _make_change(tmp_path, "2026-06-15-interactive")
 
     class _DummyPrompt:
@@ -271,11 +272,13 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     async def _fake_ask(
         prompt: object, status: object, ch: object, *,
         color: bool, width: int, coord: object, driver: object,
+        hint: str | None = None,
     ) -> str:
         captured["change"] = ch
         captured["status"] = status
         captured["driver"] = driver
         captured["coord"] = coord
+        captured["hint"] = hint
         return "user typed this"
 
     monkeypatch.setattr("imp.cli.session_run.ask_line_with_slash", _fake_ask)
@@ -293,6 +296,7 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     assert captured["status"] is status
     assert captured["driver"] is driver
     assert captured["coord"] is coord
+    assert captured["hint"] == "daemon wait_for_user prompt text"
 
 
 @pytest.mark.anyio

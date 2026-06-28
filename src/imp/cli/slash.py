@@ -142,7 +142,7 @@ def _help(out: Callable[[str], None]) -> None:
 
 async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
                        width: int = 80, indent: str = "",
-                       bottom_toolbar: Any = None) -> str:
+                       bottom_toolbar: Any = None, hint: str | None = None) -> str:
     """Read a line, but cancel the prompt if the coordinator exit event fires
     (SIGTERM / out-of-band SIGINT / escalation). On cancellation, raise
     KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
@@ -171,7 +171,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
             async def _read() -> None:
                 result["line"] = await prompt.ask_async(
                     question=question, width=width, indent=indent,
-                    bottom_toolbar=bottom_toolbar)
+                    bottom_toolbar=bottom_toolbar, hint=hint)
                 tg.cancel_scope.cancel()
 
             tg.start_soon(_watch)
@@ -187,7 +187,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
 
 async def ask_line_with_slash(
     prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
-    coord: Any = None, driver: Any = None,
+    coord: Any = None, driver: Any = None, hint: str | None = None,
 ) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> returns the
@@ -241,11 +241,12 @@ async def ask_line_with_slash(
                     try:
                         if exit_evt is None:
                             line: str = await prompt.ask_async(
-                                width=width, indent=indent, bottom_toolbar=toolbar)
+                                width=width, indent=indent, bottom_toolbar=toolbar,
+                                hint=hint)
                         else:
                             line = await _ask_or_exit(
                                 prompt, exit_evt, width=width, indent=indent,
-                                bottom_toolbar=toolbar)
+                                bottom_toolbar=toolbar, hint=hint)
                     except KeyboardInterrupt:
                         # A KeyboardInterrupt reaching here is normally the
                         # exit-event-won synthesis from _ask_or_exit: an out-of-band
