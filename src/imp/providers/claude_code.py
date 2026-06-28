@@ -192,6 +192,34 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     return None
 
 
+def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object]:
+    """Best-effort read of the OAuth access-token expiry from the spawn's
+    credential file. Never raises: a missing / locked / torn file (the CLI
+    writes .credentials.json non-atomically, so a concurrent read can see a torn
+    file) yields token_expires_at=None. Only the expiry timestamp is read, never
+    token material. expiresAt is epoch milliseconds; the 5-minute buffer matches
+    the CLI's own proactive-refresh window, so a token within 5 min of expiry
+    already reads as expired."""
+    base = config_dir if config_dir is not None else Path.home() / ".claude"
+    expires_at: int | None = None
+    try:
+        data = json.loads((base / ".credentials.json").read_text(encoding="utf-8"))
+        oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+        if isinstance(oauth, dict):
+            value = oauth.get("expiresAt")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                expires_at = int(value)
+    except (OSError, ValueError):
+        expires_at = None
+    buffer_ms = 5 * 60 * 1000
+    return {
+        "token_expires_at": expires_at,
+        "token_expired": (None if expires_at is None
+                          else expires_at <= now_ms + buffer_ms),
+        "checked_at": now_ms,
+    }
+
+
 def _termination_from_result(
     sdk_msg: Any, last_text: str, diag: dict[str, Any],
 ) -> perr.ProviderError | None:
