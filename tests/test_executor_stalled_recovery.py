@@ -1,6 +1,7 @@
-"""A watchdog-class 'stalled' error retries with budgeted backoff through
-the executor's self-healed-retry path — no step_attempt burn, emits agent_retry,
-recovers without pausing."""
+"""A watchdog-class 'stalled' error retries with budgeted backoff through the
+executor's self-healed-retry path: it emits agent_retry per stall without burning
+step_attempt and recovers without pausing, and once cumulative backoff exceeds the
+1800s budget it pauses cleanly as retry_ceiling (not the auth-only reauth_needed)."""
 
 from __future__ import annotations
 
@@ -143,3 +144,40 @@ async def test_stalled_retries_with_backoff_without_burning_step_attempt(
     state = State.load(change.state_dir)
     assert state.status == "completed"
     assert state.step_attempt == 0
+
+
+class _AlwaysStallProvider:
+    name = "fake"
+    model = "m"
+
+    def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+        return _StallNthRunner(stalled=True)
+
+
+@pytest.mark.anyio
+async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path)
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    # The loop terminates (no infinite retry) once cumulative backoff exceeds the
+    # 1800s stalled budget, pausing as a generic ceiling — not the auth-only
+    # reauth_needed.
+    assert result is RunResult.PAUSED
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["reason"] == "retry_ceiling"
+    assert paused[0]["payload"]["reason"] != "reauth_needed"
+
+    state = State.load(change.state_dir)
+    assert state.status == "paused"
+    assert state.step_attempt == 0   # the backoff path never burned it
