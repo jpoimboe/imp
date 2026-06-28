@@ -50,13 +50,14 @@ def test_list_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsy
 
 
 def test_ls_is_unknown_after_rename(tmp_path: Path) -> None:
-    # An unrecognized verb falls through to the skill lookup; with no `ls` skill
-    # present that lands on the "no such skill" path.
+    # `/ls` is not the `/list` builtin: it falls through the skill lookup and,
+    # with no `ls` skill present, is submitted verbatim rather than listing
+    # changes or erroring.
     change = SimpleNamespace(control_root=tmp_path, workflow_dir=tmp_path)
     out: list[str] = []
     result = handle_slash_line("/ls", change=change, output_fn=out.append)
-    assert result is REPROMPT
-    assert any("no such skill: /ls" in line for line in out)
+    assert result == "/ls"
+    assert out == []
 
 
 def test_search_builtin_prints_matching_archived_change(tmp_path: Path) -> None:
