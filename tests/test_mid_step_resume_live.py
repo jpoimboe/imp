@@ -128,6 +128,33 @@ def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
     return False
 
 
+def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
+    """Poll state.json until status=='paused', returning the parsed state.
+
+    The interrupt's pause-write (state.save("paused") + the workflow_paused
+    event) happens ASYNCHRONOUSLY in the session daemon, AFTER the client
+    process exits 130. The client can return ahead of that write: a mid-step
+    interrupt first surfaces a bare-turn-end `awaiting_user_input` gate, and the
+    client's solicit hits EOF on the test's piped stdin and tears down before the
+    daemon settles into pause. Reading state.json once immediately therefore
+    races the write (visible with claude_code, whose interrupt path — in-flight
+    bash → rejected tool use → query error → turn end — is slow enough to lose
+    the race; in-process anthropic/openai usually win it). Poll for the durable
+    paused state instead of assuming a synchronous write."""
+    deadline = time.time() + timeout
+    last: dict[str, object] = {}
+    while time.time() < deadline:
+        try:
+            last = json.loads(state_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            time.sleep(0.1)
+            continue
+        if last.get("status") == "paused":
+            return last
+        time.sleep(0.1)
+    return last
+
+
 @pytest.mark.skipif(
     not opted_in("anthropic"),
     reason="anthropic not in IMP_LIVE_PROVIDERS",
@@ -178,8 +205,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         rc = proc.wait(timeout=15)
         assert rc == 130, f"expected exit 130, got {rc}"
 
-        state = json.loads(state_path.read_text())
-        assert state["status"] == "paused"
+        state = _wait_for_paused(state_path, timeout=15.0)
+        assert state.get("status") == "paused", state
         assert state["step"] == "w"
     finally:
         if proc.poll() is None:
@@ -274,8 +301,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
             proc.kill()
             proc.wait()
 
-    state = json.loads(state_path.read_text())
-    assert state["status"] == "paused"
+    state = _wait_for_paused(state_path, timeout=15.0)
+    assert state.get("status") == "paused", state
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
@@ -347,8 +374,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
             proc.kill()
             proc.wait()
 
-    state = json.loads(state_path.read_text())
-    assert state["status"] == "paused"
+    state = _wait_for_paused(state_path, timeout=15.0)
+    assert state.get("status") == "paused", state
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
