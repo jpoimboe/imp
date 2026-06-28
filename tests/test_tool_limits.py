@@ -165,12 +165,12 @@ def test_watchdog_decoupled_from_tool_wallclock() -> None:
     """Post-suspend invariant: B.2 (AGENT_INACTIVITY_TIMEOUT_S) is frozen for the
     full duration of every foreground tool call, so it no longer has to outlast
     B.1 (TOOL_WALLCLOCK_TIMEOUT_S). The old F4 coupling is INVERTED — B.2 is now
-    well below B.1 — and B.2 is the short ~1100 s freeze-detection window."""
+    well below B.1 — and B.2 is the short byte-liveness freeze-detection window."""
     from imp.agents.tools.limits import (
         AGENT_INACTIVITY_TIMEOUT_S,
         TOOL_WALLCLOCK_TIMEOUT_S,
     )
-    assert AGENT_INACTIVITY_TIMEOUT_S == 1100.0
+    assert AGENT_INACTIVITY_TIMEOUT_S == 300.0
     assert AGENT_INACTIVITY_TIMEOUT_S < TOOL_WALLCLOCK_TIMEOUT_S
 
 
