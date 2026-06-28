@@ -91,7 +91,6 @@ async def serve_change_session(
     seed_opening: str | None = None,
     resume: bool = False,
     opening_intent: str | None = None,
-    scope_only: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
@@ -131,8 +130,6 @@ async def serve_change_session(
                 state.resume_pending = state.step
             state.save(change.state_dir)
         run_kwargs: dict[str, Any] = {}
-        if scope_only:
-            run_kwargs["scope_only"] = True
         if non_interactive:
             run_kwargs["non_interactive"] = True
         if autonomous:
@@ -212,7 +209,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed-opening", default=None)
     parser.add_argument("--opening-intent", default=None)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--scope-only", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
     ns = parser.parse_args(argv)
@@ -228,8 +224,6 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["opening_intent"] = ns.opening_intent
     if ns.resume:
         kwargs["resume"] = True
-    if ns.scope_only:
-        kwargs["scope_only"] = True
     if ns.non_interactive:
         kwargs["non_interactive"] = True
     if ns.autonomous:
