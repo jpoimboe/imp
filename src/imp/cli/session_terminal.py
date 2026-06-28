@@ -157,6 +157,7 @@ async def run_terminal_client(
                 tg.cancel_scope.cancel()
         finally:
             coord.detach_runner()
+            coord.detach_leave_runner()
             coord.set_escalation_hook(None)
             await gate_send.aclose()
             gate_recv.close()

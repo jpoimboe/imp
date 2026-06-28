@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import anyio
 import pytest
 
 from imp.cli import signals as _signals
@@ -201,3 +202,28 @@ def test_begin_end_tool_watchdog_depth_counter_and_listeners() -> None:
     coord.end_tool_watchdog()  # the last in-flight tool returns
     assert coord.tool_active is False  # depth back to 0
     assert fired["n"] == 4  # note_activity fired again on the final end
+
+
+@pytest.mark.anyio
+async def test_leave_mid_run_forwards_leave_and_takes_leave_path() -> None:
+    coord = InterruptCoordinator()
+    coord.escalation_event = anyio.Event()
+    forwarded: list[str] = []
+    runner_called = {"n": 0}
+
+    async def leave_forward() -> None:
+        forwarded.append("leave")
+
+    async def runner_interrupt() -> None:
+        runner_called["n"] += 1
+
+    coord.attach_runner(runner_interrupt)
+    coord.attach_leave_runner(leave_forward)
+
+    await coord.leave_mid_run(reason="ctrl-d")
+
+    assert forwarded == ["leave"]          # leave-interrupt forwarded
+    assert runner_called["n"] == 0         # NOT the signal_pause/ctrl-c runner
+    assert coord.should_pause is True      # rc 130 path
+    assert coord.pause_reason == "ctrl-d"
+    assert coord.escalation_event.is_set()  # detach driven

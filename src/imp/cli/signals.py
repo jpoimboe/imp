@@ -125,6 +125,7 @@ class InterruptCoordinator:
 
     def __init__(self) -> None:
         self._runner_interrupt: Any = None
+        self._leave_runner_interrupt: Any = None
         self._should_pause = False
         self.pause_reason: str | None = None
         self._loop: Any = None          # event loop owning the signal handlers
@@ -310,6 +311,13 @@ class InterruptCoordinator:
     def detach_runner(self) -> None:
         self._runner_interrupt = None
 
+    def attach_leave_runner(self, interrupt_fn: Any) -> None:
+        """Attach the ctrl-d leave-interrupt forward, distinct from the Ctrl-C runner."""
+        self._leave_runner_interrupt = interrupt_fn
+
+    def detach_leave_runner(self) -> None:
+        self._leave_runner_interrupt = None
+
     def set_escalation_hook(self, fn: Any) -> None:
         self._trigger_escalation = fn
 
@@ -356,6 +364,16 @@ class InterruptCoordinator:
         self._should_pause = True
         if fn is not None:
             await fn()
+
+    async def leave_mid_run(self, *, reason: str = "ctrl-d") -> None:
+        """Ctrl-D mid-run suspend & leave: forward the leave-interrupt and take the leave path."""
+        fn = self._leave_runner_interrupt
+        if fn is not None:
+            await fn()
+        self.request_exit(reason)
+        evt = self.escalation_event
+        if evt is not None:
+            evt.set()
 
     def _install_loop_signal_handlers(self) -> None:
         """(Re)install the coordinator's loop signal handlers (SIGINT plus the
