@@ -21,3 +21,18 @@ def test_agent_retry_renders_category_and_attempt() -> None:
     blob = json.dumps(nv.structural_repr(tree.root), default=str)
     assert "network" in blob
     assert "retry" in blob.lower()
+
+
+def test_stalled_agent_retry_renders_as_warning_not_config_error() -> None:
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "stalled", "attempt": 2, "backoff_seconds": 4.0}},
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+
+    assert "warning: [stalled] retry 2 (4.0s)" in out
+    assert "error:" not in out
+    assert "[config]" not in out
