@@ -696,6 +696,29 @@ class _RateLimitThenSuccessRunner:
         pass
 
 
+class _AuthThenSuccessRunner:
+    """Yields an auth error for the first 7 runs, then succeeds. Cumulative
+    backoff before the 8th run is 1+2+4+8+16+32+60 = 123 s — past the old 120 s
+    auth budget, under the new 1800 s one."""
+    def __init__(self, output: dict) -> None:
+        self._output = output
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        if self.run_count <= 7:
+            yield {"type": "error", "payload": {
+                "category": "auth",
+                "kind": "http_401",
+                "message": "401 Invalid authentication credentials",
+            }}
+            return
+        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
 @pytest.mark.anyio
 async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
     tmp_path: Path, monkeypatch,
@@ -771,6 +794,41 @@ async def test_retry_budget_pauses_with_retry_ceiling(
     assert runner.run_count == 1
     paused_events = [e for e in events if e["type"] == "workflow_paused"]
     assert paused_events and paused_events[0]["payload"]["reason"] == "retry_ceiling"
+
+
+@pytest.mark.anyio
+async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """AC-A: with the real 1800 s auth budget, an auth-error backoff whose
+    cumulative delay crosses 120 s (123 s after 7 retries) keeps retrying and
+    completes. Under the old 120 s budget this run paused at attempt 7."""
+    from imp.engine import executor
+    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+        pass
+    monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
+
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _AuthThenSuccessRunner({"status": "Success"})
+
+    class _AuthProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    # 7 auth errors then success; the run rode through the 123 s crossing.
+    assert runner.run_count == 8
 
 
 @pytest.mark.anyio

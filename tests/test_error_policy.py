@@ -133,8 +133,10 @@ def test_budget_for_network_and_rate_limit_is_1800() -> None:
     assert ep.budget_for("rate_limit") == 1800.0
 
 
-def test_budget_for_auth_is_120() -> None:
-    assert ep.budget_for("auth") == 120.0
+def test_budget_for_auth_is_1800() -> None:
+    # A 401 is a transient refresh-path failure that heals on its own; give auth
+    # the same patience as network / rate_limit rather than a tight 120 s budget.
+    assert ep.budget_for("auth") == 1800.0
 
 
 def test_budget_for_pause_and_retry_now_categories_is_none() -> None:
@@ -162,7 +164,7 @@ def test_hint_folded_into_same_min_max_formula() -> None:
 
 
 def test_auth_never_pauses_in_decide() -> None:
-    # The attempt cap is gone; auth's give-up is the executor's 120s budget,
+    # The attempt cap is gone; auth's give-up is the executor's 1800s budget,
     # not a Pause from decide().
     for n in (0, 7, 50):
         d = ep.decide("auth", prior_backoff_attempts=n)
