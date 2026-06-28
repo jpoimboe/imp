@@ -87,7 +87,8 @@ async def test_high_tier_run_reports_1m_window(tmp_path: Path) -> None:
     ]
     assert windows, "no llm_response carried a context_window"
     assert max(windows) == 1_000_000, (
-        f"high-tier run reported {max(windows)} not 1_000_000 — the beta did "
-        f"not enable 1M; switch CLAUDE_CODE['opus-1m'].cli_model to "
-        f"'claude-opus-4-8[1m]' in src/imp/providers/catalog.py and re-run."
+        f"high-tier run reported {max(windows)} not 1_000_000 — the bracketed "
+        f"model-id CLAUDE_CODE['opus-1m'].cli_model ('claude-opus-4-8[1m]') did "
+        f"not enable 1M. If the model rev changed, update it in "
+        f"src/imp/providers/catalog.py and re-run."
     )

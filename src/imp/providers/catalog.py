@@ -3,9 +3,11 @@
 Each provider owns its own alias→metadata table here (kept in the providers
 layer, never the renderer — see docs/imp-invariants.md "Layering invariants").
 `window` is a static fallback; for Claude Code the live SDK `rawMaxTokens`
-supersedes it once a turn completes. `betas` is load-bearing — it is what
-enables the 1M context window. `cli_model` overrides the alias passed to the
-CLI/SDK when the alias is not a real model id (e.g. `opus-1m` → `opus`).
+supersedes it once a turn completes. `cli_model` overrides the alias passed to
+the CLI/SDK when the alias is not a real model id (e.g. `opus-1m` →
+`claude-opus-4-8[1m]`, the bracketed model-id that enables the 1M context
+window under both subscription and API-key auth).
+`betas` remains as a generic per-model opt-in field, currently unused.
 
 Hand-maintained: no provider exposes context-window size via an endpoint.
 """
@@ -32,13 +34,14 @@ CLAUDE_CODE: dict[str, ModelInfo] = {
     "haiku": ModelInfo(window=200_000),
     "sonnet": ModelInfo(window=200_000),
     "opus": ModelInfo(window=200_000),
-    # opus-1m runs the `opus` CLI model with the 1M beta requested. If a live
-    # run reads back rawMaxTokens == 200_000, switch cli_model to the model-id
-    # form "claude-opus-4-8[1m]" (see the live-verification task).
+    # opus-1m requests the 1M window via the bracketed model-id form, which
+    # both subscription (OAuth) and API-key auth honor. The earlier `betas`
+    # opt-in only worked for API-key auth: under subscription auth claude-p
+    # silently dropped the beta (window fell back to 200k) and warned to stderr
+    # every request ("Custom betas are only available for API key users").
     "opus-1m": ModelInfo(
         window=1_000_000,
-        betas=("context-1m-2025-08-07",),
-        cli_model="opus",
+        cli_model="claude-opus-4-8[1m]",
     ),
 }
 

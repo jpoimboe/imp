@@ -2441,12 +2441,13 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
     assert not Path(captured["cfg"]).exists()
 
 
-def test_build_options_requests_1m_beta_for_opus_1m(tmp_path: Path) -> None:
+def test_build_options_requests_1m_via_model_id_for_opus_1m(tmp_path: Path) -> None:
     runner = ClaudeCodeAgentRunner(model_name="opus-1m")
     opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
-    assert list(opts.betas) == ["context-1m-2025-08-07"]
-    # opus-1m is not a CLI alias; cli_model maps it to the real `opus` model.
-    assert opts.model == "opus"
+    # No custom beta (subscription auth drops it + warns); the 1M window is
+    # requested via the bracketed model-id, which both auth modes honor.
+    assert list(opts.betas) == []
+    assert opts.model == "claude-opus-4-8[1m]"
 
 
 def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:

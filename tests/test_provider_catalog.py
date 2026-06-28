@@ -14,9 +14,10 @@ from imp.providers.catalog import (
 def test_claude_code_catalog_opus_1m_entry() -> None:
     info = model_info(CLAUDE_CODE, "opus-1m")
     assert info.window == 1_000_000
-    assert info.betas == ("context-1m-2025-08-07",)
-    # opus-1m is not a real CLI alias; it must map to one the CLI understands.
-    assert info.cli_model == "opus"
+    # The bracketed model-id requests 1M under both subscription and API-key
+    # auth; no custom beta (which subscription auth silently drops).
+    assert info.betas == ()
+    assert info.cli_model == "claude-opus-4-8[1m]"
 
 
 def test_claude_code_catalog_opus_entry_is_plain_200k() -> None:
