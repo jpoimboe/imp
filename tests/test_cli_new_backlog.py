@@ -108,140 +108,6 @@ def test_new_rejects_playbook_flags() -> None:
         parser.parse_args(["new", "--findings-only"])
 
 
-def test_interactive_backlog_seeds_session_and_sets_origin(
-        tmp_path: Path, monkeypatch) -> None:
-    import sys
-
-    import anyio
-
-    from imp.cli import main as cli_main
-
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    def _fake_make_interactive_solicit(change, *, status, driver, coord):
-        async def _solicit(_prompt: str) -> str:
-            return ""
-        return _solicit
-
-    monkeypatch.setattr(
-        cli_main, "make_interactive_solicit", _fake_make_interactive_solicit)
-
-    captured: dict[str, object] = {}
-
-    async def _fake_run_session_client(
-        change, *, driver, coord, solicit, seed_opening=None, status=None,
-        opening_intent=None, leave_mode=None, scope_only=False, leave_state=None,
-        title=None, autonomous=False,
-    ) -> int:
-        captured["change_id"] = change.id
-        captured["seed_opening"] = seed_opening
-        captured["opening_intent"] = opening_intent
-        captured["scope_only"] = scope_only
-        return 0
-
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)
-
-    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
-    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
-    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
-    try:
-        rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
-            idea="My backlog item", opening="a longer brief", title=None,
-            non_interactive=False, message=None, tui=False,
-            depends_on=["2026-06-16-dep001"], workflow=None))
-    finally:
-        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
-        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
-
-    assert rc == 0
-    assert captured["seed_opening"] == "My backlog item\n\na longer brief"
-    assert captured["opening_intent"] == "My backlog item\n\na longer brief"
-    assert captured["scope_only"] is True
-
-    change = Change.load(tmp_path, _only_new_id(tmp_path))
-    assert change.origin == "idea"
-    assert change.title == "My backlog item"
-    assert change.materialized is False
-    meta = json.loads((change.change_dir / "change.json").read_text())
-    assert meta["depends_on"] == ["2026-06-16-dep001"]
-
-
-def test_headless_backlog_sets_scope_only(
-        tmp_path: Path, monkeypatch) -> None:
-    import sys
-
-    import anyio
-
-    from imp.cli import main as cli_main
-
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    captured: dict[str, object] = {}
-
-    async def _fake_run_session_client(
-        change, *, driver, coord, solicit, seed_opening=None, status=None,
-        opening_intent=None, leave_mode=None, scope_only=False, title=None,
-        non_interactive=False, autonomous=False,
-    ) -> int:
-        captured["scope_only"] = scope_only
-        return 0
-
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)
-
-    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
-    sys.stdin.isatty = lambda: False   # type: ignore[method-assign]
-    sys.stdout.isatty = lambda: False  # type: ignore[method-assign]
-    try:
-        rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
-            idea="My backlog item", opening="a longer brief", title=None,
-            non_interactive=False, message=None, tui=False,
-            depends_on=[], workflow=None))
-    finally:
-        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
-        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
-
-    assert rc == 0
-    assert captured["scope_only"] is True
-
-
-def test_tui_backlog_sets_scope_only(
-        tmp_path: Path, monkeypatch) -> None:
-    import sys
-
-    import anyio
-
-    from imp.cli import main as cli_main
-
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    captured: dict[str, object] = {}
-
-    async def _fake_run_tui_session(
-        change, *, seed_opening=None, resume=False, opening_intent=None,
-        leave_mode=None, scope_only=False, leave_state=None, autonomous=False,
-    ) -> int:
-        captured["scope_only"] = scope_only
-        return 0
-
-    monkeypatch.setattr(cli_main, "_run_tui_session", _fake_run_tui_session)
-
-    orig_out = sys.stdout.isatty
-    sys.stdout.isatty = lambda: True   # type: ignore[method-assign]
-    try:
-        rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
-            idea="My backlog item", opening="a longer brief", title=None,
-            non_interactive=False, message=None, tui=True,
-            depends_on=[], workflow=None))
-    finally:
-        sys.stdout.isatty = orig_out   # type: ignore[method-assign]
-
-    assert rc == 0
-    assert captured["scope_only"] is True
-
-
 def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> None:
     import asyncio
     _seed_control(tmp_path)
@@ -255,7 +121,44 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(main, "_record_idea", _fake_record)
     rc = asyncio.run(main._async_cmd_new(
         argparse.Namespace(idea="b", opening=None, depends_on=[], title=None,
-                           base_branch=None, non_interactive=True, message=None,
-                           tui=False, workflow=None)))
+                           base_branch=None, non_interactive=False, message=None,
+                           autonomous=False, tui=False, workflow=None)))
     assert rc == 0
     assert captured
+
+
+def test_interactive_backlog_files_instantly_no_session(
+        tmp_path: Path, monkeypatch) -> None:
+    import sys
+
+    import anyio
+
+    from imp.cli import main as cli_main
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    async def _no_session(*a, **k):
+        raise AssertionError("backlog must not run a session")
+
+    monkeypatch.setattr(cli_main, "run_session_client", _no_session)
+    monkeypatch.setattr(cli_main, "_run_tui_session", _no_session)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
+            idea="My backlog item", opening="a longer brief", title=None,
+            non_interactive=False, message=None, autonomous=False, tui=False,
+            depends_on=["2026-06-16-dep001"], workflow=None))
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    change = Change.load(tmp_path, _only_new_id(tmp_path))
+    assert change.origin == "idea"
+    assert change.title == "My backlog item"
+    assert change.materialized is False
+    assert change.seed_opening == "My backlog item\n\na longer brief"

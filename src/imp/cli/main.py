@@ -860,7 +860,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
 
-    backlog_interactive = False
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
             print("imp: --backlog and --title cannot be combined "
@@ -869,21 +868,13 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if not args.idea.strip():
             print("imp: --backlog title must be non-empty", file=sys.stderr)
             return 2
-        if bool(getattr(args, "non_interactive", False)):
-            return _record_idea(args, control)
-        backlog_interactive = True
+        return _record_idea(args, control)
 
-    if backlog_interactive:
-        seed_text = backlog.seed_opening(
-            {"title": args.idea, "description": getattr(args, "opening", None) or ""})
-        seed = SeedResolution(
-            title=args.idea, seed_text=seed_text, opening_intent=seed_text)
-    else:
-        try:
-            seed = resolve_spec_seed(args)
-        except (SeedError, ValueError) as e:
-            print(f"imp: {e}", file=sys.stderr)
-            return 2
+    try:
+        seed = resolve_spec_seed(args)
+    except (SeedError, ValueError) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
 
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
@@ -907,20 +898,14 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
-    scope_only = backlog_interactive
-    origin = "idea" if backlog_interactive else "draft"
     try:
         change = Change.create_draft(
             control, title=title, change_id=change_id, base_branch=base,
-            workflow=wf_arg, origin=origin,
-            depends_on=(list(getattr(args, "depends_on", None) or [])
-                        if backlog_interactive else None),
-            seed_opening=(opening_text if backlog_interactive else None))
+            workflow=wf_arg, origin="draft",
+            depends_on=None, seed_opening=None)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-
-    _scope_kw: dict[str, Any] = {"scope_only": True} if scope_only else {}
 
     # Build the title before the opening prompt so the escape is written at startup,
     # not after the user answers.
@@ -966,7 +951,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
             opening_intent=opening_intent, title=term_title,
-            non_interactive=True, autonomous=autonomous, **_scope_kw)
+            non_interactive=True, autonomous=autonomous)
 
     if _tui_requested(args):
         if not header_printed:
@@ -976,7 +961,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             return await _run_tui_session(
                 change, seed_opening=opening_text,
                 opening_intent=opening_intent, leave_mode=leave_mode,
-                leave_state=leave_state, autonomous=autonomous, **_scope_kw)
+                leave_state=leave_state, autonomous=autonomous)
 
         return await _clear_loop(control, tui=True, first=_first_tui)
 
@@ -995,7 +980,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
             opening_intent=opening_intent, leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, autonomous=autonomous, **_scope_kw)
+            leave_state=leave_state, title=term_title, autonomous=autonomous)
 
     return await _clear_loop(control, tui=False, first=_first)
 
