@@ -365,12 +365,20 @@ async def _dispatch_inbound(
             _log.warning("command failed: %r", command, exc_info=True)
 
 
-async def _await_shutdown_signals(shutdown: anyio.Event) -> None:
-    """Set `shutdown` on the first SIGTERM/SIGINT (spec: a clean SIGTERM drains)."""
+async def _await_shutdown_signals(
+    shutdown: anyio.Event,
+    force_exit: Callable[[int], None] = os._exit,
+) -> None:
+    """Keep receiver open across signals so a second Ctrl-C force-quits cleanly."""
     with anyio.open_signal_receiver(signal.SIGTERM, signal.SIGINT) as signals:
+        draining = False
         async for _signum in signals:
-            shutdown.set()
-            return
+            if not draining:
+                draining = True
+                shutdown.set()
+                _log.info("shutting down — Ctrl-C again to force-quit")
+            else:
+                force_exit(0)
 
 
 async def deliver_to_session(
