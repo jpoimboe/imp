@@ -2550,3 +2550,13 @@ def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
         {"provider": "claude_code", "stop_reason": "end_turn"}) is True
     assert nv._llm_response_is_turn_end(
         {"provider": "claude_code", "stop_reason": None}) is False
+
+
+def test_builder_captures_checkpoint_threshold_from_tiers_resolved() -> None:
+    from imp.cli.narrative import NarrativeBuilder
+    b = NarrativeBuilder()
+    # None before the run-start event arrives.
+    assert b.latest_checkpoint_threshold is None
+    b.add({"type": "tiers_resolved", "agent_id": None,
+           "payload": {"tiers": {}, "steps": {}, "checkpoint_threshold": 0.65}})
+    assert b.latest_checkpoint_threshold == 0.65

@@ -935,6 +935,74 @@ def test_with_outcome_field_is_idempotent() -> None:
 
 
 @pytest.mark.anyio
+async def test_pull_watchdog_frozen_during_tool_does_not_stall(monkeypatch) -> None:
+    """While tool_active is True, a pull that blocks far past the window is NOT
+    torn down: the deadline is frozen to inf. A single begin call with NO further
+    activity, then a 4x-window sleep, distinguishes the inf-freeze from a one-shot
+    now+window bump (which would expire at ~1 window and stall)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_tool_watchdog()   # freeze (single call, no further activity)
+        await anyio.sleep(0.8)        # 4x window, silent
+        coord.end_tool_watchdog()
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is False
+    assert interrupted["called"] is False
+    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_restores_finite_window_after_tool_end(monkeypatch) -> None:
+    """end_tool_watchdog (last tool returns) restores an ENFORCEABLE finite
+    deadline: after the frozen interval ends, a subsequent over-window silence
+    stalls again. Guards against the tool freeze leaving the deadline at inf."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_tool_watchdog()
+        await anyio.sleep(0.4)        # frozen: survives 2x window
+        coord.end_tool_watchdog()     # last tool returns -> finite window restored
+        await anyio.sleep(3600)       # now silent past the window -> must stall
+        yield {"type": "agent_output", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []
+
+
+@pytest.mark.anyio
 async def test_inline_solicit_raises_awaiting_when_no_channel() -> None:
     from imp.agents.tools.wait_for_user import AwaitingUserInput
     from imp.engine.agent_run import build_inline_solicit
@@ -958,3 +1026,85 @@ async def test_inline_solicit_returns_reply_and_emits_awaiting() -> None:
 
     assert reply == "redirect now"
     assert any(e["type"] == "awaiting_user_input" for e in log.read())
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_maps_handoff_event_to_result(tmp_path):
+    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.engine.agent_run import drive_invocation
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+    class _HandoffRunner:
+        async def run(self, inv):
+            yield {"type": "handoff",
+                   "payload": {"handoff_path": "/x/s.handoff.md"}}
+
+        async def interrupt(self):
+            ...
+
+    agent_def = AgentDef(
+        name="a", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="go", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    inv = AgentInvocation(
+        agent_def=agent_def, provider_name="fake", model_name="m",
+        system_prompt="p", initial_messages=(),
+        change_context=ChangeContext(title="t", project_root=tmp_path,
+                                     workflow_dir=tmp_path),
+        transcript_dir=tmp_path / "s", events_path=tmp_path / "e.jsonl")
+
+    result = await drive_invocation(
+        inv, _HandoffRunner(), coordinator=None, log=None, emit_events=False)
+
+    assert result.handoff_path == "/x/s.handoff.md"
+    assert result.errored is False
+    assert result.fatal is False
+    assert result.paused is False
+    assert result.output is None
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_handoff_event_not_logged(tmp_path):
+    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.engine.agent_run import drive_invocation
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+    class _Log:
+        def __init__(self):
+            self.calls: list[dict] = []
+        def append(self, *, agent_id, type, payload):
+            self.calls.append({"agent_id": agent_id, "type": type, "payload": payload})
+
+    class _HandoffRunner:
+        async def run(self, inv):
+            yield {"type": "handoff",
+                   "payload": {"handoff_path": "/x/s.handoff.md"}}
+
+        async def interrupt(self):
+            ...
+
+    agent_def = AgentDef(
+        name="a", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="go", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    inv = AgentInvocation(
+        agent_def=agent_def, provider_name="fake", model_name="m",
+        system_prompt="p", initial_messages=(),
+        change_context=ChangeContext(title="t", project_root=tmp_path,
+                                     workflow_dir=tmp_path),
+        transcript_dir=tmp_path / "s", events_path=tmp_path / "e.jsonl")
+
+    log = _Log()
+    result = await drive_invocation(
+        inv, _HandoffRunner(), coordinator=None, log=log, emit_events=True)
+
+    assert result.handoff_path == "/x/s.handoff.md"
+    assert log.calls == []

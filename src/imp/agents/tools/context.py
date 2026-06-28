@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal as _signal
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -105,6 +105,9 @@ class ToolContext:
     # Optional combined verify gate command (config.verify_command). Threaded onto
     # the subprocess env (IMP_VERIFY_COMMAND) by the bash tool. None => no verify gate.
     verify_command: str | None = None
+    # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
+    # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
+    checkpoint_threshold: float | int | None = None
     # Resolved SandboxPolicy for shell wrapping (spec Part B). None => bare sh -c
     # (no sandbox), preserving pre-sandbox behavior. Set by the runner from
     # invocation.sandbox_policy.
@@ -183,6 +186,18 @@ class ToolContext:
                     f"{op} on {resolved} denied by the sandbox policy"
                 )
         return resolved
+
+
+@contextlib.contextmanager
+def suspend_inactivity_watchdog(ctx: ToolContext | None) -> Iterator[None]:
+    coord = getattr(ctx, "coordinator", None)
+    if coord is not None:
+        coord.begin_tool_watchdog()
+    try:
+        yield
+    finally:
+        if coord is not None:
+            coord.end_tool_watchdog()
 
 
 def change_home_path(change_home: str | None) -> Path | None:

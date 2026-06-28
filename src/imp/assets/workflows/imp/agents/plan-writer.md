@@ -221,6 +221,8 @@ glob("{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md")
 
 Read relevant source files to understand current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
 
+{% include "partials/delegate-exploration.md" %}
+
 Use `web_search` sparingly — only to verify a library's current API or version, or to check whether an idiom is idiomatic for the language/framework. Prefer the codebase and spec over external research.
 
 ## File Structure

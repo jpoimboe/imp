@@ -161,28 +161,26 @@ def test_read_bytes_capped_exactly_at_cap_reports_truncated(tmp_path: Path) -> N
     assert truncated is True
 
 
-def test_watchdog_exceeds_tool_wallclock_with_margin() -> None:
-    """F4 coupling (spec: heartbeat prerequisite): a tool's watchdog window
-    opens at the PREVIOUS heartbeat — with the post-API heartbeat in place the
-    margin is scheduling headroom; without it the window would absorb full
-    model-API latency. Either way, at zero margin a foreground bash legally
-    approaching its B.1 wall clock dies as a `stalled` config error instead of
-    returning the ToolAborted("timed-out") is_error the agent can react to."""
+def test_watchdog_decoupled_from_tool_wallclock() -> None:
+    """Post-suspend invariant: B.2 (AGENT_INACTIVITY_TIMEOUT_S) is frozen for the
+    full duration of every foreground tool call, so it no longer has to outlast
+    B.1 (TOOL_WALLCLOCK_TIMEOUT_S). The old F4 coupling is INVERTED — B.2 is now
+    well below B.1 — and B.2 is the short ~150 s freeze-detection window."""
     from imp.agents.tools.limits import (
         AGENT_INACTIVITY_TIMEOUT_S,
         TOOL_WALLCLOCK_TIMEOUT_S,
     )
-    assert AGENT_INACTIVITY_TIMEOUT_S > TOOL_WALLCLOCK_TIMEOUT_S
-    assert AGENT_INACTIVITY_TIMEOUT_S - TOOL_WALLCLOCK_TIMEOUT_S >= 300
+    assert AGENT_INACTIVITY_TIMEOUT_S == 150.0
+    assert AGENT_INACTIVITY_TIMEOUT_S < TOOL_WALLCLOCK_TIMEOUT_S
 
 
-def test_bg_wait_budget_well_under_watchdog() -> None:
-    """F4 coupling: each completed bash_output(wait=...) heartbeats and resets
-    the watchdog window, but the budget must leave margin for the same turn's
-    remaining latency. A future watchdog reduction must not silently invert
-    this relationship."""
+def test_bg_wait_budget_decoupled_from_watchdog() -> None:
+    """Post-suspend invariant: a bash_output(wait=True) runs INSIDE a bracketed
+    foreground tool call, so B.2 is frozen for the whole wait — the wait budget
+    no longer has to fit under B.2. The old F4 coupling is INVERTED: BG_WAIT_MAX_S
+    is now larger than B.2."""
     from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S, BG_WAIT_MAX_S
-    assert BG_WAIT_MAX_S <= AGENT_INACTIVITY_TIMEOUT_S - 300
+    assert BG_WAIT_MAX_S > AGENT_INACTIVITY_TIMEOUT_S
 
 
 def test_bg_stream_cap_not_aliased_to_read_cap() -> None:

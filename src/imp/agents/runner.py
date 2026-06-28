@@ -161,6 +161,10 @@ class AgentInvocation:
     # ToolContext so every bash tool call applies the same posture. Any to avoid
     # importing SandboxPolicy here; None means no-op (bare sh -c, inactive policy).
     sandbox_policy: Any = None
+    # The configured context-checkpoint threshold (a window fraction <= 1, or an
+    # absolute token cap) for the Tier A proactive-handoff watch. Set from
+    # State.checkpoint_threshold at the build sites; None disables the watch.
+    checkpoint_threshold: float | int | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

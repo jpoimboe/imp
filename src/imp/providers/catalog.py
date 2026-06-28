@@ -3,15 +3,18 @@
 Each provider owns its own alias→metadata table here (kept in the providers
 layer, never the renderer — see docs/imp-invariants.md "Layering invariants").
 `window` is a static fallback; for Claude Code the live SDK `rawMaxTokens`
-supersedes it once a turn completes. `betas` is load-bearing — it is what
-enables the 1M context window. `cli_model` overrides the alias passed to the
-CLI/SDK when the alias is not a real model id (e.g. `opus-1m` → `opus`).
+supersedes it once a turn completes. `cli_model` overrides the alias passed to
+the CLI/SDK when the alias is not a real model id (e.g. `opus-1m` →
+`claude-opus-4-8[1m]`, the bracketed model-id that enables the 1M context
+window under both subscription and API-key auth).
+`betas` remains as a generic per-model opt-in field, currently unused.
 
 Hand-maintained: no provider exposes context-window size via an endpoint.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 DEFAULT_WINDOW = 200_000
 
@@ -32,13 +35,14 @@ CLAUDE_CODE: dict[str, ModelInfo] = {
     "haiku": ModelInfo(window=200_000),
     "sonnet": ModelInfo(window=200_000),
     "opus": ModelInfo(window=200_000),
-    # opus-1m runs the `opus` CLI model with the 1M beta requested. If a live
-    # run reads back rawMaxTokens == 200_000, switch cli_model to the model-id
-    # form "claude-opus-4-8[1m]" (see the live-verification task).
+    # opus-1m requests the 1M window via the bracketed model-id form, which
+    # both subscription (OAuth) and API-key auth honor. The earlier `betas`
+    # opt-in only worked for API-key auth: under subscription auth claude-p
+    # silently dropped the beta (window fell back to 200k) and warned to stderr
+    # every request ("Custom betas are only available for API key users").
     "opus-1m": ModelInfo(
         window=1_000_000,
-        betas=("context-1m-2025-08-07",),
-        cli_model="opus",
+        cli_model="claude-opus-4-8[1m]",
     ),
 }
 
@@ -86,3 +90,56 @@ def window_for_model(model: str | None) -> int | None:
         if token in lowered:
             return size
     return None
+
+
+def checkpoint_fraction(
+    threshold: float | int | None, window: int | None
+) -> float | None:
+    """The context-checkpoint cutoff as a fraction of the model window (None if unresolvable)."""
+    if threshold is None or threshold <= 0:
+        return None
+    if threshold <= 1:
+        return float(threshold)
+    if window is None or window <= 0:
+        return None
+    return threshold / window
+
+
+def context_threshold_crossed(
+    usage: dict[str, Any] | None, model: str | None,
+    threshold: float | int | None,
+) -> bool:
+    """True when a turn's prompt-token occupancy has reached the checkpoint cutoff.
+
+    Occupancy is `input + cache_read + cache_creation` (the prompt side of the
+    window, matching the context gauge's `usage_prompt_tokens`). The cutoff is
+    `checkpoint_fraction(threshold, window)` of the model window. Returns False
+    whenever the threshold, window, or usage is unavailable — the watch simply
+    never fires rather than guessing.
+    """
+    window = window_for_model(model)
+    frac = checkpoint_fraction(threshold, window)
+    if frac is None or window is None or window <= 0 or not usage:
+        return False
+    occupancy = (int(usage.get("input_tokens", 0) or 0)
+                 + int(usage.get("cache_read_input_tokens", 0) or 0)
+                 + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    return occupancy / window >= frac
+
+
+def sdk_context_threshold_crossed(
+    context_tokens: int | None, context_window: int | None,
+    threshold: float | int | None,
+) -> bool:
+    """True when claude_code's SDK-reported LIVE context occupancy has reached
+    the checkpoint cutoff. Unlike context_threshold_crossed (which sums prompt
+    tokens against the static catalog window), this divides the SDK's own live
+    context_tokens / context_window from get_context_usage(). Returns False
+    whenever any input is unavailable — the watch never fires rather than
+    guessing.
+    """
+    frac = checkpoint_fraction(threshold, context_window)
+    if (frac is None or not context_window or context_window <= 0
+            or not context_tokens or context_tokens <= 0):
+        return False
+    return context_tokens / context_window >= frac

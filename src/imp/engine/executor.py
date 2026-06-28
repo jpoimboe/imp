@@ -50,6 +50,7 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
+from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
     SandboxConfig,
     SandboxUnavailable,
@@ -210,6 +211,10 @@ async def run_change(
         ).config
         state = State.load(change.state_dir)
         change.relink_home()
+        # Transient: re-set on EVERY run_change entry (fresh + resume) so the
+        # Tier A handoff watch always sees the configured threshold without
+        # persisting it (the resolved_tiers block below is skipped on resume).
+        state.checkpoint_threshold = config.context_checkpoint_threshold()
         # Freeze once per Change: resume reuses the facts/guidance the first run saw.
         if state.project_facts is None:
             state.project_facts = config.project_facts
@@ -231,9 +236,11 @@ async def run_change(
             resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
             state.resolved_tiers = resolved_tiers
             state.resolved_steps = resolved_steps
+            state.max_reincarnations = config.context_max_reincarnations()
             state.save(change.state_dir)
             _emit(log, "tiers_resolved",
-                  {"tiers": details["tiers"], "steps": details["steps"]},
+                  {"tiers": details["tiers"], "steps": details["steps"],
+                   "checkpoint_threshold": config.context_checkpoint_threshold()},
                   agent_id=None)
             if opening_intent:
                 _emit(log, "opening_intent", {"text": opening_intent},
@@ -896,6 +903,57 @@ async def _route_agent(
             state.resume_pending = state.step
             state.save(change.state_dir)
         return Pause(), None, {}
+    reincarnation_key = f"step:{step.phase}/{step.name}"
+    if result.handoff_path is not None:
+        # Tier A proactive handoff: the agent approached its window and wrote a
+        # handoff note before stopping. Reincarnate the step fresh seeded from the
+        # handoff (primary) plus the stashed transcript, up to the per-session cap
+        # (shared with Tier B); at the cap, pause to the human (the note is on
+        # disk for them). Same cap counter as Tier B — both are reincarnations.
+        if (state.reincarnation_count(reincarnation_key)
+                < state.max_reincarnations):
+            state.bump_reincarnation(reincarnation_key)
+            stashed = stash_transcript(transcript_dir)
+            _emit(log, "reincarnating",
+                  {"reason": "context threshold crossed"}, agent_id=None)
+            hp = Path(result.handoff_path)
+            seed = reincarnation_seed(
+                stashed_dir=stashed,
+                handoff_path=hp if hp.exists() else None)
+            return await _route_agent(
+                step, workflow, change, state, log,
+                user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+                wrapper_text=wrapper_text, is_resume=False,
+                verify_command=verify_command, non_interactive=non_interactive,
+                scope_only=scope_only, autonomous=autonomous,
+                sandbox_policy=sandbox_policy, seed_opening=seed,
+                project_facts=project_facts, guidance=guidance)
+        state.step_attempt = 0
+        pause = Pause(reason="context_window", kind="reincarnation_cap")
+        _emit(log, "step_completed",
+              {"step": step.name, "kind": "agent",
+               "action": _action_payload(pause), "var_mutations": {}})
+        return pause, None, {}
+    if (result.fatal and result.error is not None
+            and result.error.category == "context_window"
+            and state.reincarnation_count(reincarnation_key)
+            < state.max_reincarnations):
+        # Tier B backstop: recover from the hard window error by reincarnating
+        # the step fresh — stash the transcript, seed the reborn session from it,
+        # and re-enter — instead of pausing, up to the per-session cap.
+        state.bump_reincarnation(reincarnation_key)
+        stashed = stash_transcript(transcript_dir)
+        _emit(log, "reincarnating",
+              {"reason": "context window exceeded"}, agent_id=None)
+        seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None)
+        return await _route_agent(
+            step, workflow, change, state, log,
+            user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+            wrapper_text=wrapper_text, is_resume=False,
+            verify_command=verify_command, non_interactive=non_interactive,
+            scope_only=scope_only, autonomous=autonomous,
+            sandbox_policy=sandbox_policy, seed_opening=seed,
+            project_facts=project_facts, guidance=guidance)
     if result.fatal:
         # Defense in depth: reset the retry count when pausing fatally, matching
         # the success/exhaustion resets. Runs once (at the pause), unlike the
@@ -1085,6 +1143,7 @@ async def _run_agent_invocation(
         verify_command=verify_command,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
+        checkpoint_threshold=state.checkpoint_threshold,
         inject_outcome_field=True,
     )
 

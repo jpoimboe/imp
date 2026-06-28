@@ -203,6 +203,10 @@ class AgentRunResult:
     # resumable so the paused step survives the reload. Stays False for every
     # other pause (coordinator, subagent).
     awaiting_user: bool = False
+    # Tier A proactive handoff: the runner captured an agent-authored handoff
+    # note at this path before stopping. The caller (executor / dispatch_task)
+    # reincarnates the session seeded from it. None on every other outcome.
+    handoff_path: str | None = None
 
 
 class SubagentSuspended(Exception):
@@ -246,16 +250,17 @@ async def _pull_with_inactivity_watchdog(
                 if add_listener is not None:
                     def _bump(_scope: Any = scope) -> None:
                         # Read the module global at call time so a monkeypatched
-                        # window (tests) and the live value agree. While an
-                        # attended agent is blocked awaiting a human reply, FREEZE
-                        # the in-flight deadline to inf (disabling this fail_after
-                        # entirely) instead of a finite now+window: there is no
-                        # periodic activity during the blocked await, so a one-shot
-                        # finite bump would expire one window later and re-introduce
-                        # the false kill. end_solicit_watchdog's note_activity then
-                        # re-fires this with solicit_active False, restoring a fresh
-                        # finite window.
-                        if getattr(coordinator, "solicit_active", False):
+                        # window (tests) and the live value agree. Freeze the
+                        # in-flight deadline to inf while EITHER an attended agent
+                        # is blocked awaiting a human reply (solicit_active) OR a
+                        # foreground tool call is in flight (tool_active): both are
+                        # periodic-activity-free blocked awaits, so a one-shot finite
+                        # bump would expire one window later and re-introduce the
+                        # false kill. end_solicit_watchdog / end_tool_watchdog's
+                        # note_activity then re-fires this with the flag cleared,
+                        # restoring a fresh finite window.
+                        if (getattr(coordinator, "solicit_active", False)
+                                or getattr(coordinator, "tool_active", False)):
                             _scope.deadline = math.inf
                         else:
                             _scope.deadline = (
@@ -414,6 +419,7 @@ def build_agent_invocation(
     verify_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
+    checkpoint_threshold: float | int | None = None,
     inject_outcome_field: bool = False,
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
@@ -481,6 +487,7 @@ def build_agent_invocation(
         verify_command=verify_command,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
+        checkpoint_threshold=checkpoint_threshold,
     )
 
 
@@ -540,6 +547,16 @@ async def drive_invocation(
                         # generator between tools with a dangling tool_use in
                         # the transcript).
                         continue
+                    if event["type"] == "handoff":
+                        # Tier A proactive handoff captured by the runner: a
+                        # control signal (like tool_heartbeat), not a logged
+                        # event. The caller stashes the transcript and
+                        # reincarnates the session seeded from the handoff note.
+                        return AgentRunResult(
+                            output=None, errored=False, paused=False,
+                            fatal=False, delay=None,
+                            handoff_path=(event.get("payload") or {}).get(
+                                "handoff_path"))
                     if emit_events and log is not None:
                         log.append(agent_id=invocation.agent_id,
                                    type=event["type"],

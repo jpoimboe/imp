@@ -6,6 +6,7 @@ from imp.providers.catalog import (
     DEFAULT_WINDOW,
     OPENAI,
     ModelInfo,
+    checkpoint_fraction,
     model_info,
     window_for_model,
 )
@@ -14,9 +15,10 @@ from imp.providers.catalog import (
 def test_claude_code_catalog_opus_1m_entry() -> None:
     info = model_info(CLAUDE_CODE, "opus-1m")
     assert info.window == 1_000_000
-    assert info.betas == ("context-1m-2025-08-07",)
-    # opus-1m is not a real CLI alias; it must map to one the CLI understands.
-    assert info.cli_model == "opus"
+    # The bracketed model-id requests 1M under both subscription and API-key
+    # auth; no custom beta (which subscription auth silently drops).
+    assert info.betas == ()
+    assert info.cli_model == "claude-opus-4-8[1m]"
 
 
 def test_claude_code_catalog_opus_entry_is_plain_200k() -> None:
@@ -48,3 +50,95 @@ def test_window_for_model_substring_fallback() -> None:
     assert window_for_model("gpt-5.5") == 400_000
     assert window_for_model("some-unlisted-model") is None
     assert window_for_model(None) is None
+
+
+def test_checkpoint_fraction_fractional_threshold_passes_through() -> None:
+    # A window fraction is window-independent: returned unchanged.
+    assert checkpoint_fraction(0.8, 200_000) == 0.8
+    assert checkpoint_fraction(0.8, None) == 0.8
+    assert checkpoint_fraction(1.0, 1_000_000) == 1.0
+
+
+def test_checkpoint_fraction_absolute_threshold_divides_by_window() -> None:
+    # An absolute token cap becomes a fraction of the model window.
+    assert checkpoint_fraction(150_000, 200_000) == 0.75
+    assert checkpoint_fraction(500_000, 1_000_000) == 0.5
+
+
+def test_checkpoint_fraction_unresolvable_returns_none() -> None:
+    assert checkpoint_fraction(None, 200_000) is None       # no threshold
+    assert checkpoint_fraction(0, 200_000) is None          # non-positive
+    assert checkpoint_fraction(150_000, None) is None        # absolute cap, unknown window
+    assert checkpoint_fraction(150_000, 0) is None           # absolute cap, zero window
+    assert checkpoint_fraction(-1, 200_000) is None        # negative threshold
+
+
+def test_context_threshold_crossed_fires_at_fraction() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 170000/200000 = 0.85 >= 0.8 -> crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 170_000}, "sonnet", 0.8) is True
+
+
+def test_context_threshold_crossed_not_before_fraction() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 150000/200000 = 0.75 < 0.8 -> not crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 150_000}, "sonnet", 0.8) is False
+
+
+def test_context_threshold_crossed_sums_cache_tokens() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # 100000 + 60000 + 5000 = 165000 / 200000 = 0.825 >= 0.8.
+    assert context_threshold_crossed(
+        {"input_tokens": 100_000, "cache_read_input_tokens": 60_000,
+         "cache_creation_input_tokens": 5_000}, "sonnet", 0.8) is True
+
+
+def test_context_threshold_crossed_unknown_window_never_fires() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    assert context_threshold_crossed(
+        {"input_tokens": 999_999}, "mystery-model", 0.8) is False
+
+
+def test_context_threshold_crossed_absolute_cap_divides_by_window() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    # Absolute cap 150000 on a 200000 window -> warn fraction 0.75; 160000/200000
+    # = 0.80 >= 0.75 -> crossed.
+    assert context_threshold_crossed(
+        {"input_tokens": 160_000}, "sonnet", 150_000) is True
+
+
+def test_context_threshold_crossed_no_threshold_or_usage_never_fires() -> None:
+    from imp.providers.catalog import context_threshold_crossed
+    assert context_threshold_crossed({"input_tokens": 999_999}, "sonnet", None) is False
+    assert context_threshold_crossed(None, "sonnet", 0.8) is False
+    assert context_threshold_crossed({}, "sonnet", 0.8) is False
+
+
+def test_sdk_context_threshold_crossed_fires_at_fraction() -> None:
+    from imp.providers.catalog import sdk_context_threshold_crossed
+    # 170000/200000 = 0.85 >= 0.8 -> crossed.
+    assert sdk_context_threshold_crossed(170_000, 200_000, 0.8) is True
+
+
+def test_sdk_context_threshold_crossed_not_before_fraction() -> None:
+    from imp.providers.catalog import sdk_context_threshold_crossed
+    # 150000/200000 = 0.75 < 0.8 -> not crossed.
+    assert sdk_context_threshold_crossed(150_000, 200_000, 0.8) is False
+
+
+def test_sdk_context_threshold_crossed_absolute_cap_divides_by_window() -> None:
+    from imp.providers.catalog import sdk_context_threshold_crossed
+    # Absolute cap 150000 on a 200000 window -> cutoff 0.75; 160000/200000
+    # = 0.80 >= 0.75 -> crossed.
+    assert sdk_context_threshold_crossed(160_000, 200_000, 150_000) is True
+
+
+def test_sdk_context_threshold_crossed_unavailable_inputs_never_fire() -> None:
+    from imp.providers.catalog import sdk_context_threshold_crossed
+    assert sdk_context_threshold_crossed(None, 200_000, 0.8) is False
+    assert sdk_context_threshold_crossed(170_000, None, 0.8) is False
+    assert sdk_context_threshold_crossed(170_000, 200_000, None) is False
+    assert sdk_context_threshold_crossed(0, 200_000, 0.8) is False
+    assert sdk_context_threshold_crossed(170_000, 0, 0.8) is False

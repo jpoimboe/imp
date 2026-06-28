@@ -400,6 +400,7 @@ class NarrativeBuilder:
         self._latest_prompt_tokens: int | None = None
         self._latest_context_pct: float | None = None
         self._latest_context_window: int | None = None
+        self._latest_checkpoint_threshold: float | int | None = None
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -463,6 +464,11 @@ class NarrativeBuilder:
         """SDK-reported raw context window of the most recent llm_response turn,
         or None before any has arrived."""
         return self._latest_context_window
+
+    @property
+    def latest_checkpoint_threshold(self) -> float | int | None:
+        """Configured context-checkpoint threshold; None before tiers_resolved arrives."""
+        return self._latest_checkpoint_threshold
 
     @property
     def current_burst(self) -> ToolBurstFold | None:
@@ -782,6 +788,16 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
+
+
+def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    reason = p.get("reason")
+    text = f"reincarnating — {reason}" if reason else "reincarnating"
+    self._append(LiteralTextNode(text=text, color_role="lifecycle"))
+
+
+NarrativeBuilder._HANDLERS["reincarnating"] = _h_reincarnating
 
 
 def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1292,16 +1308,15 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
     # "... [interrupted]" — the codex degraded-pause path appends the latter).
     # The brackets keep the match precise (low false-positive).
     kind = p.get("kind")
-    if kind not in ("stalled", "interrupted"):
+    if kind not in ("stalled", "interrupted", "context_exhausted"):
         # The bracketed marker only originates from the failure path; a
         # SUCCESSFUL subagent's content is agent-controlled JSON that may
         # legitimately contain "[stalled]". Gate the scan on is_error so such
         # text can't false-positive into a terminal state.
         text = fold.outcome if fold.is_error else ""
-        kind = next(
-            (s for s in ("stalled", "interrupted") if f"[{s}]" in (text or "")),
-            None)
-    if kind in ("stalled", "interrupted"):
+        _kinds = ("stalled", "interrupted", "context_exhausted")
+        kind = next((s for s in _kinds if f"[{s}]" in (text or "")), None)
+    if kind in ("stalled", "interrupted", "context_exhausted"):
         fold.terminal_state = kind
 
 
@@ -1568,7 +1583,9 @@ NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Fires once at run start with agent_id=None, BEFORE any step_started, so the
     # step stack is empty and _append lands this at the workflow root.
-    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}}}
+    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}},
+    #           "checkpoint_threshold": ...}
+    self._latest_checkpoint_threshold = p.get("checkpoint_threshold")
     tiers = p.get("tiers") or {}
     rows = [
         {"tier": tier, "provider": d.get("provider"), "model": d.get("model"),

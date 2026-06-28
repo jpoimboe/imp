@@ -32,6 +32,7 @@ class FakeResponse:
     stop_reason: str = "end_turn"
     model: str | None = None
     _request_id: str | None = None
+    usage: dict[str, Any] | None = None
 
 
 class _FakeMessages:
@@ -76,8 +77,10 @@ def tool_use(id: str, name: str, input: dict[str, Any]) -> FakeToolUseBlock:
 
 
 def response(*blocks: Any, stop_reason: str = "tool_use",
-             model: str | None = None) -> FakeResponse:
-    return FakeResponse(content=list(blocks), stop_reason=stop_reason, model=model)
+             model: str | None = None,
+             usage: dict[str, Any] | None = None) -> FakeResponse:
+    return FakeResponse(content=list(blocks), stop_reason=stop_reason,
+                        model=model, usage=usage)
 
 
 @dataclass

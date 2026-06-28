@@ -2120,12 +2120,17 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     assert opts.resume == resume_session_id("step:p/s")
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
-    # No new user turn: claude-p continues the loaded session (empty streamed slice).
-    assert created[0].queries[0] == []
-    # The missing tool_result tail was reconciled into the store.
+    # SEND_TO_LLM STREAMS the trailing user turn to kick the next turn: claude-p
+    # never self-starts a loaded --resume session, so an empty streamed slice
+    # would park it (and the runner in receive_response()) forever.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    # The tail was streamed, NOT folded into the native session: the store keeps
+    # only the 2 flushed turns, ending on the assistant tool_use.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 3
-    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert len(reconciled) == 2
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_use"
 
 
 @pytest.mark.anyio
@@ -2180,17 +2185,21 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    # In-place-repair shape WITH a store now takes the native path (not fallback).
-    # imp does NOT force a synthetic tool_result for the dangling t1 — claude-p's
-    # own pairing handles it; the live API acceptance is covered by Part B's
-    # deferred live round-trip tests.
+    # In-place-repair shape WITH a store takes the native path (not fallback).
+    # Its last turn is the user interrupt marker, so it classifies as SEND_TO_LLM:
+    # native resume STREAMS that trailing user turn to kick the next turn (an empty
+    # delta would deadlock). claude-p pairs the dangling t1 from its loaded session
+    # — imp injects no synthetic tool_result. Live acceptance: the SEND_TO_LLM
+    # round-trip in tests/test_resume_all_shapes_live.py.
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
-    assert created[0].queries[0] == []
-    # The dangling t1 turn and the interrupt marker were reconciled into the store
-    # unchanged — no synthetic tool_result was injected.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
+    # The flushed prefix (through the dangling t1 turn) stays in the native
+    # session; only the interrupt marker is streamed, not reconciled in.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 5
+    assert len(reconciled) == 4
 
 
 @pytest.mark.anyio
@@ -2301,11 +2310,19 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
-    assert created[0].queries[0] == []
-    # Repair was bypassed: no synthetic tool_result turn was injected into the
-    # transcript (4 original turns + 1 new assistant turn = 5).
-    assert len(t.load()) == 5
-    # The dangling t1 turn was reconciled into the store as the trailing entry.
+    # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1
+    # to kick the next turn — an empty delta would deadlock (claude-p never
+    # self-starts a loaded --resume session). claude-p pairs the dangling t1 from
+    # its loaded session against this streamed result.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
+    # The synth tool_result turn was injected (4 original + 1 synth user turn +
+    # 1 new assistant turn = 6).
+    assert len(t.load()) == 6
+    # The dangling t1 turn stays in the native session as the trailing reconciled
+    # entry; the synth result is streamed, not reconciled in.
     reconciled = await store.load(skey)
     assert len(reconciled) == 4
     assert reconciled[-1]["message"]["content"][0] == {
@@ -2424,12 +2441,13 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
     assert not Path(captured["cfg"]).exists()
 
 
-def test_build_options_requests_1m_beta_for_opus_1m(tmp_path: Path) -> None:
+def test_build_options_requests_1m_via_model_id_for_opus_1m(tmp_path: Path) -> None:
     runner = ClaudeCodeAgentRunner(model_name="opus-1m")
     opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
-    assert list(opts.betas) == ["context-1m-2025-08-07"]
-    # opus-1m is not a CLI alias; cli_model maps it to the real `opus` model.
-    assert opts.model == "opus"
+    # No custom beta (subscription auth drops it + warns); the 1M window is
+    # requested via the bracketed model-id, which both auth modes honor.
+    assert list(opts.betas) == []
+    assert opts.model == "claude-opus-4-8[1m]"
 
 
 def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:

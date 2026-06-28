@@ -2,6 +2,7 @@
 name: finalize
 label: finalizing
 description: Final gate before the merge queue — opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause). Integration review happens later, at the head of the queue.
+subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework, pause]}
@@ -33,6 +34,9 @@ hunt for defects, classify findings against any severity rubric, or surface anyt
 you notice in the code. `plan-code-reviewer` already reviewed and approved this exact
 diff, and `integration-review` reviews it again at the merge head; a third review
 here is redundant and is exactly where spurious end-of-run human asks are born.
+
+{% include "partials/delegate-exploration.md" %}
+
 Populate the audit fields:
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: the items you surface at the gate are a **closed set** — exactly the

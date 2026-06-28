@@ -72,7 +72,12 @@ from imp.agents.subagents import (
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext, change_home_path, kill_process_group
+from imp.agents.tools.context import (
+    ToolContext,
+    change_home_path,
+    kill_process_group,
+    suspend_inactivity_watchdog,
+)
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -624,7 +629,8 @@ def _wrap_one(
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
             start = time.perf_counter()
-            raw = await t.async_invoke(ctx, clean_args)
+            with suspend_inactivity_watchdog(ctx):
+                raw = await t.async_invoke(ctx, clean_args)
             dur_ms = (time.perf_counter() - start) * 1000.0
             if tuid:
                 state.tool_durations[tuid] = dur_ms
@@ -1234,6 +1240,7 @@ class ClaudeCodeAgentRunner:
         ctx.verify_command = invocation.verify_command
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
@@ -1313,6 +1320,17 @@ class ClaudeCodeAgentRunner:
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
+        # A SEND_TO_LLM tail needs the LLM to RESPOND to a trailing user turn,
+        # but claude-p never generates from a loaded --resume session alone — it
+        # blocks reading stdin for an input message. Folding that user turn into
+        # the native session (resume_base = len) makes the streamed delta empty,
+        # so claude-p waits forever and the runner parks in receive_response()
+        # (a deadlock broken only by the inactivity watchdog). Instead, keep the
+        # trailing unanswered user turn(s) OUT of the reconciled session and
+        # stream them as the delta — they are the message that kicks the turn.
+        if native_resume and classify_resume(existing) is ResumeState.SEND_TO_LLM:
+            while resume_base > 0 and existing[resume_base - 1].role == "user":
+                resume_base -= 1
         config_dir: Path | None = None
         if is_fresh:
             config_dir = materialize_fresh_config_dir()
@@ -1342,12 +1360,14 @@ class ClaudeCodeAgentRunner:
             # ids for which repair synthesized placeholders — must not be named succeeded
             dangling_ids: set[str] = set()
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
-            # Persist a synthetic tool_result so the SEND_TO_LLM path has a
-            # balanced transcript; emit `tool_result` events so `imp log`
-            # shows what the agent sees on the next turn. Replay-path only: a
-            # native resume lets claude-p pair the tail from its own session
-            # (reconcile_store_tail brings the store up to date), so imp must NOT
-            # also inject a synthetic result — the two tail-fixups are exclusive.
+            # Synthesize a placeholder tool_result so the tail is balanced and
+            # emit `tool_result` events so `imp log` shows what the agent sees on
+            # the next turn. This applies to native resume too: claude-p does NOT
+            # auto-pair-and-generate a dangling tail from its loaded session — it
+            # parks reading stdin, so the runner deadlocks in receive_response().
+            # The synth result is appended AFTER resume_base was captured, so it
+            # streams as the delta (claude-p pairs the dangling call in the loaded
+            # session and the result kicks the next turn).
             if invocation.balance_on_resume and not native_resume:
                 balance_success_on_resume(
                     messages, transcript, elog, aid,
@@ -1358,6 +1378,11 @@ class ClaudeCodeAgentRunner:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
+            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
+                synth = repair_dangling_tool_use_on_resume(messages, transcript)
+                if synth is not None:
+                    for rb in synth:
+                        elog.append_tool_result(agent_id=aid, block=rb)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE and not native_resume:
                 yield {"type": "error", "payload": {
@@ -1521,6 +1546,11 @@ class ClaudeCodeAgentRunner:
             # receive_response() terminates after the first ResultMessage).
             next_query: Any = _stream_history(
                 messages[resume_base:] if native_resume else messages)
+            from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+            from imp.providers.catalog import sdk_context_threshold_crossed
+            # Tier A proactive-handoff watch state (Mechanism 3).
+            handoff_phase: str | None = None
+            handoff_path = handoff_path_for(invocation.transcript_dir)
             while True:
                 await client.query(next_query)
                 requery = False
@@ -1580,6 +1610,51 @@ class ClaudeCodeAgentRunner:
                                     llm_stop_reason = frag["stop_reason"]
                                 if frag.get("usage"):
                                     llm_usage = frag["usage"]
+                                # Tier A proactive handoff (Mechanism 3): on the
+                                # configured context-threshold crossing, interrupt the
+                                # live turn and replay history with a handoff
+                                # instruction appended — before the SDK auto-compacts
+                                # (so no ContextWindowError). complete_step_called is set
+                                # later (per-block loop), so detect the completing turn
+                                # from blocks here, canonicalizing the name: the SDK
+                                # presents it as mcp__imp__complete_step, so a bare
+                                # compare would miss it and wrongly preempt it.
+                                if (handoff_phase is None
+                                        and invocation.checkpoint_threshold is not None):
+                                    completing = any(
+                                        isinstance(b, ToolUseBlock)
+                                        and _canon_tool_name(b.name) == "complete_step"
+                                        for b in imp_msg.content)
+                                    cu_fields = await _context_usage_fields(client)
+                                    if (not completing
+                                            and sdk_context_threshold_crossed(
+                                                cu_fields.get("context_tokens"),
+                                                cu_fields.get("context_window"),
+                                                invocation.checkpoint_threshold)):
+                                        # Record the crossing turn before interrupting,
+                                        # then balance its dangling tool_use in
+                                        # messages/transcript for the replay contract.
+                                        # Do NOT log a synthetic tool_result: it never
+                                        # ran, and an orphan result (no matching
+                                        # tool_call event) renders as a stray errored
+                                        # "tool" entry.
+                                        await _flush_llm_group()
+                                        with contextlib.suppress(Exception):
+                                            await client.interrupt()
+                                        repair_dangling_tool_use_on_resume(
+                                            messages, transcript)
+                                        instr_msg = Message(
+                                            role="user",
+                                            content=(TextBlock(
+                                                text=handoff_instruction(handoff_path)),))
+                                        messages.append(instr_msg)
+                                        transcript.append(instr_msg)
+                                        elog.append_user_message(
+                                            agent_id=aid, message=instr_msg)
+                                        next_query = _stream_history(messages)
+                                        handoff_phase = "instruction_sent"
+                                        requery = True
+                                        break
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
@@ -1595,12 +1670,10 @@ class ClaudeCodeAgentRunner:
                                             block=ToolUseBlock(id=b.id, name=norm,
                                                                input=b.input))
                                         continue
-                                    # Dual-write `complete_step` state at the
-                                    # runner level so the test fakes don't need
-                                    # to drive the MCP wrapper. In production the
-                                    # wrapper *also* sets these fields when the
-                                    # SDK invokes it — idempotent write.
-                                    if b.name == "complete_step":
+                                    # Dual-write: test fakes don't drive the MCP wrapper; production
+                                    # wrapper also sets these — idempotent. SDK presents the tool as
+                                    # mcp__imp__complete_step so canonicalize before comparing.
+                                    if _canon_tool_name(b.name) == "complete_step":
                                         state.complete_step_called = True
                                         state.complete_step_args = b.input
                                     # Ceiling guard: observational here. With
@@ -1775,6 +1848,17 @@ class ClaudeCodeAgentRunner:
                                 yield perr.make_error_event(
                                     loop_err, kind=getattr(loop_err, "kind", ""))
                                 return
+
+                        if handoff_phase == "instruction_sent":
+                            # The handoff-writing turn completed: signal the
+                            # captured handoff and stop. drive_invocation maps
+                            # this to AgentRunResult.handoff_path; the engine
+                            # stashes the transcript and reincarnates the session
+                            # seeded from the note. Wins over a stray
+                            # complete_step on this turn.
+                            yield {"type": "handoff",
+                                   "payload": {"handoff_path": str(handoff_path)}}
+                            return
 
                         # End-of-turn:
                         #   a) complete_step captured → emit agent_output, return

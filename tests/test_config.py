@@ -170,3 +170,15 @@ def test_providers_duplicate_rejected(tmp_path: Path) -> None:
             "  low: {openai: gpt-5.4-mini}\n"
             "  medium: {openai: gpt-5.3-codex}\n"
             "  high: {openai: gpt-5.5}\n")
+
+
+def test_context_accessors_read_overrides() -> None:
+    cfg = Config(context={"checkpoint_threshold": 0.65, "max_reincarnations": 5})
+    assert cfg.context_checkpoint_threshold() == 0.65
+    assert cfg.context_max_reincarnations() == 5
+
+
+def test_context_accessors_default_when_unset() -> None:
+    cfg = Config()
+    assert cfg.context_checkpoint_threshold() == 0.8
+    assert cfg.context_max_reincarnations() == 2
