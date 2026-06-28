@@ -296,17 +296,19 @@ def _pause_lines(
     ]
 
 
-def _pause_facts(change: Change) -> tuple[str, str | None, str]:
+def _pause_facts(change: Change) -> tuple[str, str | None, str, str | None]:
     name = change.id
-    phase = _phase_from_events(list(change.event_log().read()))
-    return name, phase, change.id
+    events = list(change.event_log().read())
+    phase = _phase_from_events(events)
+    reason = _pause_reason(events)
+    return name, phase, change.id, reason
 
 
 def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    name, phase, token = _pause_facts(change)
-    for ln in _pause_lines(name, phase, token, color=color):
+    name, phase, token, reason = _pause_facts(change)
+    for ln in _pause_lines(name, phase, token, reason=reason, color=color):
         print(ln)
 
 
