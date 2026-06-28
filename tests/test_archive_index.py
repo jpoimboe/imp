@@ -158,3 +158,19 @@ def test_ingest_last_event_ts_all_malformed(tmp_path: Path) -> None:
         ).fetchone()[0] is None
     finally:
         conn.close()
+
+
+def test_completed_rows_reads_denormalized_last_event_ts(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, status, step, title, created_at,"
+            " last_event_ts) VALUES (?, ?, ?, ?, ?, ?)",
+            ("alpha", "completed", "finalize", "Alpha",
+             "2026-06-01T00:00:00+00:00", "2026-06-01T09:00:00+00:00"))
+        conn.commit()
+        assert index.completed_rows(conn) == [(
+            "alpha", "completed", "finalize", "2026-06-01T09:00:00+00:00",
+            "Alpha", "2026-06-01T00:00:00+00:00", None)]
+    finally:
+        conn.close()
