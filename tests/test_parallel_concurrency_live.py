@@ -34,6 +34,7 @@ def _assert_two_task_dispatches_overlap(events: list[dict]) -> None:
         "task calls did not both precede the first task result (not concurrent)")
 
 
+@pytest.mark.codex_parallel
 @pytest.mark.anyio
 @pytest.mark.xfail(
     reason="codex 0.142.3 serializes MCP sub_agent dispatch: the installed CLI "

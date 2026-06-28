@@ -52,6 +52,7 @@ timeout = 60
 timeout_method = "signal"
 markers = [
     "real_sandbox_policy: opt out of the no-bwrap sandbox fallback fixture (tests asserting the raw sandbox posture)",
+    "codex_parallel: codex parallel-MCP-dispatch concurrency probe; XFAIL on codex builds that serialize MCP sub_agent dispatch. Deselected from the default test-live via -m 'not codex_parallel'; run on demand with `make test-live-codex-parallel`.",
 ]
 filterwarnings = [
     # Regression guards — message-scoped so they fire ONLY on the specific

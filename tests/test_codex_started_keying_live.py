@@ -16,6 +16,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.mark.codex_parallel
 @pytest.mark.anyio
 @pytest.mark.xfail(
     reason="codex 0.142.3 serializes MCP sub_agent dispatch, so the concurrency-"
