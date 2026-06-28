@@ -396,6 +396,25 @@ def test_max_reincarnations_defaults_to_two(tmp_path: Path) -> None:
     assert State.load(tmp_path).max_reincarnations == 2
 
 
+def test_state_resume_target_defaults_to_none_and_round_trips(tmp_path: Path) -> None:
+    s = State(id="c1", step="plan", step_attempt=0, status="paused")
+    s.save(tmp_path)
+
+    # Key genuinely absent from on-disk JSON (forward-compat path) ⇒ loads as None.
+    raw = json.loads((tmp_path / "state.json").read_text())
+    del raw["resume_target"]
+    (tmp_path / "state.json").write_text(json.dumps(raw))
+    assert State.load(tmp_path).resume_target is None
+
+    # An explicitly stamped "prompt" survives a save() -> load() cycle and is
+    # written into the on-disk payload.
+    s.resume_target = "prompt"
+    s.save(tmp_path)
+    assert State.load(tmp_path).resume_target == "prompt"
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["resume_target"] == "prompt"
+
+
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
     # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
     # KeyboardInterrupt) must not leak a .state-* temp file beside state.json
