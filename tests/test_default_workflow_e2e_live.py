@@ -74,9 +74,9 @@ async def test_live_minimal_change_completes_one_step(
         "default-workflow: imp\n"
         "providers: [anthropic]\n"
         "tiers:\n"
-        "  low:    {anthropic: claude-sonnet-4-6}\n"
-        "  medium: {anthropic: claude-sonnet-4-6}\n"
-        "  high:   {anthropic: claude-sonnet-4-6}\n"
+        "  low:    {anthropic: claude-haiku-4-5-20251001}\n"
+        "  medium: {anthropic: claude-haiku-4-5-20251001}\n"
+        "  high:   {anthropic: claude-haiku-4-5-20251001}\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")

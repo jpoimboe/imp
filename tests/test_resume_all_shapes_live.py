@@ -37,7 +37,7 @@ from imp.providers.claude_code_session_store import (
 from tests._live import opted_in
 from tests.conftest import _init_repo
 
-_MODEL = "claude-sonnet-4-5"
+_MODEL = "claude-haiku-4-5-20251001"
 
 
 def _live_inv(tmp_path: Path) -> AgentInvocation:

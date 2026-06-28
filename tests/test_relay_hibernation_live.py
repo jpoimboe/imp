@@ -64,8 +64,8 @@ def _seed_cc_project(root: Path) -> None:
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}
-          medium: {claude_code: claude-sonnet-4-5}
-          high: {claude_code: claude-opus-4-5}
+          medium: {claude_code: claude-haiku-4-5-20251001}
+          high: {claude_code: claude-haiku-4-5-20251001}
     """))
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(

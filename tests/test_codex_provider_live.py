@@ -74,7 +74,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
             tier=None,
         ),
         provider_name="codex",
-        model_name="gpt-5.5",
+        model_name="gpt-5.4-mini",
         system_prompt=(
             'Reply by calling complete_step with word="banana". Do not call '
             "any other tools and do not write any files."
@@ -94,7 +94,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
 async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> None:
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
-    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner = CodexAgentRunner(model_name="gpt-5.4-mini")
     inv = _inv(tmp_path)
     events: list[Any] = []
     async for ev in runner.run(inv):
@@ -148,7 +148,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     real codex turn terminates under cap pressure rather than looping."""
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
-    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner = CodexAgentRunner(model_name="gpt-5.4-mini")
     inv = _inv(tmp_path)
     # Give the agent a second (read-only) tool so it can make two calls, and
     # order them so the SECOND call (complete_step) is the one that trips cap=1.

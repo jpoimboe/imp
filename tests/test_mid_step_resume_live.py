@@ -84,8 +84,8 @@ def _seed_project(tmp_path: Path) -> None:
         providers: [anthropic]
         tiers:
           low: {anthropic: claude-haiku-4-5-20251001}
-          medium: {anthropic: claude-sonnet-4-6}
-          high: {anthropic: claude-opus-4-7}
+          medium: {anthropic: claude-haiku-4-5-20251001}
+          high: {anthropic: claude-haiku-4-5-20251001}
     """))
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(

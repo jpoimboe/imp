@@ -56,7 +56,11 @@ _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
   tests/test_default_workflow_e2e_live_openai.py \
   tests/test_default_workflow_e2e_live_claude_code.py \
-  tests/test_mid_step_resume_live.py
+  tests/test_mid_step_resume_live.py \
+  tests/test_openai_gate_feedback_resume_live.py \
+  tests/test_resume_all_shapes_live.py \
+  tests/test_native_session_resume_live.py \
+  tests/test_relay_hibernation_live.py
 
 .PHONY: test-live
 test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
