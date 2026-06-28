@@ -3111,7 +3111,7 @@ async def test_send_to_llm_tail_with_feedback_replays_and_injects(
     the replay path so balance_success_on_resume injects the feedback as the next
     user turn. Native resume would skip that injection and lose the feedback."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
     from imp.providers import claude_code as cc
     from imp.providers.claude_code_session_store import session_key
 
@@ -3154,6 +3154,50 @@ async def test_send_to_llm_tail_with_feedback_replays_and_injects(
     assert any(
         "REVISE: tighten the plan." in cc._text_of(m)
         for m in replayed if m.role == "user")
+    # ...and the manifest is NOT also appended (balance already put a turn last —
+    # a manifest after it would bury the feedback / stack two user turns).
+    assert not any(
+        isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
+        for m in replayed for b in m.content)
+
+
+@pytest.mark.anyio
+async def test_balance_fallback_no_store_builds_manifest(tmp_path: Path) -> None:
+    """A production resume (balance_on_resume=True) with NO store falls to
+    stream-json replay and must still build the redo-defusing manifest. The
+    manifest names prior tool calls succeeded so the replay's is_error
+    placeholders don't drive a redo; it was previously gated out on the
+    balance_on_resume path even though balance_success_on_resume is a no-op for a
+    SEND_TO_LLM tail (no feedback turn to protect)."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv = replace(inv, balance_on_resume=True)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    # No session store → stream-json fallback (balance path, no native resume).
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                     input={"path": "spec.md"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=False),)))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: FakeClaudeSDKClient(
+            opts, scripted_messages=scripted))
+    [ev async for ev in runner.run(inv)]
+
+    replayed = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert any(
+        any(isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
+            for b in m.content)
+        for m in replayed if m.role == "user"
+    ), "manifest not built on the balance_on_resume no-store fallback"
 
 
 @pytest.mark.anyio

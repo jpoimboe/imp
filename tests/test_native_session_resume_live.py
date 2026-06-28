@@ -283,13 +283,12 @@ def test_no_store_fallback_replays_deferred_mcp_tools_without_400(
         "deferred-MCP-tool fallback replay tripped the 400 Part C fixes"
     )
     # ckx9f5/Part C contract: the fallback replay RECALLED the prior reads instead
-    # of redoing them. ENABLE_TOOL_SEARCH=false (Part C's chosen defense — the
-    # spike picked the CLI knob over manifest priming) declares the deferred MCP
-    # tools up front, so the replayed tool_use blocks neither 400 nor get
-    # overwritten with is_error placeholders that would drive a redo. Assert that
-    # behavior, not the manifest text: the resume-manifest is intentionally NOT
-    # built on the production balance_on_resume path (claude_code.py gates it on
-    # `not balance_on_resume`, and the executor sets that True on every resume).
+    # of redoing them. Two stacked defenses make this hold: ENABLE_TOOL_SEARCH=false
+    # declares the deferred MCP tools up front so the replayed tool_use blocks don't
+    # 400, and the resume-manifest names the prior reads as succeeded so the replay's
+    # is_error placeholders don't drive a redo. Assert that behavior, not the
+    # manifest text (which lives in a user_message payload with an em-dash that
+    # json.dumps would escape).
     post = [Path(p).name for p in _read_paths(events)]
     assert post.count("a.txt") == 1, post
     assert post.count("b.txt") == 1, post

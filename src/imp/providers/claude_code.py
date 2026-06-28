@@ -1359,6 +1359,10 @@ class ClaudeCodeAgentRunner:
             tool_calls_used = 0  # per-invocation; never inherit history
             # ids for which repair synthesized placeholders — must not be named succeeded
             dangling_ids: set[str] = set()
+            # The user turn balance_success_on_resume appended (a synthetic
+            # tool_result and/or feedback), or None when it was a no-op. Gates the
+            # manifest below: skip it only when balance already put a turn last.
+            balanced_msg: Message | None = None
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Synthesize a placeholder tool_result so the tail is balanced and
             # emit `tool_result` events so `imp log` shows what the agent sees on
@@ -1369,7 +1373,7 @@ class ClaudeCodeAgentRunner:
             # streams as the delta (claude-p pairs the dangling call in the loaded
             # session and the result kicks the next turn).
             if invocation.balance_on_resume and not native_resume:
-                balance_success_on_resume(
+                balanced_msg = balance_success_on_resume(
                     messages, transcript, elog, aid,
                     wrapper_text=invocation.retry_feedback)
             elif not native_resume:
@@ -1423,9 +1427,14 @@ class ClaudeCodeAgentRunner:
             if resume_state is not ResumeState.AWAITING_USER:
                 drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
-            # ckx9f5: name prior tool calls succeeded so stream-json replay's placeholder
-            # errors don't trigger redo; skip the balance path (retry feedback stays last).
-            if not invocation.balance_on_resume and not native_resume:
+            # ckx9f5: name prior tool calls succeeded so stream-json replay's
+            # placeholder errors don't trigger redo. Build on every replay
+            # (non-native) entry EXCEPT when balance_success_on_resume already
+            # appended a turn (`balanced_msg`) — a manifest after it would either
+            # bury the feedback or stack two user turns. Keyed on balanced_msg,
+            # not balance_on_resume: the executor sets the flag on every resume, so
+            # gating on it skipped the manifest for the whole production fallback.
+            if not native_resume and balanced_msg is None:
                 _last_user = next(
                     (m for m in reversed(messages) if m.role == "user"), None)
                 _already_manifested = _last_user is not None and any(
