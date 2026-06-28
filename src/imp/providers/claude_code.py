@@ -1147,6 +1147,7 @@ class ClaudeCodeAgentRunner:
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
+            include_partial_messages=True,
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
             env=env,
             # Pin the `claude` subprocess to the change's project_root. Without
@@ -1614,6 +1615,9 @@ class ClaudeCodeAgentRunner:
                             "message": "runner cancelled by interrupt",
                         }}
                         return
+
+                    if invocation.coordinator is not None:
+                        invocation.coordinator.note_activity()
 
                     # Post-API-site analog (Decision 10): one sweep per
                     # received SDK message — the model-API/CLI latency between
