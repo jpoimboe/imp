@@ -761,6 +761,19 @@ def _exit_worktree(change: Change) -> None:
         change.set_project_root(change.control_root)
 
 
+def _merge_blocked_pause(
+    log: EventLog, step: Step, change: Change, status: str, detail: str | None,
+) -> tuple[Action, str | None, dict[str, object]]:
+    reason = "worktree_dirty" if status == "DIRTY" else status.lower()
+    _emit(log, "merge_blocked",
+          {"reason": reason, "base": change.base_branch, "detail": detail})
+    pause = Pause(reason="merge_blocked", kind=reason)
+    _emit(log, "step_completed",
+          {"step": step.name, "kind": "merge_and_exit_worktree",
+           "action": _action_payload(pause), "var_mutations": {}})
+    return pause, None, {}
+
+
 async def _route_merge_and_exit_worktree(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
@@ -785,17 +798,23 @@ async def _route_merge_and_exit_worktree(
         state.save(change.state_dir)
         _exit_worktree(change)
 
-    if result.status in ("CONFLICT", "REFUSED", "DIRTY"):
-        reason = "worktree_dirty" if result.status == "DIRTY" else result.status.lower()
-        _emit(log, "merge_blocked",
-              {"reason": reason, "base": change.base_branch, "detail": result.detail})
-        pause = Pause(reason="merge_blocked", kind=reason)
-        _emit(log, "step_completed",
-              {"step": step.name, "kind": "merge_and_exit_worktree",
-               "action": _action_payload(pause), "var_mutations": {}})
-        return pause, None, {}
-
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
+
+    if isinstance(match.action, Goto):                # a recovery route
+        attempt = state.loop_counts.get(step.name, 0)
+        _emit(log, "merge_retry",
+              {"status": result.status, "attempt": attempt + 1,
+               "max": step.max_loops, "base": change.base_branch})
+        state.vars.update(match.var_mutations)
+        action, _, muts = _finish(log, step, match, state)
+        # _finish hardcodes its feedback element to None; thread the rule's own
+        # feedback so a DIRTY route's preamble reaches the reconciler (mirrors the
+        # agent route).
+        return action, match.action.feedback, muts
+
+    if isinstance(match.action, Pause):               # REFUSED or any other status
+        return _merge_blocked_pause(log, step, change, result.status, result.detail)
+
     state.vars.update(match.var_mutations)
     return _finish(log, step, match, state)
 
