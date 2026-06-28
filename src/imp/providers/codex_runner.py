@@ -1260,6 +1260,9 @@ def process_event(
             "cache_creation_input_tokens": 0,
             "reasoning_output_tokens": reasoning_tokens,
         }
+        # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
+        # — the same anthropic-shaped dict context_threshold_crossed consumes.
+        state["pending_usage"] = normalized
         # Attach to the most recent llm_response payload for this agent_id.
         _attach_usage_to_last_llm_response(elog, agent_id=agent_id,
                                            usage=normalized)
