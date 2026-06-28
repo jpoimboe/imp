@@ -16,17 +16,14 @@ runners:
     tool_results, so the runner watches for the next assistant message and
     extracts the captured args from a shared state dict.
 
-History writes are suppressed differently depending on run mode.  Fresh starts
-run against an isolated ephemeral `CLAUDE_CONFIG_DIR` created by
-`materialize_fresh_config_dir` and removed in `run()`'s finally block; with a
-private home directory the suppression flags are unnecessary.  Resume and
-stream-json-replay paths have no ephemeral config dir, so they keep
-`CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` in the subprocess env and pass
-`extra_args={"no-session-persistence": None}` (the documented forwarding path
-for `--no-session-persistence`; spec §6.11, verified in Spike 7 and SDK
-`_internal/transport/subprocess_cli.py`) to avoid writing to `~/.claude`
-(CC 2.x otherwise writes an `ai-title` session stub to ~/.claude/projects/).
-Imp persists its own transcripts.
+History isolation, by config dir. claude-p (CC 2.x) writes an `ai-title` session
+stub to its `CLAUDE_CONFIG_DIR`/projects/ on every spawn; imp keeps that off the
+real `~/.claude` by controlling where that dir points. Fresh and stream-json
+replay both run against an imp-materialized ephemeral `CLAUDE_CONFIG_DIR`
+(`materialize_fresh_config_dir`, removed in `run()`'s finally) — a throwaway sink
+whose stub is discarded on cleanup. Native resume is the only disposition that
+leaves `config_dir = None`; it runs under the SDK's own materialized temp dir.
+No disposition writes to the real `~/.claude`. Imp persists its own transcripts.
 """
 
 from __future__ import annotations
