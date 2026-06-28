@@ -40,6 +40,7 @@ from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef
 from imp.providers import errors as perr
+from imp.providers.catalog import context_tokens_from_usage
 from imp.providers.codex_config import (
     AuthMode,
     detect_auth_mode,
@@ -944,11 +945,13 @@ class CodexAgentRunner:
 
 def _attach_usage_to_last_llm_response(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
+    context_tokens: int | None = None,
 ) -> None:
     """Patch the most recent `llm_response` payload for `agent_id` with
-    `usage`. Required on every `EventLog` implementation — see
-    `src/imp/engine/state.py`."""
-    elog.update_last_llm_response_usage(agent_id=agent_id, usage=usage)
+    `usage` (and the canonical `context_tokens` when supplied). Required on
+    every `EventLog` implementation — see `src/imp/engine/state.py`."""
+    elog.update_last_llm_response_usage(
+        agent_id=agent_id, usage=usage, context_tokens=context_tokens)
 
 
 def _serialize_mcp_result(result: Any) -> str:
@@ -1305,9 +1308,11 @@ def process_event(
         # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
         # — the same anthropic-shaped dict context_threshold_crossed consumes.
         state["pending_usage"] = normalized
-        # Attach to the most recent llm_response payload for this agent_id.
-        _attach_usage_to_last_llm_response(elog, agent_id=agent_id,
-                                           usage=normalized)
+        # Attach to the most recent llm_response payload for this agent_id,
+        # carrying the canonical context_tokens computed from the same dict.
+        _attach_usage_to_last_llm_response(
+            elog, agent_id=agent_id, usage=normalized,
+            context_tokens=context_tokens_from_usage(normalized))
         return
 
     # Default arm: turn.failed / error / unknown —
