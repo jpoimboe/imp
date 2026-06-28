@@ -349,6 +349,10 @@ def test_imp_flat_gap_check_is_end_of_change_backstop() -> None:
     assert "uncovered" in low
     assert "needs-decision" in low and "suppress" in low  # a parked decision suppresses a replan
     assert "more_plans" in low
+    # Sizing projection is at natural boundaries now — no ~5-8 floor grain.
+    assert "5\u20138" not in text
+    assert "natural dependency boundaries" in low
+    assert "no task-count floor" in low
 
 
 def test_imp_flat_gap_check_keeps_clamp_rules() -> None:

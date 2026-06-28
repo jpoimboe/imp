@@ -52,12 +52,11 @@ each lap, because you run only once at change end. You touch it only when you au
 **corrective** plan (`more_plans: true`), where you must bump it. Emit your honest
 anticipated number of plans for the whole spec, already clamped:
 
-**Project the corrective scope under the same greedy ~5–8 bundling `plan-writer`
-carves.** Re-derive the still-uncovered scope (the backstop derivation you already
-perform), mentally bundle it into the **largest** green-preserving ~5–8-task plans —
-splitting only at genuine dependency boundaries, deferring only forced-atomic
-remainders — and count the resulting plans on top of what is already implemented. The
-clamp rules:
+**Project the corrective scope at natural dependency boundaries**: group the
+still-uncovered scope into coherent plans — bundling scope that must land
+together, splitting where slices are independent, with no trivial one-task
+slivers and no task-count floor — and count the resulting plans on top of what is
+already implemented. The clamp rules:
 
 - `plan_total` MUST be `>= {{ vars.plan_index }}` (the current plan number).
 - When `more_plans` is **true**, `plan_total` MUST be **strictly greater** than

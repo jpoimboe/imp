@@ -964,6 +964,10 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     assert "uncovered" in low
     assert "needs-decision" in low and "suppress" in low
     assert "more_plans" in low
+    # Sizing projection is at natural boundaries now — no ~5-8 floor grain.
+    assert "5\u20138" not in text
+    assert "natural dependency boundaries" in low
+    assert "no task-count floor" in low
     # Clamp rules survive verbatim.
     assert "the current plan number" in low
     assert "strictly greater" in low
