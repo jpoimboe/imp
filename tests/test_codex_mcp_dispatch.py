@@ -365,3 +365,52 @@ def test_codex_has_no_wait_for_user_pause_intercept() -> None:
     # Only the AwaitingUserInput import path keeps the module name.
     assert runner_src.count("wait_for_user") == 1
     assert inspect.getsource(mcp_mod).count("wait_for_user") == 0
+
+
+def test_dispatch_brackets_tool_watchdog(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    seen = {"active": None}
+
+    def _fn(ctx, text):
+        seen["active"] = ctx.coordinator.tool_active
+        return f"echo:{text}"
+
+    rec = Tool(name="rec", description="",
+               input_schema={"type": "object",
+                             "properties": {"text": {"type": "string"}},
+                             "required": ["text"]}, fn=_fn)
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    state = RunState(cap=10)
+    out = asyncio.run(dispatch_tool(
+        tool=rec, args={"text": "hi"}, ctx=ctx, state=state))
+
+    assert out == "echo:hi"
+    assert seen["active"] is True       # watchdog frozen DURING the tool call
+    assert coord.tool_active is False   # balanced after return -> window re-arms
+
+
+def test_dispatch_brackets_tool_watchdog_on_raise(tmp_path: Path) -> None:
+    """Watchdog counter stays balanced when a tool raises — guards against
+    suspend_inactivity_watchdog being moved outside the try block."""
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+
+    def _fn(ctx):
+        raise RuntimeError("boom")
+
+    boom = Tool(name="boom", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    state = RunState(cap=10)
+    # RuntimeError is swallowed by dispatch_tool's `except Exception` arm
+    out = asyncio.run(dispatch_tool(tool=boom, args={}, ctx=ctx, state=state))
+
+    assert "RuntimeError" in out
+    assert coord.tool_active is False
