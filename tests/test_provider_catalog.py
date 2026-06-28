@@ -7,6 +7,7 @@ from imp.providers.catalog import (
     OPENAI,
     ModelInfo,
     checkpoint_fraction,
+    context_tokens_from_usage,
     model_info,
     window_for_model,
 )
@@ -142,3 +143,27 @@ def test_sdk_context_threshold_crossed_unavailable_inputs_never_fire() -> None:
     assert sdk_context_threshold_crossed(170_000, 200_000, None) is False
     assert sdk_context_threshold_crossed(0, 200_000, 0.8) is False
     assert sdk_context_threshold_crossed(170_000, 0, 0.8) is False
+
+
+def test_context_tokens_from_usage_anthropic_cache_split() -> None:
+    # Anthropic input_tokens EXCLUDES cached tokens, so the true prompt size is
+    # the three-way sum: 1000 + 5000 + 200 = 6200.
+    usage = {
+        "input_tokens": 1000,
+        "cache_read_input_tokens": 5000,
+        "cache_creation_input_tokens": 200,
+        "output_tokens": 50,
+    }
+    assert context_tokens_from_usage(usage) == 6200
+
+
+def test_context_tokens_from_usage_openai_inclusive() -> None:
+    # OpenAI Responses carries no cache fields, so the sum reduces to
+    # input_tokens (which already includes cache). Not total_tokens, not output.
+    usage = {"input_tokens": 1234, "output_tokens": 99, "total_tokens": 1333}
+    assert context_tokens_from_usage(usage) == 1234
+
+
+def test_context_tokens_from_usage_empty_is_zero() -> None:
+    assert context_tokens_from_usage({}) == 0
+    assert context_tokens_from_usage(None) == 0

@@ -238,3 +238,47 @@ def test_append_tool_result_stamps_duration_ms_when_provided(tmp_path: Path) -> 
     b = log.append_tool_result(
         agent_id="A", block=ToolResultBlock(tool_use_id="t2", content="ok"))
     assert "duration_ms" not in b["payload"]
+
+
+def test_in_memory_patch_lands_context_tokens_on_llm_response() -> None:
+    log = InMemoryEventLog()
+    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_llm_response_usage(
+        agent_id="step:a",
+        usage={"input_tokens": 800, "cache_read_input_tokens": 200},
+        context_tokens=1000)
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert resp["payload"]["context_tokens"] == 1000
+    assert resp["payload"]["usage"]["cache_read_input_tokens"] == 200
+
+
+def test_in_memory_patch_omits_context_tokens_when_none() -> None:
+    log = InMemoryEventLog()
+    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_llm_response_usage(
+        agent_id="step:a", usage={"input_tokens": 5})
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert "context_tokens" not in resp["payload"]
+
+
+def test_jsonl_usage_patch_row_carries_context_tokens(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_llm_response_usage(
+        agent_id="step:a", usage={"input_tokens": 800}, context_tokens=1000)
+    patch = next(e for e in _read(tmp_path / "e.jsonl")
+                 if e["type"] == "llm_response_usage_patch")
+    assert patch["payload"]["context_tokens"] == 1000
+
+
+def test_jsonl_usage_patch_row_omits_context_tokens_when_none(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+                            raw={}, usage={}, stop_reason=None)
+    log.update_last_llm_response_usage(agent_id="step:a", usage={"input_tokens": 5})
+    patch = next(e for e in _read(tmp_path / "e.jsonl")
+                 if e["type"] == "llm_response_usage_patch")
+    assert "context_tokens" not in patch["payload"]

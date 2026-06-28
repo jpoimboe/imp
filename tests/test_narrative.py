@@ -2560,3 +2560,14 @@ def test_builder_captures_checkpoint_threshold_from_tiers_resolved() -> None:
     b.add({"type": "tiers_resolved", "agent_id": None,
            "payload": {"tiers": {}, "steps": {}, "checkpoint_threshold": 0.65}})
     assert b.latest_checkpoint_threshold == 0.65
+
+
+def test_usage_prompt_tokens_sums_input_and_both_cache_buckets() -> None:
+    usage = {"input_tokens": 100, "cache_read_input_tokens": 20,
+             "cache_creation_input_tokens": 5}
+    assert nv.usage_prompt_tokens(usage) == 125
+
+
+def test_usage_prompt_tokens_none_when_empty() -> None:
+    assert nv.usage_prompt_tokens(None) is None
+    assert nv.usage_prompt_tokens({}) is None

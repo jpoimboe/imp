@@ -105,6 +105,21 @@ def checkpoint_fraction(
     return threshold / window
 
 
+def context_tokens_from_usage(usage: dict[str, Any] | None) -> int:
+    """The model's view of prompt size for one turn: input + both cache buckets.
+
+    Correct for both usage shapes: Anthropic's `input_tokens` EXCLUDES cached
+    tokens (so the three-way sum is the true prompt), while OpenAI Responses
+    carries no cache fields (so the sum reduces to `input_tokens`, which already
+    includes cache). Missing fields count as 0.
+    """
+    if not usage:
+        return 0
+    return (int(usage.get("input_tokens", 0) or 0)
+            + int(usage.get("cache_read_input_tokens", 0) or 0)
+            + int(usage.get("cache_creation_input_tokens", 0) or 0))
+
+
 def context_threshold_crossed(
     usage: dict[str, Any] | None, model: str | None,
     threshold: float | int | None,
@@ -121,9 +136,7 @@ def context_threshold_crossed(
     frac = checkpoint_fraction(threshold, window)
     if frac is None or window is None or window <= 0 or not usage:
         return False
-    occupancy = (int(usage.get("input_tokens", 0) or 0)
-                 + int(usage.get("cache_read_input_tokens", 0) or 0)
-                 + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    occupancy = context_tokens_from_usage(usage)
     return occupancy / window >= frac
 
 

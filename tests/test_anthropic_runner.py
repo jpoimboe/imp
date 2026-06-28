@@ -952,3 +952,22 @@ async def test_anthropic_llm_response_records_request_id(tmp_path: Path) -> None
 
     resp = next(e for e in log.read() if e["type"] == "llm_response")
     assert resp["payload"]["request_id"] == "req_test_abc123"
+
+
+@pytest.mark.anyio
+async def test_llm_response_carries_context_tokens(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        text("calling complete_step"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        usage={"input_tokens": 1000, "cache_read_input_tokens": 5000,
+               "cache_creation_input_tokens": 200, "output_tokens": 12},
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    # input + cache_read + cache_creation = 1000 + 5000 + 200
+    assert resp["payload"]["context_tokens"] == 6200

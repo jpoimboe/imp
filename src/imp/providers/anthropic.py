@@ -568,7 +568,10 @@ class AnthropicAgentRunner:
         # None until the threshold crosses, then "instruction_sent" for the one
         # handoff-writing turn that follows.
         from imp.engine.reincarnation import handoff_instruction, handoff_path_for
-        from imp.providers.catalog import context_threshold_crossed
+        from imp.providers.catalog import (
+            context_threshold_crossed,
+            context_tokens_from_usage,
+        )
         handoff_phase: str | None = None
         handoff_path = handoff_path_for(invocation.transcript_dir)
 
@@ -624,11 +627,13 @@ class AnthropicAgentRunner:
                             payload={"message": w})
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
+            usage = raw.get("usage") or {}
             elog.append_llm_response(
                 agent_id=aid, provider=invocation.provider_name,
                 model=raw.get("model") or self.model,
-                raw=raw, usage=raw.get("usage") or {},
+                raw=raw, usage=usage,
                 stop_reason=raw.get("stop_reason"),
+                context_tokens=context_tokens_from_usage(usage),
                 request_id=getattr(response, "_request_id", None),
                 duration_ms=(time.perf_counter() - _t0) * 1000.0)
             _emit_anthropic_web_events(raw, elog, aid)

@@ -256,6 +256,7 @@ class EventLog(Protocol):
     def tail(self, n: int) -> list[dict[str, Any]]: ...
     def update_last_llm_response_usage(
         self, *, agent_id: str, usage: dict[str, Any],
+        context_tokens: int | None = None,
     ) -> None: ...
 
 
@@ -523,15 +524,19 @@ class JsonlEventLog(_BaseEventLog):
 
     def update_last_llm_response_usage(
         self, *, agent_id: str, usage: dict[str, Any],
+        context_tokens: int | None = None,
     ) -> None:
         # JsonlEventLog is append-only on disk. Write a usage-patch row so
         # read_telemetry can fold it into the preceding llm_response totals.
         # NOT a second llm_response — that would double-count under telemetry's
         # one-response-per-turn invariant.
+        payload: dict[str, Any] = {"usage": usage}
+        if context_tokens is not None:
+            payload["context_tokens"] = context_tokens
         self._persist({
             "type": "llm_response_usage_patch",
             "agent_id": agent_id,
-            "payload": {"usage": usage},
+            "payload": payload,
         })
 
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
@@ -576,6 +581,7 @@ class InMemoryEventLog(_BaseEventLog):
 
     def update_last_llm_response_usage(
         self, *, agent_id: str, usage: dict[str, Any],
+        context_tokens: int | None = None,
     ) -> None:
         for ev in reversed(self._events):
             if ev.get("type") == "llm_response" and ev.get("agent_id") == agent_id:
@@ -584,6 +590,8 @@ class InMemoryEventLog(_BaseEventLog):
                 # Merge: codex emits full usage at turn.completed; the prior
                 # llm_response (from item:agent_message) carries no usage.
                 payload["usage"] = {**existing, **usage}
+                if context_tokens is not None:
+                    payload["context_tokens"] = context_tokens
                 return
         raise RuntimeError(
             f"no prior llm_response for agent_id={agent_id!r} to attach usage to"
