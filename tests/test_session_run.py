@@ -313,7 +313,6 @@ async def test_run_session_client_threads_resume_into_attach(
 
     def _fake_build(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-        opening_intent: str | None = None,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False,
     ) -> Any:
@@ -663,7 +662,6 @@ async def test_run_session_client_threads_autonomous_into_attach(
 
     def _fake_build(
         ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-        opening_intent: str | None = None,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False,
     ) -> Any:
