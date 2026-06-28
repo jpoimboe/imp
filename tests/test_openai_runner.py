@@ -794,3 +794,25 @@ async def test_openai_llm_response_records_request_id(tmp_path: Path) -> None:
 
     resp = next(e for e in log.read() if e["type"] == "llm_response")
     assert resp["payload"]["request_id"] == "req_openai_xyz"
+
+
+@pytest.mark.anyio
+async def test_llm_response_carries_context_tokens(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("calling complete_step"),
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+            usage={"input_tokens": 1234, "output_tokens": 99,
+                   "total_tokens": 1333},
+        ),
+    ])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    # No cache fields, so the canonical value is input_tokens (not total_tokens).
+    assert resp["payload"]["context_tokens"] == 1234

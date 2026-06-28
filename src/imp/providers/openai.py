@@ -60,6 +60,7 @@ from imp.engine.agent_run import (
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
+from imp.providers.catalog import context_tokens_from_usage
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
@@ -637,11 +638,13 @@ class OpenAIAgentRunner:
                             payload={"message": w})
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
+            usage = raw.get("usage") or {}
             elog.append_llm_response(
                 agent_id=aid, provider=invocation.provider_name,
                 model=raw.get("model") or self.model,
-                raw=raw, usage=raw.get("usage") or {},
+                raw=raw, usage=usage,
                 stop_reason=_openai_stop_reason(raw),
+                context_tokens=context_tokens_from_usage(usage),
                 request_id=getattr(response, "_request_id", None),
                 duration_ms=(time.perf_counter() - _t0) * 1000.0)
             _emit_openai_web_events(raw, elog, aid)
