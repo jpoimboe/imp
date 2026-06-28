@@ -305,8 +305,10 @@ def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     extra_env: tuple[str, ...],
 ) -> tuple[tuple[str, str], ...]:
-    """Env allowlist (spec B.4). IMP_* come from engine_env_result (authoritative,
-    M2-r5); generic + LC_* + extra_env pass through from `environ`; TMPDIR=/tmp.
+    """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
+    (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
+    — the imp-on-imp import shadow); generic + LC_* + extra_env pass through from
+    `environ`; TMPDIR=/tmp.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR is assigned
@@ -323,7 +325,7 @@ def _build_setenv(
         if k in environ:
             d[k] = environ[k]
     for k, v in engine_env_result.items():
-        if k.startswith("IMP_"):
+        if _is_engine_passthrough(k):
             d[k] = v
     d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/extra_env value
     return tuple(d.items())

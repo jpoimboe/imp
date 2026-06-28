@@ -333,6 +333,33 @@ def test_build_setenv_dedups_overlapping_extra_env(tmp_path):
     assert len(keys) == len(set(keys))
 
 
+def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt),
+                           "PYTHONPATH": str(wt / "src")},
+        environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    assert ("PYTHONPATH", str(wt / "src")) in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+
+
+def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
+        environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    keys = {k for k, _ in pol.setenv}
+    assert "PYTHONPATH" not in keys
+
+
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
