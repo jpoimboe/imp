@@ -1104,8 +1104,7 @@ class ClaudeCodeAgentRunner:
                        *, session_store: Any = None,
                        session_id: str | None = None,
                        resume: str | None = None,
-                       config_dir: Path | None = None,
-                       disable_tool_search: bool = False) -> Any:
+                       config_dir: Path | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions, SdkBeta
 
         from imp.providers.catalog import CLAUDE_CODE, model_info
@@ -1138,10 +1137,13 @@ class ClaudeCodeAgentRunner:
             # relies on the SDK's own materialized temp dir, so no history-related
             # env/args are added here.
             env["CLAUDE_CONFIG_DIR"] = str(config_dir)
-        if disable_tool_search:
-            # Standard tool mode declares replayed MCP tool_use blocks up front;
-            # the default ToolSearch deferral leaves them undeclared and 400s.
-            env["ENABLE_TOOL_SEARCH"] = "false"
+        # Standard tool mode is imp's single mode for every path (fresh and
+        # resume): declare the MCP tools up front. claude-p's default ToolSearch
+        # deferral would cost an extra LLM round-trip on each step's first MCP
+        # call to resolve the schema, and would leave replayed tool_use blocks
+        # undeclared (400 "tool use concurrency"). imp's tool-sets are small, so
+        # up-front declaration is always the right trade.
+        env["ENABLE_TOOL_SEARCH"] = "false"
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
@@ -1391,8 +1393,7 @@ class ClaudeCodeAgentRunner:
             opts = self._build_options(
                 invocation, mcp_server, list(tools), impty_server=impty_server,
                 session_store=opt_store, session_id=opt_session_id,
-                resume=opt_resume, config_dir=config_dir,
-                disable_tool_search=bool(existing) and not native_resume)
+                resume=opt_resume, config_dir=config_dir)
         else:
             opts = None
 

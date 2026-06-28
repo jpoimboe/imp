@@ -151,14 +151,15 @@ def _read_paths(events_path: Path) -> list[str]:
 def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     tmp_path: Path,
 ) -> None:
-    """One mid-bash SIGINT + `imp resume` covers both fallback-path invariants:
+    """One mid-bash SIGINT + `imp resume` covers both resume invariants:
 
     * ckx9f5: the resume RECALLS the prior reads instead of redoing them (no
       '[Tool result missing…]' placeholder redo), so the whole-run read set stays
       exactly one a.txt + one b.txt.
     * Part C: replaying the deferred-MCP tool_use history does not trip `400 due
-      to tool use concurrency issues` — the fallback sets ENABLE_TOOL_SEARCH=false
-      so the MCP tools are declared up front rather than deferred behind
+      to tool use concurrency issues`. imp runs standard tool mode
+      (ENABLE_TOOL_SEARCH=false) by default on every path, fresh and resume, so
+      the MCP tools are always declared up front rather than deferred behind
       ToolSearch, and the resume-manifest names the prior reads as succeeded so
       the is_error placeholders don't drive a redo.
 
@@ -225,10 +226,10 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     assert final_state["status"] == "completed"
 
     # Part C: the deferred-MCP-tool replay did NOT trip `400 due to tool use
-    # concurrency issues` — the fallback sets ENABLE_TOOL_SEARCH=false so the
-    # replayed MCP tool_use blocks are declared up front. (Assert the behavior,
-    # not the manifest text, which lives in a user_message payload with an em-dash
-    # that json.dumps would escape.)
+    # concurrency issues` — imp's default standard tool mode (ENABLE_TOOL_SEARCH=
+    # false on every path) declares the replayed MCP tool_use blocks up front.
+    # (Assert the behavior, not the manifest text, which lives in a user_message
+    # payload with an em-dash that json.dumps would escape.)
     haystack = resume.stdout + resume.stderr + "\n".join(
         json.dumps(rec) for rec in _iter_events(events))
     assert "tool use concurrency" not in haystack, (
