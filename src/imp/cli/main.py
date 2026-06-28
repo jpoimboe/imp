@@ -2220,9 +2220,12 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
     """Build the overview as lines: in-flight, Backlog, then the history block."""
     name_w = change_row.name_budget()
-    inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
-    history = _history_rows(control, show_all=show_all)
+    scanned = _scan_change_homes(control)
+    status_rows = _status_rows(control, scanned)
+    inflight = _sort_rows_newest_first(status_rows)
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
+    history = _history_rows(control, show_all=show_all,
+                            live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
         return [_NO_CHANGES_MESSAGE]
     lines = [change_row.header_line(color=color)]

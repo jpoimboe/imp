@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import imp.cli.main as m
@@ -107,3 +108,36 @@ def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
     _archive_completed(tmp_path, "gamma")
     assert {r[0] for r in m._history_rows(tmp_path, show_all=False)} == {"gamma"}
     assert m._history_rows(tmp_path, show_all=False, live_ids={"gamma"}) == []
+
+
+def test_overview_lines_scans_homes_once(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    Change.create_draft(tmp_path, title="Brief", change_id="bk1",
+                        base_branch="main", origin="idea", seed_opening="Brief")
+
+    real = m._scan_change_homes
+    calls = 0
+
+    def counting(control: Path):
+        nonlocal calls
+        calls += 1
+        return real(control)
+
+    monkeypatch.setattr(m, "_scan_change_homes", counting)
+    m._overview_lines(tmp_path, show_all=False,
+                      now=datetime(2026, 6, 28, tzinfo=UTC), color=False)
+    assert calls == 1
+
+
+def test_overview_lines_renders_inflight_and_backlog(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    Change.create_draft(tmp_path, title="Brief", change_id="bk1",
+                        base_branch="main", origin="idea", seed_opening="Brief")
+
+    lines = m._overview_lines(tmp_path, show_all=False,
+                              now=datetime(2026, 6, 28, tzinfo=UTC), color=False)
+    assert any(ln.startswith("alpha") for ln in lines)   # in-flight zone preserved
+    assert "Backlog" in lines                            # backlog section preserved
+    assert any(ln.startswith("bk1") for ln in lines)
