@@ -139,6 +139,33 @@ def test_assert_stamped_is_readonly_gate_before_merge() -> None:
     assert isinstance(m1.action, Pause)
 
 
+def test_merge_to_base_recovery_rules_and_cap() -> None:
+    wf = load_workflow(WF)
+    step = next(s for s in wf.flat_steps() if s.name == "merge-to-base")
+    assert step.max_loops == 3
+    rules = step.rules
+
+    m = evaluate_rules(rules, vars={}, output={"merge": "MERGED"})
+    assert isinstance(m.action, Continue)
+
+    m = evaluate_rules(rules, vars={}, output={"merge": "DIRTY"})
+    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
+    assert m.action.release is None
+    assert m.action.feedback is not None and "uncommitted" in m.action.feedback
+    assert m.rule.label == "recovering merge"
+
+    m = evaluate_rules(rules, vars={}, output={"merge": "CONFLICT"})
+    assert isinstance(m.action, Goto) and m.action.target == "integrate-rebase"
+    assert m.action.release is None
+    assert m.rule.label == "retrying integration"
+
+    m = evaluate_rules(rules, vars={}, output={"merge": "REFUSED"})
+    assert isinstance(m.action, Pause)
+
+    m = evaluate_rules(rules, vars={}, output={"merge": "SOMETHING_ELSE"})
+    assert isinstance(m.action, Pause)
+
+
 def test_finalize_merge_routes_to_wait_for_head() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "finalize")
