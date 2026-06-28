@@ -103,11 +103,12 @@ After the spec body is final and self-reviewed, append a `## Plan outline` secti
 **source of truth** for plan count and
 seeds `plan_total` (the first `plan-writer` reads it and echoes the count). Decompose
 the **whole spec** into N plans, each a coarse **one-or-two-line statement of *what*
-that plan covers — not the how** (no tasks, no code, no file lists). Use the same
-greedy-bundling sizing guidance `plan-writer` uses, expressed at this coarse grain:
-each outline plan is the **largest** green-preserving bundle of independent scope (a
-working **~5–8 tasks/plan** target), split only at genuine dependency boundaries. On a
-trivial / fast-path change it is a **single** outline plan.
+that plan covers — not the how** (no tasks, no code, no file lists). Size each outline plan at its **natural dependency boundary**: bundle scope that
+must land together; split where one slice does not depend on another. Each plan
+should be a coherent, independently-reviewable unit — neither a giant catch-all
+nor a trivial one-task sliver carved off for tidiness. There is **no task-count floor
+to fill toward** and **no ceiling** — a plan is as large as its natural boundary
+makes it. On a trivial / fast-path change it is a **single** outline plan.
 
 Shape:
 

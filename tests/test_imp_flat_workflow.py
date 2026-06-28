@@ -364,7 +364,9 @@ def test_imp_flat_spec_finalizer_authors_plan_outline() -> None:
     low = text.lower()
     assert "## Plan outline" in text
     assert "what" in low and "not the how" in low
-    assert "5\u20138" in text                 # the greedy ~5-8 tasks/plan grain
+    assert "5\u20138" not in text             # the ~5-8 floor grain is gone
+    assert "natural dependency boundary" in low
+    assert "no task-count floor" in low
     assert "source of truth" in low
     assert "plan count" in low or "plan_total" in low
 
