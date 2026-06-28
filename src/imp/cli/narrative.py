@@ -1556,6 +1556,8 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
                 if isinstance(exit_code, int)
                 else tail
             )
+        elif d.get("last_agent_text"):
+            detail = str(d["last_agent_text"])
     self._append(ErrorNode(
         message=str(p.get("message", "?")), category=p.get("category"),
         is_warning=False, detail=detail))
