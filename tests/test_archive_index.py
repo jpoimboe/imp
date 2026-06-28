@@ -104,3 +104,57 @@ def test_ingest_is_idempotent(tmp_path: Path) -> None:
         assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
     finally:
         conn.close()
+
+
+def test_ingest_denormalizes_last_event_ts(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        index.ingest(conn, _sample_record(), _sample_events())
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] == "2026-06-01T00:00:02+00:00"
+    finally:
+        conn.close()
+
+
+def test_ingest_last_event_ts_empty_events(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        index.ingest(conn, _sample_record(), [])
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] is None
+    finally:
+        conn.close()
+
+
+def test_ingest_last_event_ts_skips_malformed(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"id": "e0", "parent_id": None, "agent_id": None,
+             "timestamp": "2026-06-01T00:00:05+00:00", "type": "change_created",
+             "payload": {"id": "alpha"}},
+            {"_malformed": True, "raw": "NOT_JSON"},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] == "2026-06-01T00:00:05+00:00"
+    finally:
+        conn.close()
+
+
+def test_ingest_last_event_ts_all_malformed(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"_malformed": True, "raw": "NOT_JSON"},
+            {"_malformed": True, "raw": "ALSO_NOT_JSON"},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] is None
+    finally:
+        conn.close()
