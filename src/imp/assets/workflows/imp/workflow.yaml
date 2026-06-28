@@ -19,7 +19,7 @@ vars:
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   review_scope:           {type: string, default: plan}  # plan | change — per-plan vs end-of-change review
-  review_base:            {type: string, default: ""}    # SHA defining the per-plan review diff range
+  review_base:            {type: string, default: ""}    # SHA defining the review diff range (review_base..HEAD)
   coverage_settled:       {type: bool, default: false}   # latched once gap-check is clean; gates the once-only end-of-change gap-check AND the change-wide review; a later rework re-entry is reviewed per-plan, not re-paneled
   integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
   plan_index:             {type: int, default: 1}         # current plan number, rendered in plan/task step labels
