@@ -9,6 +9,7 @@ import pytest
 
 from imp.engine.change import Change
 from imp.engine.executor import RunResult
+from imp.engine.state import State
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
 from imp.remote.session.discover import session_socket_path
@@ -26,7 +27,7 @@ def anyio_backend() -> str:
 
 
 def _make_change(tmp_path: Path, change_id: str) -> Change:
-    return Change(
+    change = Change(
         id=change_id,
         title="T",
         base_branch="main",
@@ -34,6 +35,9 @@ def _make_change(tmp_path: Path, change_id: str) -> Change:
         project_root=tmp_path,
         change_dir=tmp_path / ".imp" / "change",
     )
+    State(id=change_id, step=None, step_attempt=0, status="paused").save(
+        change.state_dir)
+    return change
 
 
 async def _wait_for_socket(sock: str) -> None:
@@ -1519,3 +1523,24 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
             change, run_fn=fake_run, hibernate=False, autonomous=True)
     assert result is RunResult.COMPLETED
     assert captured["autonomous"] is True
+
+
+@pytest.mark.anyio
+async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-dph")
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        await coordinator.signal_pause(reason="ctrl-c")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+
+    assert result is RunResult.PAUSED
+    assert State.load(change.state_dir).resume_target == "prompt"

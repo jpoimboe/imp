@@ -152,6 +152,10 @@ async def serve_change_session(
             try:
                 reply = await user_chat_input_fn("")
             except AwaitingUserInput:
+                # Left at the resteer hold prompt: record where to land on resume.
+                state = State.load(change.state_dir)
+                state.resume_target = "prompt"
+                state.save(change.state_dir)
                 return result
             coordinator.reset()
             if reply.strip():
