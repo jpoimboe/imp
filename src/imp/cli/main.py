@@ -1832,6 +1832,39 @@ def resolve_display_status(
 _Row = tuple[str, str, str, str, str, str, str | None]
 
 
+class _HomeScan(NamedTuple):
+    """One live change home parsed exactly once for the overview's row builders.
+
+    change_json/state_json are the raw bytes (state_json is None when a home has
+    no state.json yet); meta is the parsed change.json (homes whose change.json
+    is missing or malformed are dropped from the scan, so meta is always valid)."""
+    change_id: str
+    change_json: bytes
+    state_json: bytes | None
+    meta: dict[str, Any]
+    last_iso: str
+
+
+def _scan_change_homes(control: Path) -> list[_HomeScan]:
+    """Read and parse every live change home once, so the overview's three row
+    builders share a single pass instead of re-reading each home three times."""
+    scanned: list[_HomeScan] = []
+    for change_id in _list_change_homes(control):
+        cdir = _change_home(control, change_id)
+        try:
+            change_json = (cdir / "change.json").read_bytes()
+            meta = json.loads(change_json)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        try:
+            state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
+        except FileNotFoundError:
+            state_json = None
+        last_iso = _last_event_iso(cdir / "events.jsonl") or ""
+        scanned.append(_HomeScan(change_id, change_json, state_json, meta, last_iso))
+    return scanned
+
+
 def _status_row(change_id: str, state_json: bytes, change_json: bytes,
                 last_activity: str) -> _Row | None:
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
