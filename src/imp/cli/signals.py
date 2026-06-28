@@ -160,6 +160,13 @@ class InterruptCoordinator:
         # (see agent_run._pull_with_inactivity_watchdog). Name-identical to the
         # unrelated ReplyInterjectRouter.solicit_active (reply routing) — distinct.
         self._solicit_active = False
+        # Suspend-during-tools (this Change): depth counter, NOT a bool, because
+        # foreground tool calls can run concurrently (the parallel arm of
+        # dispatch_turn_tool_uses). The finite inactivity window only re-arms when
+        # the LAST in-flight foreground tool returns. While > 0 the per-pull
+        # inactivity watchdog freezes its deadline to inf (see
+        # agent_run._pull_with_inactivity_watchdog), exactly like solicit.
+        self._tool_depth = 0
 
     def add_activity_listener(self, fn: Any) -> Any:
         """Register a no-arg callback fired on each `note_activity()`. Returns
@@ -197,6 +204,26 @@ class InterruptCoordinator:
         note_activity() so every registered bump re-evaluates and installs a
         fresh finite window."""
         self._solicit_active = False
+        self.note_activity()
+
+    @property
+    def tool_active(self) -> bool:
+        """True while one or more foreground tool calls are in flight."""
+        return self._tool_depth > 0
+
+    def begin_tool_watchdog(self) -> None:
+        """Enter a foreground tool call: freeze the inactivity watchdog.
+        Depth-counted so concurrent foreground tools each hold the freeze. Fires
+        note_activity() so every registered per-pull bump re-evaluates NOW and
+        freezes its in-flight deadline to inf."""
+        self._tool_depth += 1
+        self.note_activity()
+
+    def end_tool_watchdog(self) -> None:
+        """Leave a foreground tool call: decrement the depth. When the LAST
+        in-flight tool returns (depth back to 0), the next bump installs a fresh
+        finite window. Fires note_activity() so the per-pull bump re-evaluates."""
+        self._tool_depth -= 1
         self.note_activity()
 
     def set_at_prompt(self, value: bool) -> None:

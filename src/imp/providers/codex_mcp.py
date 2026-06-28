@@ -28,7 +28,7 @@ from typing import Any, Literal
 from imp.agents.parallel import max_parallel_tasks
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ToolContext, suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
 
 # Bypass posture for the codex provider. This is the SAME value the ThreadOptions
@@ -153,7 +153,8 @@ async def dispatch_tool(
         except SubagentSuspended as exc:
             raise SubagentSuspended(f"{exc} [interrupted]") from exc
     try:
-        raw = await tool.async_invoke(ctx, args)
+        with suspend_inactivity_watchdog(ctx):
+            raw = await tool.async_invoke(ctx, args)
     except FatalToolError as fte:
         state.fatal_tool_error = (tool.name, str(fte))
         return f"fatal tool error: {fte}"

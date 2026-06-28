@@ -72,7 +72,12 @@ from imp.agents.subagents import (
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext, change_home_path, kill_process_group
+from imp.agents.tools.context import (
+    ToolContext,
+    change_home_path,
+    kill_process_group,
+    suspend_inactivity_watchdog,
+)
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -624,7 +629,8 @@ def _wrap_one(
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
             start = time.perf_counter()
-            raw = await t.async_invoke(ctx, clean_args)
+            with suspend_inactivity_watchdog(ctx):
+                raw = await t.async_invoke(ctx, clean_args)
             dur_ms = (time.perf_counter() - start) * 1000.0
             if tuid:
                 state.tool_durations[tuid] = dur_ms

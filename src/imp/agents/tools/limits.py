@@ -36,16 +36,14 @@ EXTERNAL_WALK_FILE_CAP = 20_000
 # --- Watchdog / teardown timing (a per-tool-call deadline, distinct from the
 # per-category retry-backoff budgets in error_policy.py) ---------------------
 TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
-# F4 coupling: AGENT_INACTIVITY_TIMEOUT_S must stay > TOOL_WALLCLOCK_TIMEOUT_S
-# with >= 300 s margin. Post-heartbeat, a tool's watchdog window opens at the
-# PREVIOUS heartbeat; with the post-API heartbeat that is at worst the start
-# of the turn's tool phase, so the margin is scheduling/event-plumbing
-# headroom (without the post-API heartbeat it would have to absorb full
-# model-API latency). Either way, at zero margin a B.1-max foreground tool
-# trips the watchdog FIRST and dies as a `stalled` config error instead of
-# returning ToolAborted("timed-out").
-# Change together; tests/test_tool_limits.py pins the relationship.
-AGENT_INACTIVITY_TIMEOUT_S = 2100.0      # B.2: per-activity no-events window
+# B.2 is INDEPENDENT of B.1: the coordinator suspends the inactivity watchdog
+# for the full duration of every foreground tool call (begin/end_tool_watchdog;
+# see agent_run._pull_with_inactivity_watchdog and cli/signals.py), so B.2 never
+# runs concurrently with a foreground tool and no longer has to outlast B.1. A
+# runaway foreground tool is bounded by B.1 alone. B.2 is therefore a short
+# freeze-detection window: catch a wedged agent (no tool running, no events,
+# no progress) within ~150 s. tests/test_tool_limits.py pins the decoupling.
+AGENT_INACTIVITY_TIMEOUT_S = 150.0       # B.2: per-activity no-events window
 PROCESS_KILL_GRACE_S = 4.0               # C-ii: SIGTERM -> wait -> SIGKILL grace
 
 # --- Background execution (bg.py) -------------------------------------------
@@ -55,11 +53,10 @@ PROCESS_KILL_GRACE_S = 4.0               # C-ii: SIGTERM -> wait -> SIGKILL grac
 # Deliberately NOT aliased to FILE_READ_CAP_BYTES — that is a *read* bound;
 # coupling them would let a future read-cap bump silently change kill policy.
 BG_STREAM_FILE_CAP_BYTES = 5_000_000
-# F4 coupling: BG_WAIT_MAX_S must stay WELL UNDER AGENT_INACTIVITY_TIMEOUT_S
-# (>= 300 s margin) — each completed bash_output(wait=True) is a tool
-# completion => heartbeat => window reset, so chained waits are safe, but the
-# budget must leave room for the same turn's remaining latency. Change
-# together; tests/test_tool_limits.py pins the relationship.
+# B.2 is INDEPENDENT of this budget: a bash_output(wait=True) runs inside a
+# bracketed foreground tool call, so B.2 is suspended for the whole wait exactly
+# like any other tool. The wait budget no longer has to fit under B.2 (it is now
+# larger than the short B.2 window). tests/test_tool_limits.py pins the decoupling.
 BG_WAIT_MAX_S = 1200.0                   # 20 min wait budget per bash_output call
 
 # --- Control-dir + VCS exclusion (structured nav tools only) ----------------

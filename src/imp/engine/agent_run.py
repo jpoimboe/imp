@@ -246,16 +246,17 @@ async def _pull_with_inactivity_watchdog(
                 if add_listener is not None:
                     def _bump(_scope: Any = scope) -> None:
                         # Read the module global at call time so a monkeypatched
-                        # window (tests) and the live value agree. While an
-                        # attended agent is blocked awaiting a human reply, FREEZE
-                        # the in-flight deadline to inf (disabling this fail_after
-                        # entirely) instead of a finite now+window: there is no
-                        # periodic activity during the blocked await, so a one-shot
-                        # finite bump would expire one window later and re-introduce
-                        # the false kill. end_solicit_watchdog's note_activity then
-                        # re-fires this with solicit_active False, restoring a fresh
-                        # finite window.
-                        if getattr(coordinator, "solicit_active", False):
+                        # window (tests) and the live value agree. Freeze the
+                        # in-flight deadline to inf while EITHER an attended agent
+                        # is blocked awaiting a human reply (solicit_active) OR a
+                        # foreground tool call is in flight (tool_active): both are
+                        # periodic-activity-free blocked awaits, so a one-shot finite
+                        # bump would expire one window later and re-introduce the
+                        # false kill. end_solicit_watchdog / end_tool_watchdog's
+                        # note_activity then re-fires this with the flag cleared,
+                        # restoring a fresh finite window.
+                        if (getattr(coordinator, "solicit_active", False)
+                                or getattr(coordinator, "tool_active", False)):
                             _scope.deadline = math.inf
                         else:
                             _scope.deadline = (

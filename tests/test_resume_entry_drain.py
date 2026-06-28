@@ -97,6 +97,12 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
         def reset(self) -> None:
             pass
 
+        def begin_tool_watchdog(self) -> None:
+            pass
+
+        def end_tool_watchdog(self) -> None:
+            pass
+
     coord = _FakeCoordinator()
 
     # Fake client: complete on the first call (so we only need one response).
@@ -226,6 +232,12 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
             return self._q.pop(0) if self._q else None
 
         def reset(self) -> None:
+            pass
+
+        def begin_tool_watchdog(self) -> None:
+            pass
+
+        def end_tool_watchdog(self) -> None:
             pass
 
     coord = _FakeCoordinator()
@@ -714,6 +726,12 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
             return self._q.pop(0) if self._q else None
 
         def reset(self) -> None:
+            pass
+
+        def begin_tool_watchdog(self) -> None:
+            pass
+
+        def end_tool_watchdog(self) -> None:
             pass
 
     coord = _FakeCoordinator()

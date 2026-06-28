@@ -34,6 +34,7 @@ from imp.agents.subagents import (
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
+from imp.agents.tools.context import suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.schema import validate_agent_output
@@ -102,7 +103,8 @@ async def dispatch_one_tool_use(
         return None
     start = time.perf_counter()
     try:
-        raw_result = await tool.async_invoke(ctx, tu.input)
+        with suspend_inactivity_watchdog(ctx):
+            raw_result = await tool.async_invoke(ctx, tu.input)
     except StepComplete as sc:
         try:
             validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)

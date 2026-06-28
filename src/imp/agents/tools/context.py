@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal as _signal
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -183,6 +183,18 @@ class ToolContext:
                     f"{op} on {resolved} denied by the sandbox policy"
                 )
         return resolved
+
+
+@contextlib.contextmanager
+def suspend_inactivity_watchdog(ctx: ToolContext | None) -> Iterator[None]:
+    coord = getattr(ctx, "coordinator", None)
+    if coord is not None:
+        coord.begin_tool_watchdog()
+    try:
+        yield
+    finally:
+        if coord is not None:
+            coord.end_tool_watchdog()
 
 
 def change_home_path(change_home: str | None) -> Path | None:
