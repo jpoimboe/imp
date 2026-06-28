@@ -883,19 +883,29 @@ class CodexAgentRunner:
 
     def _build_prompt(self, system_prompt: str) -> str:
         """Prepend the anti-native-tool instruction (design: soft enforcement
-        backstopped by the tripwire)."""
+        backstopped by the tripwire).
+
+        Codex DEFERS MCP tools behind its `tool_search` discovery tool: imp's
+        `mcp__imp__*` tools are NOT in the model's initial tool list — the model
+        must call `tool_search` to surface them first (codex-rs:
+        build_mcp_tool_exposure, gated on `supports_search_tool &&
+        namespace_tools`; the flags that disabled this are removed upstream, so
+        it is not configurable). Models that skip the search conclude the tool
+        "is not exposed in this session" and refuse the turn — a ~60% turn-1
+        refusal on gpt-5.4-mini. Telling the model to use `tool_search` to load
+        the tools, with the completion tool named by its exposed id, drives that
+        to ~0% (measured 30/30 first-turn vs 4/10 without)."""
         return (
             system_prompt
             + "\n\n"
             + "IMPORTANT — Tool policy:\n"
-            + "- Use ONLY the `mcp__imp__*` tools exposed via the MCP server.\n"
-            + "- NEVER call native `apply_patch` or any other built-in tool.\n"
-            # Name the completion tool by the EXACT identifier codex exposes it
-            # under (`mcp__imp__complete_step`), not the bare `complete_step`.
-            # Weak low-tier models (gpt-5.4-mini) otherwise hunt for a bare
-            # `complete_step` tool, fail to find it among the namespaced MCP
-            # tools, and refuse the turn ("I can't call complete_step from the
-            # tools exposed") — a ~60% turn-1 refusal that nudges barely recover.
+            + "- Your imp tools (the `mcp__imp__*` tools) are exposed via codex's\n"
+            + "  `tool_search` tool, NOT in your initial tool list. If an\n"
+            + "  `mcp__imp__*` tool you need is not already available, call\n"
+            + "  `tool_search` to load it FIRST, then call it. These tools ARE\n"
+            + "  available — do not claim otherwise.\n"
+            + "- Use ONLY the `mcp__imp__*` tools. NEVER call native `apply_patch`\n"
+            + "  or any other built-in tool.\n"
             + "- Finish the task by calling the `mcp__imp__complete_step` tool\n"
             + "  with the structured answer.\n"
         )
