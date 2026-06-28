@@ -114,3 +114,30 @@ def test_ensure_current_migrates_legacy_v0_db(tmp_path: Path) -> None:
     rows = _rows_by_id(db)
     assert "stale" not in rows                       # rebuilt from records, not the old db
     assert rows["alpha"] == "2026-06-01T00:00:01+00:00"  # last_event_ts denormalized
+
+
+def test_completed_rows_migrates_before_query(tmp_path: Path) -> None:
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    db = archive.index_path(tmp_path)
+    _write_legacy_v0_db(db)  # legacy 'changes' has no last_event_ts column
+
+    rows = read.completed_rows(tmp_path)
+
+    # Migration ran first: the new last_event_ts query would OperationalError on
+    # the legacy schema; instead it returns the rebuilt v2 rows.
+    ids = {r[0] for r in rows}
+    assert ids == {"alpha"}            # rebuilt from records; 'stale' dropped
+    assert _user_version(db) == 2
+
+
+def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    db = archive.index_path(tmp_path)
+    _write_legacy_v0_db(db)  # only the bogus 'stale' row remains in the db
+
+    hits = read.search_archive(tmp_path, "alpha")
+
+    # Without the gate the legacy db has no 'alpha' row -> []. With it, the
+    # rebuild restores 'alpha' (title "Alpha") and the search finds it.
+    assert [h[0] for h in hits] == ["alpha"]
+    assert _user_version(db) == 2
