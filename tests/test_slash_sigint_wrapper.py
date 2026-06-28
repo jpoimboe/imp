@@ -116,3 +116,31 @@ async def test_at_prompt_reset_on_exception_path(tmp_path: Path) -> None:
         await ask_line_with_slash(
             _EofPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
     assert coord.at_prompt_calls == [True, False]
+
+
+class _QuiesceCoord(_FakeCoord):
+    def __init__(self) -> None:
+        super().__init__()
+        self.quiesced: list[str] = []
+
+    def tty_quiesced(self):
+        import contextlib as _ctx
+
+        @_ctx.asynccontextmanager
+        async def _cm():
+            self.quiesced.append("enter")
+            try:
+                yield
+            finally:
+                self.quiesced.append("exit")
+
+        return _cm()
+
+
+@pytest.mark.anyio
+async def test_solicit_prompt_runs_inside_tty_quiesced(tmp_path: Path) -> None:
+    coord = _QuiesceCoord()
+    line = await ask_line_with_slash(
+        _LinePrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+    assert line == "hello"
+    assert coord.quiesced == ["enter", "exit"]

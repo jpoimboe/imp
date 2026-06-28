@@ -18,6 +18,11 @@ from imp.engine.state import State
 from imp.remote.session.attach import build_session_attach
 
 
+def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
+    """Run the CLI Ctrl-D reader only for an interactive tty run (never headless/piped)."""
+    return not non_interactive and sys.stdin.isatty()
+
+
 def infer_session_result(change: Change) -> RunResult:
     """Read persisted state: 'completed' → COMPLETED, else PAUSED."""
     if State.load(change.state_dir).status == "completed":
@@ -49,6 +54,9 @@ async def run_session_client(
     startup_failed = False
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
+        if _should_run_ctrl_d_reader(non_interactive=non_interactive):
+            from imp.cli.signals import CtrlDReader
+            await tg.start(CtrlDReader(coord).run)
         if status is not None:
             tg.start_soon(status.tick)
         try:
