@@ -93,13 +93,13 @@ _LIVE_TEST_FILES := \
 test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
 	@$(_REQUIRE_PROVIDERS) && \
 	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) -v $(_LIVE_TEST_FILES)
+	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
 test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_REQUIRE_PROVIDERS) && \
 	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) -s -v $(_LIVE_TEST_FILES)
+	    timeout --foreground 1800 $(PYTEST) -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
 test-live-quick: ## One-step live test for the first opted-in provider only.
@@ -109,6 +109,14 @@ test-live-quick: ## One-step live test for the first opted-in provider only.
 	      tests/test_default_workflow_e2e_live.py \
 	      tests/test_default_workflow_e2e_live_openai.py \
 	      tests/test_default_workflow_e2e_live_claude_code.py
+
+.PHONY: test-live-codex-parallel
+test-live-codex-parallel: ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
+	@$(_REQUIRE_PROVIDERS) && \
+	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
+	    $(PYTEST) -v -m codex_parallel \
+	      tests/test_parallel_concurrency_live.py \
+	      tests/test_codex_started_keying_live.py
 
 .PHONY: test-all
 test-all: test test-live ## Full suite including live tests.
