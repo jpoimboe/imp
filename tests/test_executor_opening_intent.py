@@ -1,5 +1,5 @@
 """run_change emits a display-only opening_intent event once on a fresh run,
-right after tiers_resolved; never on a resume, never when the param is empty."""
+right after tiers_resolved; never on a resume, never when seed_opening is empty."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -41,10 +41,10 @@ def _seed(root: Path) -> object:
 
 
 @pytest.mark.anyio
-async def test_opening_intent_emitted_after_tiers_resolved(tmp_path: Path) -> None:
+async def test_opening_intent_emitted_from_seed_opening(tmp_path: Path) -> None:
     change = _seed(tmp_path)
     _register_prompt_capturing({"status": "Success"}, [])
-    result = await run_change(change, opening_intent="add a --json flag")
+    result = await run_change(change, seed_opening="add a --json flag")
     assert result is RunResult.COMPLETED
 
     types = [e["type"] for e in JsonlEventLog(change.events_path).read()]
@@ -56,7 +56,7 @@ async def test_opening_intent_emitted_after_tiers_resolved(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_no_opening_intent_when_param_absent_or_empty(tmp_path: Path) -> None:
+async def test_no_opening_intent_when_seed_opening_absent_or_empty(tmp_path: Path) -> None:
     change = _seed(tmp_path)
     _register_prompt_capturing({"status": "Success"}, [])
     await run_change(change)  # default None
@@ -66,6 +66,6 @@ async def test_no_opening_intent_when_param_absent_or_empty(tmp_path: Path) -> N
     (tmp_path / "other").mkdir()
     change2 = _seed(tmp_path / "other")
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_change(change2, opening_intent="")  # empty string is suppressed
+    await run_change(change2, seed_opening="")  # empty string is suppressed
     types2 = [e["type"] for e in JsonlEventLog(change2.events_path).read()]
     assert "opening_intent" not in types2

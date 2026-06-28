@@ -241,8 +241,8 @@ async def run_change(
                   {"tiers": details["tiers"], "steps": details["steps"],
                    "checkpoint_threshold": config.context_checkpoint_threshold()},
                   agent_id=None)
-            if opening_intent:
-                _emit(log, "opening_intent", {"text": opening_intent},
+            if seed_opening:
+                _emit(log, "opening_intent", {"text": seed_opening},
                       agent_id=None)
 
         flat = workflow.flat_steps()
