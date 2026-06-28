@@ -1542,6 +1542,27 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 
 
 @pytest.mark.anyio
+async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-cda")
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        await coordinator.signal_pause(reason="ctrl-d")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+
+    assert result is RunResult.PAUSED
+    assert State.load(change.state_dir).resume_target == "agent"
+
+
+@pytest.mark.anyio
 async def test_resume_prompt_target_holds_before_running_agent(
     tmp_path: Path,
 ) -> None:

@@ -163,9 +163,12 @@ async def serve_change_session(
             try:
                 reply = await user_chat_input_fn("")
             except AwaitingUserInput:
-                # Left at the resteer hold prompt: record where to land on resume.
+                # Left at the hold loop. A ctrl-d mid-run interrupt detaches here
+                # with the agent mid-step, so resume continues the agent; any other
+                # detach left the user at the resteer prompt, so resume there.
                 state = State.load(change.state_dir)
-                state.resume_target = "prompt"
+                state.resume_target = (
+                    "agent" if coordinator.pause_reason == "ctrl-d" else "prompt")
                 state.save(change.state_dir)
                 return result
             coordinator.reset()
