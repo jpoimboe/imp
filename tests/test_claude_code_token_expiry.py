@@ -79,3 +79,53 @@ def test_falls_back_to_home_claude_when_config_dir_none(tmp_path: Path,
     out = _read_token_expiry(None, NOW)
     assert out["token_expires_at"] == NOW - 5000
     assert out["token_expired"] is True
+
+
+def test_auth_error_carries_token_expiry_from_config_dir(tmp_path: Path) -> None:
+    _write_creds(tmp_path, 1)  # epoch ms 1 (1970) — unambiguously past
+    sdk = result(is_error=True, api_error_status=401)
+    term = _termination_from_result(sdk, "agent did some work", {},
+                                    config_dir=tmp_path)
+    assert isinstance(term, perr.AuthError)
+    assert term.detail["token_expires_at"] == 1
+    assert term.detail["token_expired"] is True
+    assert isinstance(term.detail["checked_at"], int)
+
+
+def test_auth_error_future_token_not_expired(tmp_path: Path) -> None:
+    _write_creds(tmp_path, 99_999_999_999_999)  # year ~5138 — clearly future
+    sdk = result(is_error=True, api_error_status=403)
+    term = _termination_from_result(sdk, "agent did some work", {},
+                                    config_dir=tmp_path)
+    assert isinstance(term, perr.AuthError)
+    assert term.detail["token_expired"] is False
+
+
+def test_auth_error_missing_credentials_yields_null(tmp_path: Path) -> None:
+    sdk = result(is_error=True, api_error_status=401)  # tmp_path has no creds file
+    term = _termination_from_result(sdk, "agent did some work", {},
+                                    config_dir=tmp_path)
+    assert isinstance(term, perr.AuthError)
+    assert term.detail["token_expires_at"] is None
+    assert term.detail["token_expired"] is None
+
+
+def test_non_auth_error_has_no_token_expiry_keys(tmp_path: Path) -> None:
+    _write_creds(tmp_path, 1)
+    sdk = result(is_error=True, api_error_status=429)
+    term = _termination_from_result(sdk, "agent did some work", {},
+                                    config_dir=tmp_path)
+    assert isinstance(term, perr.RateLimitError)
+    assert "token_expires_at" not in term.detail
+
+
+def test_auth_error_from_substring_classifier_carries_token_expiry(
+        tmp_path: Path) -> None:
+    _write_creds(tmp_path, 1)  # past expiry
+    sdk = result(is_error=True)  # no api_error_status; auth comes from the text
+    term = _termination_from_result(
+        sdk, "API request failed: Invalid authentication credentials", {},
+        config_dir=tmp_path)
+    assert isinstance(term, perr.AuthError)
+    assert term.detail["token_expires_at"] == 1
+    assert term.detail["token_expired"] is True

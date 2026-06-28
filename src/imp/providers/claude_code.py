@@ -222,6 +222,7 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
 
 def _termination_from_result(
     sdk_msg: Any, last_text: str, diag: dict[str, Any],
+    config_dir: Path | None = None,
 ) -> perr.ProviderError | None:
     """P2: a ResultMessage flagged is_error (or a nonzero subprocess exit) is a
     real termination — return a typed-or-unknown ProviderError carrying every
@@ -256,6 +257,8 @@ def _termination_from_result(
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
     if labeled is None and status == 429:
         labeled = perr.RateLimitError(f"claude_code: api_error_status={status}")
+    if isinstance(labeled, perr.AuthError):
+        detail.update(_read_token_expiry(config_dir, int(time.time() * 1000)))
     if isinstance(labeled, (perr.QuotaError, perr.AuthError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
@@ -1946,7 +1949,8 @@ class ClaudeCodeAgentRunner:
                         term = _termination_from_result(
                             sdk_msg, last_text,
                             {**_subprocess_diag(client),
-                             "stderr_tail": self._stderr_sink.tail()})
+                             "stderr_tail": self._stderr_sink.tail()},
+                            config_dir=config_dir)
                         if term is not None:
                             _roll_back_error_turn(messages, transcript)
                             yield perr.make_error_event(
