@@ -1,5 +1,5 @@
-"""Live e2e for the codex provider, gated behind IMP_RUN_CODEX=1 (mirrors
-IMP_RUN_DOGFOOD precedent). Runs codex under the EXACT production flags:
+"""Live e2e for the codex provider, gated on `codex` in IMP_LIVE_PROVIDERS.
+Runs codex under the EXACT production flags:
 `sandbox_mode="danger-full-access" + network_access_enabled=False` — the
 combination the unit tests can't validate.
 
@@ -9,19 +9,14 @@ Assertions:
   - Zero `web_search` items appear (L1 SDK-form disable confirmation).
   - Cap-abort: forcing a cap trip terminates within the bounded retry budget.
 
-Skip conditions:
-  - IMP_RUN_CODEX != "1"
-  - `codex` binary not on PATH
-  - openai_codex_sdk not importable
+Skipped unless `codex` is in IMP_LIVE_PROVIDERS. Opting in then asserts the
+`codex` CLI + openai_codex_sdk are present (see assert_codex_toolchain).
 """
 
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import json
-import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,12 +26,11 @@ import pytest
 from imp.agents.runner import AgentInvocation, ChangeContext
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
+from tests._live import assert_codex_toolchain, opted_in
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("IMP_RUN_CODEX") != "1"
-    or shutil.which("codex") is None
-    or importlib.util.find_spec("openai_codex_sdk") is None,
-    reason="codex live test requires IMP_RUN_CODEX=1 + codex CLI + openai_codex_sdk",
+    not opted_in("codex"),
+    reason="codex not in IMP_LIVE_PROVIDERS",
 )
 
 
@@ -92,6 +86,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
 
 @pytest.mark.anyio
 async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> None:
+    assert_codex_toolchain()
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
     runner = CodexAgentRunner(model_name="gpt-5.4-mini")
@@ -146,6 +141,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     what the model does next. The mechanism itself (RMW + abort flag) is
     unit-covered in test_codex_mcp_dispatch.py; this is the live proof that a
     real codex turn terminates under cap pressure rather than looping."""
+    assert_codex_toolchain()
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
     runner = CodexAgentRunner(model_name="gpt-5.4-mini")

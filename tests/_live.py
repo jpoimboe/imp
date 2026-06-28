@@ -28,6 +28,25 @@ def first_opted_in() -> str | None:
     return items[0] if items else None
 
 
+def assert_codex_toolchain() -> None:
+    """Assert the codex CLI binary and SDK are both present.
+
+    Opting codex into IMP_LIVE_PROVIDERS implies the toolchain is installed, so
+    this asserts (fails loudly) rather than skipping — mirroring how the other
+    providers assert their auth once opted in. `make test-live` validates the
+    `codex` binary up front in _REQUIRE_PROVIDERS; this also covers the
+    pytest-direct path and the SDK import the Makefile does not check."""
+    import importlib.util
+    import shutil
+
+    assert shutil.which("codex") is not None, (
+        "codex opted in via IMP_LIVE_PROVIDERS but `codex` CLI not on PATH"
+    )
+    assert importlib.util.find_spec("openai_codex_sdk") is not None, (
+        "codex opted in via IMP_LIVE_PROVIDERS but openai_codex_sdk not importable"
+    )
+
+
 def build_isolated_venv(
     project_root: Path,
     *,

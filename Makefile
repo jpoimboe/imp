@@ -60,18 +60,22 @@ _LIVE_TEST_FILES := \
   tests/test_openai_gate_feedback_resume_live.py \
   tests/test_resume_all_shapes_live.py \
   tests/test_native_session_resume_live.py \
-  tests/test_relay_hibernation_live.py
+  tests/test_relay_hibernation_live.py \
+  tests/test_codex_provider_live.py \
+  tests/test_codex_started_keying_live.py \
+  tests/test_parallel_concurrency_live.py \
+  tests/test_parallel_elicitation_live.py
 
 .PHONY: test-live
 test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
 	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
+	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
 	    timeout --foreground 1800 $(PYTEST) -v $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
 test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
+	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
 	    timeout --foreground 1800 $(PYTEST) -s -v $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
@@ -169,7 +173,8 @@ define _REQUIRE_PROVIDERS
     echo "  IMP_LIVE_PROVIDERS=anthropic       (needs ANTHROPIC_API_KEY or ~/.anthropic-key)" >&2; \
     echo "  IMP_LIVE_PROVIDERS=openai          (needs OPENAI_API_KEY or ~/.openai-key)" >&2; \
     echo "  IMP_LIVE_PROVIDERS=claude_code     (needs \`claude\` CLI on PATH)" >&2; \
-    echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code  (combine as desired)" >&2; \
+    echo "  IMP_LIVE_PROVIDERS=codex           (needs \`codex\` CLI on PATH + openai_codex_sdk)" >&2; \
+    echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code,codex  (combine as desired)" >&2; \
     echo "" >&2; \
     echo "Note: per-provider one-step tests run for every provider listed." >&2; \
     exit 1; \
@@ -202,8 +207,13 @@ define _REQUIRE_PROVIDERS
           echo "ERROR: provider 'claude_code' opted in but \`claude\` CLI not on PATH." >&2; \
           exit 1; \
         fi ;; \
+      codex) \
+        if ! command -v codex >/dev/null 2>&1; then \
+          echo "ERROR: provider 'codex' opted in but \`codex\` CLI not on PATH." >&2; \
+          exit 1; \
+        fi ;; \
       *) \
-        echo "ERROR: unknown provider '$$prov' in IMP_LIVE_PROVIDERS (valid: anthropic, openai, claude_code)." >&2; \
+        echo "ERROR: unknown provider '$$prov' in IMP_LIVE_PROVIDERS (valid: anthropic, openai, claude_code, codex)." >&2; \
         exit 1 ;; \
     esac; \
   done; \

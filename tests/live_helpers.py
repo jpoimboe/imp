@@ -1,5 +1,5 @@
-"""Helpers for live elicitation and concurrency tests (IMP_RUN_LIVE_ELICIT /
-IMP_RUN_CODEX / IMP_RUN_DOGFOOD gated)."""
+"""Helpers for live elicitation and concurrency tests (gated on the relevant
+provider in IMP_LIVE_PROVIDERS)."""
 from __future__ import annotations
 
 import json
