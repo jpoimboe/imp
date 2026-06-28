@@ -14,6 +14,7 @@ Hand-maintained: no provider exposes context-window size via an endpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 DEFAULT_WINDOW = 200_000
 
@@ -88,3 +89,56 @@ def window_for_model(model: str | None) -> int | None:
         if token in lowered:
             return size
     return None
+
+
+def checkpoint_fraction(
+    threshold: float | int | None, window: int | None
+) -> float | None:
+    """The context-checkpoint cutoff as a fraction of the model window (None if unresolvable)."""
+    if threshold is None or threshold <= 0:
+        return None
+    if threshold <= 1:
+        return float(threshold)
+    if window is None or window <= 0:
+        return None
+    return threshold / window
+
+
+def context_threshold_crossed(
+    usage: dict[str, Any] | None, model: str | None,
+    threshold: float | int | None,
+) -> bool:
+    """True when a turn's prompt-token occupancy has reached the checkpoint cutoff.
+
+    Occupancy is `input + cache_read + cache_creation` (the prompt side of the
+    window, matching the context gauge's `usage_prompt_tokens`). The cutoff is
+    `checkpoint_fraction(threshold, window)` of the model window. Returns False
+    whenever the threshold, window, or usage is unavailable — the watch simply
+    never fires rather than guessing.
+    """
+    window = window_for_model(model)
+    frac = checkpoint_fraction(threshold, window)
+    if frac is None or window is None or window <= 0 or not usage:
+        return False
+    occupancy = (int(usage.get("input_tokens", 0) or 0)
+                 + int(usage.get("cache_read_input_tokens", 0) or 0)
+                 + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    return occupancy / window >= frac
+
+
+def sdk_context_threshold_crossed(
+    context_tokens: int | None, context_window: int | None,
+    threshold: float | int | None,
+) -> bool:
+    """True when claude_code's SDK-reported LIVE context occupancy has reached
+    the checkpoint cutoff. Unlike context_threshold_crossed (which sums prompt
+    tokens against the static catalog window), this divides the SDK's own live
+    context_tokens / context_window from get_context_usage(). Returns False
+    whenever any input is unavailable — the watch never fires rather than
+    guessing.
+    """
+    frac = checkpoint_fraction(threshold, context_window)
+    if (frac is None or not context_window or context_window <= 0
+            or not context_tokens or context_tokens <= 0):
+        return False
+    return context_tokens / context_window >= frac

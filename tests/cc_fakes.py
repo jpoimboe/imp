@@ -111,6 +111,7 @@ class FakeClaudeSDKClient:
         self._pos = 0
         self.queries: list[Any] = []  # whatever was passed to .query()
         self.closed = False
+        self.interrupts = 0  # count of interrupt() calls
         self._context_usage = context_usage
         self._context_usage_raises = context_usage_raises
 
@@ -145,7 +146,7 @@ class FakeClaudeSDKClient:
                 return
 
     async def interrupt(self) -> None:
-        pass
+        self.interrupts += 1
 
     async def get_context_usage(self) -> Any:
         if self._context_usage_raises:

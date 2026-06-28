@@ -1039,6 +1039,9 @@ async def test_run_change_computes_and_persists_resolved_tiers(tmp_path):
     assert len(resolved_events) == 1
     assert "tiers" in resolved_events[0]["payload"]
     assert "steps" in resolved_events[0]["payload"]
+    # The run-start event carries the configured checkpoint threshold so the
+    # renderer/engine can resolve a warn/checkpoint cutoff. Default config -> 0.8.
+    assert resolved_events[0]["payload"]["checkpoint_threshold"] == 0.8
 
 
 @pytest.mark.anyio
@@ -2537,3 +2540,129 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
     await run_change(change, on_event=lambda _e: None)
     assert overlaid.read_text() == "# Mine\nv1\n"
+
+
+@pytest.mark.anyio
+async def test_run_change_persists_configured_max_reincarnations(tmp_path):
+    """run_change copies config.context_max_reincarnations() onto State at run
+    start (config is in scope only here), like resolved_tiers."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    # Overwrite the project layer with a NON-default cap so the assertion is
+    # falsifiable (5 != the default 2).
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 5\n")
+    _register_fake({"status": "Success"})
+
+    await run_change(change, on_event=lambda _e: None)
+
+    assert State.load(change.state_dir).max_reincarnations == 5
+
+
+@pytest.mark.anyio
+async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
+    """A step whose runner hits the hard window error reincarnates fresh (Tier B
+    backstop) up to the per-session cap, then pauses — emitting one
+    `reincarnating` event and stashing the prior transcript at .attempt-1."""
+    from imp.providers import resolve
+
+    change, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    class _CtxWindowRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)   # non-empty transcript -> stashable
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _CtxWindowProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _CtxWindowRunner:
+            return _CtxWindowRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _CtxWindowProvider(model))
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1
+    assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
+    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+
+
+@pytest.mark.anyio
+async def test_run_change_threads_checkpoint_threshold_to_invocation(tmp_path):
+    """run_change re-derives config.context_checkpoint_threshold() onto State on
+    every entry (transient, not persisted) and the executor carries it onto each
+    AgentInvocation, so the runner's Tier A watch sees the configured value."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    # Non-default threshold so the assertion is falsifiable (0.65 != default 0.8).
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  checkpoint_threshold: 0.65\n")
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    await run_change(change, on_event=lambda _e: None)
+
+    assert sink and sink[0].checkpoint_threshold == 0.65
+
+
+@pytest.mark.anyio
+async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
+    """A step whose runner captures a Tier A handoff reincarnates fresh seeded
+    from it (up to the per-session cap), emitting one `reincarnating` event with
+    the threshold reason and stashing the prior transcript; at the cap it pauses."""
+    from imp.engine.reincarnation import handoff_path_for
+    from imp.providers import resolve
+
+    change, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    class _HandoffRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)   # non-empty transcript -> stashable
+            hp = handoff_path_for(invocation.transcript_dir)
+            hp.write_text("# handoff\n")
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffRunner:
+            return _HandoffRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffProvider(model))
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1
+    assert reincarnating[0]["payload"]["reason"] == "context threshold crossed"
+    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    cap_event = next(e for e in events if e["type"] == "step_completed")
+    assert cap_event["payload"]["action"]["verb"] == "pause"

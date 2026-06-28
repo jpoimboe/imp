@@ -427,7 +427,7 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     leading bullet: the row is indented two cols (like the tool-burst recap) to
     sit under the agent turn's words, and the magenta color marks it as subagent
     identity. A finished subagent appends `· {elapsed}` (how long it ran); an
-    abnormal terminal state (running-at-pause, failed, stalled, interrupted)
+    abnormal terminal state (running-at-pause, failed, stalled, interrupted, context exhausted)
     appends a plain `(state)` tag so a subagent that didn't cleanly finish still
     stands out."""
     label = f"  {sub.subagent_name}"
@@ -441,6 +441,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
         label += " (stalled)"
     elif sub.terminal_state == "interrupted":
         label += " (interrupted)"
+    elif sub.terminal_state == "context_exhausted":
+        label += " (context exhausted)"
     elif sub.is_error:
         label += " (failed)"
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)

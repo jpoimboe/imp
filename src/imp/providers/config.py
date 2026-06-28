@@ -53,6 +53,7 @@ class Config:
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
+    context: dict[str, Any] = field(hash=False, default_factory=dict)
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = field(hash=False, default="")
 
@@ -63,6 +64,15 @@ class Config:
         """Env-var name for `provider` — `provider_envs[provider]` if present,
         else `<PROVIDER>_API_KEY`."""
         return self.provider_envs.get(provider, f"{provider.upper()}_API_KEY")
+
+    def context_checkpoint_threshold(self) -> float | int:
+        """Window fraction (0 < x <= 1) or absolute token cap (x > 1). Default 0.8."""
+        threshold: float | int = self.context.get("checkpoint_threshold", 0.8)
+        return threshold
+
+    def context_max_reincarnations(self) -> int:
+        reincarnations: int = self.context.get("max_reincarnations", 2)
+        return reincarnations
 
 
 _FACT_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
@@ -216,6 +226,8 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["sandbox"] = _parse_sandbox(raw["sandbox"], src)
     if raw.get("remote") is not None:
         out["remote"] = _parse_remote(raw["remote"], src)
+    if raw.get("context") is not None:
+        out["context"] = _parse_context(raw["context"], src)
     return out, src
 
 
@@ -372,6 +384,30 @@ def _parse_remote(raw: Any, src: SourceLoc) -> dict[str, Any]:
                 src)
         out["startup_timeout"] = float(st)
     return {"driver": out}
+
+
+def _parse_context(raw: Any, src: SourceLoc) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise LoadError(f"{src.file.name} 'context:' must be a mapping", src)
+    out: dict[str, Any] = {}
+    for k, v in items(raw):
+        if k == "checkpoint_threshold":
+            # bool is an int subclass; reject it so `checkpoint_threshold: true` isn't read as 1.
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+                raise LoadError(
+                    "context.checkpoint_threshold must be a positive number "
+                    "(a fraction like 0.8, or an absolute token count)", src)
+            out[k] = v
+        elif k == "max_reincarnations":
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                raise LoadError(
+                    "context.max_reincarnations must be a non-negative integer", src)
+            out[k] = v
+        else:
+            raise LoadError(
+                f"context.{k!r} is not a known context setting "
+                "(allowed: checkpoint_threshold, max_reincarnations)", src)
+    return out
 
 
 def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:

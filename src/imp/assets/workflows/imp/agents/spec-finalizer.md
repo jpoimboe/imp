@@ -41,6 +41,8 @@ re-brainstorm: the design dialogue already happened at the front door.
 
 {% include "partials/spec-design-principles.md" %}
 
+{% include "partials/delegate-exploration.md" %}
+
 ## Front-door handoff (phase 1 adopt)
 
 This is the standard arrival from the front-door conversation. The draft spec is

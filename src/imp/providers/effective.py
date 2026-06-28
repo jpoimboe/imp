@@ -63,7 +63,7 @@ def merge_layers(
     layers: list[tuple[dict[str, Any], SourceLoc]],
 ) -> tuple[dict[str, Any], Provenance]:
     """Recursive structural merge, leaves replace (spec §2). `layers` is ordered
-    low→high precedence. `tiers` deep-merges two levels; `provider_envs`/`vars`
+    low→high precedence. `tiers` deep-merges two levels; `provider_envs`/`vars`/`sandbox`/`context`
     deep-merge one level; everything else is a leaf replaced wholesale."""
     out: dict[str, Any] = {}
     prov: Provenance = {}
@@ -76,7 +76,7 @@ def merge_layers(
                     for vendor, model in vendors.items():
                         td[vendor] = model
                         prov[("tiers", tier, vendor)] = src
-            elif key in ("provider_envs", "vars", "sandbox"):
+            elif key in ("provider_envs", "vars", "sandbox", "context"):
                 dst2: dict[str, Any] = out.setdefault(key, {})
                 for k, v in val.items():
                     dst2[k] = v
@@ -102,6 +102,7 @@ def _to_config(
         theme=merged.get("theme", "ansi"),
         sandbox=merged.get("sandbox", {}),
         remote=merged.get("remote", {}),
+        context=merged.get("context", {}),
         project_facts=project_facts,
         guidance=guidance,
     )

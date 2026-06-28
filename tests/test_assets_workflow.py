@@ -52,7 +52,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
         "coder", "code-reviewer",
     }
     dispatchers = {"task-lead", "deferred-sweep",
-                   "plan-writer", "spec-finalizer", "front-door"}
+                   "plan-writer", "spec-finalizer", "front-door", "finalize"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -965,3 +965,27 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     assert "the current plan number" in low
     assert "strictly greater" in low
     assert "coverage complete" in low
+
+
+def test_task_lead_escalates_coder_tier_for_single_task_plan(tmp_path: Path) -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.state import JsonlEventLog
+
+    body = load_workflow(bundled_workflow_dir("imp")).agents["task-lead"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+
+    single = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc",
+        vars={"task_total": 1, "fast_path": False}),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert 'subagent_name="coder", tier="high"' in single
+
+    multi = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc",
+        vars={"task_total": 3, "fast_path": False}),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert 'subagent_name="coder", tier="medium"' in multi
+    assert 'subagent_name="coder", tier="high"' not in multi

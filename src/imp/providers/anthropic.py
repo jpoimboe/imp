@@ -472,6 +472,7 @@ class AnthropicAgentRunner:
         ctx.coordinator = invocation.coordinator
         ctx.tiers = invocation.tiers
         ctx.verify_command = invocation.verify_command
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.event_log = elog                       # shared write instance
@@ -563,6 +564,14 @@ class AnthropicAgentRunner:
         web_specs = anthropic_web_tool_specs(invocation.agent_def)
         web_headers = anthropic_beta_headers(invocation.agent_def)
 
+        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
+        # None until the threshold crosses, then "instruction_sent" for the one
+        # handoff-writing turn that follows.
+        from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+        from imp.providers.catalog import context_threshold_crossed
+        handoff_phase: str | None = None
+        handoff_path = handoff_path_for(invocation.transcript_dir)
+
         while not self._cancel:
             anthropic_tools = [_anthropic_tool_schema(t) for t in tools.values()]
             anthropic_tools.extend(web_specs)
@@ -630,8 +639,23 @@ class AnthropicAgentRunner:
             await _bg._sweep_bg(ctx)
             yield {"type": "tool_heartbeat", "payload": {}}
 
+            # Tier A watch: compare this turn's occupancy to the checkpoint
+            # threshold (only before a handoff is already in flight).
+            crossed_now = (
+                handoff_phase is None
+                and invocation.checkpoint_threshold is not None
+                and context_threshold_crossed(
+                    raw.get("usage"), self.model,
+                    invocation.checkpoint_threshold))
+
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
+                if handoff_phase == "instruction_sent":
+                    # The handoff-writing turn ended without a tool: signal the
+                    # captured handoff and stop (the engine reincarnates).
+                    yield {"type": "handoff",
+                           "payload": {"handoff_path": str(handoff_path)}}
+                    return
                 last_text = "".join(
                     b.text for b in assistant_msg.content
                     if isinstance(b, TextBlock)
@@ -723,6 +747,25 @@ class AnthropicAgentRunner:
             if loop_err is not None:
                 yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
                 return
+
+            if handoff_phase == "instruction_sent":
+                # The agent's handoff-writing turn just completed (its write_file
+                # tool_result is recorded). Signal the captured handoff and stop;
+                # the engine stashes the transcript and reincarnates seeded with it.
+                yield {"type": "handoff",
+                       "payload": {"handoff_path": str(handoff_path)}}
+                return
+            if crossed_now:
+                # Approaching the window: inject the agent-authored handoff
+                # instruction as the next user turn (the same user-message append
+                # interjects use), then capture the note on the following turn.
+                instr = handoff_instruction(handoff_path)
+                hmsg = Message(role="user", content=(TextBlock(text=instr),))
+                messages.append(hmsg)
+                transcript.append(hmsg)
+                elog.append_user_message(agent_id=aid, message=hmsg)
+                handoff_phase = "instruction_sent"
+                continue
 
             # Turn boundary: this turn's tool_results are appended to
             # messages/transcript; deliver any queued human interject as a user
