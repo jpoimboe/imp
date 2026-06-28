@@ -618,13 +618,20 @@ async def drive_invocation(
         return AgentRunResult(None, False, True, False, None, awaiting_user=True)
 
     if stall["hit"]:
-        # B.2: the watchdog tore the agent down. Surface as errored/'stalled'.
+        # B.2: the watchdog tore the agent down. Route through the policy so the
+        # executor's budgeted-backoff path handles it (no step_attempt burn, clean
+        # ceiling pause on budget exhaustion) — not a hand-built [config] result.
         if emit_events and log is not None:
             log.append(agent_id=invocation.agent_id, type="error",
-                       payload={"category": "config", "kind": "stalled",
+                       payload={"category": "stalled", "kind": "stalled",
                                 "message": f"no events for {AGENT_INACTIVITY_TIMEOUT_S:.0f}s"})
-        return AgentRunResult(None, True, False, False, None,
-                              ErrorInfo("config", "stalled"))
+        decision = error_policy.decide(
+            "stalled", prior_backoff_attempts=prior_backoff_attempts)
+        # 'stalled' is a RetryWithBackoff category (never Pause/RetryNow), so the
+        # delay is always present — the executor loop owns budget exhaustion.
+        assert isinstance(decision, error_policy.RetryWithBackoff)
+        return AgentRunResult(None, True, False, False, decision.delay_seconds,
+                              ErrorInfo("stalled", "stalled"))
 
     if agent_output is None:
         return AgentRunResult(None, True, False, False, None)
