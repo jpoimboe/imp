@@ -1126,16 +1126,13 @@ class ClaudeCodeAgentRunner:
             "ANTHROPIC_API_KEY": "",
             "ANTHROPIC_AUTH_TOKEN": "",
         }
-        extra_args: dict[str, Any]
+        extra_args: dict[str, Any] = {}
         if config_dir is not None:
-            # isolated home → suppression flags pointless and they starve session_store;
-            # the batcher resolves projects_dir from this env
+            # imp-isolated home (fresh + replay); the batcher resolves
+            # projects_dir from this env. Native resume passes config_dir=None and
+            # relies on the SDK's own materialized temp dir, so no history-related
+            # env/args are added here.
             env["CLAUDE_CONFIG_DIR"] = str(config_dir)
-            extra_args = {}
-        else:
-            # resume/replay keep the flags so they don't write ~/.claude
-            env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
-            extra_args = {"no-session-persistence": None}
         if disable_tool_search:
             # Standard tool mode declares replayed MCP tool_use blocks up front;
             # the default ToolSearch deferral leaves them undeclared and 400s.
