@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Any
+
+import filelock
 
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
@@ -98,3 +101,30 @@ def rebuild_index(control_root: Path) -> None:
         os.replace(tmp, index_path(control_root))
     finally:
         Path(tmp).unlink(missing_ok=True)
+
+
+def _read_user_version(control_root: Path) -> int:
+    db = index_path(control_root)
+    if not db.exists():
+        # Absent db: nothing to migrate; connect() stamps a fresh db current.
+        return index._SCHEMA_VERSION
+    conn = sqlite3.connect(db, timeout=30)
+    try:
+        return int(conn.execute("PRAGMA user_version").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def ensure_current(control_root: Path) -> None:
+    """Rebuild the index if its schema version is stale.
+
+    Double-checked locking: a lock-free version read fast-paths the steady state;
+    the one-time migration rebuild runs under the writer lock with a re-check so
+    two processes never rebuild twice.
+    """
+    if _read_user_version(control_root) >= index._SCHEMA_VERSION:
+        return
+    with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
+        if _read_user_version(control_root) >= index._SCHEMA_VERSION:
+            return
+        rebuild_index(control_root)
