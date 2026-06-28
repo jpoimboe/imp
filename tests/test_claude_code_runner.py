@@ -1161,6 +1161,82 @@ async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
     assert runner._cancel is True
 
 
+@pytest.mark.anyio
+async def test_force_kill_sigkills_transport_group_without_waiting(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """force_kill() SIGKILLs the live transport process group and never awaits the child."""
+    import asyncio
+    import signal
+
+    import imp.providers.claude_code as cc
+
+    calls: list[tuple[int | None, int]] = []
+
+    async def _record(process: Any, sig: int) -> None:
+        calls.append((getattr(process, "pid", None), sig))
+
+    monkeypatch.setattr(cc, "kill_process_group", _record)
+
+    class _Proc:
+        pid = 4242
+
+        def __init__(self) -> None:
+            self.waited = False
+
+        async def wait(self) -> int:
+            self.waited = True
+            return 0
+
+    class _Transport:
+        def __init__(self, proc: _Proc) -> None:
+            self._process = proc
+
+    (tmp_path / "art").mkdir()
+    holder: dict[str, _StallingClient] = {}
+
+    def factory(opts: Any) -> _StallingClient:
+        c = _StallingClient(opts)
+        # Attach a live transport+process so force_kill has a group to SIGKILL.
+        c._transport = _Transport(_Proc())
+        holder["c"] = c
+        return c
+
+    inv = _inv(tmp_path)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory, steer_timeout=0.05)
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await runner.force_kill()
+
+    proc = holder["c"]._transport._process
+    assert calls == [(4242, signal.SIGKILL)]
+    assert proc.waited is False   # fire-and-forget: never reaps the child
+
+    # Clean up the parked run() task via the cooperative interrupt path.
+    await runner.interrupt()
+    await asyncio.wait_for(task, timeout=2)
+
+
+@pytest.mark.anyio
+async def test_force_kill_without_live_client_is_safe() -> None:
+    """force_kill() before run() (no client/transport) must not raise."""
+    import imp.providers.claude_code as cc
+
+    runner = cc.ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    await runner.force_kill()   # no client connected; must be a safe no-op
+
+
 class _NoCoopClient:
     """A live client that ignores cooperative interrupt(): receive_response()
     parks forever, so interrupt() must escalate to disconnect()."""

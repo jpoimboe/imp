@@ -2163,6 +2163,16 @@ class ClaudeCodeAgentRunner:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
 
+    async def force_kill(self) -> None:
+        """Non-waiting SIGKILL of the claude-p transport group on teardown overrun;
+        reaping a D-state child would re-block the executor, so never await wait()."""
+        transport = getattr(self._client, "_transport", None)
+        process = getattr(transport, "_process", None)
+        if process is None:
+            return
+        with contextlib.suppress(ProcessLookupError, OSError):
+            await kill_process_group(process, signal.SIGKILL)
+
 
 class ClaudeCodeProvider:
     name = "claude_code"
