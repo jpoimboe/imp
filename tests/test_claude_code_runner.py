@@ -291,9 +291,10 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
         events.append(ev)
 
     assert events[-1]["type"] == "agent_output"
-    # Initial messages were NOT re-appended.
+    # Initial messages were NOT re-appended: no-store SEND_TO_LLM now
+    # resumes natively — no manifest turn, so 3 original + 1 new assistant = 4.
     loaded = t.load()
-    assert len(loaded) == 5  # 3 original + 1 manifest user turn + 1 new assistant turn
+    assert len(loaded) == 4
 
 
 @pytest.mark.anyio
@@ -1696,26 +1697,28 @@ async def test_fresh_run_mirrors_session_into_store(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_resume_without_stored_session_passes_no_session_state(tmp_path: Path) -> None:
+async def test_resume_without_stored_session_passes_native_session_state(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+    # No session store → reconstructs from the transcript and goes native.
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    t.append(Message(
-        role="assistant",
-        content=(
-            TextBlock(text="thinking…"),
-            ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),
-        ),
-    ))
-    t.append(Message(
-        role="user", content=(ToolResultBlock(tool_use_id="t0", content="x"),),
-    ))
+    t.append(Message(role="assistant", content=(
+        TextBlock(text="thinking…"),
+        ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),
+    )))
+    # Ends on a user tool_result turn → classify_resume → SEND_TO_LLM, a
+    # native-eligible tail with no needs_imp_balance veto.
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="x"),)))
 
     scripted = [
         assistant(tool_use("c1", "complete_step", {"status": "Success"})),
@@ -1729,14 +1732,19 @@ async def test_resume_without_stored_session_passes_no_session_state(tmp_path: P
         return c
 
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory,
-    )
+        model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.session_store is None
+    # Native session state IS now passed (inverse of the old no-store contract):
+    # the store is reconstructed and the resume id is set; session_id stays None.
+    assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
-    assert opts.resume is None
+    assert opts.resume == resume_session_id("step:p/s")
+    # SEND_TO_LLM folds the trailing user tool_result OUT of resume_base and
+    # streams it as the delta, so 2 flushed turns are reconstructed (not 3).
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 2
 
 
 def _user_text_blob(replayed: list[Any]) -> str:
@@ -1755,9 +1763,12 @@ def _user_text_blob(replayed: list[Any]) -> str:
 
 
 @pytest.mark.anyio
-async def test_resume_injects_succeeded_manifest_into_replay(tmp_path: Path) -> None:
+async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> None:
+    """A no-store AWAITING_USER tail now resumes natively, so the
+    stream-json 'succeeded' replay manifest is never built — the streamed delta
+    is just the human reply (the inverse of this test's pre-3a contract)."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -1771,7 +1782,7 @@ async def test_resume_injects_succeeded_manifest_into_replay(tmp_path: Path) -> 
     )))
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
-    # Ends on a bare turn-end → AWAITING_USER; the attended resume delivers the reply.
+    # Bare turn-end → AWAITING_USER, native-eligible.
     t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
 
     scripted = [
@@ -1787,13 +1798,18 @@ async def test_resume_injects_succeeded_manifest_into_replay(tmp_path: Path) -> 
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
-        user_input_fn=lambda _prompt: "keep going",
-    )
+        user_input_fn=lambda _prompt: "keep going")
     [ev async for ev in runner.run(inv)]
 
+    opts = created[0].opts
+    assert opts.resume == resume_session_id("step:p/s")  # native path, not replay
     blob = _user_text_blob(created[0].queries[0])
-    assert "read_file — succeeded" in blob
-    assert "replay artifact" in blob
+    # No replay manifest is built on the native path…
+    assert RESUME_MANIFEST_HEADER not in blob
+    assert "replay artifact" not in blob
+    assert "read_file — succeeded" not in blob
+    # …only the human reply kicks the resumed turn.
+    assert "keep going" in blob
 
 
 @pytest.mark.anyio
@@ -1847,16 +1863,22 @@ async def test_resume_balance_path_keeps_retry_feedback_last(tmp_path: Path) -> 
 
 
 @pytest.mark.anyio
-async def test_resume_manifest_skips_dangling_last_tool_use(tmp_path: Path) -> None:
+async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> None:
+    """A no-store DANGLING tail now resumes natively. No replay manifest
+    is built (so the completed write is NOT named succeeded in a manifest); the
+    dangling read is repaired by a STREAMED synth tool_result, and the flushed
+    prefix is reconstructed into the native session."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import Transcript
+    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    # A completed write — must be named succeeded with its echoed body.
     t.append(Message(role="assistant", content=(
         ToolUseBlock(id="w1", name="mcp__imp__write_file",
                      input={"path": "plan.md", "content": "PLANBODY"}),)))
@@ -1879,27 +1901,42 @@ async def test_resume_manifest_skips_dangling_last_tool_use(tmp_path: Path) -> N
         return c
 
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory,
-    )
-    [ev async for ev in runner.run(inv)]
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
 
-    blob = _user_text_blob(created[0].queries[0])
-    # The completed write is named succeeded with its echoed deliverable…
-    assert "write_file — succeeded (wrote plan.md)" in blob
-    assert "PLANBODY" in blob
-    # …but the genuinely-dangling read is NOT claimed succeeded.
-    assert "read_file — succeeded" not in blob
-    # The dangling tool_use is still repaired: a tool_result for r2 was persisted.
-    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
-    assert any(
-        isinstance(b, ToolResultBlock) and b.tool_use_id == "r2"
-        for m in loaded
-        for b in m.content
-    )
+    # Native resume reached completion — NOT the transcript_invalid abort.
+    assert events[-1]["type"] == "agent_output"
+    opts = created[0].opts
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+    # No replay manifest anywhere in the persisted transcript.
+    replayed = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    assert not any(
+        isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
+        for m in replayed if m.role == "user" for b in m.content)
+    # The dangling r2 read is repaired by a STREAMED synth tool_result.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "r2"
+    # The flushed prefix (write + dangling read) is reconstructed; r2 is the
+    # trailing native-session entry, the synth result is streamed, not stored.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 4
+    assert reconciled[-1]["message"]["content"][0] == {
+        "type": "tool_use", "id": "r2",
+        "name": "mcp__imp__read_file", "input": {"path": "x.md"}}
 
 
 @pytest.mark.anyio
-async def test_resume_manifest_not_re_injected_on_re_resume(tmp_path: Path) -> None:
+async def test_no_store_native_resume_does_not_reinject_manifest(tmp_path: Path) -> None:
+    """A re-resume whose transcript already carries a prior manifest turn
+    now resumes natively (no-store SEND_TO_LLM). The native path builds no new
+    manifest, so the prior manifest text rides the streamed delta exactly once and
+    is never stacked a second time. (The pre-3a replay-dedup guard at
+    claude_code.py:1469-1476 is now reachable only via a non-production
+    balance_on_resume=False config — see Decisions — so this is the
+    production-faithful single-occurrence assertion.)"""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
 
@@ -1916,7 +1953,7 @@ async def test_resume_manifest_not_re_injected_on_re_resume(tmp_path: Path) -> N
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
     t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
-    # Simulate a prior resume that already injected the nudge + manifest.
+    # A prior resume already injected the nudge + manifest as trailing user turns.
     t.append(Message(role="user", content=(TextBlock(
         text="You stopped before calling complete_step. Continue exactly where you "
              "left off and finish the step — call complete_step when the work is done."),)))
@@ -1935,14 +1972,16 @@ async def test_resume_manifest_not_re_injected_on_re_resume(tmp_path: Path) -> N
         return c
 
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory,
-    )
+        model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
+    opts = created[0].opts
+    assert opts.resume == resume_session_id("step:p/s")  # native, not replay
     blob = _user_text_blob(created[0].queries[0])
-    # The prior manifest is present (merged into the replay query)…
+    # The two trailing user turns (nudge + prior manifest) fold OUT of the
+    # native session and ride the streamed SEND_TO_LLM delta…
     assert "replay artifact" in blob
-    # …but NOT re-injected a second time.
+    # …exactly once — the native path injects no second manifest.
     assert blob.count("replay artifact") == 1
 
 
@@ -2024,14 +2063,17 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_resume_without_stored_session_falls_back(tmp_path: Path) -> None:
+async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    # No session store pre-populated → native resume is unavailable.
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+    # No session store pre-populated → reconstructs it from the transcript.
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
@@ -2042,6 +2084,7 @@ async def test_resume_without_stored_session_falls_back(tmp_path: Path) -> None:
     )))
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
+    # Bare turn-end → AWAITING_USER, a native-eligible tail.
     t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
 
     scripted = [
@@ -2061,15 +2104,21 @@ async def test_resume_without_stored_session_falls_back(tmp_path: Path) -> None:
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume is None
-    assert opts.session_store is None
-    # Fallback streams the WHOLE history (more than one stream-json frame)…
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+    assert isinstance(opts.session_store, ImpSessionStore)
+    # The no-store branch reconstructed and persisted the 4 pre-resume turns.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 4
+    assert reconciled[-1]["message"]["content"][0]["text"] == "done early"
+    # Native AWAITING_USER streams ONLY the human reply as the delta — no replay
+    # of prior history, no fallback manifest.
     first_query = created[0].queries[0]
-    assert len(first_query) > 1
-    # …and injects the Part-3 manifest naming prior calls succeeded.
+    assert len(first_query) == 1
     blob = _user_text_blob(first_query)
-    assert RESUME_MANIFEST_HEADER in blob
-    assert "read_file — succeeded" in blob
+    assert "keep going" in blob
+    assert "reading" not in blob
+    assert RESUME_MANIFEST_HEADER not in blob
 
 
 @pytest.mark.anyio
@@ -2203,19 +2252,17 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_inplace_repair_falls_back_without_store(tmp_path: Path) -> None:
+async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import (
-        RESUME_DURABILITY_NOTE,
-        RESUME_MANIFEST_HEADER,
-        Transcript,
-    )
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    # No session store → native resume unavailable → stream-json fallback runs the
-    # in-place repair for the dangling read whose interrupt marker is the last turn.
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+    # No session store → reconstructs from the transcript and goes native.
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
@@ -2224,6 +2271,8 @@ async def test_inplace_repair_falls_back_without_store(tmp_path: Path) -> None:
                      input={"path": "a.txt"}),)))
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
+    # Dangling t1 tool_use followed by a persisted interrupt marker:
+    # classify_resume returns SEND_TO_LLM (last turn is a user turn).
     t.append(Message(role="assistant", content=(
         ToolUseBlock(id="t1", name="mcp__imp__read_file",
                      input={"path": "b.txt"}),)))
@@ -2243,14 +2292,17 @@ async def test_inplace_repair_falls_back_without_store(tmp_path: Path) -> None:
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    assert opts.resume is None
-    assert opts.session_store is None
-    first_query = created[0].queries[0]
-    assert len(first_query) > 1
-    blob = _user_text_blob(first_query)
-    assert RESUME_MANIFEST_HEADER in blob
-    assert blob.count("read_file — succeeded") == 1
-    assert RESUME_DURABILITY_NOTE in blob
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+    # SEND_TO_LLM STREAMS the trailing user interrupt marker to kick the turn;
+    # claude-p pairs the dangling t1 from its (reconstructed) loaded session.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
+    # The flushed prefix (through the dangling t1 turn) was reconstructed into
+    # the native session; only the interrupt marker is streamed, not stored.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 4
 
 
 @pytest.mark.anyio
@@ -2331,15 +2383,17 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_dangling_tool_use_falls_back_without_store(tmp_path: Path) -> None:
+async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    # No session store → native resume unavailable → fallback repairs the dangling
-    # tool_use (shape-1 synthetic result) rather than aborting.
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+    # No session store → reconstructs from the transcript and goes native.
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
@@ -2348,6 +2402,7 @@ async def test_dangling_tool_use_falls_back_without_store(tmp_path: Path) -> Non
                      input={"path": "a.txt"}),)))
     t.append(Message(role="user", content=(
         ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
+    # Mid-tool interrupt: a bare assistant tool_use with NO tool_result.
     t.append(Message(role="assistant", content=(
         ToolUseBlock(id="t1", name="mcp__imp__read_file",
                      input={"path": "b.txt"}),)))
@@ -2364,23 +2419,27 @@ async def test_dangling_tool_use_falls_back_without_store(tmp_path: Path) -> Non
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
-    # No store → fallback (not native), and the dangling tool_use is repaired into
-    # a balanced transcript rather than aborting with transcript_invalid.
+    # The transcript_invalid abort did NOT fire: the run reached completion.
     assert events[-1]["type"] == "agent_output"
     assert not any(
         e["type"] == "error"
         and e["payload"].get("kind") == "transcript_invalid"
         for e in events)
-    assert created[0].opts.resume is None
-    assert created[0].opts.session_store is None
-    # Repair ran: synthetic tool_result for t1 injected at transcript[4].
-    # Shape: 4 original + 1 synthetic repair + 1 resume manifest + 1 new assistant = 7.
-    transcript_turns = t.load()
-    assert len(transcript_turns) == 7
-    repair_turn = transcript_turns[4]
-    assert repair_turn.role == "user"
-    assert isinstance(repair_turn.content[0], ToolResultBlock)
-    assert repair_turn.content[0].tool_use_id == "t1"
+    opts = created[0].opts
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+    # DANGLING native resume STREAMS a synthesized placeholder tool_result for t1.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
+    # The dangling t1 turn was reconstructed as the trailing native-session entry;
+    # the synth result is streamed, not stored.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 4
+    assert reconciled[-1]["message"]["content"][0] == {
+        "type": "tool_use", "id": "t1",
+        "name": "mcp__imp__read_file", "input": {"path": "b.txt"}}
 
 
 
@@ -2914,15 +2973,15 @@ async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_fallback_replay_disables_tool_search(tmp_path: Path) -> None:
+async def test_no_store_native_keeps_tool_search_deferred(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    # No session store → stream-json fallback. The transcript ends on a balanced
-    # user tool_result (SEND_TO_LLM) so the replay carries an MCP tool_use block.
+    # No session store → reconstructs and goes native. The SEND_TO_LLM tail
+    # is native-eligible, so ToolSearch deferral stays in effect (no ENABLE_TOOL_SEARCH).
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(role="assistant", content=(
@@ -2944,11 +3003,10 @@ async def test_fallback_replay_disables_tool_search(tmp_path: Path) -> None:
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    # Confirm this really is the fallback path (no native session).
-    assert opts.resume is None
-    assert opts.session_store is None
-    # Part C: the fallback declares deferred MCP tools up front via standard mode.
-    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
+    # Confirm this really is the native path (reconstructed, not replay fallback).
+    assert opts.resume == resume_session_id("step:p/s")
+    # Native resume keeps deferral: the env knob is NOT set.
+    assert "ENABLE_TOOL_SEARCH" not in opts.env
 
 
 @pytest.mark.anyio
@@ -3162,21 +3220,22 @@ async def test_send_to_llm_tail_with_feedback_replays_and_injects(
 
 
 @pytest.mark.anyio
-async def test_balance_fallback_no_store_builds_manifest(tmp_path: Path) -> None:
-    """A production resume (balance_on_resume=True) with NO store falls to
-    stream-json replay and must still build the redo-defusing manifest. The
-    manifest names prior tool calls succeeded so the replay's is_error
-    placeholders don't drive a redo; it was previously gated out on the
-    balance_on_resume path even though balance_success_on_resume is a no-op for a
-    SEND_TO_LLM tail (no feedback turn to protect)."""
+async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) -> None:
+    """A production resume (balance_on_resume=True) with NO store and a
+    SEND_TO_LLM tail now reconstructs the session and resumes natively.
+    balance_on_resume does NOT veto native resume, so no stream-json replay and
+    no redo-defusing manifest are produced."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    # No session store → stream-json fallback (balance path, no native resume).
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(role="assistant", content=(
@@ -3186,18 +3245,30 @@ async def test_balance_fallback_no_store_builds_manifest(tmp_path: Path) -> None
         ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=False),)))
 
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
     runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5",
-        client_factory=lambda opts: FakeClaudeSDKClient(
-            opts, scripted_messages=scripted))
+        model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
+    opts = created[0].opts
+    assert opts.resume == resume_session_id("step:p/s")
+    assert opts.session_id is None
+    # No stream-json replay → no redo-defusing manifest in the transcript.
     replayed = Transcript(inv.transcript_dir / "transcript.jsonl").load()
-    assert any(
+    assert not any(
         any(isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
             for b in m.content)
-        for m in replayed if m.role == "user"
-    ), "manifest not built on the balance_on_resume no-store fallback"
+        for m in replayed if m.role == "user")
+    # The 2 flushed turns were reconstructed; the trailing user tool_result is
+    # streamed as the SEND_TO_LLM delta, not stored.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 2
 
 
 @pytest.mark.anyio
@@ -3539,10 +3610,11 @@ async def test_replay_path_isolates_config_dir(tmp_path: Path) -> None:
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path)
+    # retry_feedback vetoes native resume, so the runner takes the replay
+    # disposition (the feedback must be co-located on the balancing user turn).
+    inv = replace(inv, balance_on_resume=True, retry_feedback="REVISE: redo it.")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    # Existing transcript + NO session store written → no-store replay fallback
-    # (native_resume is False), so the runner takes the replay disposition.
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(

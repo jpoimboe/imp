@@ -120,3 +120,28 @@ def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
         main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
     mb.assert_called_once()
     assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
+
+
+def test_emit_paused_summary_renders_terminated_reason(capsys) -> None:
+    change = _Change([
+        {"type": "step_started", "payload": {"phase": "reviewing plan"}},
+        {"type": "error",
+         "payload": {"detail": {"last_agent_text":
+                                "API Error 400 — tool use concurrency\ntrace"}}},
+        {"type": "workflow_paused",
+         "payload": {"reason": "terminated", "kind": "terminated"}},
+    ])
+    main._emit_paused_summary(change)
+    out = capsys.readouterr().out
+    assert "(terminated: API Error 400 — tool use concurrency)" in out
+    assert "at reviewing plan" in out
+
+
+def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
+    change = _Change([
+        {"type": "workflow_paused",
+         "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
+    ])
+    main._emit_paused_summary(change)
+    out = capsys.readouterr().out
+    assert "(interrupt)" in out

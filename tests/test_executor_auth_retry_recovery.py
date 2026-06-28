@@ -129,3 +129,51 @@ async def test_auth_retry_recovers_through_backoff_loop(
     assert "agent_retry" in log_types
     assert "awaiting_user_input" not in log_types
     assert "llm_response" in log_types
+
+
+@pytest.mark.anyio
+async def test_concurrency_400_retry_recovers_through_backoff_loop(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _seed_single_agent(tmp_path)
+
+    scripts = [
+        [assistant(text("API Error 400 — tool use concurrency")),
+         result(is_error=True, api_error_status=400)],
+        [assistant(text("done"),
+                   tool_use("c1", "complete_step",
+                            {"status": "Success", "outcome": "done"})),
+         result()],
+    ]
+    calls: dict[str, int] = {"n": 0}
+
+    def client_factory(opts: Any) -> FakeClaudeSDKClient:
+        script = scripts[calls["n"]]
+        calls["n"] += 1
+        return FakeClaudeSDKClient(opts, scripted_messages=script)
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return ClaudeCodeAgentRunner(
+                model_name="m", client_factory=client_factory)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    out = await run_change(change)
+
+    assert out is RunResult.COMPLETED
+    assert State.load(change.state_dir).status == "completed"
+    assert calls["n"] == 2
+
+    log_types = [e["type"] for e in change.event_log().read()]
+    assert "agent_retry" in log_types
+    assert "workflow_paused" not in log_types
+    assert "llm_response" in log_types

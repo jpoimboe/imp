@@ -58,7 +58,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     change = Change(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, token = _pause_facts(change)
+    name, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"
     assert token == "qzbscf"
 
@@ -71,6 +71,52 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, token = _pause_facts(change)
+    name, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
+
+
+def test_pause_reason_terminated_appends_first_line_of_last_agent_text() -> None:
+    from imp.cli.main import _pause_reason
+
+    reason = _pause_reason([
+        ev("1", "step_started", step="plan-reviewer", kind="agent",
+           phase="reviewing plan"),
+        ev("2", "error", category="terminated",
+           detail={"last_agent_text":
+                   "API Error 400 — tool use concurrency\nstack trace line"}),
+        ev("3", "workflow_paused", reason="terminated", kind="terminated"),
+    ])
+    assert reason == "terminated: API Error 400 — tool use concurrency"
+
+
+def test_pause_reason_interrupt_has_no_cause() -> None:
+    from imp.cli.main import _pause_reason
+
+    # interrupt_reason wins over reason (mirrors _h_workflow_paused); distinct
+    # values make that precedence falsifiable.
+    reason = _pause_reason([
+        ev("1", "workflow_paused", reason="terminated", interrupt_reason="interrupt"),
+    ])
+    assert reason == "interrupt"
+
+
+def test_pause_reason_interrupt_after_prior_terminated_pause_has_no_stale_cause() -> None:
+    from imp.cli.main import _pause_reason
+
+    # Cumulative log across resume: a terminated pause, then a fresh invocation
+    # that the user ctrl-c'd. The interrupt pause's own segment has no error, so
+    # the stale terminated cause must NOT leak onto the interrupt headline.
+    reason = _pause_reason([
+        ev("1", "error", category="terminated",
+           detail={"last_agent_text": "API Error 400 — tool use concurrency"}),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("3", "workflow_paused", reason="interrupt", interrupt_reason="interrupt"),
+    ])
+    assert reason == "interrupt"
+
+
+def test_pause_reason_none_when_no_pause_event() -> None:
+    from imp.cli.main import _pause_reason
+
+    assert _pause_reason([ev("1", "change_created", change_id=1, title="x")]) is None

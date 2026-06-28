@@ -2637,3 +2637,21 @@ def test_resume_restart_clears_pre_interrupt_children() -> None:
     texts = [c.text for c in build.children if isinstance(c, nv.AgentTextNode)]
     assert texts == ["fresh complete"]                      # partial wiped
     assert build.start_ts == "2026-06-28T00:05:00+00:00"    # clock restamped
+
+
+def test_error_node_uses_last_agent_text_when_no_full_summary_or_stderr() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("e1", "error", category="terminated",
+             message="claude_code agent terminated with an error (cause unknown)",
+             detail={"last_agent_text": "API Error 400 — tool use concurrency"}))
+    err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err.detail == "API Error 400 — tool use concurrency"
+
+
+def test_error_node_full_summary_wins_over_last_agent_text() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("e1", "error", category="loop", message="loop guard",
+             detail={"full_summary": "the full summary",
+                     "last_agent_text": "secondary text"}))
+    err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err.detail == "the full summary"
