@@ -31,10 +31,4 @@ if [ "$committed" != "$live" ]; then
   echo "live plan $LIVE differs from the committed blob on $WIP" >&2
   exit 1
 fi
-TASKS=$(grep -cE '^## Task[[:space:]]' "$LIVE" || true)
-CEILING=12
-if (( TASKS > CEILING )); then
-  echo "plan $LIVE has $TASKS tasks (ceiling $CEILING) — split this plan: emit the first coherent chunk and rely on the outline-driven plan loop for the rest" >&2
-  exit 1
-fi
-echo "ok: $WIP carries plans/${NEWEST} matching $LIVE (${TASKS} tasks)"
+echo "ok: $WIP carries plans/${NEWEST} matching $LIVE"

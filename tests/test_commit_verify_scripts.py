@@ -143,49 +143,27 @@ def test_plan_verify_fails_when_live_plan_differs_from_committed(tmp_path: Path)
     assert _run_id("plan-commit-verify.sh", root, "id1") != 0
 
 
-def test_plan_verify_rejects_plan_over_task_ceiling(tmp_path: Path) -> None:
-    # A plan with 13 `## Task` headings (above the ~12 ceiling) is rejected with a
-    # "split this" message that resumes plan-writer (non-zero exit).
+def test_plan_verify_passes_large_plan_no_task_cap(tmp_path: Path) -> None:
+    # The task-count cap is gone: a 20-task plan (far above the old 12 ceiling)
+    # now passes, and the success line carries no "(N tasks)" suffix. Both
+    # workflow copies dropped the cap and stay byte-identical.
     root = _repo(tmp_path)
     (root / ".imp").mkdir()
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "seed")
     body = "# plan 1\n\n" + "".join(
-        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 14))   # 13 tasks
+        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 21))   # 20 tasks
     _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
     proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
-    assert proc.returncode != 0
-    assert "split" in proc.stderr.lower()
-    assert "13" in proc.stderr
-
-
-def test_plan_verify_passes_plan_within_task_ceiling(tmp_path: Path) -> None:
-    # A coherent 8-task plan passes the gate.
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    body = "# plan 1\n\n" + "".join(
-        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 9))    # 8 tasks
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
-    proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
-    assert proc.returncode == 0
-
-
-def test_plan_verify_passes_plan_at_task_ceiling(tmp_path: Path) -> None:
-    # Exactly at the ceiling (12 tasks): the guard uses > so 12 must pass.
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    body = "# plan 1\n\n" + "".join(
-        f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 13))    # 12 tasks
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
-    proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
-    assert proc.returncode == 0
+    assert proc.returncode == 0, proc.stderr
+    assert "matching" in proc.stdout
+    assert "tasks)" not in proc.stdout                 # no "(N tasks)" suffix
+    imp = (SCRIPTS / "plan-commit-verify.sh").read_text()
+    flat = (bundled_workflow_dir("imp-flat") / "scripts"
+            / "plan-commit-verify.sh").read_text()
+    assert "CEILING" not in imp and "CEILING" not in flat
+    assert imp == flat
 
 
 def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
