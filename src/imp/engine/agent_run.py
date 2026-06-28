@@ -31,7 +31,10 @@ import anyio
 
 from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import AgentInvocation, ChangeContext, Message
-from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
+from imp.agents.tools.limits import (
+    AGENT_INACTIVITY_TIMEOUT_S,
+    PROCESS_KILL_GRACE_S,
+)
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
     INTERRUPT_STEER_HINT as INTERRUPT_STEER_HINT,
@@ -278,10 +281,19 @@ async def _pull_with_inactivity_watchdog(
             return
         except TimeoutError:
             stall["hit"] = True
-            with contextlib.suppress(Exception):
-                await runner.interrupt()
-            with contextlib.suppress(Exception):
-                await gen.aclose()
+            # Cap the cooperative interrupt()+aclose() COLLECTIVELY: a wedged CLI
+            # can ignore the graceful interrupt, so on overrun escalate to the
+            # optional fire-and-forget force_kill seam (subprocess providers only).
+            with anyio.move_on_after(PROCESS_KILL_GRACE_S) as kill_scope:
+                with contextlib.suppress(Exception):
+                    await runner.interrupt()
+                with contextlib.suppress(Exception):
+                    await gen.aclose()
+            if kill_scope.cancelled_caught:
+                force_kill = getattr(runner, "force_kill", None)
+                if force_kill is not None:
+                    with contextlib.suppress(Exception):
+                        await force_kill()
             return
         yield ev
 

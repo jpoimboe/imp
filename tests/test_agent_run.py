@@ -472,6 +472,45 @@ async def test_drive_invocation_stall_logs_stalled_category(
 
 
 @pytest.mark.anyio
+async def test_watchdog_teardown_force_kills_when_interrupt_ignores_grace(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """AC6 bounded teardown: a wedged runner is force-killed within PROCESS_KILL_GRACE_S."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(ar, "PROCESS_KILL_GRACE_S", 0.3)
+
+    forced = {"called": False}
+
+    class _IgnoresInterruptRunner:
+        async def interrupt(self) -> None:
+            await anyio.sleep(3600)   # ignores the graceful interrupt forever
+
+        async def force_kill(self) -> None:
+            forced["called"] = True
+
+        async def run(self, _invocation):
+            await anyio.sleep(3600)   # emit nothing, ever
+            yield {"type": "agent_output", "payload": {}}  # never reached
+
+    start = anyio.current_time()
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _IgnoresInterruptRunner(), coordinator=None,
+            log=None, emit_events=False)
+    elapsed = anyio.current_time() - start
+
+    assert forced["called"] is True
+    assert result.errored is True
+    assert result.error is not None and result.error.category == "stalled"
+    assert result.delay == 1.0
+    # Bounded: ~AGENT_INACTIVITY_TIMEOUT_S + ~PROCESS_KILL_GRACE_S, NOT ~3600s.
+    # Generous ceiling for CI jitter, far below the hang it replaces.
+    assert elapsed < 2.0
+
+
+@pytest.mark.anyio
 async def test_drive_invocation_survives_when_subtree_active(
     tmp_path: Path, monkeypatch,
 ) -> None:
