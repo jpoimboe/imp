@@ -255,13 +255,19 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     # Override the anthropic project.yaml _seed_project committed; re-commit so
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the openai pin.
+    # gpt-5.4-mini, not gpt-4o-mini: the model isn't under test here (the
+    # interrupt/resume machinery is), but it MUST reliably run the scripted
+    # bash(`sleep 30`) so the SIGINT lands mid-bash. gpt-4o-mini intermittently
+    # skipped the bash call and completed the step immediately, so the test saw no
+    # bash tool_call and failed. gpt-5.4-mini (the project's openai `low` pin)
+    # follows the bash-then-complete sequence reliably.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
         providers: [openai]
         tiers:
-          low: {openai: gpt-4o-mini}
-          medium: {openai: gpt-4o-mini}
-          high: {openai: gpt-4o-mini}
+          low: {openai: gpt-5.4-mini}
+          medium: {openai: gpt-5.4-mini}
+          high: {openai: gpt-5.4-mini}
     """))
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(
