@@ -1906,27 +1906,20 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
     return (row[0], status, *row[2:])
 
 
-def _status_rows(control: Path) -> list[_Row]:
+def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
+    homes = _scan_change_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
-    for change_id in _list_change_homes(control):
-        cdir = _change_home(control, change_id)
-        try:
-            state_json = (cdir / "state" / "state.json").read_bytes()
-            change_json = (cdir / "change.json").read_bytes()
-        except FileNotFoundError:
+    for h in homes:
+        if h.state_json is None:
             continue
-        try:
-            meta = json.loads(change_json)
-        except json.JSONDecodeError:
-            continue
-        if meta.get("materialized", True) is False and meta.get("origin", "draft") != "draft":
+        if h.meta.get("materialized", True) is False and h.meta.get("origin", "draft") != "draft":
             continue  # un-materialized ideas/follow-ups belong to the Backlog zone
-        last = _last_event_iso(cdir / "events.jsonl") or ""
-        row = _status_row(change_id, state_json, change_json, last)
+        row = _status_row(h.change_id, h.state_json, h.change_json, h.last_iso)
         if row is None:
             continue
+        cdir = _change_home(control, h.change_id)
         status = resolve_display_status(
-            row[1], cdir, materialized=meta.get("materialized", True))
+            row[1], cdir, materialized=h.meta.get("materialized", True))
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue

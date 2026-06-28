@@ -44,3 +44,17 @@ def test_scan_change_homes_drops_malformed_change_json(tmp_path: Path) -> None:
 
     ids = {h.change_id for h in m._scan_change_homes(tmp_path)}
     assert "badJson" not in ids
+
+
+def test_status_rows_uses_passed_scan(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+
+    scan = m._scan_change_homes(tmp_path)
+    # Threaded scan and internal scan produce identical rows.
+    assert m._status_rows(tmp_path, scan) == m._status_rows(tmp_path)
+    assert {r[0] for r in m._status_rows(tmp_path)} == {"alpha", "beta"}
+    # The passed scan is actually honored, not ignored: a one-home scan yields one row.
+    alpha_only = [h for h in scan if h.change_id == "alpha"]
+    assert {r[0] for r in m._status_rows(tmp_path, alpha_only)} == {"alpha"}
