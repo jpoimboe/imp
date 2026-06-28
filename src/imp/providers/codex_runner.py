@@ -890,8 +890,14 @@ class CodexAgentRunner:
             + "IMPORTANT — Tool policy:\n"
             + "- Use ONLY the `mcp__imp__*` tools exposed via the MCP server.\n"
             + "- NEVER call native `apply_patch` or any other built-in tool.\n"
-            + "- Finish the task by calling the `complete_step` tool with the\n"
-            + "  structured answer.\n"
+            # Name the completion tool by the EXACT identifier codex exposes it
+            # under (`mcp__imp__complete_step`), not the bare `complete_step`.
+            # Weak low-tier models (gpt-5.4-mini) otherwise hunt for a bare
+            # `complete_step` tool, fail to find it among the namespaced MCP
+            # tools, and refuse the turn ("I can't call complete_step from the
+            # tools exposed") — a ~60% turn-1 refusal that nudges barely recover.
+            + "- Finish the task by calling the `mcp__imp__complete_step` tool\n"
+            + "  with the structured answer.\n"
         )
 
     async def interrupt(self) -> None:
