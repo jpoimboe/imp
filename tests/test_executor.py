@@ -797,6 +797,49 @@ async def test_retry_budget_pauses_with_retry_ceiling(
 
 
 @pytest.mark.anyio
+async def test_auth_budget_exhaustion_pauses_with_reauth_needed(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """AC-B: when the auth budget is exceeded, the executor pauses with
+    reason="reauth_needed" (kind passes through from the labeled error, here
+    http_401). Non-auth categories keep retry_ceiling (covered by
+    test_retry_budget_pauses_with_retry_ceiling)."""
+    from imp.engine import executor
+    # Tiny budget so the first retry delay (1.0s) exceeds it on attempt 1.
+    monkeypatch.setattr(executor, "budget_for", lambda category: 0.5)
+    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+        pass
+    monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
+
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _CategoryErrorRunner(
+        category="auth", kind="http_401",
+        message="401 Invalid authentication credentials",
+    )
+
+    class _AuthProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
+    )
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.PAUSED
+    assert runner.run_count == 1
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert paused and paused[0]["payload"]["reason"] == "reauth_needed"
+
+
+@pytest.mark.anyio
 async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
     tmp_path: Path, monkeypatch,
 ) -> None:

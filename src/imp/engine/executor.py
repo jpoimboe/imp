@@ -872,9 +872,13 @@ async def _route_agent(
         # not a retry-then-pause. Identical in interactive and headless runs.
         # delay is non-None only for RetryWithBackoff categories, which always
         # carry a budget, so budget is non-None here.
-        budget = budget_for(result.error.category if result.error else "unknown")
+        category = result.error.category if result.error else "unknown"
+        budget = budget_for(category)
         if budget is not None and cumulative_backoff + result.delay > budget:
-            pause = Pause(reason="retry_ceiling",
+            # Auth exhaustion is actionable: the human must re-authenticate, not wait out a
+            # generic ceiling.
+            reason = "reauth_needed" if category == "auth" else "retry_ceiling"
+            pause = Pause(reason=reason,
                           kind=result.error.kind if result.error else None)
             _emit(log, "step_completed",
                   {"step": step.name, "kind": "agent",
@@ -885,7 +889,7 @@ async def _route_agent(
         # transient network/rate_limit error that recovers doesn't look like a
         # failure. category comes from the plumbed ErrorInfo.
         _emit(log, "agent_retry", {
-            "category": result.error.category if result.error else "unknown",
+            "category": category,
             "attempt": backoff,
             "backoff_seconds": result.delay,
         }, agent_id=None)
