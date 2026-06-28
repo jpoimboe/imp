@@ -891,3 +891,26 @@ def test_anthropic_has_no_wait_for_user_result_handling() -> None:
     src = inspect.getsource(anthropic_mod)
     assert '_tu.name == "wait_for_user"' not in src
     assert 'if name == "wait_for_user"' not in src
+
+
+@pytest.mark.anyio
+async def test_anthropic_resume_creates_no_native_session_store(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    transcript = Transcript(inv.transcript_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="resume me"),)))
+    transcript.append(Message(role="assistant", content=(
+        ToolUseBlock(id="u1", name="read_file", input={"path": "/project/x"}),)))
+    transcript.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="u1", content="prior contents"),)))
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success"})),
+    ])
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake)
+    events = [e async for e in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+    # Scope guard: the anthropic path never materializes a claude_session/ store dir.
+    assert not (inv.transcript_dir / "claude_session").exists()

@@ -191,3 +191,85 @@ def test_resumed_step_does_not_redo_prior_reads(tmp_path: Path) -> None:
     names = [Path(p).name for p in post]
     assert names.count("a.txt") == 1, names
     assert names.count("b.txt") == 1, names
+
+
+@pytest.mark.skipif(
+    not opted_in("claude_code"),
+    reason="claude_code not in IMP_LIVE_PROVIDERS",
+)
+def test_no_store_fallback_replays_deferred_mcp_tools_without_400(
+    tmp_path: Path,
+) -> None:
+    """Part C: a no-store fallback resume replays a deferred-MCP-tool history
+    (two read_file calls) without tripping `400 due to tool use concurrency
+    issues`, because the fallback sets ENABLE_TOOL_SEARCH=false so the MCP tools
+    are declared up front rather than deferred behind ToolSearch."""
+    assert shutil.which("claude") is not None, (
+        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
+        "not found on PATH"
+    )
+    _seed_multiread_project(tmp_path)
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+    _pypath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "imp", "new", "partc-fallback-deferred-tools"],
+        cwd=tmp_path, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        change_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = change_dir.name
+        events = change_dir / "events.jsonl"
+        state_path = change_dir / "state" / "state.json"
+
+        if not _wait_for_bash_tool_call(events, timeout=120.0):
+            stdout, stderr = proc.communicate(timeout=10)
+            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+        time.sleep(2.0)
+        os.killpg(proc.pid, signal.SIGINT)
+        rc = proc.wait(timeout=20)
+        assert rc == 130
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    state = json.loads(state_path.read_text())
+    assert state["status"] == "paused"
+    # Both MCP read_file tools ran before the mid-bash interrupt, and the
+    # batcher flushed nothing (no result boundary) → the resume takes the
+    # stream-json fallback that replays those deferred-MCP tool_use blocks.
+    pre = {Path(p).name for p in _read_paths(events)}
+    assert {"a.txt", "b.txt"} <= pre, pre
+
+    resume = subprocess.run(
+        [sys.executable, "-m", "imp", "resume", slug],
+        cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=240,
+    )
+    # Part C: the deferred-MCP-tool replay did NOT 400 — the resume completed.
+    assert resume.returncode == 0, (
+        f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
+    )
+    assert json.loads(state_path.read_text())["status"] == "completed"
+    haystack = resume.stdout + resume.stderr + "\n".join(
+        json.dumps(rec) for rec in _iter_events(events))
+    assert "tool use concurrency" not in haystack, (
+        "deferred-MCP-tool fallback replay tripped the 400 Part C fixes"
+    )
+    # The manifest still names the prior reads as succeeded (defuses the
+    # placeholder corruption that the fallback otherwise causes). The manifest
+    # text lives verbatim in a user_message event payload, so search the PARSED
+    # events with ensure_ascii=False: transcript.py builds the line with an
+    # em-dash (U+2014, "read_file — succeeded"), which json.dumps's default
+    # ensure_ascii=True escapes to — — so a literal substring check against
+    # the json.dumps haystack above would false-fail on correct code.
+    assert any(
+        "read_file — succeeded"
+        in json.dumps(rec.get("payload", {}), ensure_ascii=False)
+        for rec in _iter_events(events)
+    ), "fallback manifest did not name the prior read as succeeded"

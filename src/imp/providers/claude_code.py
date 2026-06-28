@@ -95,6 +95,8 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
+    _SESSION_LIMIT_RE,
+    reconcile_store_tail,
     resume_session_id,
     session_key,
     session_store_for,
@@ -149,6 +151,8 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     for pat in _QUOTA_PATTERNS:
         if pat in text:
             return perr.QuotaError(f"claude CLI: {pat}")
+    if _SESSION_LIMIT_RE.search(text):
+        return perr.RateLimitError(f"claude CLI: {text[:200]}")
     m = _API_ERROR_RE.search(text)
     if m:
         code = int(m.group(1))
@@ -215,6 +219,8 @@ def _termination_from_result(
     if labeled is None and status in (401, 403):
         labeled = perr.AuthError(f"claude_code: api_error_status={status}")
         labeled.kind = f"http_{status}"  # type: ignore[attr-defined]
+    if labeled is None and status == 429:
+        labeled = perr.RateLimitError(f"claude_code: api_error_status={status}")
     if isinstance(labeled, (perr.QuotaError, perr.AuthError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
@@ -1026,7 +1032,8 @@ class ClaudeCodeAgentRunner:
                        *, session_store: Any = None,
                        session_id: str | None = None,
                        resume: str | None = None,
-                       config_dir: Path | None = None) -> Any:
+                       config_dir: Path | None = None,
+                       disable_tool_search: bool = False) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions, SdkBeta
 
         from imp.providers.catalog import CLAUDE_CODE, model_info
@@ -1062,6 +1069,10 @@ class ClaudeCodeAgentRunner:
             # resume/replay keep the flags so they don't write ~/.claude
             env["CLAUDE_CODE_SKIP_PROMPT_HISTORY"] = "1"
             extra_args = {"no-session-persistence": None}
+        if disable_tool_search:
+            # Standard tool mode declares replayed MCP tool_use blocks up front;
+            # the default ToolSearch deferral leaves them undeclared and 400s.
+            env["ENABLE_TOOL_SEARCH"] = "false"
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
@@ -1237,20 +1248,26 @@ class ClaudeCodeAgentRunner:
         skey = session_key(invocation.change_context.project_root, aid)
         # Native resume is sound ONLY when existing's final turn was actually
         # flushed to the store. The SDK mirror batcher flushes solely at a `result`
-        # boundary, so the only resume shape whose final turn carries a result is
-        # AWAITING_USER (the agent ended its turn on assistant prose — a bare
-        # turn-end yield). Every other shape leaves its final turn UNflushed and
-        # outside the resume_base slice: SEND_TO_LLM ends on an unflushed user turn;
-        # DANGLING_TOOL_USE (and the balance_on_resume flag's path) ends on an
-        # unflushed, interrupted assistant tool_use whose id lives in neither
-        # claude-p's loaded session nor the slice — so the surgery's tool_result
-        # would be orphaned (the unmatched-tool_use 400 this change targets). Those
+        # boundary, so AWAITING_USER (the agent ended its turn on assistant prose —
+        # a bare turn-end yield) is the only shape whose tail is already flushed.
+        # SEND_TO_LLM ends on an unflushed user turn but is handled on the native
+        # path via reconcile-and-overwrite: the unflushed tail is written into the
+        # store before claude-p loads its native session. DANGLING_TOOL_USE
+        # (native with store; no-store fallback only — and the
+        # balance_on_resume flag's path) ends on an unflushed, interrupted assistant
+        # tool_use whose id lives in neither claude-p's loaded session nor the slice
+        # — so the surgery's tool_result would be orphaned (the unmatched-tool_use
+        # 400 this change targets). Only the no-store fallback and balance_on_resume
         # downgrade to stream-json replay, which re-streams the whole balanced
         # history in position.
+        store_body = await store.load(skey)
         native_resume = (
             (not is_fresh)
-            and store_has_conversation_body(await store.load(skey))
-            and classify_resume(existing) is ResumeState.AWAITING_USER
+            and not invocation.balance_on_resume
+            and store_has_conversation_body(store_body)
+            and classify_resume(existing) in (
+                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
+                ResumeState.DANGLING_TOOL_USE)
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
@@ -1273,7 +1290,8 @@ class ClaudeCodeAgentRunner:
             opts = self._build_options(
                 invocation, mcp_server, list(tools), impty_server=impty_server,
                 session_store=opt_store, session_id=opt_session_id,
-                resume=opt_resume, config_dir=config_dir)
+                resume=opt_resume, config_dir=config_dir,
+                disable_tool_search=bool(existing) and not native_resume)
         else:
             opts = None
 
@@ -1290,14 +1308,14 @@ class ClaudeCodeAgentRunner:
                 balance_success_on_resume(
                     messages, transcript, elog, aid,
                     wrapper_text=invocation.retry_feedback)
-            else:
+            elif not native_resume:
                 synth = repair_dangling_tool_use_on_resume(messages, transcript)
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
             resume_state = classify_resume(messages)
-            if resume_state is ResumeState.DANGLING_TOOL_USE:
+            if resume_state is ResumeState.DANGLING_TOOL_USE and not native_resume:
                 yield {"type": "error", "payload": {
                     "category": "config",
                     "kind": "transcript_invalid",
@@ -1405,6 +1423,15 @@ class ClaudeCodeAgentRunner:
             pending_complete = False
             return rec
 
+        if native_resume:
+            assert store_body  # native_resume gate guarantees store_has_conversation_body
+            reconciled = reconcile_store_tail(
+                messages[:resume_base], store_body,
+                session_id=skey["session_id"],
+                cwd=str(invocation.change_context.project_root),
+                model=self.model,
+            )
+            await store.overwrite(skey, reconciled)
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
             # Publish the live client so interrupt() (called from the watchdog/

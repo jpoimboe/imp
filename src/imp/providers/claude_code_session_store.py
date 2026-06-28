@@ -11,6 +11,7 @@ not subclass the SDK's `SessionStore` Protocol.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import shutil
@@ -18,6 +19,13 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from imp.agents.runner import (
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 
 
 def _sanitize(value: str) -> str:
@@ -77,6 +85,22 @@ class ImpSessionStore:
                 if uid is not None:
                     seen.add(uid)
 
+    async def overwrite(
+        self, key: Mapping[str, Any], entries: list[dict[str, Any]],
+    ) -> None:
+        """Replace the key's file with `entries`, truncating. Unlike append (which
+        only dedups-and-adds), this drops entries no longer present — required when
+        reconcile strips a trailing synthetic error turn whose deterministic uuid
+        the real replacement tail reuses, which append's uuid dedup would drop."""
+        path = self._path(key)
+        if not entries:
+            path.unlink(missing_ok=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+
     async def load(
         self, key: Mapping[str, Any],
     ) -> list[dict[str, Any]] | None:
@@ -135,3 +159,146 @@ def store_has_conversation_body(entries: list[dict[str, Any]] | None) -> bool:
         isinstance(e, dict) and e.get("type") != "ai-title"
         for e in (entries or [])
     )
+
+
+_RECORD_UUID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "imp/claude_code/session-record")
+
+
+def _record_uuid(session_id: str, index: int) -> str:
+    """Deterministic uuid (session_id + turn index) so reconcile re-runs dedup idempotently."""
+    return str(uuid.uuid5(_RECORD_UUID_NAMESPACE, f"{session_id}:{index}"))
+
+
+def _session_block_to_dict(block: Any) -> dict[str, Any]:
+    if isinstance(block, TextBlock):
+        return {"type": "text", "text": block.text}
+    if isinstance(block, ToolUseBlock):
+        return {"type": "tool_use", "id": block.id,
+                "name": block.name, "input": block.input}
+    if isinstance(block, ToolResultBlock):
+        return {"type": "tool_result", "tool_use_id": block.tool_use_id,
+                "content": block.content, "is_error": block.is_error}
+    raise TypeError(f"unexpected content block: {type(block).__name__}")
+
+
+_SESSION_LIMIT_RE = re.compile(
+    r"hit (?:your|a|the) session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/",
+    re.IGNORECASE)
+
+
+def session_record_is_error_turn(entry: Any) -> bool:
+    """True for a synthetic API-error / session-limit turn (isApiErrorMessage flag or text)."""
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("isApiErrorMessage") is True:
+        return True
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return False
+    if message.get("isApiErrorMessage") is True:
+        return True
+    content = message.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        text = " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text")
+    else:
+        text = ""
+    return bool(_SESSION_LIMIT_RE.search(text))
+
+
+def strip_trailing_error_turn(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop a single trailing synthetic error turn; return entries unchanged otherwise."""
+    if entries and session_record_is_error_turn(entries[-1]):
+        return list(entries[:-1])
+    return list(entries)
+
+
+def _store_body_turn_count(entries: list[dict[str, Any]]) -> int:
+    """Count conversation turns (user/assistant with a message) in a store body."""
+    return sum(
+        1 for e in entries
+        if isinstance(e, dict)
+        and e.get("type") in ("user", "assistant")
+        and "message" in e
+    )
+
+
+def reconcile_store_tail(
+    messages: list[Message], store_entries: list[dict[str, Any]], *,
+    session_id: str, cwd: str, model: str,
+) -> list[dict[str, Any]]:
+    """Pure reconcile: strip a trailing synthetic error turn, then append session
+    records for the transcript messages the store is missing.
+
+    Returns the full desired store entry list (kept body + synthesized tail).
+    The turn-count -> message-index mapping assumes the store body's conversation
+    turns are 1:1 with imp transcript messages (the common case at a result
+    boundary). The caller persists the returned list before native resume.
+
+    Persistence note: a stripped trailing error turn and the real tail entry that
+    replaces it can share a deterministic uuid, so the caller must OVERWRITE the
+    store file with the returned list — appending would let the store's uuid dedup
+    drop the real tail.
+    """
+    kept = strip_trailing_error_turn(store_entries)
+    body_count = _store_body_turn_count(kept)
+    missing = messages[body_count:]
+    if not missing:
+        return kept
+    parent = kept[-1].get("uuid") if kept else None
+    tail = message_to_session_records(
+        missing, parent_uuid=parent, session_id=session_id, cwd=cwd,
+        model=model, start_index=body_count)
+    return kept + tail
+
+
+def message_to_session_records(
+    messages: list[Message], *, parent_uuid: str | None, session_id: str,
+    cwd: str, model: str, start_index: int = 0,
+) -> list[dict[str, Any]]:
+    """Convert imp transcript Messages into claude-p on-disk session records.
+
+    Shape matches a real ~/.claude/projects/<key>/<session>.jsonl line: a
+    parentUuid->uuid chain carrying sessionId, type, and an Anthropic message.
+    parent_uuid anchors the chain to the last record already in the store
+    (None for an empty store). start_index is the absolute turn index of
+    messages[0] so uuids stay stable across reconcile re-runs.
+    """
+    records: list[dict[str, Any]] = []
+    parent = parent_uuid
+    timestamp = datetime.datetime.now(datetime.UTC).isoformat()
+    for offset, m in enumerate(messages):
+        index = start_index + offset
+        rec_uuid = _record_uuid(session_id, index)
+        content = [_session_block_to_dict(b) for b in m.content]
+        if m.role == "assistant":
+            message: dict[str, Any] = {
+                "id": "msg_" + rec_uuid.replace("-", "")[:24],
+                "type": "message",
+                "role": "assistant",
+                "model": model,
+                "content": content,
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
+        else:
+            message = {"role": m.role, "content": content}
+        records.append({
+            "parentUuid": parent,
+            "uuid": rec_uuid,
+            "sessionId": session_id,
+            "type": m.role,
+            "cwd": cwd,
+            "isSidechain": False,
+            "userType": "external",
+            "timestamp": timestamp,
+            "message": message,
+        })
+        parent = rec_uuid
+    return records

@@ -259,3 +259,253 @@ def test_session_store_for_writes_under_claude_session_subdir(
     )
     written = list((tmp_path / "claude_session").rglob("*.jsonl"))
     assert written, "append must land under <transcript_dir>/claude_session/"
+
+
+def test_message_to_session_records_chains_and_shapes() -> None:
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    from imp.providers.claude_code_session_store import message_to_session_records
+
+    messages = [
+        Message(role="assistant", content=(
+            TextBlock(text="reading"),
+            ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "spec.md"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
+    ]
+    recs = message_to_session_records(
+        messages, parent_uuid="P", session_id="sid", cwd="/proj",
+        model="claude-sonnet-4-5", start_index=2)
+
+    assert len(recs) == 2
+    assert recs[0]["type"] == "assistant"
+    assert recs[0]["parentUuid"] == "P"
+    assert recs[0]["sessionId"] == "sid"
+    assert recs[0]["cwd"] == "/proj"
+    assert recs[0]["message"]["role"] == "assistant"
+    assert recs[0]["message"]["model"] == "claude-sonnet-4-5"
+    msg_id = recs[0]["message"]["id"]
+    assert msg_id.startswith("msg_")
+    assert msg_id[4:] == recs[0]["uuid"].replace("-", "")[:24]
+    tool_use = recs[0]["message"]["content"][1]
+    assert tool_use == {"type": "tool_use", "id": "t0",
+                        "name": "mcp__imp__read_file", "input": {"path": "spec.md"}}
+    assert recs[1]["type"] == "user"
+    assert recs[1]["parentUuid"] == recs[0]["uuid"]
+    assert recs[1]["message"]["content"][0] == {
+        "type": "tool_result", "tool_use_id": "t0",
+        "content": "BODY", "is_error": False}
+
+
+def test_message_to_session_records_uuids_are_deterministic(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.providers.claude_code_session_store import message_to_session_records
+
+    messages = [Message(role="assistant", content=(TextBlock(text="hi"),))]
+    a = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=5)
+    b = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=5)
+    assert [r["uuid"] for r in a] == [r["uuid"] for r in b]
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, a)
+    anyio.run(store.append, key, b)
+    assert len(anyio.run(store.load, key)) == 1
+
+
+def test_strip_trailing_error_turn_drops_session_limit_turn() -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        strip_trailing_error_turn,
+    )
+
+    good = message_to_session_records(
+        [Message(role="assistant", content=(TextBlock(text="done"),))],
+        parent_uuid=None, session_id="sid", cwd="/p", model="m", start_index=0)
+    bad = message_to_session_records(
+        [Message(role="assistant", content=(
+            TextBlock(text="You've hit your session limit · resets 1am (America/Los_Angeles)"),))],
+        parent_uuid=good[-1]["uuid"], session_id="sid", cwd="/p", model="m",
+        start_index=1)
+    entries = good + bad
+
+    assert strip_trailing_error_turn(entries) == good
+
+
+def test_strip_trailing_error_turn_drops_is_api_error_flag() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a", "message": {"role": "assistant"}},
+        {"type": "assistant", "uuid": "b", "isApiErrorMessage": True,
+         "message": {"role": "assistant", "content": []}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
+def test_strip_trailing_error_turn_drops_nested_message_api_error_flag() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a", "message": {"role": "assistant"}},
+        {"type": "assistant", "uuid": "b",
+         "message": {"role": "assistant", "isApiErrorMessage": True, "content": []}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
+def test_strip_trailing_error_turn_drops_string_content_session_limit() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a",
+         "message": {"role": "assistant", "content": "all good"}},
+        {"type": "assistant", "uuid": "b",
+         "message": {"role": "assistant",
+                     "content": "You've hit your session limit, try later"}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
+def test_strip_trailing_error_turn_keeps_normal_tail() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [{"type": "assistant", "uuid": "a",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "all good"}]}}]
+    assert strip_trailing_error_turn(entries) == entries
+    assert strip_trailing_error_turn([]) == []
+
+
+def test_session_record_is_error_turn_benign_session_limit_prose() -> None:
+    from imp.providers.claude_code_session_store import session_record_is_error_turn
+
+    assert not session_record_is_error_turn({
+        "type": "assistant", "uuid": "x",
+        "message": {"role": "assistant",
+                    "content": [{"type": "text",
+                                 "text": "I'm working on session limit handling."}]}})
+
+
+def _three_message_transcript() -> list:
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    return [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "s"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="BODY", is_error=False),)),
+    ]
+
+
+def test_reconcile_store_tail_appends_missing_trailing_turn() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+
+    out = reconcile_store_tail(
+        messages, store_body, session_id="sid", cwd="/p", model="m")
+
+    assert len(out) == 3
+    assert out[:2] == store_body
+    assert out[2]["type"] == "user"
+    assert out[2]["parentUuid"] == store_body[-1]["uuid"]
+    assert out[2]["message"]["content"][0]["type"] == "tool_result"
+
+
+def test_reconcile_store_tail_strips_error_turn_then_resynthesizes() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    from imp.agents.runner import Message, TextBlock
+    err = message_to_session_records(
+        [Message(role="assistant", content=(
+            TextBlock(text="You've hit your session limit (America/Los_Angeles)"),))],
+        parent_uuid=store_body[-1]["uuid"], session_id="sid", cwd="/p",
+        model="m", start_index=2)
+    store_with_error = store_body + err
+
+    out = reconcile_store_tail(
+        messages, store_with_error, session_id="sid", cwd="/p", model="m")
+
+    assert len(out) == 3
+    assert out[:2] == store_body
+    assert out[2]["message"]["content"][0]["type"] == "tool_result"
+
+
+def test_overwrite_replaces_existing_entries(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "a", "message": {"role": "user"}},
+        {"type": "assistant", "uuid": "b", "message": {"role": "assistant"}},
+    ])
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "c", "message": {"role": "user"}},
+    ])
+    # The pre-existing a/b entries are gone — overwrite truncates, unlike append.
+    assert anyio.run(store.load, key) == [
+        {"type": "user", "uuid": "c", "message": {"role": "user"}}]
+
+
+def test_overwrite_with_empty_truncates(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "a", "message": {"role": "user"}}])
+    anyio.run(store.overwrite, key, [])
+    assert anyio.run(store.load, key) is None
+
+
+def test_overwrite_preserves_duplicate_uuid_replacement(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path)
+    key = _main_key()
+    anyio.run(store.append, key, [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "stale"}])
+    # Same uuid, new content: append's dedup would drop this; overwrite must keep it.
+    anyio.run(store.overwrite, key, [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}])
+    assert anyio.run(store.load, key) == [
+        {"type": "user", "uuid": "x", "message": {"role": "user"}, "text": "fresh"}]
+
+
+def test_reconcile_store_tail_is_idempotent_when_complete() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    full = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    out = reconcile_store_tail(
+        messages, full, session_id="sid", cwd="/p", model="m")
+    assert [r["uuid"] for r in out] == [r["uuid"] for r in full]
+    assert len(out) == 3

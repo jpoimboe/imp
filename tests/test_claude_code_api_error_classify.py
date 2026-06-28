@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from imp.providers import errors as perr
-from imp.providers.claude_code import _classify_agent_text
+from imp.providers.claude_code import _classify_agent_text, _termination_from_result
+from tests.cc_fakes import result
 
 
 def test_400_classified_as_api_error_with_http_kind() -> None:
@@ -180,3 +181,40 @@ def test_termination_connection_refused_is_network_not_terminated() -> None:
 def test_transient_phrases_constant_removed() -> None:
     import imp.providers.claude_code as cc
     assert not hasattr(cc, "_TRANSIENT_PHRASES")
+
+
+def test_429_status_result_classifies_rate_limit() -> None:
+    # last_text carries no API-error/session-limit wording, so _classify_agent_text
+    # returns None and only the api_error_status==429 branch can classify it.
+    sdk = result(is_error=True, api_error_status=429)
+    term = _termination_from_result(sdk, "some unrelated agent prose", {})
+    assert isinstance(term, perr.RateLimitError)
+    assert not isinstance(term, perr.TerminatedError)
+    assert term.detail["api_error_status"] == 429
+
+
+def test_session_limit_text_classifies_rate_limit() -> None:
+    exc = _classify_agent_text(
+        "You've hit your session limit · resets 11:30pm (America/Los_Angeles)")
+    assert isinstance(exc, perr.RateLimitError)
+
+
+def test_session_limit_phrase_classifies_rate_limit() -> None:
+    assert isinstance(
+        _classify_agent_text("You have hit a session limit."), perr.RateLimitError)
+
+
+def test_ordinary_prose_stays_unclassified_after_backstop() -> None:
+    assert _classify_agent_text("Reading the spec and editing files.") is None
+
+
+def test_scheduling_prose_with_timezone_stays_unclassified() -> None:
+    assert _classify_agent_text(
+        "The cron job resets daily at midnight (America/Chicago) every Sunday") is None
+    assert _classify_agent_text(
+        "Database resets at 3am (America/New_York) each week") is None
+
+
+def test_session_limit_prose_stays_unclassified() -> None:
+    assert _classify_agent_text("The session limit is set to 1000 seconds.") is None
+    assert _classify_agent_text("I'm working on session limit handling.") is None
