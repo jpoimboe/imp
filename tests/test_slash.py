@@ -76,11 +76,27 @@ def test_skills_listing_shows_description_when_present(tmp_path: Path) -> None:
     assert debug_line.strip() == "/debug"        # bare name when no description
 
 
-def test_unknown_command_reprompts(tmp_path: Path) -> None:
+def test_unknown_command_passes_through_verbatim(tmp_path: Path) -> None:
+    # A /-line matching no builtin and no skill is no longer an error: it is
+    # returned verbatim and submitted as ordinary input (no print, no REPROMPT).
     change = _FakeChange(tmp_path)
     out: list[str] = []
-    assert handle_slash_line("/nope", change=change, output_fn=out.append) is REPROMPT
-    assert any("nope" in line for line in out)
+    result = handle_slash_line("/nope", change=change, output_fn=out.append)
+    assert result == "/nope"
+    assert out == []
+
+
+def test_pasted_absolute_path_passes_through(tmp_path: Path) -> None:
+    # The reported bug: a pasted absolute path was misread as `no such skill:
+    # /home/...`. It must now reach the agent verbatim, slash and all.
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    path = "/home/jpoimboe/imp/src/foo.py"
+    result = handle_slash_line(path, change=change, output_fn=out.append)
+    assert result == path
+    assert out == []
+    # A pass-through is not a skill load: no attribution event is recorded.
+    assert not change._events.exists() or change._events.read_text() == ""
 
 
 def test_skills_builtin_cannot_be_shadowed(tmp_path: Path) -> None:
@@ -280,14 +296,14 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
 
 
 def test_continue_is_no_longer_a_verb(tmp_path: Path) -> None:
-    # /continue is removed: it now falls through to the skill resolver and is
-    # reported as an unknown command (resume by typing an ordinary line instead).
+    # /continue is removed: it falls through to the skill resolver, matches no
+    # skill, and is now submitted verbatim as ordinary input (resume by typing an
+    # ordinary line instead).
     change = _FakeChange(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/continue", change=change, output_fn=out.append)
-    assert result is REPROMPT
+    assert result == "/continue"
     joined = "\n".join(out)
-    assert "no such skill" in joined
     assert "resumes a paused run" not in joined
 
 

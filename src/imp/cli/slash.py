@@ -28,9 +28,12 @@ def is_slash_command(text: str) -> bool:
 def handle_slash_line(
     text: str, *, change: Any, output_fn: Callable[[str], None],
 ) -> object | str:
-    """Dispatch a /-line. Returns REPROMPT for /help, /skills, unknown, bad, or
-    not-found commands (each prints via output_fn). Returns the skill body (str)
-    for a successful /<name>, emitting a human-attributed skill_load event.
+    """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
+    print usage (each prints via output_fn). Returns the skill body (str) for a
+    successful /<name>, emitting a human-attributed skill_load event. A /-line
+    that matches no builtin and no skill is returned verbatim (str) and submitted
+    as ordinary input — so a pasted path like `/home/user/foo.py` is not misread
+    as a command.
 
     `/<name> <args>` loads skill <name> and appends the trailing argument text
     after the body (blank-line separated), so `/refactor src/foo.py` submits the
@@ -101,9 +104,11 @@ def handle_slash_line(
     try:
         body = load_user_skill(change.workflow_dir / "skills", cmd)
     except SkillError:
-        output_fn(f"no such skill: /{cmd}")
-        _help(output_fn)
-        return REPROMPT
+        # Not a builtin or known skill. Rather than erroring, submit the line
+        # verbatim as ordinary input — so a pasted absolute path like
+        # `/home/user/foo.py` reaches the agent unchanged instead of being
+        # misread as `no such skill: /home/...`.
+        return text
 
     change.event_log().append(
         agent_id=None, type="skill_load",
