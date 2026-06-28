@@ -2120,12 +2120,17 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     assert opts.resume == resume_session_id("step:p/s")
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
-    # No new user turn: claude-p continues the loaded session (empty streamed slice).
-    assert created[0].queries[0] == []
-    # The missing tool_result tail was reconciled into the store.
+    # SEND_TO_LLM STREAMS the trailing user turn to kick the next turn: claude-p
+    # never self-starts a loaded --resume session, so an empty streamed slice
+    # would park it (and the runner in receive_response()) forever.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    # The tail was streamed, NOT folded into the native session: the store keeps
+    # only the 2 flushed turns, ending on the assistant tool_use.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 3
-    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert len(reconciled) == 2
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_use"
 
 
 @pytest.mark.anyio
@@ -2180,17 +2185,21 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     [ev async for ev in runner.run(inv)]
 
     opts = created[0].opts
-    # In-place-repair shape WITH a store now takes the native path (not fallback).
-    # imp does NOT force a synthetic tool_result for the dangling t1 — claude-p's
-    # own pairing handles it; the live API acceptance is covered by Part B's
-    # deferred live round-trip tests.
+    # In-place-repair shape WITH a store takes the native path (not fallback).
+    # Its last turn is the user interrupt marker, so it classifies as SEND_TO_LLM:
+    # native resume STREAMS that trailing user turn to kick the next turn (an empty
+    # delta would deadlock). claude-p pairs the dangling t1 from its loaded session
+    # — imp injects no synthetic tool_result. Live acceptance: the SEND_TO_LLM
+    # round-trip in tests/test_resume_all_shapes_live.py.
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
-    assert created[0].queries[0] == []
-    # The dangling t1 turn and the interrupt marker were reconciled into the store
-    # unchanged — no synthetic tool_result was injected.
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    assert streamed[0]["message"]["content"] == "[Request interrupted by user]"
+    # The flushed prefix (through the dangling t1 turn) stays in the native
+    # session; only the interrupt marker is streamed, not reconciled in.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 5
+    assert len(reconciled) == 4
 
 
 @pytest.mark.anyio

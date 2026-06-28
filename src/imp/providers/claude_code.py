@@ -1313,6 +1313,17 @@ class ClaudeCodeAgentRunner:
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
+        # A SEND_TO_LLM tail needs the LLM to RESPOND to a trailing user turn,
+        # but claude-p never generates from a loaded --resume session alone — it
+        # blocks reading stdin for an input message. Folding that user turn into
+        # the native session (resume_base = len) makes the streamed delta empty,
+        # so claude-p waits forever and the runner parks in receive_response()
+        # (a deadlock broken only by the inactivity watchdog). Instead, keep the
+        # trailing unanswered user turn(s) OUT of the reconciled session and
+        # stream them as the delta — they are the message that kicks the turn.
+        if native_resume and classify_resume(existing) is ResumeState.SEND_TO_LLM:
+            while resume_base > 0 and existing[resume_base - 1].role == "user":
+                resume_base -= 1
         config_dir: Path | None = None
         if is_fresh:
             config_dir = materialize_fresh_config_dir()
