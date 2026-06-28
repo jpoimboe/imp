@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import imp.cli.main as m
+from imp.engine import archive
 from imp.engine.change import Change
 from tests.conftest import _seed_control
 
@@ -72,3 +74,36 @@ def test_backlog_rows_uses_passed_scan(tmp_path: Path) -> None:
     assert {r[0] for r in m._backlog_rows(tmp_path)} == {"bk1", "bk2"}
     bk1_only = [h for h in scan if h.change_id == "bk1"]
     assert {r[0] for r in m._backlog_rows(tmp_path, bk1_only)} == {"bk1"}
+
+
+def _archive_completed(control: Path, cid: str) -> None:
+    events = control / f"{cid}.jsonl"
+    events.write_bytes(
+        f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'
+        f'"payload":{{"id":"{cid}"}}}}\n'.encode())
+    change_json = control / f"{cid}-change.json"
+    change_json.write_text(json.dumps({
+        "id": cid, "title": cid.title(), "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+        "materialized": True}))
+    state_json = control / f"{cid}-state.json"
+    state_json.write_text(json.dumps({
+        "id": cid, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
+    archive.archive_change(
+        control, cid, events_path=events,
+        change_json_path=change_json, state_json_path=state_json)
+
+
+def test_completed_rows_honors_live_ids(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _archive_completed(tmp_path, "gamma")
+    assert {r[0] for r in m._completed_rows(tmp_path)} == {"gamma"}
+    assert m._completed_rows(tmp_path, live_ids={"gamma"}) == []
+
+
+def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _archive_completed(tmp_path, "gamma")
+    assert {r[0] for r in m._history_rows(tmp_path, show_all=False)} == {"gamma"}
+    assert m._history_rows(tmp_path, show_all=False, live_ids={"gamma"}) == []

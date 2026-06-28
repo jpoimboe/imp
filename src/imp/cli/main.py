@@ -1927,10 +1927,11 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
     return rows
 
 
-def _completed_rows(control: Path) -> list[_Row]:
+def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Completed/abandoned Changes NOT currently surfaced in-flight, from a
-    SINGLE indexed archive query (spec AC 7)."""
-    live = {r[0] for r in _status_rows(control)}
+    SINGLE indexed archive query (spec AC 7). `live_ids` lets the overview reuse
+    the in-flight id set it already computed instead of re-deriving it."""
+    live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
     for row in archive_read.completed_rows(control):
         if row[0] in live or row[1] in _INFLIGHT:
@@ -2205,9 +2206,10 @@ _HISTORY_CAP = 10
 _DISPOSITION = {"completed": "merged", "abandoned": "abandoned"}
 
 
-def _history_rows(control: Path, *, show_all: bool) -> list[_Row]:
+def _history_rows(control: Path, *, show_all: bool,
+                  live_ids: set[str] | None = None) -> list[_Row]:
     """Terminal-disposition (completed/abandoned) rows for the history block."""
-    rows = [r for r in _completed_rows(control) if r[1] in _DISPOSITION]
+    rows = [r for r in _completed_rows(control, live_ids) if r[1] in _DISPOSITION]
     if not show_all:
         rows = [r for r in rows if r[1] == "completed"]
     rows = _sort_rows_newest_first(rows)
