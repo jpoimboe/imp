@@ -939,12 +939,13 @@ def test_gap_check_routing_and_latch() -> None:
     assert isinstance(multi.action, Goto) and multi.action.target == "plan-code-reviewer"
     assert multi.var_mutations["coverage_settled"] is True
     assert multi.var_mutations["review_scope"] == "change"
-    # Clean + single-plan -> latch + straight to summarizer, no change-wide panel.
+    # Clean + single-plan -> change-wide review fires too (plan_total gate dropped).
     single = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                             output={"status": "Success", "more_plans": False,
                                     "plan_total": 1, "rationale": "done"})
-    assert isinstance(single.action, Goto) and single.action.target == "summarizer"
+    assert isinstance(single.action, Goto) and single.action.target == "plan-code-reviewer"
     assert single.var_mutations["coverage_settled"] is True
+    assert single.var_mutations["review_scope"] == "change"
 
 
 def test_gap_check_agent_is_end_of_change_backstop() -> None:

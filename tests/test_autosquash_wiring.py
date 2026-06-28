@@ -33,14 +33,23 @@ def test_cleanup_implement_routes_by_exit_code() -> None:
     assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
     from imp.engine.gates import evaluate_rules
     r = step.rules
-    m0 = evaluate_rules(r, vars={}, output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m0.action, Goto) and m0.action.target == "plan-code-reviewer"
-    m2 = evaluate_rules(r, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
+    # forward plan (coverage not yet latched): exit 0 SKIPS the reviewer -> deferred-sweep
+    fwd = evaluate_rules(r, vars={"coverage_settled": False},
+                         output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(fwd.action, Goto) and fwd.action.target == "deferred-sweep"
+    # post-settlement corrective (coverage latched): exit 0 -> immediate per-plan review
+    corr = evaluate_rules(r, vars={"coverage_settled": True},
+                          output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(corr.action, Goto) and corr.action.target == "plan-code-reviewer"
+    m2 = evaluate_rules(r, vars={"coverage_settled": False},
+                        output={"exit": 2, "stdout": "", "stderr": ""})
     assert isinstance(m2.action, Continue)            # fall through into the resolver
-    m3 = evaluate_rules(r, vars={}, output={"exit": 3, "stdout": "", "stderr": ""})
+    m3 = evaluate_rules(r, vars={"coverage_settled": False},
+                        output={"exit": 3, "stdout": "", "stderr": ""})
     assert isinstance(m3.action, Goto) and m3.action.target == "task-lead"
     assert m3.action.resume is True
-    m1 = evaluate_rules(r, vars={}, output={"exit": 1, "stdout": "", "stderr": ""})
+    m1 = evaluate_rules(r, vars={"coverage_settled": False},
+                        output={"exit": 1, "stdout": "", "stderr": ""})
     assert isinstance(m1.action, Pause)
 
 

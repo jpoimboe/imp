@@ -1,10 +1,14 @@
-"""Per-batch review cadence: cleanup-implement / autosquash-resolve-implement run
-INSIDE the per-plan implement loop; a single `plan-code-reviewer` step reviews
-review_base..HEAD per plan and merge-base..HEAD once at change end
-(review_scope=change). The outline drives the plan loop; gap-check is the
-once-per-change coverage backstop. deferred-sweep + sweep-verify + review-base-repin
-trail each review batch; review-base-repin, gap-check and finalize tail the implement
-phase (no separate review phase)."""
+"""Change-end-only code-review cadence: cleanup-implement / autosquash-resolve-implement
+run INSIDE the per-plan implement loop, but a forward outline plan's clean
+cleanup-implement SKIPS `plan-code-reviewer` (routing to deferred-sweep); the single
+`plan-code-reviewer` step reviews only a post-settlement corrective's own diff
+(review_base..HEAD, reached via the coverage_settled seam) and the whole change once at
+change end (review_scope=change, merge-base..HEAD). The outline drives the plan loop;
+gap-check is the once-per-change coverage backstop and now fires the change-wide review
+for every change. verify (per-plan green gate) and plan-reviewer (per-plan doc review)
+are unchanged. deferred-sweep + sweep-verify + review-base-repin trail each review batch;
+review-base-repin, gap-check and finalize tail the implement phase (no separate review
+phase)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -174,12 +178,30 @@ def test_gap_check_routes_coverage_at_change_end() -> None:
     assert isinstance(m_multi.action, Goto) and m_multi.action.target == "plan-code-reviewer"
     assert m_multi.var_mutations["review_scope"] == "change"
     assert m_multi.var_mutations["coverage_settled"] is True
-    # Coverage complete + single-plan -> straight to summarizer, no panel.
+    # Coverage complete + single-plan -> change-wide review fires too (plan_total gate dropped).
     m_one = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                            output={"status": "Success", "more_plans": False,
                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_one.action, Goto) and m_one.action.target == "summarizer"
+    assert isinstance(m_one.action, Goto) and m_one.action.target == "plan-code-reviewer"
+    assert m_one.var_mutations["review_scope"] == "change"
     assert m_one.var_mutations["coverage_settled"] is True
+
+
+def test_forward_plan_skips_code_review_corrective_keeps_it() -> None:
+    rules = _steps(_wf())["cleanup-implement"].rules
+    # forward outline plan: clean fold skips plan-code-reviewer entirely
+    fwd = evaluate_rules(rules, vars={**_BASE_VARS, "coverage_settled": False},
+                         output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(fwd.action, Goto) and fwd.action.target == "deferred-sweep"
+    # post-settlement corrective: clean fold goes straight to the reviewer over its own diff
+    corr = evaluate_rules(rules, vars={**_BASE_VARS, "coverage_settled": True},
+                          output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(corr.action, Goto) and corr.action.target == "plan-code-reviewer"
+    # verify (per-plan green gate) and plan-reviewer (per-plan doc review) are unchanged.
+    impl = next(p for p in _wf().phases if p.name == "implement")
+    assert "verify" in [s.name for s in impl.steps]
+    plan = next(p for p in _wf().phases if p.name == "plan")
+    assert "plan-reviewer" in [s.name for s in plan.steps]
 
 
 def test_plan_code_reviewer_reads_review_scope_not_integration_pass() -> None:
