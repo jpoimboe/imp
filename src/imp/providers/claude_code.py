@@ -38,6 +38,7 @@ import json
 import re
 import shutil
 import signal
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -364,6 +365,9 @@ class _RunState:
     # Runner's event loop, recorded at _run_loop entry. _impl raises on a foreign
     # loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
+    # Per-tool wall-time (ms) keyed by SDK tool_use_id, written by the MCP
+    # wrapper and read once by the receive loop when it appends the tool_result.
+    tool_durations: dict[str, float] = field(default_factory=dict)
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -598,7 +602,14 @@ def _wrap_one(
                 state.complete_step_called = True
                 state.complete_step_args = args
                 return _tool_response("step complete", is_error=False)
-            raw = await t.async_invoke(ctx, args)
+            tuid = args.get("__tool_use_id__", "")
+            clean_args = {k: v for k, v in args.items()
+                          if not (k.startswith("__") and k.endswith("__"))}
+            start = time.perf_counter()
+            raw = await t.async_invoke(ctx, clean_args)
+            dur_ms = (time.perf_counter() - start) * 1000.0
+            if tuid:
+                state.tool_durations[tuid] = dur_ms
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if name == "bash":
                 try:
@@ -1432,6 +1443,39 @@ class ClaudeCodeAgentRunner:
                 model=self.model,
             )
             await store.overwrite(skey, reconciled)
+
+        llm_group_open = False
+        llm_group_key: str | None = None
+        llm_blocks: list[dict[str, Any]] = []
+        llm_model: str | None = None
+        llm_stop_reason: Any = None
+        llm_usage: dict[str, Any] = {}
+
+        async def _flush_llm_group(backstop_stop_reason: Any = None) -> None:
+            nonlocal llm_group_open, llm_group_key, llm_blocks
+            nonlocal llm_model, llm_stop_reason, llm_usage
+            if not llm_group_open:
+                return
+            cu_fields = await _context_usage_fields(client)
+            stop = llm_stop_reason if llm_stop_reason is not None \
+                else backstop_stop_reason
+            elog.append_llm_response(
+                agent_id=aid, provider=invocation.provider_name,
+                model=llm_model or self.model,
+                raw={"content": llm_blocks, "stop_reason": stop,
+                     "usage": llm_usage},
+                usage=llm_usage, stop_reason=stop,
+                message_id=llm_group_key,
+                context_window=cu_fields.get("context_window"),
+                context_pct=cu_fields.get("context_pct"),
+                context_tokens=cu_fields.get("context_tokens"))
+            llm_group_open = False
+            llm_group_key = None
+            llm_blocks = []
+            llm_model = None
+            llm_stop_reason = None
+            llm_usage = {}
+
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
             # Publish the live client so interrupt() (called from the watchdog/
@@ -1483,16 +1527,26 @@ class ClaudeCodeAgentRunner:
                                 pending_text = (
                                     pending_text + turn_text if pending_text else turn_text)
                             if cls_name == "AssistantMessage":
-                                raw = _serialize_claude_code_message(sdk_msg)
-                                cu_fields = await _context_usage_fields(client)
-                                elog.append_llm_response(
-                                    agent_id=aid, provider=invocation.provider_name,
-                                    model=self.model, raw=raw,
-                                    usage=raw.get("usage") or {},
-                                    stop_reason=raw.get("stop_reason"),
-                                    context_window=cu_fields.get("context_window"),
-                                    context_pct=cu_fields.get("context_pct"),
-                                    context_tokens=cu_fields.get("context_tokens"))
+                                mid = getattr(sdk_msg, "message_id", None)
+                                if (llm_group_open and mid is not None
+                                        and llm_group_key is not None
+                                        and mid != llm_group_key):
+                                    await _flush_llm_group()
+                                frag = _serialize_claude_code_message(sdk_msg)
+                                if not llm_group_open:
+                                    llm_group_open = True
+                                    llm_group_key = mid
+                                elif llm_group_key is None and mid is not None:
+                                    llm_group_key = mid
+                                llm_blocks.extend(frag["content"])
+                                served = getattr(sdk_msg, "model", None)
+                                if served is not None and llm_model is None:
+                                    llm_model = served
+                                if (frag.get("stop_reason") is not None
+                                        and llm_stop_reason is None):
+                                    llm_stop_reason = frag["stop_reason"]
+                                if frag.get("usage"):
+                                    llm_usage = frag["usage"]
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
@@ -1553,6 +1607,7 @@ class ClaudeCodeAgentRunner:
                                         block=ToolUseBlock(id=b.id, name=canon,
                                                            input=b.input))
                         elif imp_msg.role == "user":
+                            await _flush_llm_group()
                             # ToolResultBlocks generated by claude calling our MCP
                             # tools. Append the corresponding tool_result events.
                             for b in imp_msg.content:
@@ -1562,7 +1617,9 @@ class ClaudeCodeAgentRunner:
                                         cites = _parse_cc_web_citations(
                                             norm, call_input, b.content)
                                         elog.append_tool_result(
-                                            agent_id=aid, block=b, citations=cites)
+                                            agent_id=aid, block=b, citations=cites,
+                                            duration_ms=state.tool_durations.pop(
+                                                b.tool_use_id, None))
                                         continue
                                     # SUPPRESS the SDK's duplicate `task` result.
                                     # _impl already appended the canonical
@@ -1580,7 +1637,10 @@ class ClaudeCodeAgentRunner:
                                     pend = pending_tools.get(b.tool_use_id)
                                     is_task = pend is not None and pend.name == "sub_agent"
                                     if not is_task:
-                                        elog.append_tool_result(agent_id=aid, block=b)
+                                        elog.append_tool_result(
+                                            agent_id=aid, block=b,
+                                            duration_ms=state.tool_durations.pop(
+                                                b.tool_use_id, None))
                                     if pend is not None:
                                         pend.is_error = b.is_error
                                         pend.result_preview = \
@@ -1605,6 +1665,23 @@ class ClaudeCodeAgentRunner:
                         return
 
                     if cls_name == "ResultMessage":
+                        await _flush_llm_group(
+                            backstop_stop_reason=getattr(
+                                sdk_msg, "stop_reason", None))
+                        elog.append_query_result(
+                            agent_id=aid,
+                            total_cost_usd=getattr(sdk_msg, "total_cost_usd", None),
+                            duration_ms=getattr(sdk_msg, "duration_ms", None),
+                            duration_api_ms=getattr(sdk_msg, "duration_api_ms", None),
+                            num_turns=getattr(sdk_msg, "num_turns", None),
+                            stop_reason=getattr(sdk_msg, "stop_reason", None),
+                            subtype=getattr(sdk_msg, "subtype", None),
+                            is_error=bool(getattr(sdk_msg, "is_error", False)),
+                            usage=getattr(sdk_msg, "usage", None) or {},
+                            model_usage=getattr(sdk_msg, "model_usage", None) or {},
+                            api_error_status=getattr(sdk_msg, "api_error_status", None),
+                            permission_denials=getattr(sdk_msg, "permission_denials", None),
+                            errors=getattr(sdk_msg, "errors", None))
                         if (self._steer_requested and getattr(
                                 sdk_msg, "subtype", None)
                                 == "error_during_execution"):

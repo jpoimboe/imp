@@ -19,6 +19,7 @@ class _Dumpable:
     """Carries a pre-built model_dump(mode='json') dict, mirroring the SDK's
     pydantic objects (the runner reads .model_dump, not attributes)."""
     _dump: dict[str, Any]
+    _request_id: str | None = None
 
     def model_dump(self, mode: str | None = None) -> dict[str, Any]:
         return self._dump
@@ -49,11 +50,15 @@ def resp_web_search_call(item_id: str, *, query: str) -> dict[str, Any]:
 
 
 def resp_response(*output_items: dict[str, Any],
-                  usage: dict[str, Any] | None = None) -> _Dumpable:
-    return _Dumpable({
+                  usage: dict[str, Any] | None = None,
+                  model: str | None = None) -> _Dumpable:
+    dump: dict[str, Any] = {
         "output": list(output_items),
         "usage": usage or {"input_tokens": 1, "output_tokens": 1},
-    })
+    }
+    if model is not None:
+        dump["model"] = model
+    return _Dumpable(dump)
 
 
 class _FakeResponses:

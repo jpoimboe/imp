@@ -28,7 +28,9 @@ from tests.cc_fakes import (
     result,
     text,
     thinking,
+    tool_result,
     tool_use,
+    user,
 )
 
 
@@ -3022,3 +3024,332 @@ async def test_balance_on_resume_disables_tool_search(tmp_path: Path) -> None:
     assert opts.resume is None
     # Part C: the replay declares deferred MCP tools up front via standard mode.
     assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
+
+
+@pytest.mark.anyio
+async def test_coalesces_one_llm_response_per_message_id(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        # turn m1 streamed as three fragments sharing one message_id
+        assistant(thinking("planning"), message_id="m1", model="served-x"),
+        assistant(text("reading the files"), message_id="m1", model="served-x"),
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  tool_use("u2", "grep", {"pattern": "x"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "data-a"), tool_result("u2", "data-b")),
+        # turn m2: prose + complete_step
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file", "grep"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    # AC1/AC3: exactly one llm_response per distinct message_id
+    assert [r["payload"]["message_id"] for r in resps] == ["m1", "m2"]
+    m1 = resps[0]["payload"]
+    # AC1: all the group's blocks, in order, in one event
+    assert [b["type"] for b in m1["raw"]["content"]] == \
+        ["thinking", "text", "tool_use", "tool_use"]
+    # AC1/AC4: real stop_reason (never null), served model from the fragment
+    assert m1["stop_reason"] == "tool_use"
+    assert m1["model"] == "served-x"          # served, NOT the configured model
+    assert m1["raw"]["stop_reason"] == "tool_use"
+    m2 = resps[1]["payload"]
+    assert [b["type"] for b in m2["raw"]["content"]] == ["text", "tool_use"]
+    assert m2["stop_reason"] == "end_turn"
+    assert m2["model"] == "served-x"
+    # AC2: N tool_use blocks -> N tool_call events and N paired tool_result events
+    tcs = [e for e in log.read() if e["type"] == "tool_call"
+           and e["payload"]["name"] in ("read_file", "grep")]
+    trs = [e for e in log.read() if e["type"] == "tool_result"
+           and e["payload"]["id"] in ("u1", "u2")]
+    assert len(tcs) == 2
+    assert len(trs) == 2
+
+
+@pytest.mark.anyio
+async def test_none_message_id_folds_into_open_group(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("part one"), message_id="m1", model="served-x"),
+        # a continuation fragment whose message_id is None must fold into m1,
+        # never open a new group keyed on None
+        assistant(text(" part two"), message_id=None, model="served-x"),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    assert len(resps) == 1                      # one group, not two
+    assert resps[0]["payload"]["message_id"] == "m1"
+    texts = [b.get("text") for b in resps[0]["payload"]["raw"]["content"]
+             if b["type"] == "text"]
+    assert texts == ["part one", " part two"]   # the None fragment continued m1
+
+
+@pytest.mark.anyio
+async def test_none_message_id_opens_group_then_adopts_real_key(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        # group OPENS on a None-keyed fragment; the next non-None fragment must
+        # upgrade the group key to "m1" rather than leaving it None-keyed.
+        assistant(text("part one"), message_id=None, model="served-x"),
+        assistant(text(" part two"), message_id="m1", model="served-x"),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    assert len(resps) == 1                      # one group, not two
+    assert resps[0]["payload"]["message_id"] == "m1"   # adopted the real key
+    texts = [b.get("text") for b in resps[0]["payload"]["raw"]["content"]
+             if b["type"] == "text"]
+    assert texts == ["part one", " part two"]
+
+
+@pytest.mark.anyio
+async def test_emits_one_query_result_with_authoritative_telemetry(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn", subtype="success",
+               total_cost_usd=0.0321, duration_ms=5000, duration_api_ms=4100,
+               num_turns=1, usage={"input_tokens": 900, "output_tokens": 120},
+               model_usage={"served-x": {"input_tokens": 900}}),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    qrs = [e for e in log.read() if e["type"] == "query_result"]
+    assert len(qrs) == 1                         # AC5: exactly one per query
+    p = qrs[0]["payload"]
+    assert p["total_cost_usd"] == 0.0321
+    assert p["duration_ms"] == 5000
+    assert p["duration_api_ms"] == 4100
+    assert p["num_turns"] == 1
+    assert p["stop_reason"] == "end_turn"
+    assert p["subtype"] == "success"
+    assert p["is_error"] is False
+    assert p["usage"] == {"input_tokens": 900, "output_tokens": 120}
+    assert p["model_usage"] == {"served-x": {"input_tokens": 900}}
+
+
+@pytest.mark.anyio
+async def test_query_result_carries_optional_error_fields(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m1", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn", subtype="success",
+               permission_denials=[{"tool": "bash"}], errors=["boom"]),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    p = next(e for e in log.read() if e["type"] == "query_result")["payload"]
+    assert p["permission_denials"] == [{"tool": "bash"}]
+    assert p["errors"] == ["boom"]
+
+
+@pytest.mark.anyio
+async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> None:
+    from tests.cc_fakes import tool_result, user
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "data")),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn", num_turns=2),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    qr = next(e for e in log.read() if e["type"] == "query_result")
+    distinct_ids = {r["payload"]["message_id"] for r in resps}
+    # AC3: llm_response count == distinct message_id count == num_turns
+    assert len(resps) == len(distinct_ids) == qr["payload"]["num_turns"] == 2
+
+
+@pytest.mark.anyio
+async def test_claude_code_impl_records_tool_duration(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    import imp.providers.claude_code as cc_mod
+    from imp.agents.tools.context import ToolContext
+
+    async def _noop(_ctx: Any) -> None:
+        return None
+    monkeypatch.setattr(cc_mod._bg, "_sweep_bg", _noop)
+
+    target = tmp_path / "f.txt"
+    target.write_text("hello")
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log, tools=frozenset({"read_file"}))
+    state = cc_mod._RunState()
+    state.agent_id = "step:p/s"
+    ctx = ToolContext(project_root=tmp_path,
+                      events_path=tmp_path / "events.jsonl",
+                      event_log=log, agent_id="step:p/s")
+
+    captured: dict[str, Any] = {}
+
+    def sdk_tool(name: str, desc: str, schema: Any, annotations: Any = None) -> Any:
+        def deco(fn: Any) -> Any:
+            captured["impl"] = fn
+            return fn
+        return deco
+
+    tool = cc_mod._build_tools(inv)["read_file"]
+    cc_mod._wrap_one("read_file", tool, ctx, state, sdk_tool)
+    await captured["impl"]({"path": str(target), "__tool_use_id__": "u9"})
+
+    assert "u9" in state.tool_durations
+    assert 0 <= state.tool_durations["u9"] < 5_000
+
+
+@pytest.mark.anyio
+async def test_claude_code_tool_result_carries_recorded_duration(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "file body")),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    captured_calls: list[Any] = []
+    orig = log.append_tool_result
+
+    def spy(**kwargs: Any) -> Any:
+        captured_calls.append(kwargs)
+        return orig(**kwargs)
+    log.append_tool_result = spy  # type: ignore[method-assign]
+
+    async for _ev in runner.run(inv):
+        pass
+
+    u1 = next(k for k in captured_calls
+              if getattr(k["block"], "tool_use_id", None) == "u1")
+    assert "duration_ms" in u1                  # keyword always passed; None when unrun
+
+
+@pytest.mark.anyio
+async def test_claude_code_tool_result_duration_non_none_e2e(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.providers.claude_code as cc_mod
+    orig_cls = cc_mod._RunState
+    def _seeded_state():
+        s = orig_cls()
+        s.tool_durations["u1"] = 99.0
+        return s
+    monkeypatch.setattr(cc_mod, "_RunState", _seeded_state)
+
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "file body")),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    tr = next(
+        e for e in log.read()
+        if e["type"] == "tool_result" and e["payload"]["id"] == "u1"
+    )
+    assert tr["payload"]["duration_ms"] == 99.0

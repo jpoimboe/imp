@@ -62,6 +62,7 @@ class TokenTotals:
     output: int = 0
     cache_read: int = 0
     cache_creation: int = 0
+    cost: float = 0.0
 
     def add_usage(self, usage: dict[str, Any] | None) -> None:
         if not usage:
@@ -612,15 +613,15 @@ class NarrativeBuilder:
         etype = event["type"]
         agent_id = event.get("agent_id")
 
-        # 0. token accumulation — every llm_response, before sub routing (F2).
-        #    The cumulative total folds in subagents; the context-bar value
-        #    (_latest_prompt_tokens) tracks the TOP-LEVEL agent only, so a
-        #    sub:-prefixed turn never moves the bar. The prefix test (vs. the
-        #    exact membership check in §1 routing) excludes every subagent turn
-        #    at any depth, including a stray sub: event that reaches dispatch.
+        # 0. token accumulation — before sub routing (F2) so subagent events fold
+        #    into the change total. The context-bar value (_latest_prompt_tokens)
+        #    tracks the TOP-LEVEL agent only; a sub:-prefixed turn never moves it.
         if etype == "llm_response":
             usage = payload.get("usage")
-            self._tokens.add_usage(usage)
+            # claude_code's coalesced usage is streaming-partial; its authoritative
+            # totals come from query_result, not from summing llm_response usage.
+            if payload.get("provider") != "claude_code":
+                self._tokens.add_usage(usage)
             pt = usage_prompt_tokens(usage)
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
             if pt is not None and not is_subagent:
@@ -631,6 +632,11 @@ class NarrativeBuilder:
             cwin = payload.get("context_window")
             if cwin is not None and not is_subagent:
                 self._latest_context_window = cwin
+        elif etype == "query_result":
+            # Authoritative per-query totals/cost from claude_code. Accumulated
+            # BEFORE sub-routing so a subagent's query_result still folds in.
+            self._tokens.add_usage(payload.get("usage"))
+            self._tokens.cost += float(payload.get("total_cost_usd") or 0)
 
         # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
         #    a nested builder's own events carry a sub: id that is NOT one of
@@ -1238,12 +1244,19 @@ def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     self._append(node)
 
 
+def _h_query_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # Token totals + cost are accumulated in add() (pre-routing, so subagent
+    # query_results fold into the change total). No visible node.
+    return
+
+
 NarrativeBuilder._HANDLERS["opening_intent"] = _h_opening_intent
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
 NarrativeBuilder._HANDLERS["llm_response"] = _h_llm_response
 NarrativeBuilder._HANDLERS["thinking"] = _h_thinking
 NarrativeBuilder._HANDLERS["step_context"] = _h_step_context
 NarrativeBuilder._HANDLERS["agent_output"] = _h_agent_output
+NarrativeBuilder._HANDLERS["query_result"] = _h_query_result
 
 
 def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:

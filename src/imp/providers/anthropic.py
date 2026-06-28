@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import os
+import time
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
@@ -187,7 +188,7 @@ def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
     """Serialize a provider response to a plain dict (the llm_response.raw
     value). Prefers SDK pydantic .model_dump() for max fidelity; falls back to
     introspecting .content / .stop_reason / .usage for test fakes. Both paths
-    produce {content: [block-dicts], stop_reason, usage}."""
+    produce {content: [block-dicts], stop_reason, usage, model}."""
     dump = getattr(response, "model_dump", None)
     if callable(dump):
         try:
@@ -211,6 +212,7 @@ def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
         "content": content,
         "stop_reason": getattr(response, "stop_reason", None),
         "usage": _usage_dict(getattr(response, "usage", None)),
+        "model": getattr(response, "model", None),
     }
 
 
@@ -587,6 +589,7 @@ class AnthropicAgentRunner:
             # cancelled — the loop simply exits on the next iteration via _cancel.
             # Worst case is one extra in-flight request; cancellation is not
             # instantaneous, by design.
+            _t0 = time.perf_counter()
             self._cancel_scope = anyio.CancelScope()
             response = None
             try:
@@ -613,9 +616,12 @@ class AnthropicAgentRunner:
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
             elog.append_llm_response(
-                agent_id=aid, provider=invocation.provider_name, model=self.model,
+                agent_id=aid, provider=invocation.provider_name,
+                model=raw.get("model") or self.model,
                 raw=raw, usage=raw.get("usage") or {},
-                stop_reason=raw.get("stop_reason"))
+                stop_reason=raw.get("stop_reason"),
+                request_id=getattr(response, "_request_id", None),
+                duration_ms=(time.perf_counter() - _t0) * 1000.0)
             _emit_anthropic_web_events(raw, elog, aid)
             # Post-API sweep + heartbeat (Decision 10): the model-API call is
             # the longest awaitable with no registry access — sweeping here

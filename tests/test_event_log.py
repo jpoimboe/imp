@@ -171,3 +171,70 @@ def test_append_tool_result_stamps_id_ns_when_provided() -> None:
     by_id = {e["payload"]["id"]: e["payload"] for e in results}
     assert by_id["b1"]["id_ns"] == "block"      # stamped
     assert "id_ns" not in by_id["b2"]           # omitted → absent, not None
+
+
+def test_append_query_result_carries_telemetry_and_omits_absent(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    r = log.append_query_result(
+        agent_id="A", total_cost_usd=0.0123, duration_ms=4200,
+        duration_api_ms=3900, num_turns=3, stop_reason="end_turn",
+        subtype="success", is_error=False,
+        usage={"input_tokens": 1000, "output_tokens": 200},
+        model_usage={"claude-x": {"input_tokens": 1000}})
+    assert r["type"] == "query_result"
+    p = r["payload"]
+    assert p["total_cost_usd"] == 0.0123
+    assert p["num_turns"] == 3
+    assert p["usage"] == {"input_tokens": 1000, "output_tokens": 200}
+    assert p["model_usage"] == {"claude-x": {"input_tokens": 1000}}
+    assert p["duration_ms"] == 4200
+    assert p["duration_api_ms"] == 3900
+    assert p["stop_reason"] == "end_turn"
+    assert p["subtype"] == "success"
+    assert p["is_error"] is False
+    # absent optional SDK fields are omitted, never written as None
+    assert "api_error_status" not in p
+    assert "permission_denials" not in p
+    assert "errors" not in p
+
+
+def test_append_query_result_includes_present_optional_fields(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    r = log.append_query_result(
+        agent_id="A", total_cost_usd=0.0, duration_ms=1, duration_api_ms=1,
+        num_turns=1, stop_reason=None, subtype="error_during_execution",
+        is_error=True, usage={}, model_usage={},
+        api_error_status=529, permission_denials=[{"tool": "bash"}],
+        errors=["boom"])
+    p = r["payload"]
+    assert p["api_error_status"] == 529
+    assert p["permission_denials"] == [{"tool": "bash"}]
+    assert p["errors"] == ["boom"]
+
+
+def test_append_llm_response_stamps_optional_fields_when_provided(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    a = log.append_llm_response(
+        agent_id="A", provider="claude_code", model="served-x",
+        raw={"content": []}, usage={}, stop_reason="end_turn",
+        message_id="msg_1", request_id="req_9", duration_ms=1234)
+    assert a["payload"]["message_id"] == "msg_1"
+    assert a["payload"]["request_id"] == "req_9"
+    assert a["payload"]["duration_ms"] == 1234
+    b = log.append_llm_response(
+        agent_id="A", provider="anthropic", model="m",
+        raw={"content": []}, usage={}, stop_reason="end_turn")
+    assert "message_id" not in b["payload"]
+    assert "request_id" not in b["payload"]
+    assert "duration_ms" not in b["payload"]
+
+
+def test_append_tool_result_stamps_duration_ms_when_provided(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    a = log.append_tool_result(
+        agent_id="A", block=ToolResultBlock(tool_use_id="t1", content="ok"),
+        duration_ms=37.5)
+    assert a["payload"]["duration_ms"] == 37.5
+    b = log.append_tool_result(
+        agent_id="A", block=ToolResultBlock(tool_use_id="t2", content="ok"))
+    assert "duration_ms" not in b["payload"]

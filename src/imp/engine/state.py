@@ -205,7 +205,10 @@ class EventLog(Protocol):
                             auth_mode: str | None = None,
                             context_window: int | None = None,
                             context_pct: float | None = None,
-                            context_tokens: int | None = None) -> dict[str, Any]: ...
+                            context_tokens: int | None = None,
+                            message_id: str | None = None,
+                            request_id: str | None = None,
+                            duration_ms: float | None = None) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any, label: str | None = None,
                          id_ns: str | None = None) -> dict[str, Any]: ...
@@ -214,7 +217,21 @@ class EventLog(Protocol):
                            citations: list[dict[str, Any]] | None = None,
                            id_ns: str | None = None,
                            kind: str | None = None,
+                           duration_ms: float | None = None,
                            ) -> dict[str, Any]: ...
+    def append_query_result(self, *, agent_id: str | None,
+                            total_cost_usd: float | None,
+                            duration_ms: int | None,
+                            duration_api_ms: int | None,
+                            num_turns: int | None,
+                            stop_reason: Any,
+                            subtype: str | None,
+                            is_error: bool,
+                            usage: dict[str, Any],
+                            model_usage: dict[str, Any],
+                            api_error_status: Any = None,
+                            permission_denials: Any = None,
+                            errors: Any = None) -> dict[str, Any]: ...
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
@@ -323,7 +340,10 @@ class _BaseEventLog:
                             auth_mode: str | None = None,
                             context_window: int | None = None,
                             context_pct: float | None = None,
-                            context_tokens: int | None = None) -> dict[str, Any]:
+                            context_tokens: int | None = None,
+                            message_id: str | None = None,
+                            request_id: str | None = None,
+                            duration_ms: float | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "provider": provider, "model": model, "raw": raw,
             "usage": usage, "stop_reason": stop_reason,
@@ -336,6 +356,12 @@ class _BaseEventLog:
             payload["context_pct"] = context_pct
         if context_tokens is not None:
             payload["context_tokens"] = context_tokens
+        if message_id is not None:
+            payload["message_id"] = message_id
+        if request_id is not None:
+            payload["request_id"] = request_id
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
         return self._emit(
             agent_id=agent_id, type="llm_response", payload=payload)
 
@@ -361,6 +387,7 @@ class _BaseEventLog:
                            citations: list[dict[str, Any]] | None = None,
                            id_ns: str | None = None,
                            kind: str | None = None,
+                           duration_ms: float | None = None,
                            ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "id": block.tool_use_id, "content": block.content,
@@ -376,7 +403,37 @@ class _BaseEventLog:
             payload["id_ns"] = id_ns
         if kind is not None:
             payload["kind"] = kind
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
         return self._emit(agent_id=agent_id, type="tool_result", payload=payload)
+
+    def append_query_result(self, *, agent_id: str | None,
+                            total_cost_usd: float | None,
+                            duration_ms: int | None,
+                            duration_api_ms: int | None,
+                            num_turns: int | None,
+                            stop_reason: Any,
+                            subtype: str | None,
+                            is_error: bool,
+                            usage: dict[str, Any],
+                            model_usage: dict[str, Any],
+                            api_error_status: Any = None,
+                            permission_denials: Any = None,
+                            errors: Any = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "total_cost_usd": total_cost_usd, "duration_ms": duration_ms,
+            "duration_api_ms": duration_api_ms, "num_turns": num_turns,
+            "stop_reason": stop_reason, "subtype": subtype,
+            "is_error": is_error, "usage": usage, "model_usage": model_usage,
+        }
+        if api_error_status is not None:
+            payload["api_error_status"] = api_error_status
+        if permission_denials is not None:
+            payload["permission_denials"] = permission_denials
+        if errors is not None:
+            payload["errors"] = errors
+        return self._emit(
+            agent_id=agent_id, type="query_result", payload=payload)
 
     def append(self, *, agent_id: str | None, type: str,
                payload: Any) -> dict[str, Any]:

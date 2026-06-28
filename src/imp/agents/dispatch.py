@@ -18,6 +18,7 @@ Only the providers import this module.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -99,6 +100,7 @@ async def dispatch_one_tool_use(
         tool_results.append(block)
         elog.append_tool_result(agent_id=aid, block=block)
         return None
+    start = time.perf_counter()
     try:
         raw_result = await tool.async_invoke(ctx, tu.input)
     except StepComplete as sc:
@@ -128,7 +130,8 @@ async def dispatch_one_tool_use(
         err_text = f"{type(e).__name__}: {e}"
         block = ToolResultBlock(tu.id, err_text, is_error=True)
         tool_results.append(block)
-        elog.append_tool_result(agent_id=aid, block=block)
+        elog.append_tool_result(agent_id=aid, block=block,
+                                duration_ms=(time.perf_counter() - start) * 1000.0)
         return None
 
     content_str = (raw_result if isinstance(raw_result, str)
@@ -148,7 +151,8 @@ async def dispatch_one_tool_use(
                                  "signal": -rc})
     block = ToolResultBlock(tu.id, content_str)
     tool_results.append(block)
-    elog.append_tool_result(agent_id=aid, block=block)
+    elog.append_tool_result(agent_id=aid, block=block,
+                            duration_ms=(time.perf_counter() - start) * 1000.0)
     return None
 
 
