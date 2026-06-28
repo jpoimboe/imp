@@ -54,7 +54,7 @@ def test_resume_reentry_resets_phase_label() -> None:
         ev("4", "workflow_resumed"),
         ev("5", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/5 · thinking",
-           phase_label="implementation phase · plan 3/4", resumed=True),
+           phase_label="implementation phase · plan 3/4", resumed=True, restarted=True),
     ]:
         b.add(e)
     assert _steps(b)[0].phase_label == "implementation phase · plan 3/4"

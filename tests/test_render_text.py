@@ -382,7 +382,8 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
         _ev("3", "workflow_paused", reason="ctrl-c"),
         _ev("4", "workflow_resumed"),
         # resume re-enters the step and re-emits awaiting_user_input + the reply
-        _ev("5", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("5", "step_started", step="s", kind="agent", phase="p", model="m",
+            restarted=True),
         _ev("6", "awaiting_user_input", agent_id="step:p/s", prompt="Continue?"),
         _ev("7", "user_message", agent_id="step:p/s",
             content=[{"type": "text", "text": "go ahead"}]),

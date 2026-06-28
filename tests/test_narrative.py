@@ -452,7 +452,7 @@ def test_resume_reentry_reuses_phase_and_resets_step() -> None:
     live = [
         # re-emitted on resume — same phase + step → re-enters, does not duplicate
         _ev("s2b", "step_started", step="build", kind="agent", phase="design",
-            model="m", provider="anthropic"),
+            model="m", provider="anthropic", restarted=True),
         _ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "fresh complete"}]}),
@@ -902,7 +902,8 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
 
     # Resume re-entry path reuses the open StepNode and must restamp start_ts.
     b.add(_ev("2", "workflow_resumed"))
-    e3 = _ev("3", "step_started", step="spec", kind="agent", phase="design")
+    e3 = _ev("3", "step_started", step="spec", kind="agent", phase="design",
+             restarted=True)
     e3["timestamp"] = "2026-05-30T10:05:00+00:00"
     b.add(e3)
     reused = b._step_stack[-1]
@@ -1880,7 +1881,7 @@ def test_resume_reentry_updates_position_label_on_step_node() -> None:
         ev("4", "workflow_resumed"),
         ev("5", "step_started", step="task-lead", kind="agent",
            phase="implement", model="m", provider="anthropic",
-           position_label=True),
+           position_label=True, restarted=True),
     ])
     step = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
                 for c in p.children if isinstance(c, nv.StepNode))
@@ -2001,7 +2002,7 @@ def test_opening_intent_reinjected_once_on_resume_reentry_of_first_step() -> Non
     live = [
         # re-emitted on resume: same phase+step triggers the resume re-entry branch.
         _ev("s1b", "step_started", step="spec", kind="agent", phase="design",
-            model="m", provider="anthropic"),
+            model="m", provider="anthropic", restarted=True),
     ]
     tree = nv.build_tree(seed + live)
     phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
@@ -2053,13 +2054,13 @@ def test_step_node_command_populated_on_resume_reentry() -> None:
     seed = [
         ev("c", "change_created", change_id=1, title="t"),
         ev("s1", "step_started", step="gate", kind="script", phase="verify",
-           command="make check"),
+           command="make test"),
         ev("wp", "workflow_paused", reason="ctrl-c"),
         ev("wr", "workflow_resumed"),
     ]
     live = [
         ev("s1b", "step_started", step="gate", kind="script", phase="verify",
-           command="make check"),
+           command="make check", restarted=True),
     ]
     b = nv.NarrativeBuilder()
     for e in seed + live:
@@ -2571,3 +2572,68 @@ def test_usage_prompt_tokens_sums_input_and_both_cache_buckets() -> None:
 def test_usage_prompt_tokens_none_when_empty() -> None:
     assert nv.usage_prompt_tokens(None) is None
     assert nv.usage_prompt_tokens({}) is None
+
+
+def test_resume_continuation_preserves_pre_interrupt_children() -> None:
+    # restarted=False: a continued resume keeps the pre-interrupt rendered work,
+    # appends the post-resume turns, and retains the original start clock.
+    seed = [
+        ev("c", "change_created", change_id=1, title="t"),
+        ev("s", "step_started", step="build", kind="agent", phase="design",
+           model="m", provider="anthropic", timestamp="2026-06-28T00:00:00+00:00"),
+        ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
+           model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "partial attempt"}]}),
+        ev("wp", "workflow_paused", reason="ctrl-c"),
+        ev("wr", "workflow_resumed"),
+    ]
+    live = [
+        ev("sb", "step_started", step="build", kind="agent", phase="design",
+           model="m", provider="anthropic", resumed=True, restarted=False,
+           timestamp="2026-06-28T00:05:00+00:00"),
+        ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+           model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "fresh complete"}]}),
+        ev("sc", "step_completed", step="build", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    tree = nv.build_tree(seed + live)
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 1
+    build = next(c for c in phases[0].children if isinstance(c, nv.StepNode))
+    texts = [c.text for c in build.children if isinstance(c, nv.AgentTextNode)]
+    assert texts == ["partial attempt", "fresh complete"]   # BOTH preserved
+    assert build.start_ts == "2026-06-28T00:00:00+00:00"    # original clock kept
+    assert build.closed is True
+    assert build.resumed is True
+
+
+def test_resume_restart_clears_pre_interrupt_children() -> None:
+    # restarted=True: a genuine re-run from an empty/never-ran transcript wipes
+    # the partial and restamps the clock (preserving pre-change behavior).
+    seed = [
+        ev("c", "change_created", change_id=1, title="t"),
+        ev("s", "step_started", step="build", kind="agent", phase="design",
+           model="m", provider="anthropic", timestamp="2026-06-28T00:00:00+00:00"),
+        ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
+           model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "partial attempt"}]}),
+        ev("wp", "workflow_paused", reason="ctrl-c"),
+        ev("wr", "workflow_resumed"),
+    ]
+    live = [
+        ev("sb", "step_started", step="build", kind="agent", phase="design",
+           model="m", provider="anthropic", resumed=True, restarted=True,
+           timestamp="2026-06-28T00:05:00+00:00"),
+        ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+           model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "fresh complete"}]}),
+        ev("sc", "step_completed", step="build", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    tree = nv.build_tree(seed + live)
+    build = next(c for p in tree.root.children if isinstance(p, nv.PhaseNode)
+                 for c in p.children if isinstance(c, nv.StepNode))
+    texts = [c.text for c in build.children if isinstance(c, nv.AgentTextNode)]
+    assert texts == ["fresh complete"]                      # partial wiped
+    assert build.start_ts == "2026-06-28T00:05:00+00:00"    # clock restamped

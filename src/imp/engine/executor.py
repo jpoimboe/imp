@@ -825,6 +825,8 @@ async def _route_agent(
     # continued (the provider injects a `continue` nudge), not re-run fresh; only
     # an empty/absent transcript starts fresh.
     keep = is_resume and _resume_replays_transcript(transcript_dir)
+    # Plain lifecycle bit: True only on an empty-transcript process-resume (restart from scratch).
+    restarted = is_resume and not keep
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
@@ -853,7 +855,8 @@ async def _route_agent(
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={
-                **_step_started_payload(step, state, change, log), "resumed": is_resume},
+                **_step_started_payload(step, state, change, log),
+                "resumed": is_resume, "restarted": restarted},
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,

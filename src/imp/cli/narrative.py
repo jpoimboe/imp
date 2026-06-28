@@ -866,10 +866,12 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 top.resumed = True
             return
     # Resume re-entry: the first step_started after a resume re-enters the
-    # interrupted step in the still-open phase. The executor re-runs it from
-    # scratch, so reuse the open StepNode and RESET its content (the fresh re-run
-    # supersedes the interrupted partial). Consume the re-entry window regardless
-    # of whether a match is found.
+    # interrupted step in the still-open phase. `restarted` (always present on a
+    # resume) tells the two cases apart: True is a genuine re-run from an
+    # empty/never-ran transcript — wipe the partial and restamp the clock; False
+    # is a continuation (the transcript is replayed and continued) — keep the
+    # pre-interrupt children and the original clock, only reopening the node for
+    # appending. Consume the re-entry window regardless of whether a match is found.
     resuming, self._resuming = self._resuming, False
     if (resuming and self._current_phase is not None
             and not self._current_phase.closed
@@ -878,32 +880,35 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             (c for c in self._current_phase.children
              if isinstance(c, StepNode) and c.name == name and not c.closed), None)
         if existing is not None:
-            existing.children.clear()
+            # Shared reopen — applies to a re-run AND a continuation: reopen the
+            # node for appending and refresh the resume-display fields.
             existing.outcome = None
             existing.closed = False
             existing.interrupted = False
-            existing.kind = kind
-            existing.model = p.get("model")
-            existing.provider = p.get("provider")
-            # Interactivity is re-sourced from the event stream (an
-            # awaiting_user_input event sets it), NOT from step_started — so
-            # reset it to False here; a re-emitted awaiting_user_input on the
-            # resumed step re-arms it (Task 8 / L3).
-            existing.interactive = False
-            existing.start_ts = event.get("timestamp")
-            existing.agent_output = None
             existing.label = p.get("label")
             existing.live_label = None
-            existing.command = p.get("command")
-            existing.chrome = p.get("chrome")
-            existing.phase_label = p.get("phase_label")
-            existing.resumed = bool(p.get("resumed", False))
-            existing.route_label = p.get("route_label")
-            existing.rotate_phrase = bool(p.get("rotate_phrase", False))
-            existing.position_label = bool(p.get("position_label", False))
-            existing.rotated_phrase = None
-            if existing is self._first_step:
-                _inject_opening_intent(self, existing)
+            existing.resumed = True
+            if p.get("restarted"):
+                # Genuine re-run from scratch: the fresh run supersedes the
+                # interrupted partial, so wipe it, restamp the clock, and reset
+                # the re-run-only fields. Interactivity is re-sourced from the
+                # event stream (a re-emitted awaiting_user_input re-arms it).
+                existing.children.clear()
+                existing.kind = kind
+                existing.model = p.get("model")
+                existing.provider = p.get("provider")
+                existing.interactive = False
+                existing.start_ts = event.get("timestamp")
+                existing.agent_output = None
+                existing.command = p.get("command")
+                existing.chrome = p.get("chrome")
+                existing.phase_label = p.get("phase_label")
+                existing.route_label = p.get("route_label")
+                existing.rotate_phrase = bool(p.get("rotate_phrase", False))
+                existing.position_label = bool(p.get("position_label", False))
+                existing.rotated_phrase = None
+                if existing is self._first_step:
+                    _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase, p.get("chrome"), p.get("phase_label"))

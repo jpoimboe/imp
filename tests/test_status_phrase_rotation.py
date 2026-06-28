@@ -112,7 +112,7 @@ def test_resume_reentry_resets_rotate_phrase_and_rotated_phrase(monkeypatch) -> 
     b.add(ev("5", "workflow_resumed"))
     b.add(ev("6", "step_started", step="front-door", kind="agent",
              phase="front-door", model="m2", provider="anthropic",
-             label="frozen1", rotate_phrase=True))
+             label="frozen1", rotate_phrase=True, restarted=True))
     assert b._step_stack[-1] is step        # same node reused
     assert step.rotated_phrase is None      # cleared on resume re-entry
     assert step.rotate_phrase is True       # re-armed from the new payload
