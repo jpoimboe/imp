@@ -1240,6 +1240,7 @@ class ClaudeCodeAgentRunner:
         ctx.verify_command = invocation.verify_command
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
@@ -1545,6 +1546,11 @@ class ClaudeCodeAgentRunner:
             # receive_response() terminates after the first ResultMessage).
             next_query: Any = _stream_history(
                 messages[resume_base:] if native_resume else messages)
+            from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+            from imp.providers.catalog import sdk_context_threshold_crossed
+            # Tier A proactive-handoff watch state (Mechanism 3).
+            handoff_phase: str | None = None
+            handoff_path = handoff_path_for(invocation.transcript_dir)
             while True:
                 await client.query(next_query)
                 requery = False
@@ -1604,6 +1610,51 @@ class ClaudeCodeAgentRunner:
                                     llm_stop_reason = frag["stop_reason"]
                                 if frag.get("usage"):
                                     llm_usage = frag["usage"]
+                                # Tier A proactive handoff (Mechanism 3): on the
+                                # configured context-threshold crossing, interrupt the
+                                # live turn and replay history with a handoff
+                                # instruction appended — before the SDK auto-compacts
+                                # (so no ContextWindowError). complete_step_called is set
+                                # later (per-block loop), so detect the completing turn
+                                # from blocks here, canonicalizing the name: the SDK
+                                # presents it as mcp__imp__complete_step, so a bare
+                                # compare would miss it and wrongly preempt it.
+                                if (handoff_phase is None
+                                        and invocation.checkpoint_threshold is not None):
+                                    completing = any(
+                                        isinstance(b, ToolUseBlock)
+                                        and _canon_tool_name(b.name) == "complete_step"
+                                        for b in imp_msg.content)
+                                    cu_fields = await _context_usage_fields(client)
+                                    if (not completing
+                                            and sdk_context_threshold_crossed(
+                                                cu_fields.get("context_tokens"),
+                                                cu_fields.get("context_window"),
+                                                invocation.checkpoint_threshold)):
+                                        # Record the crossing turn before interrupting,
+                                        # then balance its dangling tool_use in
+                                        # messages/transcript for the replay contract.
+                                        # Do NOT log a synthetic tool_result: it never
+                                        # ran, and an orphan result (no matching
+                                        # tool_call event) renders as a stray errored
+                                        # "tool" entry.
+                                        await _flush_llm_group()
+                                        with contextlib.suppress(Exception):
+                                            await client.interrupt()
+                                        repair_dangling_tool_use_on_resume(
+                                            messages, transcript)
+                                        instr_msg = Message(
+                                            role="user",
+                                            content=(TextBlock(
+                                                text=handoff_instruction(handoff_path)),))
+                                        messages.append(instr_msg)
+                                        transcript.append(instr_msg)
+                                        elog.append_user_message(
+                                            agent_id=aid, message=instr_msg)
+                                        next_query = _stream_history(messages)
+                                        handoff_phase = "instruction_sent"
+                                        requery = True
+                                        break
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
@@ -1619,12 +1670,10 @@ class ClaudeCodeAgentRunner:
                                             block=ToolUseBlock(id=b.id, name=norm,
                                                                input=b.input))
                                         continue
-                                    # Dual-write `complete_step` state at the
-                                    # runner level so the test fakes don't need
-                                    # to drive the MCP wrapper. In production the
-                                    # wrapper *also* sets these fields when the
-                                    # SDK invokes it — idempotent write.
-                                    if b.name == "complete_step":
+                                    # Dual-write: test fakes don't drive the MCP wrapper; production
+                                    # wrapper also sets these — idempotent. SDK presents the tool as
+                                    # mcp__imp__complete_step so canonicalize before comparing.
+                                    if _canon_tool_name(b.name) == "complete_step":
                                         state.complete_step_called = True
                                         state.complete_step_args = b.input
                                     # Ceiling guard: observational here. With
@@ -1799,6 +1848,17 @@ class ClaudeCodeAgentRunner:
                                 yield perr.make_error_event(
                                     loop_err, kind=getattr(loop_err, "kind", ""))
                                 return
+
+                        if handoff_phase == "instruction_sent":
+                            # The handoff-writing turn completed: signal the
+                            # captured handoff and stop. drive_invocation maps
+                            # this to AgentRunResult.handoff_path; the engine
+                            # stashes the transcript and reincarnates the session
+                            # seeded from the note. Wins over a stray
+                            # complete_step on this turn.
+                            yield {"type": "handoff",
+                                   "payload": {"handoff_path": str(handoff_path)}}
+                            return
 
                         # End-of-turn:
                         #   a) complete_step captured → emit agent_output, return
