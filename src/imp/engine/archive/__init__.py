@@ -69,11 +69,13 @@ def archive_change(
         resumable=resumable, step_blobs=step_blobs)
     record.write_record(records_root(control_root), rec)
 
-    conn = index.connect(index_path(control_root))
-    try:
-        index.ingest(conn, rec, _parse_events(events_bytes))
-    finally:
-        conn.close()
+    ensure_current(control_root)
+    with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
+        conn = index.connect(index_path(control_root))
+        try:
+            index.ingest(conn, rec, _parse_events(events_bytes))
+        finally:
+            conn.close()
 
 
 def rebuild_index(control_root: Path) -> None:

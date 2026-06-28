@@ -141,3 +141,20 @@ def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
     # rebuild restores 'alpha' (title "Alpha") and the search finds it.
     assert [h[0] for h in hits] == ["alpha"]
     assert _user_version(db) == 2
+
+
+def test_archive_change_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> None:
+    _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
+    db = archive.index_path(tmp_path)
+    _write_legacy_v0_db(db)  # finalize must not run the v2 INSERT against this
+
+    # A finalize landing on a not-yet-migrated db: it must trigger the rebuild
+    # then ingest, never raise OperationalError on the missing column.
+    _seed_change(tmp_path, "gamma", "2026-06-02T00:00:02+00:00")
+
+    assert "events" not in _table_names(db)
+    assert _user_version(db) == 2
+    rows = _rows_by_id(db)
+    assert set(rows) == {"alpha", "gamma"}        # 'stale' dropped by the rebuild
+    assert rows["alpha"] == "2026-06-01T00:00:01+00:00"
+    assert rows["gamma"] == "2026-06-02T00:00:02+00:00"
