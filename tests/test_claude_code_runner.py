@@ -3610,10 +3610,11 @@ async def test_replay_path_isolates_config_dir(tmp_path: Path) -> None:
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path)
+    # retry_feedback vetoes native resume, so the runner takes the replay
+    # disposition (the feedback must be co-located on the balancing user turn).
+    inv = replace(inv, balance_on_resume=True, retry_feedback="REVISE: redo it.")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    # Existing transcript + NO session store written → no-store replay fallback
-    # (native_resume is False), so the runner takes the replay disposition.
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(
