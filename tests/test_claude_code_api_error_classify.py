@@ -218,3 +218,30 @@ def test_scheduling_prose_with_timezone_stays_unclassified() -> None:
 def test_session_limit_prose_stays_unclassified() -> None:
     assert _classify_agent_text("The session limit is set to 1000 seconds.") is None
     assert _classify_agent_text("I'm working on session limit handling.") is None
+
+
+def test_400_tool_use_concurrency_emdash_classifies_network_not_terminated() -> None:
+    # The real mehu87 termination: a 400 whose agent text says "tool use
+    # concurrency" with no colon, so _classify_agent_text returns None. It must
+    # classify transient (NetworkError → RetryWithBackoff), never TerminatedError.
+    assert _classify_agent_text("API Error 400 — tool use concurrency") is None
+    sdk = result(is_error=True, api_error_status=400)
+    term = _termination_from_result(
+        sdk, "API Error 400 — tool use concurrency", {})
+    assert isinstance(term, perr.NetworkError)
+    assert not isinstance(term, perr.TerminatedError)
+    assert term.category == "network"
+    assert term.detail["api_error_status"] == 400
+
+
+def test_400_tool_use_concurrency_colon_form_wins_over_api_error_label() -> None:
+    # Colon form: _classify_agent_text labels this a terminal ApiError(http_400).
+    # The 400/concurrency rule must override that classification → NetworkError.
+    labeled = _classify_agent_text("API Error: 400 messages: tool use concurrency")
+    assert isinstance(labeled, perr.ApiError)
+    assert labeled.category == "api"
+    sdk = result(is_error=True, api_error_status=400)
+    term = _termination_from_result(
+        sdk, "API Error: 400 messages: tool use concurrency", {})
+    assert term.category == "network"
+    assert not isinstance(term, perr.TerminatedError)

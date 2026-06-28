@@ -246,6 +246,15 @@ def _termination_from_result(
     }
     labeled = _classify_agent_text(last_text)
     status = detail["api_error_status"]
+    if (isinstance(status, int) and status == 400
+            and "tool use concurrency" in last_text.lower()):
+        # A transient request-shaping 400 (concurrent tool_use batching). Route
+        # to the network category (RetryWithBackoff) so a stray replay-400
+        # self-heals instead of terminally pausing. Reassigns unconditionally so a
+        # colon-form "API Error: 400 …" — which _classify_agent_text labels a
+        # terminal ApiError — is rerouted here too, not left to terminate.
+        labeled = perr.NetworkError(
+            f"claude_code: tool use concurrency (api_error_status={status})")
     if labeled is None and isinstance(status, int) and 500 <= status < 600:
         labeled = perr.NetworkError(f"claude_code: api_error_status={status}")
     if labeled is None and status in (401, 403):
