@@ -3527,3 +3527,65 @@ async def test_claude_code_tool_result_duration_non_none_e2e(
         if e["type"] == "tool_result" and e["payload"]["id"] == "u1"
     )
     assert tr["payload"]["duration_ms"] == 99.0
+
+
+@pytest.mark.anyio
+async def test_replay_path_isolates_config_dir(tmp_path: Path) -> None:
+    """The replay (no-store) disposition must run claude-p under an imp-owned
+    ephemeral CLAUDE_CONFIG_DIR — never the real ~/.claude — and run()'s finally
+    must remove it. No suppression flags on this path."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    # Existing transcript + NO session store written → no-store replay fallback
+    # (native_resume is False), so the runner takes the replay disposition.
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),),
+    ))
+    t.append(Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t0", content="x"),),
+    ))
+
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    events = [ev async for ev in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+
+    opts = created[0].opts
+    cfg = opts.env.get("CLAUDE_CONFIG_DIR")
+    assert cfg, "replay spawn must set CLAUDE_CONFIG_DIR to an isolated home"
+    assert Path(cfg).name.startswith("claude-fresh-"), (
+        f"expected an imp-materialized temp home, got {cfg!r}"
+    )
+    assert Path(cfg) != Path.home() / ".claude", (
+        "replay must never point CLAUDE_CONFIG_DIR at the real home"
+    )
+    # run()'s finally rmtree's self._config_dir, so the temp home is gone.
+    assert not Path(cfg).exists(), (
+        "run()'s finally must remove the ephemeral config dir"
+    )
+    assert "CLAUDE_CODE_SKIP_PROMPT_HISTORY" not in opts.env
+    assert opts.extra_args == {}
+    assert runner._config_dir is None  # reset by the finally

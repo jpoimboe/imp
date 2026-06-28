@@ -116,22 +116,24 @@ def test_build_options_isolates_config_dir_for_fresh(tmp_path: Path) -> None:
     assert _get_projects_dir(opts.env) == cfg / "projects"
 
 
-def test_build_options_skips_cc_prompt_history(tmp_path: Path) -> None:
-    """imp persists its own transcripts; the nested `claude` must write NOTHING
-    to ~/.claude/projects/. --no-session-persistence suppresses the conversation
-    body but NOT the ai-title stub (CC 2.x writes a single-record
-    {"type":"ai-title",...} session file even under that flag, polluting
-    `claude --resume`). CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 suppresses ALL CC-side
-    history writes, killing the stub at source. The SDK merges options.env OVER
-    the inherited env, so _build_options must set it.
-    """
+def test_build_options_drops_suppression_flags_when_no_config_dir(
+    tmp_path: Path,
+) -> None:
+    """A config_dir=None build (native resume) no longer adds the history
+    suppression flags: claude-p stays off ~/.claude via the SDK's own
+    materialized temp dir, not CLAUDE_CODE_SKIP_PROMPT_HISTORY /
+    --no-session-persistence. Both must be absent and extra_args must be {}."""
     runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
     opts = runner._build_options(
         _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
     )
-    assert opts.env.get("CLAUDE_CODE_SKIP_PROMPT_HISTORY") == "1", (
-        f"expected options.env['CLAUDE_CODE_SKIP_PROMPT_HISTORY']=='1' so the "
-        f"nested claude writes no session/ai-title files to ~/.claude/projects/, "
-        f"got {opts.env.get('CLAUDE_CODE_SKIP_PROMPT_HISTORY')!r}"
+    assert "CLAUDE_CODE_SKIP_PROMPT_HISTORY" not in opts.env, (
+        f"suppression flag must be gone, got "
+        f"{opts.env.get('CLAUDE_CODE_SKIP_PROMPT_HISTORY')!r}"
     )
-    assert opts.extra_args == {"no-session-persistence": None}
+    assert "CLAUDE_CONFIG_DIR" not in opts.env, (
+        "config_dir=None must not set CLAUDE_CONFIG_DIR"
+    )
+    assert opts.extra_args == {}, (
+        f"expected no --no-session-persistence, got extra_args={opts.extra_args!r}"
+    )
