@@ -2403,25 +2403,24 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Set the Change title explicitly; front-door "
                             "names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
-                       help="Headless: no live prompt; supply the reply via --message.")
+                       help="Run headless: no live prompt; supply the first reply "
+                            "via --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Auto-take the recommendation at recommendation-bearing "
                             "gates instead of confirming each; genuine intent-forks "
                             "still pause for a human. Independent of --non-interactive.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Headless reply consumed by the first bare-turn-end prompt; "
-                            "pause+resume with another --message. "
+                            "pause then resume with another --message. "
                             "Requires --non-interactive.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
     p_new.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
-                       help="Scope a Change for your backlog with this TITLE. "
-                            "Non-interactive: files it instantly with no "
-                            "conversation (the positional MESSAGE is an optional "
-                            "longer brief). Interactive: opens a scoping "
-                            "conversation biased toward saving for later. Start it "
-                            "later with `imp resume <id>`.")
+                       help="File an idea for your backlog with this TITLE and "
+                            "exit immediately without running (the positional "
+                            "MESSAGE is an optional longer brief). Start it later "
+                            "with `imp resume <id>`.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A change id this backlog Change depends on "

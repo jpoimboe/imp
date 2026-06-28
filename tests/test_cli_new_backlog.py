@@ -181,6 +181,19 @@ def test_non_backlog_non_interactive_runs_headless(
     assert captured["non_interactive"] is True
 
 
+def test_new_help_is_one_meaning_per_flag(capsys) -> None:
+    import re
+    parser = main._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["new", "--help"])
+    # argparse reflows help to the terminal width; normalize whitespace so the
+    # assertions do not depend on where it wraps lines.
+    flat = re.sub(r"\s+", " ", capsys.readouterr().out)
+    assert "scoping conversation" not in flat
+    assert "File an idea for your backlog" in flat
+    assert "exit immediately without running" in flat
+
+
 def test_interactive_backlog_files_instantly_no_session(
         tmp_path: Path, monkeypatch) -> None:
     import sys
