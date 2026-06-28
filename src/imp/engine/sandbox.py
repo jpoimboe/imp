@@ -85,6 +85,15 @@ class SandboxPolicy:
         return verdict == "rw"
 
 
+def _is_engine_passthrough(key: str) -> bool:
+    """Engine-env keys allowed through the sandbox env allowlist: every IMP_*
+    var plus PYTHONPATH — the single deliberate non-IMP_ exception, carrying the
+    imp-on-imp import shadow. Shared by both allowlist sites (the per-spawn loop
+    in build_sandbox_argv and the policy bake in _build_setenv) so they cannot
+    drift."""
+    return key.startswith("IMP_") or key == "PYTHONPATH"
+
+
 def build_sandbox_argv(
     command: str, *, cwd: str, policy: SandboxPolicy,
     engine_env: Mapping[str, str],
@@ -102,10 +111,11 @@ def build_sandbox_argv(
 
     Required (not optional) on purpose: a sandboxed spawn without its live engine
     env is always a bug, so every call site — present and future — is forced to
-    supply it rather than silently inheriting a stale snapshot. The IMP_ PREFIX is
-    the allowlist: any new IMP_* var flows through with no edit here, while non-
-    IMP_ engine keys (e.g. PYTHONPATH) stay out of the sandbox, matching
-    `_build_setenv`'s IMP_-only engine allowlist."""
+    supply it rather than silently inheriting a stale snapshot. The allowlist is
+    the IMP_ prefix plus PYTHONPATH (`_is_engine_passthrough`): any new IMP_* var
+    flows through with no edit here, and PYTHONPATH passes through as the single
+    deliberate non-IMP_ exception — the imp-on-imp import shadow — matching
+    `_build_setenv`."""
     if not policy.active:
         return ["sh", "-c", command]
 
@@ -140,7 +150,7 @@ def build_sandbox_argv(
     # duplicate --setenv is emitted.
     setenv = dict(policy.setenv)
     for k, v in engine_env.items():
-        if k.startswith("IMP_"):
+        if _is_engine_passthrough(k):
             setenv[k] = v
     argv += ["--clearenv"]
     for k, v in setenv.items():
@@ -295,8 +305,10 @@ def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     extra_env: tuple[str, ...],
 ) -> tuple[tuple[str, str], ...]:
-    """Env allowlist (spec B.4). IMP_* come from engine_env_result (authoritative,
-    M2-r5); generic + LC_* + extra_env pass through from `environ`; TMPDIR=/tmp.
+    """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
+    (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
+    — the imp-on-imp import shadow); generic + LC_* + extra_env pass through from
+    `environ`; TMPDIR=/tmp.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR is assigned
@@ -313,7 +325,7 @@ def _build_setenv(
         if k in environ:
             d[k] = environ[k]
     for k, v in engine_env_result.items():
-        if k.startswith("IMP_"):
+        if _is_engine_passthrough(k):
             d[k] = v
     d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/extra_env value
     return tuple(d.items())

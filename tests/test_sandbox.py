@@ -119,7 +119,8 @@ def test_live_engine_env_supersedes_frozen_imp_vars():
     assert argv.count("IMP_CHANGE_TITLE") == 1       # not duplicated
     i = argv.index("IMP_CHANGE_TITLE")
     assert argv[i + 1] == "Live mode log polish"   # fresh value wins
-    assert "PYTHONPATH" not in argv                 # non-IMP_ key stays out (prefix allowlist)
+    # the single deliberate non-IMP_ passthrough
+    assert "--setenv PYTHONPATH /wt/src" in " ".join(argv)
 
 
 def test_new_imp_var_flows_through_without_code_change():
@@ -130,6 +131,22 @@ def test_new_imp_var_flows_through_without_code_change():
         engine_env={"IMP_FUTURE_VAR": "v", "SOME_OTHER": "no"})
     assert "--setenv IMP_FUTURE_VAR v" in " ".join(argv)
     assert "SOME_OTHER" not in argv
+
+
+def test_pythonpath_flows_through_build_sandbox_argv():
+    # PYTHONPATH is the single deliberate non-IMP_ key the allowlist passes
+    # through (the imp-on-imp import shadow): when the live engine_env carries it,
+    # the sandboxed spawn must see it via --setenv.
+    argv = build_sandbox_argv(
+        "x", cwd="/wt", policy=_policy(),
+        engine_env={"PYTHONPATH": "/ctl/.imp/worktrees/abc/src"})
+    assert "--setenv PYTHONPATH /ctl/.imp/worktrees/abc/src" in " ".join(argv)
+
+
+def test_no_pythonpath_setenv_when_engine_env_lacks_it():
+    # A non-imp project's engine_env carries no PYTHONPATH, so none is emitted.
+    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
+    assert "PYTHONPATH" not in argv
 
 
 def test_no_unshare_pid_and_no_die_with_parent():
@@ -314,6 +331,33 @@ def test_build_setenv_dedups_overlapping_extra_env(tmp_path):
     # No key appears more than once.
     keys = [k for k, _ in pol.setenv]
     assert len(keys) == len(set(keys))
+
+
+def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt),
+                           "PYTHONPATH": str(wt / "src")},
+        environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    assert ("PYTHONPATH", str(wt / "src")) in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+
+
+def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
+        environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    keys = {k for k, _ in pol.setenv}
+    assert "PYTHONPATH" not in keys
 
 
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
