@@ -7,7 +7,14 @@ import re
 import subprocess
 from pathlib import Path
 
-from imp.engine.archive import blobs_root, index, index_path, record, records_root
+from imp.engine.archive import (
+    blobs_root,
+    ensure_current,
+    index,
+    index_path,
+    record,
+    records_root,
+)
 from imp.engine.archive.blobstore import LocalBlobStore
 
 
@@ -40,6 +47,7 @@ def is_archived(control_root: Path, change_id: str) -> bool:
 def completed_rows(
     control_root: Path,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:
+    ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
         return []
@@ -53,6 +61,7 @@ def completed_rows(
 def search_archive(
     control_root: Path, query: str,
 ) -> list[tuple[str, str, str, str]]:
+    ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
         return []

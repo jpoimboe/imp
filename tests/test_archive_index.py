@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from imp.engine.archive import index
@@ -20,10 +21,9 @@ def _index_names(conn) -> set[str]:
 def test_connect_creates_schema(tmp_path: Path) -> None:
     conn = index.connect(tmp_path / "index.db")
     try:
-        assert {"changes", "deps", "events"} <= _table_names(conn)
-        assert {
-            "idx_events_type", "idx_events_change", "idx_events_agent",
-        } <= _index_names(conn)
+        assert {"changes", "deps"} <= _table_names(conn)
+        assert "events" not in _table_names(conn)
+        assert not any(name.startswith("idx_events_") for name in _index_names(conn))
     finally:
         conn.close()
 
@@ -33,7 +33,8 @@ def test_connect_is_idempotent(tmp_path: Path) -> None:
     index.connect(db).close()  # also creates the parent dir
     conn = index.connect(db)   # second connect must not raise on existing tables
     try:
-        assert {"changes", "deps", "events"} <= _table_names(conn)
+        assert {"changes", "deps"} <= _table_names(conn)
+        assert "events" not in _table_names(conn)
     finally:
         conn.close()
 
@@ -61,17 +62,17 @@ def _sample_events() -> list[dict]:
     ]
 
 
-def test_ingest_populates_changes_deps_events(tmp_path: Path) -> None:
+def test_ingest_populates_changes_deps(tmp_path: Path) -> None:
     conn = index.connect(tmp_path / "index.db")
     try:
         index.ingest(conn, _sample_record(), _sample_events())
 
         crow = conn.execute(
-            "SELECT id, title, base, created_at, status, step, events_hash"
-            " FROM changes").fetchall()
+            "SELECT id, title, base, created_at, status, step, events_hash,"
+            " last_event_ts FROM changes").fetchall()
         assert crow == [(
             "alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00",
-            "completed", "finalize", "deadbeef")]
+            "completed", "finalize", "deadbeef", "2026-06-01T00:00:02+00:00")]
         assert conn.execute(
             "SELECT ingested_at FROM changes WHERE id='alpha'"
         ).fetchone()[0] is not None
@@ -80,16 +81,6 @@ def test_ingest_populates_changes_deps_events(tmp_path: Path) -> None:
             "SELECT depends_on_id FROM deps WHERE change_id='alpha'"
             " ORDER BY depends_on_id").fetchall()
         assert deps == [("beta",), ("gamma",)]
-
-        evs = conn.execute(
-            "SELECT seq, event_id, parent_id, agent_id, ts, type, payload_json"
-            " FROM events WHERE change_id='alpha' ORDER BY seq").fetchall()
-        assert evs == [
-            (0, "e0", None, None, "2026-06-01T00:00:01+00:00",
-             "change_created", '{"id": "alpha"}'),
-            (1, "e1", "e0", "plan-writer", "2026-06-01T00:00:02+00:00",
-             "step_started", '{"step": "plan-writer"}'),
-        ]
     finally:
         conn.close()
 
@@ -101,6 +92,101 @@ def test_ingest_is_idempotent(tmp_path: Path) -> None:
         index.ingest(conn, _sample_record(), _sample_events())
         assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM deps").fetchone()[0] == 2
-        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_ingest_denormalizes_last_event_ts(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        index.ingest(conn, _sample_record(), _sample_events())
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] == "2026-06-01T00:00:02+00:00"
+    finally:
+        conn.close()
+
+
+def test_ingest_last_event_ts_empty_events(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        index.ingest(conn, _sample_record(), [])
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] is None
+    finally:
+        conn.close()
+
+
+def test_ingest_last_event_ts_skips_malformed(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"id": "e0", "parent_id": None, "agent_id": None,
+             "timestamp": "2026-06-01T00:00:05+00:00", "type": "change_created",
+             "payload": {"id": "alpha"}},
+            {"_malformed": True, "raw": "NOT_JSON"},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] == "2026-06-01T00:00:05+00:00"
+    finally:
+        conn.close()
+
+
+def test_ingest_last_event_ts_all_malformed(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"_malformed": True, "raw": "NOT_JSON"},
+            {"_malformed": True, "raw": "ALSO_NOT_JSON"},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        assert conn.execute(
+            "SELECT last_event_ts FROM changes WHERE id='alpha'"
+        ).fetchone()[0] is None
+    finally:
+        conn.close()
+
+
+def test_connect_stamps_fresh_db_user_version(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_connect_pre_existing_db_keeps_user_version(tmp_path: Path) -> None:
+    db = tmp_path / "index.db"
+    raw = sqlite3.connect(db)
+    raw.execute("CREATE TABLE changes (id TEXT PRIMARY KEY)")
+    raw.commit()
+    raw.close()
+    # Precondition: a legacy db reads back as version 0.
+    pre = sqlite3.connect(db)
+    assert pre.execute("PRAGMA user_version").fetchone()[0] == 0
+    pre.close()
+
+    conn = index.connect(db)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_completed_rows_reads_denormalized_last_event_ts(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, status, step, title, created_at,"
+            " last_event_ts) VALUES (?, ?, ?, ?, ?, ?)",
+            ("alpha", "completed", "finalize", "Alpha",
+             "2026-06-01T00:00:00+00:00", "2026-06-01T09:00:00+00:00"))
+        conn.commit()
+        assert index.completed_rows(conn) == [(
+            "alpha", "completed", "finalize", "2026-06-01T09:00:00+00:00",
+            "Alpha", "2026-06-01T00:00:00+00:00", None)]
     finally:
         conn.close()

@@ -72,7 +72,8 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
         assert conn.execute(
             "SELECT status FROM changes WHERE id='feat'").fetchone() == ("completed",)
         assert conn.execute(
-            "SELECT COUNT(*) FROM events WHERE change_id='feat'").fetchone()[0] >= 1
+            "SELECT last_event_ts FROM changes WHERE id='feat'"
+        ).fetchone()[0] is not None
     finally:
         conn.close()
 

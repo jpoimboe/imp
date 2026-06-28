@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from imp.engine import archive
@@ -28,12 +29,10 @@ def _archive_one(control: Path, cid: str, dep: str, etype: str) -> None:
 def _snapshot(conn) -> dict:
     return {
         "changes": sorted(conn.execute(
-            "SELECT id, title, base, created_at, status, step, events_hash"
-            " FROM changes").fetchall()),
+            "SELECT id, title, base, created_at, status, step, events_hash,"
+            " last_event_ts FROM changes").fetchall()),
         "deps": sorted(conn.execute(
             "SELECT change_id, depends_on_id FROM deps").fetchall()),
-        "events": sorted(conn.execute(
-            "SELECT change_id, seq, event_id, type FROM events").fetchall()),
     }
 
 
@@ -59,4 +58,44 @@ def test_rebuild_reproduces_index_contents(tmp_path: Path) -> None:
 
     assert after == before
     assert after["changes"]  # non-empty: the rebuild actually loaded rows
-    assert len(after["events"]) == 2
+    assert all(row[7] for row in after["changes"])  # last_event_ts populated
+
+
+def test_rebuild_keeps_original_rows_queryable_during_ingest(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    _archive_one(tmp_path, "alpha", "beta", "change_created")
+    _archive_one(tmp_path, "gamma", "alpha", "change_merged")
+
+    observed: dict[str, set[str]] = {}
+    real_ingest = index.ingest
+
+    def spy(conn, rec, events):
+        # First time the rebuild ingests a row, query the LIVE index path with a
+        # separate connection. The atomic rebuild builds into a temp db and only
+        # os.replaces it at the very end, so the original committed rows must
+        # still be fully visible on disk here.
+        if "ids" not in observed:
+            reader = sqlite3.connect(archive.index_path(tmp_path))
+            try:
+                observed["ids"] = {
+                    r[0] for r in reader.execute("SELECT id FROM changes")}
+            finally:
+                reader.close()
+        return real_ingest(conn, rec, events)
+
+    monkeypatch.setattr(index, "ingest", spy)
+    archive.rebuild_index(tmp_path)
+
+    # Mid-rebuild, the live index still held BOTH original rows (not an empty,
+    # just-recreated db).
+    assert observed["ids"] == {"alpha", "gamma"}
+    # No temp db is left behind in the archive dir after the swap.
+    assert not list(archive.archive_root(tmp_path).glob("*.db.tmp"))
+    # Final content reproduced from records + blobs.
+    conn = index.connect(archive.index_path(tmp_path))
+    try:
+        ids = {r[0] for r in conn.execute("SELECT id FROM changes")}
+    finally:
+        conn.close()
+    assert ids == {"alpha", "gamma"}

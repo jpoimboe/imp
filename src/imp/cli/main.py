@@ -1832,6 +1832,39 @@ def resolve_display_status(
 _Row = tuple[str, str, str, str, str, str, str | None]
 
 
+class _HomeScan(NamedTuple):
+    """One live change home parsed exactly once for the overview's row builders.
+
+    change_json/state_json are the raw bytes (state_json is None when a home has
+    no state.json yet); meta is the parsed change.json (homes whose change.json
+    is missing or malformed are dropped from the scan, so meta is always valid)."""
+    change_id: str
+    change_json: bytes
+    state_json: bytes | None
+    meta: dict[str, Any]
+    last_iso: str
+
+
+def _scan_change_homes(control: Path) -> list[_HomeScan]:
+    """Read and parse every live change home once, so the overview's three row
+    builders share a single pass instead of re-reading each home three times."""
+    scanned: list[_HomeScan] = []
+    for change_id in _list_change_homes(control):
+        cdir = _change_home(control, change_id)
+        try:
+            change_json = (cdir / "change.json").read_bytes()
+            meta = json.loads(change_json)
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        try:
+            state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
+        except FileNotFoundError:
+            state_json = None
+        last_iso = _last_event_iso(cdir / "events.jsonl") or ""
+        scanned.append(_HomeScan(change_id, change_json, state_json, meta, last_iso))
+    return scanned
+
+
 def _status_row(change_id: str, state_json: bytes, change_json: bytes,
                 last_activity: str) -> _Row | None:
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
@@ -1873,27 +1906,20 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
     return (row[0], status, *row[2:])
 
 
-def _status_rows(control: Path) -> list[_Row]:
+def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
+    homes = _scan_change_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
-    for change_id in _list_change_homes(control):
-        cdir = _change_home(control, change_id)
-        try:
-            state_json = (cdir / "state" / "state.json").read_bytes()
-            change_json = (cdir / "change.json").read_bytes()
-        except FileNotFoundError:
+    for h in homes:
+        if h.state_json is None:
             continue
-        try:
-            meta = json.loads(change_json)
-        except json.JSONDecodeError:
-            continue
-        if meta.get("materialized", True) is False and meta.get("origin", "draft") != "draft":
+        if h.meta.get("materialized", True) is False and h.meta.get("origin", "draft") != "draft":
             continue  # un-materialized ideas/follow-ups belong to the Backlog zone
-        last = _last_event_iso(cdir / "events.jsonl") or ""
-        row = _status_row(change_id, state_json, change_json, last)
+        row = _status_row(h.change_id, h.state_json, h.change_json, h.last_iso)
         if row is None:
             continue
+        cdir = _change_home(control, h.change_id)
         status = resolve_display_status(
-            row[1], cdir, materialized=meta.get("materialized", True))
+            row[1], cdir, materialized=h.meta.get("materialized", True))
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue
@@ -1901,10 +1927,11 @@ def _status_rows(control: Path) -> list[_Row]:
     return rows
 
 
-def _completed_rows(control: Path) -> list[_Row]:
+def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Completed/abandoned Changes NOT currently surfaced in-flight, from a
-    SINGLE indexed archive query (spec AC 7)."""
-    live = {r[0] for r in _status_rows(control)}
+    SINGLE indexed archive query (spec AC 7). `live_ids` lets the overview reuse
+    the in-flight id set it already computed instead of re-deriving it."""
+    live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
     for row in archive_read.completed_rows(control):
         if row[0] in live or row[1] in _INFLIGHT:
@@ -2155,25 +2182,20 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backlog_rows(control: Path) -> list[_Row]:
+def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
+    homes = _scan_change_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
-    for change_id in _list_change_homes(control):
-        cdir = _change_home(control, change_id)
-        try:
-            change_json = (cdir / "change.json").read_bytes()
-            meta = json.loads(change_json)
-        except (FileNotFoundError, json.JSONDecodeError):
-            continue
+    for h in homes:
+        meta = h.meta
         if meta.get("materialized", True):
             continue  # materialized homes are Active, not Backlog
         origin = meta.get("origin", "draft")
         if origin == "draft":
             continue  # un-materialized drafts are Active, not Backlog
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
-        last = _last_event_iso(cdir / "events.jsonl") or ""
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
-        rows.append((change_id, origin, blocked, last,
+        rows.append((h.change_id, origin, blocked, h.last_iso,
                      meta.get("title") or "", created, blocked or None))
     return rows
 
@@ -2184,9 +2206,10 @@ _HISTORY_CAP = 10
 _DISPOSITION = {"completed": "merged", "abandoned": "abandoned"}
 
 
-def _history_rows(control: Path, *, show_all: bool) -> list[_Row]:
+def _history_rows(control: Path, *, show_all: bool,
+                  live_ids: set[str] | None = None) -> list[_Row]:
     """Terminal-disposition (completed/abandoned) rows for the history block."""
-    rows = [r for r in _completed_rows(control) if r[1] in _DISPOSITION]
+    rows = [r for r in _completed_rows(control, live_ids) if r[1] in _DISPOSITION]
     if not show_all:
         rows = [r for r in rows if r[1] == "completed"]
     rows = _sort_rows_newest_first(rows)
@@ -2197,9 +2220,12 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
     """Build the overview as lines: in-flight, Backlog, then the history block."""
     name_w = change_row.name_budget()
-    inflight = _sort_rows_newest_first(_status_rows(control))
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control))
-    history = _history_rows(control, show_all=show_all)
+    scanned = _scan_change_homes(control)
+    status_rows = _status_rows(control, scanned)
+    inflight = _sort_rows_newest_first(status_rows)
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
+    history = _history_rows(control, show_all=show_all,
+                            live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
         return [_NO_CHANGES_MESSAGE]
     lines = [change_row.header_line(color=color)]
