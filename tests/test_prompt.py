@@ -297,3 +297,100 @@ async def test_ask_async_without_toolbar_passes_no_toolbar_kwarg() -> None:
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     await prompt.ask_async()                               # default: no toolbar
     assert "bottom_toolbar" not in captured               # pre-toolbar callers unchanged
+
+
+@pytest.mark.anyio
+async def test_ask_async_flushes_tty_input_before_reading(monkeypatch) -> None:
+    """AC1/AC4: on a real tty, ask_async flushes the kernel input queue on
+    sys.stdin's fd with TCIFLUSH, and the flush precedes the prompt_async read."""
+    import sys
+    import termios
+
+    order: list[str] = []
+    flush_args: list[tuple[int, int]] = []
+
+    def _fake_tcflush(fd: int, queue: int) -> None:
+        order.append("flush")
+        flush_args.append((fd, queue))
+
+    class _FakeStdin:
+        def isatty(self) -> bool:
+            return True
+
+        def fileno(self) -> int:
+            return 0
+
+    monkeypatch.setattr(sys, "stdin", _FakeStdin())
+    monkeypatch.setattr(termios, "tcflush", _fake_tcflush)
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            order.append("read")
+            return "answer"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    result = await prompt.ask_async()
+
+    assert result == "answer"
+    assert order == ["flush", "read"]               # flush runs BEFORE the read
+    assert flush_args == [(0, termios.TCIFLUSH)]     # stdin fd, input queue only
+
+
+@pytest.mark.anyio
+async def test_ask_async_does_not_flush_when_stdin_is_not_a_tty(monkeypatch) -> None:
+    """AC2/AC4: when sys.stdin is not a tty, ask_async never flushes and never
+    touches the fd; the read proceeds and returns normally."""
+    import sys
+    import termios
+
+    flushed: list[tuple] = []
+    monkeypatch.setattr(termios, "tcflush", lambda *a: flushed.append(a))
+
+    class _FakeStdin:
+        def isatty(self) -> bool:
+            return False
+
+        def fileno(self) -> int:
+            raise AssertionError("fileno must not be read on a non-tty stdin")
+
+    monkeypatch.setattr(sys, "stdin", _FakeStdin())
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            return "typed"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    result = await prompt.ask_async()
+
+    assert result == "typed"     # read proceeds normally
+    assert flushed == []         # no flush attempted on a non-tty fd
+
+
+@pytest.mark.anyio
+async def test_ask_async_headless_path_reads_without_flush(monkeypatch) -> None:
+    """AC3/AC4: the headless / --message path (non-tty stdin) reads input
+    unchanged with no flush and raises no error, even with termios available."""
+    import sys
+    import termios
+
+    flushed: list[tuple] = []
+    monkeypatch.setattr(termios, "tcflush", lambda *a: flushed.append(a))
+
+    class _NonTtyStdin:
+        def isatty(self) -> bool:
+            return False
+
+        def fileno(self) -> int:
+            return 3
+
+    monkeypatch.setattr(sys, "stdin", _NonTtyStdin())
+
+    class _SpySession:
+        async def prompt_async(self, msg, **kwargs):  # type: ignore[no-untyped-def]
+            return "headless reply"
+
+    prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
+    result = await prompt.ask_async()
+
+    assert result == "headless reply"   # input read normally, no regression
+    assert flushed == []                # never flushed on the headless path

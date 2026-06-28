@@ -12,6 +12,7 @@ History is per-session in-memory; persisted history is a post-V0 feature.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -211,6 +212,15 @@ class Prompt:
             spaced = f"\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
             extra["bottom_toolbar"] = ANSI(spaced) if self._color else spaced
             extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
+        stdin = sys.stdin
+        if stdin.isatty():
+            # Drop typed-ahead kernel-buffered bytes so they don't auto-submit into this prompt.
+            try:
+                import termios
+            except ImportError:
+                pass
+            else:
+                termios.tcflush(stdin.fileno(), termios.TCIFLUSH)
         result = await self._session.prompt_async(
             msg, handle_sigint=False, placeholder=placeholder,
             prompt_continuation=lambda _w, _l, _s: cont, **extra)
