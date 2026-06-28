@@ -136,9 +136,7 @@ def context_threshold_crossed(
     frac = checkpoint_fraction(threshold, window)
     if frac is None or window is None or window <= 0 or not usage:
         return False
-    occupancy = (int(usage.get("input_tokens", 0) or 0)
-                 + int(usage.get("cache_read_input_tokens", 0) or 0)
-                 + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    occupancy = context_tokens_from_usage(usage)
     return occupancy / window >= frac
 
 
