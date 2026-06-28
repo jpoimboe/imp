@@ -177,7 +177,6 @@ async def run_change(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
-    scope_only: bool = False,
     autonomous: bool = False,
     seed_opening: str | None = None,
     opening_intent: str | None = None,
@@ -300,7 +299,6 @@ async def run_change(
                 verify_command=config.verify_command,
                 verify_timeout=config.verify_timeout,
                 non_interactive=non_interactive,
-                scope_only=scope_only,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
@@ -496,7 +494,6 @@ async def _dispatch_step(
     coordinator: Any, verify_command: str | None = None,
     verify_timeout: int | None = None,
     non_interactive: bool = False,
-    scope_only: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
@@ -533,7 +530,6 @@ async def _dispatch_step(
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume, verify_command=verify_command,
         non_interactive=non_interactive,
-        scope_only=scope_only,
         autonomous=autonomous,
         sandbox_policy=sandbox_policy, seed_opening=seed_opening,
         project_facts=project_facts, guidance=guidance)
@@ -834,7 +830,6 @@ async def _route_agent(
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     verify_command: str | None = None,
     non_interactive: bool = False,  # forwarded to the invocation/child runs
-    scope_only: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
@@ -890,7 +885,6 @@ async def _route_agent(
             balance_on_resume=balance,
             initial_messages=initial, is_resume=is_resume,
             verify_command=verify_command, non_interactive=non_interactive,
-            scope_only=scope_only,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
             project_facts=project_facts, guidance=guidance)
@@ -959,7 +953,7 @@ async def _route_agent(
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 wrapper_text=wrapper_text, is_resume=False,
                 verify_command=verify_command, non_interactive=non_interactive,
-                scope_only=scope_only, autonomous=autonomous,
+                autonomous=autonomous,
                 sandbox_policy=sandbox_policy, seed_opening=seed,
                 project_facts=project_facts, guidance=guidance)
         state.step_attempt = 0
@@ -985,7 +979,7 @@ async def _route_agent(
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=False,
             verify_command=verify_command, non_interactive=non_interactive,
-            scope_only=scope_only, autonomous=autonomous,
+            autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed,
             project_facts=project_facts, guidance=guidance)
     if result.fatal:
@@ -1019,7 +1013,6 @@ async def _route_agent(
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume, verify_command=verify_command,
                                   non_interactive=non_interactive,
-                                  scope_only=scope_only,
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
                                   seed_opening=seed_opening,
@@ -1070,7 +1063,6 @@ async def _run_agent_invocation(
     balance_on_resume: bool = False,
     verify_command: str | None = None,
     non_interactive: bool = False,
-    scope_only: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
     project_facts: dict[str, str] | None = None,
@@ -1107,7 +1099,6 @@ async def _run_agent_invocation(
             orig_base_head=change.orig_base_head,
             event_log=log, vars=state.vars,
             project_facts=project_facts, guidance=guidance,
-            scope_only=scope_only,
             autonomous=autonomous,
         )
         rendered = render_prompt(
