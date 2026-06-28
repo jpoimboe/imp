@@ -351,6 +351,12 @@ phases:
       - name: merge-to-base
         kind: merge_and_exit_worktree
         label: merging
+        max_loops: 3                      # recovery passes before giving up to a human
         rules:
-          - {if: {merge: MERGED}, continue: true}
+          - {if: {merge: MERGED},   continue: true}
+          - {if: {merge: DIRTY},    goto: reconciler,
+             label: "recovering merge",
+             feedback: "The merge couldn't proceed because the change worktree still had uncommitted changes. Commit your resolution; integration will retry."}
+          - {if: {merge: CONFLICT}, goto: integrate-rebase, label: "retrying integration"}
+          - {if: {merge: REFUSED},  pause: true}
           - {else: true, pause: true}

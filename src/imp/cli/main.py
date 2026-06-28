@@ -277,11 +277,13 @@ def _emit_paused_summary(change: Change) -> None:
 
 def _emit_merge_blocked(
     change: Change, reason: str | None, detail: str | None = None,
+    note: str | None = None,
 ) -> None:
     """Merge couldn't complete — the user must act: wordmark, ⚠.
 
-    `detail` is git's own stderr (carried on the `merge_blocked` event). The
-    `refused` and `conflict` reasons are neutral buckets — REFUSED alone covers
+    `detail` is git's own stderr (carried on the `merge_blocked` event).
+    `note` is an optional message rendered before git's detail (e.g. the recovery-exhaustion note).
+    The `refused` and `conflict` reasons are neutral buckets — REFUSED alone covers
     overwrite, unrelated histories, ref-lock, and object-store corruption — so the
     template can only describe the common case. We append git's actual words for
     those two so the surfaced reason is truthful for every refusal, not just the
@@ -302,6 +304,8 @@ def _emit_merge_blocked(
                f"can be removed).")
     else:
         msg = f"Change {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+    if note:
+        msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
         msg = f"{msg}\ngit said: {detail.strip()}"
     print(ansi(f"{mark}{msg}", "wordmark", enabled=color))
@@ -350,12 +354,14 @@ def _handle_terminal_outcome(
     if final_state.status == "merge_blocked":
         mb_reason: str | None = None
         mb_detail: str | None = None
+        mb_note: str | None = None
         for ev in change.event_log().read():
             if ev.get("type") == "merge_blocked":
                 payload = ev.get("payload") or {}
                 mb_reason = payload.get("reason")
                 mb_detail = payload.get("detail")
-        _emit_merge_blocked(change, mb_reason, mb_detail)
+                mb_note = payload.get("note")
+        _emit_merge_blocked(change, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
     if final_state.step is not None:
         matched = _last_script_blocked(

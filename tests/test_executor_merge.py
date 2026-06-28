@@ -13,7 +13,7 @@ from imp.engine.change import Change
 from imp.engine.executor import _complete, _route_merge_and_exit_worktree
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog, State
-from imp.engine.types import Pause
+from imp.engine.types import Goto, Pause
 from tests.conftest import _git, _seed_control
 
 
@@ -78,7 +78,9 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
         conn.close()
 
 
-def test_merge_step_merge_blocked_on_conflict(tmp_path: Path) -> None:
+def test_merge_step_conflict_routes_to_recovery(tmp_path: Path) -> None:
+    # A real merge conflict now routes back to integrate-rebase for a re-rebase,
+    # emitting merge_retry — NOT a hardcoded merge_blocked pause.
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "README.md").write_text("branch")
@@ -87,44 +89,59 @@ def test_merge_step_merge_blocked_on_conflict(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("base")
     _git(tmp_path, "commit", "-qam", "base")
     state, log = _ctx(ch)
+    state.held_lane = "main"   # simulates holding the lane heading into merge
 
-    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
-    # _route_merge intercepts CONFLICT into a reasoned merge_blocked Pause.
-    assert isinstance(action, Pause)
-    assert action.reason == "merge_blocked"
+    action, fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert isinstance(action, Goto) and action.target == "integrate-rebase"
+    assert fb is None                            # the CONFLICT rule carries no feedback preamble
     assert state.merge_commit is None
     events = list(JsonlEventLog(ch.events_path).read())
-    assert any(e.get("type") == "merge_blocked" for e in events)
+    retries = [e for e in events if e.get("type") == "merge_retry"]
+    assert len(retries) == 1
+    assert retries[0]["payload"]["status"] == "CONFLICT"
+    assert retries[0]["payload"]["attempt"] == 1
+    assert retries[0]["payload"]["max"] == 3
+    assert retries[0]["payload"]["base"] == "main"
+    assert not any(e.get("type") == "merge_blocked" for e in events)
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()  # left intact
+    assert state.held_lane == "main"           # lane retained — recovery goto never releases
+    assert not any(e.get("type") == "lane_evicted" for e in events)
 
 
-def test_merge_step_refuses_dirty_worktree(tmp_path: Path) -> None:
-    # H1/R5: uncommitted work must NOT be silently dropped at merge. The dirty
-    # net now lives in merge_to_base under the lock and surfaces as DIRTY ->
-    # merge_blocked(worktree_dirty).
+def test_merge_step_dirty_routes_to_recovery(tmp_path: Path) -> None:
+    # Uncommitted work in the worktree now routes back to the reconciler to
+    # commit its leftover resolution, emitting merge_retry. Nothing is dropped.
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "uncommitted.txt").write_text("not committed")  # left dirty
     state, log = _ctx(ch)
+    state.held_lane = "main"   # simulates holding the lane heading into merge
 
-    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
-    assert isinstance(action, Pause)
-    assert action.reason == "merge_blocked"
-    assert action.kind == "worktree_dirty"
+    action, fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert isinstance(action, Goto) and action.target == "reconciler"
+    # The DIRTY rule's feedback preamble must be threaded to the reconciler, not
+    # dropped by _finish — otherwise the reconciler has no matching entry context.
+    assert fb is not None and "uncommitted changes" in fb
     assert state.merge_commit is None
+    events = list(JsonlEventLog(ch.events_path).read())
+    retries = [e for e in events if e.get("type") == "merge_retry"]
+    assert len(retries) == 1 and retries[0]["payload"]["status"] == "DIRTY"
+    assert not any(e.get("type") == "merge_blocked" for e in events)
     assert (ch.project_root / "uncommitted.txt").exists()        # nothing lost
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()   # worktree intact
+    assert state.held_lane == "main"           # lane retained — recovery goto never releases
+    assert not any(e.get("type") == "lane_evicted" for e in events)
 
 
-def test_merge_blocked_resumes_and_completes(tmp_path: Path) -> None:
-    # V8: after the user commits the leftover work, a re-run of the merge step
-    # succeeds and _complete finalizes.
+def test_merge_dirty_recovers_then_completes(tmp_path: Path) -> None:
+    # Recovery-then-success: a DIRTY first pass routes to recovery (not a pause);
+    # after the leftover work is committed, a re-run merges and _complete finalizes.
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    (ch.project_root / "f.txt").write_text("v")  # dirty -> first attempt blocks
+    (ch.project_root / "f.txt").write_text("v")  # dirty -> first attempt recovers
     state, log = _ctx(ch)
     action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
-    assert isinstance(action, Pause)
+    assert isinstance(action, Goto) and action.target == "reconciler"
     assert state.merge_commit is None
 
     _git(ch.project_root, "add", "-A")
@@ -137,6 +154,27 @@ def test_merge_blocked_resumes_and_completes(tmp_path: Path) -> None:
     assert result.value == "completed"
     assert (tmp_path / "f.txt").read_text() == "v"
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_merge_step_refused_pauses(tmp_path: Path, monkeypatch) -> None:
+    from imp.engine import worktree
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    monkeypatch.setattr(
+        worktree, "merge_to_base",
+        lambda *a, **k: worktree.MergeResult("REFUSED", detail="fatal: refusing"))
+    state, log = _ctx(ch)
+
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert isinstance(action, Pause)
+    assert action.reason == "merge_blocked" and action.kind == "refused"
+    events = list(JsonlEventLog(ch.events_path).read())
+    blocked = [e for e in events if e.get("type") == "merge_blocked"]
+    assert len(blocked) == 1
+    assert blocked[0]["payload"]["reason"] == "refused"
+    assert blocked[0]["payload"]["base"] == "main"
+    assert blocked[0]["payload"]["detail"] == "fatal: refusing"
+    assert not any(e.get("type") == "merge_retry" for e in events)
 
 
 def test_merge_step_idempotent_when_commit_already_recorded(tmp_path: Path) -> None:
@@ -242,3 +280,28 @@ def test_decisions_body_missing_section_returns_none(tmp_path: Path) -> None:
 def test_decisions_body_file_not_found_returns_none(tmp_path: Path) -> None:
     from imp.engine import executor
     assert executor._decisions_body(tmp_path / "nonexistent.md") is None
+
+
+def test_merge_step_recovery_exhausted_pauses(tmp_path: Path, monkeypatch) -> None:
+    # With the loop count already at the cap, a CONFLICT does NOT route to recovery:
+    # the router pauses with merge_blocked carrying the attempt-count note + git detail,
+    # one attempt before the generic max_loops backstop would fire.
+    from imp.engine import worktree
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    monkeypatch.setattr(
+        worktree, "merge_to_base",
+        lambda *a, **k: worktree.MergeResult("CONFLICT", detail="merge conflict in f"))
+    state, log = _ctx(ch)
+    state.loop_counts["merge-to-base"] = 3            # already at max_loops
+
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert isinstance(action, Pause)
+    assert action.reason == "merge_blocked" and action.kind == "conflict"
+    events = list(JsonlEventLog(ch.events_path).read())
+    assert not any(e.get("type") == "merge_retry" for e in events)
+    blocked = [e for e in events if e.get("type") == "merge_blocked"]
+    assert len(blocked) == 1
+    note = blocked[0]["payload"]["note"]
+    assert "3" in note and "recovery passes" in note
+    assert blocked[0]["payload"]["detail"] == "merge conflict in f"

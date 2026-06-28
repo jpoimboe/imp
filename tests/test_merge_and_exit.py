@@ -35,66 +35,6 @@ def test_merge_and_exit_removes_worktree_and_flips_root(tmp_path: Path) -> None:
     assert ch.project_root == ch.control_root                         # project_root flipped
 
 
-def test_merge_and_exit_pauses_on_conflict(tmp_path: Path, monkeypatch) -> None:
-    from imp.engine import worktree
-    monkeypatch.setattr(worktree, "merge_to_base",
-                        lambda *a, **k: worktree.MergeResult(
-                            status="CONFLICT", merge_commit=None, detail="test"))
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    (ch.project_root / "feature.txt").write_text("hi")
-    _git(ch.project_root, "add", "-A")
-    _git(ch.project_root, "commit", "-qm", "feat")
-    state, log = State.load(ch.state_dir), JsonlEventLog(ch.events_path)
-
-    action, _fb, _muts = anyio.run(
-        _route_merge_and_exit_worktree, _merge_exit_step(), ch, state, log)
-
-    assert isinstance(action, Pause)
-    assert action.reason == "merge_blocked"
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
-
-
-def test_merge_and_exit_pauses_on_refused(tmp_path: Path, monkeypatch) -> None:
-    from imp.engine import worktree
-    monkeypatch.setattr(worktree, "merge_to_base",
-                        lambda *a, **k: worktree.MergeResult(
-                            status="REFUSED", merge_commit=None, detail="test"))
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    (ch.project_root / "feature.txt").write_text("hi")
-    _git(ch.project_root, "add", "-A")
-    _git(ch.project_root, "commit", "-qm", "feat")
-    state, log = State.load(ch.state_dir), JsonlEventLog(ch.events_path)
-
-    action, _fb, _muts = anyio.run(
-        _route_merge_and_exit_worktree, _merge_exit_step(), ch, state, log)
-
-    assert isinstance(action, Pause)
-    assert action.reason == "merge_blocked"
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
-
-
-def test_merge_and_exit_pauses_on_dirty(tmp_path: Path, monkeypatch) -> None:
-    from imp.engine import worktree
-    monkeypatch.setattr(worktree, "merge_to_base",
-                        lambda *a, **k: worktree.MergeResult(
-                            status="DIRTY", merge_commit=None, detail="test"))
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    (ch.project_root / "feature.txt").write_text("hi")
-    _git(ch.project_root, "add", "-A")
-    _git(ch.project_root, "commit", "-qm", "feat")
-    state, log = State.load(ch.state_dir), JsonlEventLog(ch.events_path)
-
-    action, _fb, _muts = anyio.run(
-        _route_merge_and_exit_worktree, _merge_exit_step(), ch, state, log)
-
-    assert isinstance(action, Pause)
-    assert action.reason == "merge_blocked"
-    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
-
-
 def test_merge_and_exit_idempotent_when_already_merged(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
