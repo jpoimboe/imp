@@ -281,6 +281,7 @@ class CodexAgentRunner:
         ctx.verify_command = invocation.verify_command
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
@@ -580,6 +581,14 @@ class CodexAgentRunner:
 
         guard = LoopGuard()
 
+        # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
+        # None until the threshold crosses, then "instruction_sent" for the one
+        # handoff-writing turn that follows.
+        from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+        from imp.providers.catalog import context_threshold_crossed
+        handoff_phase: str | None = None
+        handoff_path = handoff_path_for(invocation.transcript_dir)
+
         while True:
             # Reset per-turn completion-capture state before each turn so a
             # stale flag from a missed-completion turn cannot satisfy the
@@ -592,6 +601,7 @@ class CodexAgentRunner:
             state.complete_step_args = {}
             streamed = await thread.run_streamed(next_prompt)
             need_nudge = False  # set when turn ends without complete_step
+            handoff_turn_queued = False  # set when a Tier A handoff turn is queued
             async for event in streamed.events:
                 # Dead-server poll: if the MCP server task has ended, bail
                 # immediately rather than letting codex's retry-loop be
@@ -696,6 +706,15 @@ class CodexAgentRunner:
                         yield perr.make_error_event(
                             loop_err, kind=getattr(loop_err, "kind", ""))
                         return
+                    if handoff_phase == "instruction_sent":
+                        # The handoff-writing turn just completed (the agent
+                        # wrote the note as instructed). Signal the captured
+                        # handoff and stop; the engine reincarnates the session
+                        # seeded from it. Wins over a stray complete_step on this
+                        # turn — the agent was told to write & stop, not complete.
+                        yield {"type": "handoff",
+                               "payload": {"handoff_path": str(handoff_path)}}
+                        return
                     if proc_state.get("complete_step_called"):
                         args = proc_state.get("complete_step_args") or {}
                         try:
@@ -709,6 +728,24 @@ class CodexAgentRunner:
                             return
                         yield {"type": "agent_output", "payload": args}
                         return
+                    # Tier A watch: this turn crossed the checkpoint threshold
+                    # while still working (no complete_step). Inject the
+                    # handoff instruction as the next turn prompt and capture
+                    # the note on the following turn.
+                    if (handoff_phase is None
+                            and invocation.checkpoint_threshold is not None
+                            and context_threshold_crossed(
+                                proc_state.get("pending_usage"), self.model,
+                                invocation.checkpoint_threshold)):
+                        instr = handoff_instruction(handoff_path)
+                        elog.append_user_message(
+                            agent_id=aid,
+                            message=Message(role="user",
+                                            content=(TextBlock(text=instr),)))
+                        next_prompt = instr
+                        handoff_phase = "instruction_sent"
+                        handoff_turn_queued = True
+                        break
                     # Not captured: classified provider-error text wins over
                     # both nudge and `no_complete_step`. Auth/quota substrings
                     # must short-circuit nudge attempts (a nudge to a quota'd
@@ -743,6 +780,11 @@ class CodexAgentRunner:
                     "category": "config", "kind": "interrupted",
                     "message": "runner cancelled by interrupt"}}
                 return
+            # A Tier A handoff turn was queued: loop back and run it (next_prompt
+            # already holds the handoff instruction). The write turn's boundary
+            # yields the terminal `handoff` above.
+            if handoff_turn_queued:
+                continue
             # Inner loop exited. If we set need_nudge, invoke continuation_fn
             # and either run another turn or yield the after-nudges error.
             if not need_nudge:
