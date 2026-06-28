@@ -178,3 +178,26 @@ def test_begin_end_solicit_watchdog_toggles_flag_and_fires_listeners() -> None:
     coord.end_solicit_watchdog()
     assert coord.solicit_active is False
     assert fired["n"] == 2  # fired again on end
+
+
+def test_begin_end_tool_watchdog_depth_counter_and_listeners() -> None:
+    coord = InterruptCoordinator()
+    assert coord.tool_active is False  # default
+    fired = {"n": 0}
+    coord.add_activity_listener(lambda: fired.__setitem__("n", fired["n"] + 1))
+
+    coord.begin_tool_watchdog()
+    assert coord.tool_active is True
+    assert fired["n"] == 1  # note_activity fired on begin
+
+    coord.begin_tool_watchdog()  # a second concurrent foreground tool
+    assert coord.tool_active is True
+    assert fired["n"] == 2
+
+    coord.end_tool_watchdog()  # one tool still in flight
+    assert coord.tool_active is True  # depth still > 0 -> NOT a bare bool
+    assert fired["n"] == 3
+
+    coord.end_tool_watchdog()  # the last in-flight tool returns
+    assert coord.tool_active is False  # depth back to 0
+    assert fired["n"] == 4  # note_activity fired again on the final end
