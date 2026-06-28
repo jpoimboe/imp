@@ -2181,25 +2181,20 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backlog_rows(control: Path) -> list[_Row]:
+def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
+    homes = _scan_change_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
-    for change_id in _list_change_homes(control):
-        cdir = _change_home(control, change_id)
-        try:
-            change_json = (cdir / "change.json").read_bytes()
-            meta = json.loads(change_json)
-        except (FileNotFoundError, json.JSONDecodeError):
-            continue
+    for h in homes:
+        meta = h.meta
         if meta.get("materialized", True):
             continue  # materialized homes are Active, not Backlog
         origin = meta.get("origin", "draft")
         if origin == "draft":
             continue  # un-materialized drafts are Active, not Backlog
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
-        last = _last_event_iso(cdir / "events.jsonl") or ""
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
-        rows.append((change_id, origin, blocked, last,
+        rows.append((h.change_id, origin, blocked, h.last_iso,
                      meta.get("title") or "", created, blocked or None))
     return rows
 

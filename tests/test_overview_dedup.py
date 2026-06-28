@@ -58,3 +58,17 @@ def test_status_rows_uses_passed_scan(tmp_path: Path) -> None:
     # The passed scan is actually honored, not ignored: a one-home scan yields one row.
     alpha_only = [h for h in scan if h.change_id == "alpha"]
     assert {r[0] for r in m._status_rows(tmp_path, alpha_only)} == {"alpha"}
+
+
+def test_backlog_rows_uses_passed_scan(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="Brief", change_id="bk1",
+                        base_branch="main", origin="idea", seed_opening="Brief")
+    Change.create_draft(tmp_path, title="Brief2", change_id="bk2",
+                        base_branch="main", origin="idea", seed_opening="Brief2")
+
+    scan = m._scan_change_homes(tmp_path)
+    assert m._backlog_rows(tmp_path, scan) == m._backlog_rows(tmp_path)
+    assert {r[0] for r in m._backlog_rows(tmp_path)} == {"bk1", "bk2"}
+    bk1_only = [h for h in scan if h.change_id == "bk1"]
+    assert {r[0] for r in m._backlog_rows(tmp_path, bk1_only)} == {"bk1"}
