@@ -177,7 +177,9 @@ def test_resumed_step_does_not_redo_prior_reads(tmp_path: Path) -> None:
         # Give the model time to actually enter `sleep 30` before the interrupt.
         time.sleep(2.0)
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=20)
+        # Generous: under `-n` concurrency the post-SIGINT exit stretches; this
+        # only bites on a real hang.
+        rc = proc.wait(timeout=60)
         assert rc == 130
     finally:
         if proc.poll() is None:
@@ -252,7 +254,9 @@ def test_no_store_fallback_replays_deferred_mcp_tools_without_400(
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
         time.sleep(2.0)
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=20)
+        # Generous: under `-n` concurrency the post-SIGINT exit stretches; this
+        # only bites on a real hang.
+        rc = proc.wait(timeout=60)
         assert rc == 130
     finally:
         if proc.poll() is None:

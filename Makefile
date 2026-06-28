@@ -17,14 +17,27 @@ UV       ?= uv
 # Empirical: serial ~282s -> parallel ~34s (-n auto, 12 workers); 20 runs identical; serial override: make test XDIST=
 XDIST    ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n auto --dist loadgroup")
 # Live tests are I/O-bound on real APIs, so parallelism is a big win — but the
-# worker count is capped LOW (not -n auto). Empirically (2026-06-28, full live
-# suite, 4 providers): -n 2 is ~2x faster than serial and stable; -n 4 is faster
-# still (~3.5x on API-only tests) but destabilizes the interrupt/resume tests —
-# concurrent API load stretches their SIGINT/poll timing windows past the
-# deadlines, and trips codex's round-trip. So -n 2 is the safe default. Bump it
-# (LIVE_XDIST="-n 4") if you can tolerate the timing-sensitive flakes; force
-# serial with LIVE_XDIST= for debugging.
-LIVE_XDIST ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n 2 --dist loadgroup")
+# worker count is capped LOW (not -n auto). The thing that made -n 4 fragile was
+# the global `timeout = 60` (signal method, pyproject.toml): the slow live tests
+# run 30-45s each, so under concurrency they have little headroom before SIGALRM
+# fires and kills a still-progressing call (spurious Timeout on a sync test, an
+# event loop torn down mid-await on an async one). tests/conftest.py now gives
+# every live test a 240s backstop so the timeout only catches a genuine hang, and
+# the interrupt/resume tests carry generous (30-60s) internal SIGINT/pause
+# deadlines. With those, -n 4 is stable and ~1.7x faster than -n 2 (full suite,
+# 4 providers, 2026-06-28: -n 4 ~114s vs -n 2 ~200s).
+#
+# Don't go higher: -n 6+ OVER-subscribes a typical box (xdist workers + the
+# spawned `claude`/`codex` subprocesses + their daemons all contend for CPU),
+# starving the subprocess interrupt/resume tests until they miss their tool_call
+# poll — measured flaky at -n 6 and failing at -n 8 on a 12-core machine, for
+# only a marginal wall-clock gain. Residual flakes at -n 4 are model-level, not
+# concurrency (gpt-4o-mini occasionally skips the scripted bash call; codex ~30%
+# "tool not exposed" refusal, retried internally) — re-run a single failure
+# rather than treating it as a regression.
+#
+# Override: LIVE_XDIST="-n 2" to lighten load; LIVE_XDIST= for serial debugging.
+LIVE_XDIST ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n 4 --dist loadgroup")
 
 # Subprocess tests (`python -m imp ...`, cold-import checks) resolve `imp` via
 # the editable install — which inside a git worktree points at the MAIN checkout,

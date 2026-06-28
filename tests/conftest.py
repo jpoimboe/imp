@@ -11,6 +11,32 @@ import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# Live-API tests (the `*_live.py` convention, excluding the unrelated
+# `test_live_*` UI tests) drive real provider round-trips that take tens of
+# seconds each — 30-45s already at `-n 4` — and stretch further under heavier
+# `-n` concurrency. That leaves little headroom under the global `timeout = 60`
+# (signal method, pyproject.toml), which then fires SIGALRM mid-call: a spurious
+# Timeout on a sync subprocess test, or an event loop torn down mid-await on an
+# async one. The resume tests already opt out per-test with `timeout(240)` for
+# exactly this reason; generalize it so every live test gets the same backstop
+# and the timeout only ever catches a genuine hang. This is what lets the live
+# suite parallelize past -n 2 without the cap turning a slow call into a flake.
+_LIVE_TEST_TIMEOUT = 240
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Raise the per-test timeout for live-API tests (see _LIVE_TEST_TIMEOUT).
+
+    Applied at collection so a single rule covers every current and future
+    `*_live.py` test. Tests that already declare their own `timeout` marker keep
+    it (e.g. the resume tests that pick 240 explicitly)."""
+    for item in items:
+        name = Path(str(item.fspath)).name
+        if "_live" not in name or name.startswith("test_live_"):
+            continue
+        if item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(_LIVE_TEST_TIMEOUT))
+
 
 def _pin_subprocess_imp_to_working_tree() -> None:
     """Make subprocess `imp` resolution deterministic for the whole test run.

@@ -202,10 +202,12 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
             )
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=15)
+        # Generous deadlines: under `-n` concurrency the post-SIGINT exit and the
+        # daemon's async pause-write both stretch; these only bite on a real hang.
+        rc = proc.wait(timeout=60)
         assert rc == 130, f"expected exit 130, got {rc}"
 
-        state = _wait_for_paused(state_path, timeout=15.0)
+        state = _wait_for_paused(state_path, timeout=30.0)
         assert state.get("status") == "paused", state
         assert state["step"] == "w"
     finally:
@@ -294,14 +296,14 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=15)
+        rc = proc.wait(timeout=60)
         assert rc == 130
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
 
-    state = _wait_for_paused(state_path, timeout=15.0)
+    state = _wait_for_paused(state_path, timeout=30.0)
     assert state.get("status") == "paused", state
 
     resume = subprocess.run(
@@ -367,14 +369,14 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
         time.sleep(2.0)  # CC subprocess startup is slower; extra grace
         os.killpg(proc.pid, signal.SIGINT)
-        rc = proc.wait(timeout=20)
+        rc = proc.wait(timeout=60)
         assert rc == 130
     finally:
         if proc.poll() is None:
             proc.kill()
             proc.wait()
 
-    state = _wait_for_paused(state_path, timeout=15.0)
+    state = _wait_for_paused(state_path, timeout=30.0)
     assert state.get("status") == "paused", state
 
     resume = subprocess.run(
