@@ -124,9 +124,14 @@ def test_imp_flat_code_reviewer_is_high_tier_and_routes_task_gap_to_coder() -> N
 
 def test_imp_flat_cleanup_implement_routes_to_code_reviewer() -> None:
     rules = _steps(_flat())["cleanup-implement"].rules
-    m = evaluate_rules(rules, vars=_FLAT_VARS,
-                       output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "code-reviewer"
+    # forward plan (coverage not latched): exit 0 SKIPS the reviewer -> review-base-repin
+    fwd = evaluate_rules(rules, vars={**_FLAT_VARS, "coverage_settled": False},
+                         output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(fwd.action, Goto) and fwd.action.target == "review-base-repin"
+    # post-settlement corrective (coverage latched): exit 0 -> immediate review
+    corr = evaluate_rules(rules, vars={**_FLAT_VARS, "coverage_settled": True},
+                          output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(corr.action, Goto) and corr.action.target == "code-reviewer"
     dirty = evaluate_rules(rules, vars=_FLAT_VARS,
                            output={"exit": 3, "stdout": "", "stderr": ""})
     assert isinstance(dirty.action, Goto)
@@ -181,13 +186,14 @@ def test_imp_flat_gap_check_routing_and_latch() -> None:
     assert isinstance(multi.action, Goto) and multi.action.target == "code-reviewer"
     assert multi.var_mutations["coverage_settled"] is True
     assert multi.var_mutations["review_scope"] == "change"
-    # clean + single-plan -> latch + skip change-wide review (straight to summarizer)
+    # clean + single-plan -> change-wide review fires too (plan_total gate dropped).
     single = evaluate_rules(
         rules, vars={**_FLAT_VARS, "plan_total": 1},
         output={"status": "Success", "more_plans": False, "plan_total": 1,
                 "rationale": "done"})
-    assert isinstance(single.action, Goto) and single.action.target == "summarizer"
+    assert isinstance(single.action, Goto) and single.action.target == "code-reviewer"
     assert single.var_mutations["coverage_settled"] is True
+    assert single.var_mutations["review_scope"] == "change"
 
 
 def test_imp_flat_coverage_settled_var_replaces_change_panel_done() -> None:

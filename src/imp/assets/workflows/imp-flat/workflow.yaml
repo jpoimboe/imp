@@ -6,12 +6,14 @@ description: |
 # Single provider by design. Review independence here is NOT a tier gap — the coder
 # and the code-reviewer both run at the high (opus) tier. Independence comes from
 # FRESH CONTEXT + an ADVERSARIAL ROLE: the reviewer enters with its own context and an
-# adjudicating remit, judging the coder's work rather than producing it. Review fires
-# PER PLAN — code-reviewer reviews each settled plan over review_base..HEAD and routes
-# task_gap back to the coder — and ONCE more over the whole change at change end
-# (review_scope=change, cur_base_head..HEAD), but only when the change spanned more than
-# one plan. gap-check (the sole coverage backstop) runs once after the last outline plan
-# and latches coverage_settled on success.
+# adjudicating remit, judging the coder's work rather than producing it. Code review
+# fires ONCE at change end: forward outline plans SKIP code-reviewer (their clean
+# cleanup-implement routes straight to review-base-repin); code-reviewer reviews the
+# whole change once at change end (review_scope=change, cur_base_head..HEAD) for every
+# change, plus a post-settlement corrective over its own diff (review_base..HEAD,
+# reached via the coverage_settled seam on cleanup-implement), routing task_gap back to
+# the coder. gap-check (the sole coverage backstop) runs once after the last outline
+# plan and latches coverage_settled on success.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -159,13 +161,15 @@ phases:
 
       # cleanup folds this plan's fixup chain into one commit per task AND stamps the
       # Change: trailer over (review_base or fork)..HEAD, BEFORE the reviewer reads the
-      # diff. exit 0 -> code-reviewer; exit 2 -> the resolver; exit 3 -> the coder left
-      # a dirty tree.
+      # diff. exit 0: a corrective (coverage_settled latched) -> code-reviewer for
+      # immediate review; a forward plan skips it straight to review-base-repin. exit 2
+      # -> the resolver; exit 3 -> the coder left a dirty tree.
       - name: cleanup-implement
         quiet: true
         command: './scripts/cleanup.sh "{{ vars.review_base }}"'
         rules:
-          - {if: {exit: 0}, goto: code-reviewer}
+          - {if: {exit: 0, coverage_settled: true}, goto: code-reviewer}   # corrective -> immediate review
+          - {if: {exit: 0}, goto: review-base-repin}                       # forward plan -> skip code review
           - {if: {exit: 2}, continue: true}
           - {if: {exit: 3}, resume: coder}
           - {else: true, pause: true}
@@ -178,10 +182,10 @@ phases:
         rules:
           - {else: true, goto: cleanup-implement}
 
-      # The SOLE reviewer. It adjudicates and
-      # routes: per-plan it reviews review_base..HEAD; at change end
-      # (review_scope==change) it reviews cur_base_head..HEAD. task_gap loops back to the
-      # coder; approve proceeds.
+      # The SOLE reviewer. Forward plans skip it; it adjudicates and routes for a
+      # post-settlement corrective over its own diff (review_base..HEAD) and for the
+      # change-wide pass at change end (review_scope==change, cur_base_head..HEAD).
+      # task_gap loops back to the coder; approve proceeds.
       - name: code-reviewer
         file: agents/code-reviewer.md
         tier: high
@@ -210,16 +214,15 @@ phases:
 
       # End-of-change coverage backstop — runs ONCE (the outline drives the plan loop, not
       # gap-check). Gap found -> author a corrective via plan-writer (fixpoint loop, latch
-      # stays false). Clean -> latch coverage_settled; then run the change-wide review
-      # (review_scope=change) iff the change spanned >1 plan, else go straight to summarizer.
+      # stays false). Clean -> latch coverage_settled and run the change-wide review
+      # (review_scope=change) on clean coverage for every change (single- or multi-plan).
       - name: gap-check
         file: agents/gap-check.md
         tier: high
         label: checking plan coverage
         rules:
           - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1", review_scope: "'plan'"}, goto: plan-writer, label: "writing plan {{ vars.plan_index }}/{{ vars.plan_total }}", feedback: "More plans are needed for this spec. Coverage assessment:"}
-          - {if: "var.plan_total > 1", set: {coverage_settled: true, review_scope: "'change'"}, goto: code-reviewer}
-          - {else: true, set: {coverage_settled: true}, goto: summarizer}
+          - {else: true, set: {coverage_settled: true, review_scope: "'change'"}, goto: code-reviewer}
 
       - name: summarizer
         file: agents/summarizer.md
