@@ -106,3 +106,17 @@ def test_emit_script_blocked_notice_is_wordmark_under_dark_theme(monkeypatch, ca
         assert pal.sgr("yellow", enabled=True) not in out
     finally:
         pal.set_theme("ansi")
+
+
+def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
+    note = "imp attempted 3 recovery passes and the merge still failed."
+    change = _Change([{"type": "merge_blocked",
+                       "payload": {"reason": "conflict", "base": "master",
+                                   "detail": "merge conflict", "note": note}}])
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_merge_blocked") as mb, \
+         patch.object(main, "_emit_paused_summary"):
+        State.load.return_value = _State("merge_blocked")
+        main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
+    mb.assert_called_once()
+    assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg

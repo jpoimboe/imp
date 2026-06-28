@@ -354,12 +354,14 @@ def _handle_terminal_outcome(
     if final_state.status == "merge_blocked":
         mb_reason: str | None = None
         mb_detail: str | None = None
+        mb_note: str | None = None
         for ev in change.event_log().read():
             if ev.get("type") == "merge_blocked":
                 payload = ev.get("payload") or {}
                 mb_reason = payload.get("reason")
                 mb_detail = payload.get("detail")
-        _emit_merge_blocked(change, mb_reason, mb_detail)
+                mb_note = payload.get("note")
+        _emit_merge_blocked(change, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
     if final_state.step is not None:
         matched = _last_script_blocked(
