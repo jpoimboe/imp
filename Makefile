@@ -32,9 +32,10 @@ XDIST    ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n auto --d
 # starving the subprocess interrupt/resume tests until they miss their tool_call
 # poll — measured flaky at -n 6 and failing at -n 8 on a 12-core machine, for
 # only a marginal wall-clock gain. Residual flakes at -n 4 are model-level, not
-# concurrency (gpt-4o-mini occasionally skips the scripted bash call; codex ~30%
-# "tool not exposed" refusal, retried internally) — re-run a single failure
-# rather than treating it as a regression.
+# concurrency — re-run a single failure rather than treating it as a regression:
+# gpt-4o-mini occasionally skips the scripted bash call and completes immediately.
+# (The old codex "tool not exposed" refusal is fixed — _build_prompt tells the
+# model to load its mcp__imp__* tools via codex's tool_search first, ~0% now.)
 #
 # Override: LIVE_XDIST="-n 2" to lighten load; LIVE_XDIST= for serial debugging.
 LIVE_XDIST ?= $(shell $(PYTHON) -c "import xdist" 2>/dev/null && echo "-n 4 --dist loadgroup")

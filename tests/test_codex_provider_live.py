@@ -86,16 +86,15 @@ def _inv(tmp_path: Path) -> AgentInvocation:
 
 
 # How many independent round-trip attempts before the test gives up. The codex
-# CLI + the OpenAI model intermittently claim the imp MCP tool "is not exposed in
-# this session" even when codex logs `mcp_servers="...imp"` and the tool is in
-# fact callable — measured ~30% of TURNS on both gpt-5.4-mini and gpt-5.4, with
-# the tool named exactly as exposed (`mcp__imp__complete_step`). That residual is
-# external codex/LLM nondeterminism, NOT an imp bug: production survives it via
-# the nudge backstop (continuation_fn, below) plus the engine's RetryNow policy
-# for `agent_output_missing`. This test verifies the round-trip *can* complete
-# under production flags, so it mirrors that resilience: retry independent
-# attempts until one round-trips. With ~70% per-attempt success (initial turn +
-# NUDGE_LIMIT nudges), 5 attempts drive the flake rate to ~0.2%.
+# "tool is not exposed in this session" refusal was root-caused to codex DEFERRING
+# all MCP tools behind its `tool_search` discovery tool (imp's `mcp__imp__*` tools
+# aren't in the model's initial list); `_build_prompt` now tells the model to load
+# them via `tool_search` first, which drove first-turn complete_step success from
+# 4/10 to ~30/30 on gpt-5.4-mini. So the round-trip is reliable in production now
+# via that prompt guidance plus the nudge backstop (continuation_fn) and the
+# engine's RetryNow policy for `agent_output_missing`. The multi-attempt loop
+# stays as cheap belt-and-suspenders against residual LLM nondeterminism — it
+# almost always passes on the first attempt now.
 _ROUND_TRIP_ATTEMPTS = 5
 
 
