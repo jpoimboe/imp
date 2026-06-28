@@ -46,10 +46,12 @@ def results_to_evict(
 ) -> frozenset[str]:
     if not cold or not records:
         return frozenset()
+    call_names = {r.call_id: r.call_name for r in records if r.call_id is not None}
     cutoff = max(r.turn for r in records) - keep_recent_turns
     evict: set[str] = set()
     for r in records:
         if r.result_id is None or r.turn >= cutoff:
             continue
-        evict.add(r.result_id)
+        if call_names.get(r.result_id) in COMPACTABLE_TOOLS:
+            evict.add(r.result_id)
     return frozenset(evict)
