@@ -348,7 +348,6 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
             while not any(
                     e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("go left")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -455,7 +454,6 @@ async def test_seed_opening_is_forwarded_to_the_first_run_only(
             while not any(
                     e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("go")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1131,7 +1129,6 @@ async def test_script_blocked_pause_holds_and_surfaces_stderr(tmp_path: Path) ->
                 await anyio.sleep(0.02)
         prompts = [e for e in received if e.get("type") == "awaiting_user_input"]
         assert "integration blocked: worktree dirty" in prompts[0]["payload"]["prompt"]
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("go")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1416,7 +1413,6 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
         with anyio.fail_after(5):
             while not any(e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (user_chat_input_fn is awaiting)
         await client.send_input("redirect")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1463,7 +1459,6 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
         with anyio.fail_after(5):
             while not any(e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (user_chat_input_fn is awaiting)
         await client.send_input("redirect")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1592,7 +1587,6 @@ async def test_resume_prompt_target_holds_before_running_agent(
         prompts = [e["payload"]["prompt"] for e in received
                    if e.get("type") == "awaiting_user_input"]
         assert prompts[-1] == daemon._RESUME_PROMPT
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("steer me")
         with anyio.fail_after(5):
             while "r" not in result:
