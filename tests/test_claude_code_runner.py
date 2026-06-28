@@ -2973,7 +2973,7 @@ async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_no_store_native_keeps_tool_search_deferred(tmp_path: Path) -> None:
+async def test_no_store_native_sets_standard_tool_mode(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
 
@@ -2981,7 +2981,8 @@ async def test_no_store_native_keeps_tool_search_deferred(tmp_path: Path) -> Non
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
     # No session store → reconstructs and goes native. The SEND_TO_LLM tail
-    # is native-eligible, so ToolSearch deferral stays in effect (no ENABLE_TOOL_SEARCH).
+    # is native-eligible; standard tool mode is imp's default on every path, so
+    # ENABLE_TOOL_SEARCH=false is set here too.
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(role="assistant", content=(
@@ -3005,12 +3006,12 @@ async def test_no_store_native_keeps_tool_search_deferred(tmp_path: Path) -> Non
     opts = created[0].opts
     # Confirm this really is the native path (reconstructed, not replay fallback).
     assert opts.resume == resume_session_id("step:p/s")
-    # Native resume keeps deferral: the env knob is NOT set.
-    assert "ENABLE_TOOL_SEARCH" not in opts.env
+    # Standard tool mode is the default on every path: the env knob is set.
+    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
 
 
 @pytest.mark.anyio
-async def test_native_resume_keeps_tool_search_deferred(tmp_path: Path) -> None:
+async def test_native_resume_sets_standard_tool_mode(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
@@ -3051,9 +3052,9 @@ async def test_native_resume_keeps_tool_search_deferred(tmp_path: Path) -> None:
     opts = created[0].opts
     # Confirm this really is the native path.
     assert opts.resume == resume_session_id("step:p/s")
-    # Native resume keeps deferral: the env knob is NOT set, so token-saving
-    # ToolSearch deferral stays in effect for normal operation.
-    assert "ENABLE_TOOL_SEARCH" not in opts.env
+    # Standard tool mode is imp's default on every path, including native
+    # resume: the env knob is set.
+    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
 
 
 @pytest.mark.anyio
@@ -3158,8 +3159,8 @@ async def test_balance_on_resume_send_to_llm_tail_native_resumes(
     # Native path: claude-p loads its own session — no stream-json replay, no 400.
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_store is not None
-    # Native resume keeps ToolSearch deferral (the 400 only hit the replay path).
-    assert "ENABLE_TOOL_SEARCH" not in opts.env
+    # Standard tool mode is imp's default on every path, native resume included.
+    assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
 
 
 @pytest.mark.anyio
