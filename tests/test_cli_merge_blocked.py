@@ -63,3 +63,26 @@ def test_refused_without_detail_is_safe(
     out = capsys.readouterr().out
     assert "git said" not in out
     assert "imp resume" in out
+
+
+def test_exhaustion_note_renders_ahead_of_detail(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    ch = _change(tmp_path)
+    note = "imp attempted 3 recovery passes and the merge still failed."
+    cli_main._emit_merge_blocked(
+        ch, "conflict", "CONFLICT (content): Merge conflict in f.txt", note)
+    out = capsys.readouterr().out
+    assert note in out
+    assert "CONFLICT (content): Merge conflict in f.txt" in out
+    assert out.index(note) < out.index("git said")   # note precedes git's detail
+
+
+def test_no_note_leaves_output_unchanged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    ch = _change(tmp_path)
+    cli_main._emit_merge_blocked(ch, "conflict", "boom")
+    out = capsys.readouterr().out
+    assert "recovery passes" not in out
+    assert "boom" in out
