@@ -89,6 +89,7 @@ def test_merge_step_conflict_routes_to_recovery(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("base")
     _git(tmp_path, "commit", "-qam", "base")
     state, log = _ctx(ch)
+    state.held_lane = "main"   # simulates holding the lane heading into merge
 
     action, fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert isinstance(action, Goto) and action.target == "integrate-rebase"
@@ -103,6 +104,8 @@ def test_merge_step_conflict_routes_to_recovery(tmp_path: Path) -> None:
     assert retries[0]["payload"]["base"] == "main"
     assert not any(e.get("type") == "merge_blocked" for e in events)
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()  # left intact
+    assert state.held_lane == "main"           # lane retained — recovery goto never releases
+    assert not any(e.get("type") == "lane_evicted" for e in events)
 
 
 def test_merge_step_dirty_routes_to_recovery(tmp_path: Path) -> None:
@@ -112,6 +115,7 @@ def test_merge_step_dirty_routes_to_recovery(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "uncommitted.txt").write_text("not committed")  # left dirty
     state, log = _ctx(ch)
+    state.held_lane = "main"   # simulates holding the lane heading into merge
 
     action, fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert isinstance(action, Goto) and action.target == "reconciler"
@@ -125,6 +129,8 @@ def test_merge_step_dirty_routes_to_recovery(tmp_path: Path) -> None:
     assert not any(e.get("type") == "merge_blocked" for e in events)
     assert (ch.project_root / "uncommitted.txt").exists()        # nothing lost
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()   # worktree intact
+    assert state.held_lane == "main"           # lane retained — recovery goto never releases
+    assert not any(e.get("type") == "lane_evicted" for e in events)
 
 
 def test_merge_dirty_recovers_then_completes(tmp_path: Path) -> None:
