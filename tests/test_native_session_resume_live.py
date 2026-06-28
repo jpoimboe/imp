@@ -148,7 +148,24 @@ def _read_paths(events_path: Path) -> list[str]:
     not opted_in("claude_code"),
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
-def test_resumed_step_does_not_redo_prior_reads(tmp_path: Path) -> None:
+def test_resumed_step_recalls_prior_reads_without_redo_or_400(
+    tmp_path: Path,
+) -> None:
+    """One mid-bash SIGINT + `imp resume` covers both fallback-path invariants:
+
+    * ckx9f5: the resume RECALLS the prior reads instead of redoing them (no
+      '[Tool result missing…]' placeholder redo), so the whole-run read set stays
+      exactly one a.txt + one b.txt.
+    * Part C: replaying the deferred-MCP tool_use history does not trip `400 due
+      to tool use concurrency issues` — the fallback sets ENABLE_TOOL_SEARCH=false
+      so the MCP tools are declared up front rather than deferred behind
+      ToolSearch, and the resume-manifest names the prior reads as succeeded so
+      the is_error placeholders don't drive a redo.
+
+    A mid-bash SIGINT lands before any `result`, so the SDK batcher flushed no
+    session bytes and the resume takes the stream-json fallback (replay + Part-3
+    manifest) that backs both invariants.
+    """
     assert shutil.which("claude") is not None, (
         "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
         "not found on PATH"
@@ -207,92 +224,20 @@ def test_resumed_step_does_not_redo_prior_reads(tmp_path: Path) -> None:
     final_state = json.loads(state_path.read_text())
     assert final_state["status"] == "completed"
 
-    # ckx9f5 invariant: the resume recalled the prior reads faithfully instead of
-    # redoing them, so the whole-run read set is still exactly one a.txt + one
-    # b.txt. A placeholder-driven redo would re-read one or both → a count > 1.
-    post = _read_paths(events)
-    names = [Path(p).name for p in post]
-    assert names.count("a.txt") == 1, names
-    assert names.count("b.txt") == 1, names
-
-
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
-def test_no_store_fallback_replays_deferred_mcp_tools_without_400(
-    tmp_path: Path,
-) -> None:
-    """Part C: a no-store fallback resume replays a deferred-MCP-tool history
-    (two read_file calls) without tripping `400 due to tool use concurrency
-    issues`, because the fallback sets ENABLE_TOOL_SEARCH=false so the MCP tools
-    are declared up front rather than deferred behind ToolSearch."""
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
-    _seed_multiread_project(tmp_path)
-    env = os.environ.copy()
-    env.pop("CLAUDECODE", None)
-    _pypath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
-
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "imp", "new", "partc-fallback-deferred-tools"],
-        cwd=tmp_path, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-    try:
-        change_dir = _await_change_dir(tmp_path, timeout=30.0)
-        slug = change_dir.name
-        events = change_dir / "events.jsonl"
-        state_path = change_dir / "state" / "state.json"
-
-        if not _wait_for_bash_tool_call(events, timeout=120.0):
-            stdout, stderr = proc.communicate(timeout=10)
-            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
-        time.sleep(2.0)
-        os.killpg(proc.pid, signal.SIGINT)
-        # Generous: under `-n` concurrency the post-SIGINT exit stretches; this
-        # only bites on a real hang.
-        rc = proc.wait(timeout=60)
-        assert rc == 130
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-
-    status = _wait_for_status(state_path, "paused", timeout=30.0)
-    assert status == "paused", status
-    # Both MCP read_file tools ran before the mid-bash interrupt, and the
-    # batcher flushed nothing (no result boundary) → the resume takes the
-    # stream-json fallback that replays those deferred-MCP tool_use blocks.
-    pre = {Path(p).name for p in _read_paths(events)}
-    assert {"a.txt", "b.txt"} <= pre, pre
-
-    resume = subprocess.run(
-        [sys.executable, "-m", "imp", "resume", slug],
-        cwd=tmp_path, env=env,
-        capture_output=True, text=True, timeout=240,
-    )
-    # Part C: the deferred-MCP-tool replay did NOT 400 — the resume completed.
-    assert resume.returncode == 0, (
-        f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
-    )
-    assert json.loads(state_path.read_text())["status"] == "completed"
+    # Part C: the deferred-MCP-tool replay did NOT trip `400 due to tool use
+    # concurrency issues` — the fallback sets ENABLE_TOOL_SEARCH=false so the
+    # replayed MCP tool_use blocks are declared up front. (Assert the behavior,
+    # not the manifest text, which lives in a user_message payload with an em-dash
+    # that json.dumps would escape.)
     haystack = resume.stdout + resume.stderr + "\n".join(
         json.dumps(rec) for rec in _iter_events(events))
     assert "tool use concurrency" not in haystack, (
         "deferred-MCP-tool fallback replay tripped the 400 Part C fixes"
     )
-    # ckx9f5/Part C contract: the fallback replay RECALLED the prior reads instead
-    # of redoing them. Two stacked defenses make this hold: ENABLE_TOOL_SEARCH=false
-    # declares the deferred MCP tools up front so the replayed tool_use blocks don't
-    # 400, and the resume-manifest names the prior reads as succeeded so the replay's
-    # is_error placeholders don't drive a redo. Assert that behavior, not the
-    # manifest text (which lives in a user_message payload with an em-dash that
-    # json.dumps would escape).
-    post = [Path(p).name for p in _read_paths(events)]
-    assert post.count("a.txt") == 1, post
-    assert post.count("b.txt") == 1, post
+
+    # ckx9f5 invariant: the resume recalled the prior reads faithfully instead of
+    # redoing them, so the whole-run read set is still exactly one a.txt + one
+    # b.txt. A placeholder-driven redo would re-read one or both → a count > 1.
+    names = [Path(p).name for p in _read_paths(events)]
+    assert names.count("a.txt") == 1, names
+    assert names.count("b.txt") == 1, names
