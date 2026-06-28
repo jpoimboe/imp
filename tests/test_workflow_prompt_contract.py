@@ -326,6 +326,8 @@ def test_plan_writer_states_natural_sizing_no_floor_or_ceiling() -> None:
     assert "ceiling" not in low
     # Atomicity stays sacrosanct (stated in Task vs. Step, untouched).
     assert "atomicity hard rule" in low
+
+
 def test_task_lead_documents_verify_triage() -> None:
     text = (AGENTS_DIR / "task-lead.md").read_text()
     low = text.lower()
