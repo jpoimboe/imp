@@ -569,3 +569,28 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
         with contextlib.suppress(Exception):
             wt.remove_worktree(control, "sib", force=True)
         shutil.rmtree(control, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# PYTHONPATH passthrough: sandboxed `import imp` resolves to the worktree's src
+# ---------------------------------------------------------------------------
+
+def test_sandboxed_python_imports_worktree_imp() -> None:
+    """With PYTHONPATH carried in the live engine_env, a sandboxed
+    `python3 -c "import imp; print(imp.__file__)"` resolves imp under the
+    worktree's own src — proving the import shadow survives the env allowlist."""
+    root = _make_root()
+    try:
+        worktree_imp = root / "src" / "imp"
+        worktree_imp.mkdir(parents=True)
+        (worktree_imp / "__init__.py").write_text("")
+        pol = _active_policy(root)
+        argv = build_sandbox_argv(
+            "python3 -c 'import imp; print(imp.__file__)'",
+            cwd=str(root), policy=pol,
+            engine_env={"PYTHONPATH": str(root / "src")})
+        result = subprocess.run(argv, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert str(worktree_imp) in result.stdout
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
