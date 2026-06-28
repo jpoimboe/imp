@@ -78,9 +78,10 @@ def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
     None when the turn carried no usage."""
     if not usage:
         return None
-    return (int(usage.get("input_tokens", 0) or 0)
-            + int(usage.get("cache_read_input_tokens", 0) or 0)
-            + int(usage.get("cache_creation_input_tokens", 0) or 0))
+    # Lazy import to preserve module-import purity (design D3): importing catalog
+    # pulls imp.providers.__init__, which eagerly loads the provider SDKs.
+    from imp.providers.catalog import context_tokens_from_usage
+    return context_tokens_from_usage(usage)
 
 
 # ── nodes ───────────────────────────────────────────────────────────────────
