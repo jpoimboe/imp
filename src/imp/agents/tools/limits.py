@@ -72,6 +72,11 @@ BG_WAIT_MAX_S = 1200.0                   # 20 min wait budget per bash_output ca
 # --- Control-dir + VCS exclusion (structured nav tools only) ----------------
 EXCLUDED_DIRS = frozenset({".imp", ".git"})
 
+# --- History compaction (cold-cache tool-result eviction) -------------------
+# Consumed by src/imp/providers/history_compaction.py as defaults; the per-
+# provider tuning seams are the keep_recent_turns=... / threshold_s=... overrides.
+KEEP_RECENT_TURNS = 3                     # recent turns whose tool results are never evicted
+
 
 def within_artifacts(rel: Path) -> bool:
     """True when `rel` (worktree-relative) IS a change's artifacts subtree or sits
