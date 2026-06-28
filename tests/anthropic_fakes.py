@@ -1,9 +1,9 @@
 # tests/anthropic_fakes.py
 """Fake anthropic SDK client for unit-testing AnthropicAgentRunner.
 
-The real client exposes `messages.create(...)` returning a response with
-.content list of typed blocks. The fake returns a sequence of canned
-responses in order.
+The real client exposes `messages.stream(...)` as an async context manager
+that yields stream events. The fake returns a sequence of canned responses
+in order via get_final_message().
 """
 
 from __future__ import annotations
@@ -35,24 +35,57 @@ class FakeResponse:
     usage: dict[str, Any] | None = None
 
 
+class _FakeStream:
+    def __init__(self, final: Any, n_events: int) -> None:
+        self._final = final
+        self._events = [object() for _ in range(n_events)]
+
+    async def __aenter__(self) -> _FakeStream:
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        return False
+
+    def __aiter__(self) -> Any:
+        return self._gen()
+
+    async def _gen(self) -> Any:
+        for ev in self._events:
+            yield ev
+
+    async def get_final_message(self) -> Any:
+        return self._final
+
+    @property
+    def request_id(self) -> str | None:
+        # Mirrors anthropic's real AsyncMessageStream.request_id (which reads the
+        # `request-id` response header): surface the canned FakeResponse's id so
+        # the production stream.request_id extraction path is exercised.
+        return getattr(self._final, "_request_id", None)
+
+
 class _FakeMessages:
     def __init__(
         self, responses: list[FakeResponse],
         default: FakeResponse | None = None,
+        *, stream_events: int = 0,
     ) -> None:
         self._responses = list(responses)
         self._default = default
+        self._stream_events = stream_events
         self.calls: list[dict[str, Any]] = []
 
-    async def create(self, **kwargs: Any) -> FakeResponse:
+    def stream(self, **kwargs: Any) -> _FakeStream:
         self.calls.append(kwargs)
         if self._responses:
-            return self._responses.pop(0)
-        if callable(self._default):
-            return self._default(**kwargs)
-        if self._default is not None:
-            return self._default
-        raise IndexError("FakeMessages: out of canned responses (no default set)")
+            final: Any = self._responses.pop(0)
+        elif callable(self._default):
+            final = self._default(**kwargs)
+        elif self._default is not None:
+            final = self._default
+        else:
+            raise IndexError("FakeMessages: out of canned responses (no default set)")
+        return _FakeStream(final, self._stream_events)
 
 
 class FakeAsyncAnthropic:
@@ -61,11 +94,13 @@ class FakeAsyncAnthropic:
         responses: list[FakeResponse],
         *,
         default_response: FakeResponse | None = None,
+        stream_events: int = 0,
     ) -> None:
-        """`responses` are returned in order. Once exhausted, `default_response`
-        (if set) is returned indefinitely. Use the default for e2e tests that
-        don't want to count exact LLM-call counts."""
-        self.messages = _FakeMessages(responses, default_response)
+        """`responses` are returned in order from get_final_message(). Once
+        exhausted, `default_response` (if set) is returned indefinitely. Each
+        stream() call yields `stream_events` sentinel events (default 0)."""
+        self.messages = _FakeMessages(
+            responses, default_response, stream_events=stream_events)
 
 
 def text(s: str) -> FakeTextBlock:

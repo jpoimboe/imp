@@ -161,12 +161,19 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
     from imp.providers.anthropic import AnthropicAgentRunner
 
     class _ExplodingMessages:
-        async def create(self, **_kwargs):
-            raise AuthenticationError(
-                message="Invalid API key",
-                response=_make_httpx_resp(401),  # type: ignore[arg-type]
-                body=None,
-            )
+        def stream(self, **_kwargs):
+            class _CM:
+                async def __aenter__(self) -> _CM:
+                    raise AuthenticationError(
+                        message="Invalid API key",
+                        response=_make_httpx_resp(401),  # type: ignore[arg-type]
+                        body=None,
+                    )
+
+                async def __aexit__(self, *_exc: object) -> bool:
+                    return False
+
+            return _CM()
 
     class _ExplodingClient:
         messages = _ExplodingMessages()
