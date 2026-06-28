@@ -782,6 +782,18 @@ def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["merge_blocked"] = _h_merge_blocked
 
 
+def _h_merge_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    attempt = p.get("attempt", 0)
+    cap = p.get("max", 0)
+    self._append(LiteralTextNode(
+        text=f"retrying integration (attempt {attempt}/{cap})",
+        color_role="lifecycle"))
+
+
+NarrativeBuilder._HANDLERS["merge_retry"] = _h_merge_retry
+
+
 def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(LiteralTextNode(text=f"waiting to merge — {p.get('ahead', 0)} ahead",
