@@ -1308,16 +1308,16 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
     # "... [interrupted]" — the codex degraded-pause path appends the latter).
     # The brackets keep the match precise (low false-positive).
     kind = p.get("kind")
-    if kind not in ("stalled", "interrupted"):
+    if kind not in ("stalled", "interrupted", "context_exhausted"):
         # The bracketed marker only originates from the failure path; a
         # SUCCESSFUL subagent's content is agent-controlled JSON that may
         # legitimately contain "[stalled]". Gate the scan on is_error so such
         # text can't false-positive into a terminal state.
         text = fold.outcome if fold.is_error else ""
         kind = next(
-            (s for s in ("stalled", "interrupted") if f"[{s}]" in (text or "")),
+            (s for s in ("stalled", "interrupted", "context_exhausted") if f"[{s}]" in (text or "")),
             None)
-    if kind in ("stalled", "interrupted"):
+    if kind in ("stalled", "interrupted", "context_exhausted"):
         fold.terminal_state = kind
 
 

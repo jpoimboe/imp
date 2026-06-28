@@ -407,6 +407,10 @@ async def dispatch_task(
             # applied above, so transient errors retried before reaching here.
             cat = result.error.category if result.error else "unknown"
             kind = result.error.kind if result.error else None
+            # Tier A cap-exhausted: the subagent wrote a handoff but we have no
+            # reincarnation budget left. No error object exists, so tag it explicitly.
+            if kind is None and result.handoff_path is not None:
+                kind = "context_exhausted"
             # Embed the kind (e.g. "stalled" from the B.2 watchdog) so the parent's
             # is_error tool_result content carries it — Part D derives the subagent's
             # terminal glyph from this marker. Without it, a stalled subagent reads

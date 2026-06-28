@@ -441,6 +441,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
         label += " (stalled)"
     elif sub.terminal_state == "interrupted":
         label += " (interrupted)"
+    elif sub.terminal_state == "context_exhausted":
+        label += " (context exhausted)"
     elif sub.is_error:
         label += " (failed)"
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
