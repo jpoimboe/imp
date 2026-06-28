@@ -74,10 +74,17 @@ def is_cold(
 
 
 def _last_llm_response_timestamp(events_path: Path) -> datetime | None:
-    for line in reversed(events_path.read_text().splitlines()):
+    try:
+        text = events_path.read_text()
+    except FileNotFoundError:
+        return None
+    for line in reversed(text.splitlines()):
         if not line.strip():
             continue
-        rec = json.loads(line)
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         if rec.get("type") == "llm_response":
             ts = rec.get("timestamp")
             return datetime.fromisoformat(ts) if ts else None

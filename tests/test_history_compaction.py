@@ -151,3 +151,16 @@ def test_gap_exactly_threshold_is_not_cold(tmp_path: Path) -> None:
     _write_events(p, [_llm(_BASE)])
     now = _BASE + timedelta(seconds=CACHE_COLD_THRESHOLD_S)
     assert is_cold(p, now=now) is False
+
+
+def test_missing_events_file_is_not_cold(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist.jsonl"
+    assert is_cold(missing, now=datetime(2030, 1, 1, tzinfo=UTC)) is False
+
+
+def test_malformed_trailing_line_is_skipped(tmp_path: Path) -> None:
+    # The reversed scan hits the junk tail line first; it must be skipped, not crash.
+    p = tmp_path / "events.jsonl"
+    p.write_text(json.dumps(_llm(_BASE)) + "\nnot-json{\n")
+    now = _BASE + timedelta(seconds=CACHE_COLD_THRESHOLD_S + 1)
+    assert is_cold(p, now=now) is True
