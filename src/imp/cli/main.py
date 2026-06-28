@@ -652,7 +652,6 @@ async def _run_tui_session(
         resume: bool = False,
         opening_intent: str | None = None,
         leave_mode: str | None = None,
-        scope_only: bool = False,
         autonomous: bool = False,
         leave_state: dict[str, str] | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
@@ -662,7 +661,7 @@ async def _run_tui_session(
                  opening_intent=opening_intent, display_width=_display_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent, scope_only=scope_only,
+        opening_intent=opening_intent,
         autonomous=autonomous, lease=True)
     leave_state = {} if leave_state is None else leave_state
 
