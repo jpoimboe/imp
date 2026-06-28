@@ -248,7 +248,7 @@ def test_resolved_reply_seeds_pending_echo_into_narrative() -> None:
 
 def test_opening_intent_seeded_shows_in_narrative_from_frame_one() -> None:
     app = TuiApp(coord=_FakeCoord(), color=False, width=80,
-                 opening_intent="add a --json flag")
+                 seed_opening="add a --json flag")
     # Before any daemon event is processed, the typed text already renders.
     assert "add a --json flag" in app.narrative()
 

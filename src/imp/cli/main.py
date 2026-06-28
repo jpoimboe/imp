@@ -649,7 +649,6 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
         resume: bool = False,
-        opening_intent: str | None = None,
         leave_mode: str | None = None,
         autonomous: bool = False,
         leave_state: dict[str, str] | None = None) -> int:
@@ -657,10 +656,9 @@ async def _run_tui_session(
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width(),
-                 opening_intent=opening_intent, display_width=_display_width())
+                 seed_opening=seed_opening, display_width=_display_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent,
         autonomous=autonomous, lease=True)
     leave_state = {} if leave_state is None else leave_state
 
