@@ -15,6 +15,7 @@ import pytest
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext
 from imp.agents.subagents import make_task_tool
+from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -578,3 +579,28 @@ async def test_impl_raises_when_dispatched_off_the_runner_loop(
                           "__tool_use_id__": ""})
     finally:
         foreign.close()
+
+
+@pytest.mark.anyio
+async def test_wrap_brackets_regular_tool_with_tool_watchdog(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    seen = {"active": None}
+
+    def _fn(ctx, **kw):
+        seen["active"] = ctx.coordinator.tool_active
+        return "ok"
+
+    rec = Tool(name="rec", description="",
+               input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    state = _RunState()
+    wrapped = _wrap_one("rec", rec, ctx, state, _passthrough_decorator)
+    out = await wrapped({})
+
+    assert out["content"][0]["text"] == "ok"
+    assert seen["active"] is True       # watchdog frozen DURING the tool call
+    assert coord.tool_active is False   # balanced after return -> window re-arms
