@@ -163,7 +163,7 @@ def test_non_backlog_non_interactive_runs_headless(
 
     async def _fake_run_session_client(
         change, *, driver, coord, solicit, seed_opening=None, status=None,
-        opening_intent=None, leave_mode=None, title=None,
+        leave_mode=None, title=None,
         non_interactive=False, autonomous=False, leave_state=None,
     ) -> int:
         captured["non_interactive"] = non_interactive

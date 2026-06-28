@@ -14,17 +14,15 @@ def _ns(**kw):
     return argparse.Namespace(**base)
 
 
-def test_typed_message_sets_opening_intent_to_the_intent_text() -> None:
+def test_typed_message_sets_seed_text_to_the_intent_text() -> None:
     res = resolve_spec_seed(_ns(opening="add a --json flag"))
     assert isinstance(res, SeedResolution)
     assert res.seed_text == "add a --json flag"
-    assert res.opening_intent == "add a --json flag"
 
 
-def test_unseeded_suppresses_opening_intent() -> None:
+def test_unseeded_suppresses_seed_text() -> None:
     res = resolve_spec_seed(_ns())
     assert res.seed_text is None
-    assert res.opening_intent is None
 
 
 def test_prompts_when_interactive_and_unseeded() -> None:

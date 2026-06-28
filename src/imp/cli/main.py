@@ -182,7 +182,6 @@ class SeedError(Exception):
 class SeedResolution(NamedTuple):
     title: str | None
     seed_text: str | None
-    opening_intent: str | None = None
 
 
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
@@ -195,9 +194,9 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     opening = getattr(args, "opening", None)
 
     if opening is not None and opening.strip():
-        return SeedResolution(title, opening, opening_intent=opening)
+        return SeedResolution(title, opening)
 
-    return SeedResolution(title, None, opening_intent=None)
+    return SeedResolution(title, None)
 
 
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
@@ -723,7 +722,7 @@ async def _run_cleared_session(
         opening_text = _normalize_opening_reply(reply)
         if tui:
             return await _run_tui_session(
-                change, seed_opening=opening_text, opening_intent=opening_text,
+                change, seed_opening=opening_text,
                 leave_mode="new", leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
@@ -735,7 +734,7 @@ async def _run_cleared_session(
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_text, leave_mode="new",
+            leave_mode="new",
             leave_state=leave_state, title=term_title)
     finally:
         if not _session_started:
@@ -906,7 +905,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
-    opening_intent = seed.opening_intent
     color = should_use_color(sys.stdout)
 
     change_id = new_change_id()
@@ -945,7 +943,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (front-door opens
         # by asking); a real answer becomes the opening intent.
         opening_text = reply
-        opening_intent = reply
 
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
@@ -965,7 +962,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, title=term_title,
+            title=term_title,
             non_interactive=True, autonomous=autonomous)
 
     if _tui_requested(args):
@@ -975,7 +972,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
                 change, seed_opening=opening_text,
-                opening_intent=opening_intent, leave_mode=leave_mode,
+                leave_mode=leave_mode,
                 leave_state=leave_state, autonomous=autonomous)
 
         return await _clear_loop(control, tui=True, first=_first_tui)
@@ -994,7 +991,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, leave_mode=leave_mode,
+            leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous)
 
     return await _clear_loop(control, tui=False, first=_first)
