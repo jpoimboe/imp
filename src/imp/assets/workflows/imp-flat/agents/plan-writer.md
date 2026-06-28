@@ -271,48 +271,19 @@ unit — not a step dressed up as a task.
 
 ## Plan sizing
 
-Aim for **~5–8 tasks per plan** — a target to **fill up toward**, not merely an
-upper bound. ~5–8 is a working **floor** as much as an aim: under-filling it is a
-defect, not a tidy habit. It is explicitly distinct from the ~12-**task-heading**
-hard ceiling below — a floor to reach, not just a ceiling to stay under. Split
-only at **natural dependency boundaries**.
+On the **full path** you do **not** decide plan boundaries — the spec's
+`## Plan outline` already fixed which scope this plan covers. Your job is the
+HOW: decompose that slice into bite-sized tasks at natural commit boundaries, one
+commit per task. Do not fracture the slice into trivial one-task fragments, and
+do not merge across what the outline kept separate. Size in **tasks**, not lines of code;
+let the slice be as large as its natural boundary makes it. The
+**outline-driven plan loop** authors the remaining plans — the engine loops back
+to you for each next plan while `plan_index < plan_total`, with the end-of-change
+`gap-check` as the sole coverage backstop.
 
-When the spec is larger than ~5–8 tasks, do **not** cram it into one giant plan —
-and do **not** carve off the smallest separable sliver either. Each lap, assemble
-the **largest** green-preserving bundle of all currently-available independent
-slices, filling up toward ~5–8, splitting only at genuine dependency boundaries —
-never by file family, layer, or convenience. Then **defer only the genuinely
-forced-atomic remainder**: when one piece is truly un-splittable, defer *that
-piece* to a later lap; do not let it fragment the independent slices around it
-into one- and two-task plans. Rely on the **outline-driven plan loop** to author the remaining plans — the spec's
-`## Plan outline` already enumerates them and the engine loops back to you for each next
-plan while `plan_index < plan_total`; the end-of-change `gap-check` is the sole coverage
-**backstop**, looping back to you only when it finds uncovered scope.
-
-**Two carve anti-patterns to avoid:**
-
-- **File-family split.** Independent same-posture slices separated only by which
-  **file family** they touch belong in **one** plan. When the sole ordering
-  constraint is a tree-wide guard (e.g. a grep-zero check that needs every file
-  swept first), make that guard the **capstone task** of the single bundled plan
-  rather than a reason to split into several.
-- **Shared deferral target.** Several slices that are each independently
-  green-preserving and each defer to the *same* entangled remainder, but none of
-  which reads or writes another's edit, are **one** plan, not several:
-  independent slices that merely share a deferral target are not dependent on
-  each other.
-
-**Per-plan review makes under-filling costly.** Under per-plan review, every plan
-with more scope still to come triggers its own full code-review pass, so a
-1–2-task plan spends an entire review on a sliver. Under-filling is actively
-expensive, not just untidy — one more reason to fill up toward the floor.
-
-Size in **tasks**, not lines of code. A generous hard ceiling
-(~12 **task headings**) is enforced by `plan-commit-verify.sh` and sits well
-above this target, so treat ~5–8 as the working aim and floor, not the limit.
-Greedy bundling never overrides the spec's **atomicity hard rule** or merges
-genuinely dependent work: a forced-atomic remainder is always deferred to a later
-lap, never crammed into the current plan.
+On the **express / self-scope path** there is no outline, so size the single plan
+yourself by the same principle: one coherent, independently-committable unit at
+its natural dependency boundary; default `plan_total = 1`.
 
 ## First-run plan_total estimate
 

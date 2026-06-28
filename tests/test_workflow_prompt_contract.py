@@ -300,31 +300,31 @@ def test_task_lead_fixes_forward_or_logs_never_jumps_back() -> None:
     assert "only while" in low
 
 
-def test_plan_writer_states_soft_task_size_target() -> None:
+def test_plan_writer_states_natural_sizing_no_floor_or_ceiling() -> None:
     text = (AGENTS_DIR / "plan-writer.md").read_text()
     low = text.lower()
-    # The soft target is stated in TASKS (not lines of code), with the split-and-
-    # supercycle guidance, and explicitly cross-references the hard ceiling gate.
-    assert "5\u20138 tasks" in text
-    assert "natural dependency boundaries" in low
-    assert "supercycle" in low
-    assert "task headings" in low
+    # Sizing is stated in TASKS at natural boundaries, with a full-path vs
+    # express/self-scope split, no floor and no ceiling.
+    assert "natural commit boundaries" in low
+    assert "natural dependency boundary" in low
     assert "not lines of code" in low
-    # ~5\u20138 is a floor to fill up toward, not merely an upper bound, and the carve
-    # is a greedy global bundle of the LARGEST green-preserving set of independent
-    # slices \u2014 not the smallest separable sliver.
-    assert "fill up toward" in low
-    assert "floor" in low
-    assert "largest" in low
-    assert "green-preserving" in low
-    assert "first coherent chunk" not in low
-    # The remainder rule and the two named carve anti-patterns are present.
-    assert "forced-atomic remainder" in low
-    assert "file family" in low
-    assert "capstone task" in low
-    assert "deferral target" in low
-    # Per-plan review motivates the floor; atomicity stays sacrosanct.
-    assert "per-plan review" in low
+    assert "express" in low and "self-scope" in low
+    assert "default `plan_total = 1`" in text
+    assert "outline-driven plan loop" in low
+    # The ~5-8 floor, the carve anti-patterns, the per-plan-review motivation, and
+    # the ~12/CEILING ceiling cross-reference are all gone.
+    assert "5\u20138 tasks" not in text
+    assert "fill up toward" not in low
+    assert "under-filling" not in low
+    assert "per-plan review" not in low
+    assert "forced-atomic remainder" not in low
+    assert "file family" not in low
+    assert "capstone task" not in low
+    assert "deferral target" not in low
+    assert "task headings" not in low
+    assert "~12" not in text
+    assert "ceiling" not in low
+    # Atomicity stays sacrosanct (stated in Task vs. Step, untouched).
     assert "atomicity hard rule" in low
 
 

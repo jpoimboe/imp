@@ -121,7 +121,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/imp/workflow.yaml` (workflow name: **feature**; bundled with the install — a committed `imp/workflows/imp` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop **and** a per-plan review panel inside *implement*, and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the review/supercycle gates.
+Defined in `src/imp/assets/workflows/imp/workflow.yaml` (workflow name: **feature**; bundled with the install — a committed `imp/workflows/imp` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole change (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
 
 ### Overview
 

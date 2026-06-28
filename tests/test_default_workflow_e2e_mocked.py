@@ -422,17 +422,19 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
 
 @pytest.mark.anyio
-async def test_express_runs_full_implement_pipeline_with_no_change_panel(
+async def test_express_runs_full_implement_pipeline_with_change_panel(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
     # ceremony:express -> front-door sets fast_path=true and routes straight to
     # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer) and plan
     # review (plan-verify-commit fast-path rule). The implement-side fast_path ->
-    # finalize shortcut is GONE: express now runs the full pipeline
-    # (plan-code-reviewer -> deferred-sweep -> sweep-verify -> review-base-repin ->
-    # gap-check -> summarizer -> finalize), with NO change-wide panel since
-    # plan_total == 1 (gap-check -> summarizer).
+    # finalize shortcut is GONE: express now runs the full pipeline. The single
+    # forward plan SKIPS plan-code-reviewer (coverage_settled unset -> deferred-sweep);
+    # gap-check then latches coverage_settled, sets review_scope=change, and fires the
+    # change-wide plan-code-reviewer pass (the plan_total>1 gate is gone), which routes
+    # to summarizer. So plan-code-reviewer still runs exactly once -- now the change-wide
+    # pass, not a per-plan pass.
     def _default_trivial(**kwargs):
         system = kwargs.get("system", "")
         if _IR_SIG in system:
@@ -470,8 +472,8 @@ async def test_express_runs_full_implement_pipeline_with_no_change_panel(
     assert "sweep-verify" in started, started
     assert "gap-check" in started, started
     assert "summarizer" in started, started
-    # Single plan: gap-check runs exactly once and fires NO change-wide panel,
-    # so plan-code-reviewer runs exactly once (the per-plan pass).
+    # Single plan: the forward plan skips review, gap-check runs exactly once and fires
+    # the change-wide pass, so plan-code-reviewer runs exactly once (the change-wide pass).
     assert started.count("gap-check") == 1, started
     assert started.count("plan-code-reviewer") == 1, started
 

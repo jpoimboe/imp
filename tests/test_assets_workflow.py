@@ -874,7 +874,9 @@ def test_spec_finalizer_authors_plan_outline() -> None:
     # The finalized spec carries a coarse, WHAT-only decomposition that seeds plan_total.
     assert "## Plan outline" in body
     assert "what" in low and "not the how" in low
-    assert "5\u20138" in body                 # the greedy ~5-8 tasks/plan grain
+    assert "5\u20138" not in body             # the ~5-8 floor grain is gone
+    assert "natural dependency boundary" in low   # sized at natural boundaries now
+    assert "no task-count floor" in low
     assert "source of truth" in low
     assert "plan count" in low or "plan_total" in low
     # The handoff turn now routes through outline authoring before committing.
@@ -939,12 +941,13 @@ def test_gap_check_routing_and_latch() -> None:
     assert isinstance(multi.action, Goto) and multi.action.target == "plan-code-reviewer"
     assert multi.var_mutations["coverage_settled"] is True
     assert multi.var_mutations["review_scope"] == "change"
-    # Clean + single-plan -> latch + straight to summarizer, no change-wide panel.
+    # Clean + single-plan -> change-wide review fires too (plan_total gate dropped).
     single = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                             output={"status": "Success", "more_plans": False,
                                     "plan_total": 1, "rationale": "done"})
-    assert isinstance(single.action, Goto) and single.action.target == "summarizer"
+    assert isinstance(single.action, Goto) and single.action.target == "plan-code-reviewer"
     assert single.var_mutations["coverage_settled"] is True
+    assert single.var_mutations["review_scope"] == "change"
 
 
 def test_gap_check_agent_is_end_of_change_backstop() -> None:
@@ -961,6 +964,10 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     assert "uncovered" in low
     assert "needs-decision" in low and "suppress" in low
     assert "more_plans" in low
+    # Sizing projection is at natural boundaries now — no ~5-8 floor grain.
+    assert "5\u20138" not in text
+    assert "natural dependency boundaries" in low
+    assert "no task-count floor" in low
     # Clamp rules survive verbatim.
     assert "the current plan number" in low
     assert "strictly greater" in low
