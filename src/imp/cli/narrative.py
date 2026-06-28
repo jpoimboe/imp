@@ -1314,9 +1314,8 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
         # legitimately contain "[stalled]". Gate the scan on is_error so such
         # text can't false-positive into a terminal state.
         text = fold.outcome if fold.is_error else ""
-        kind = next(
-            (s for s in ("stalled", "interrupted", "context_exhausted") if f"[{s}]" in (text or "")),
-            None)
+        _kinds = ("stalled", "interrupted", "context_exhausted")
+        kind = next((s for s in _kinds if f"[{s}]" in (text or "")), None)
     if kind in ("stalled", "interrupted", "context_exhausted"):
         fold.terminal_state = kind
 

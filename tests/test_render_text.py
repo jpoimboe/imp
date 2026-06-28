@@ -1100,7 +1100,8 @@ def test_lean_subagent_status_glyphs() -> None:
     assert "(stalled)" in row(running=False, is_error=True, terminal_state="stalled")
     assert "(interrupted)" in row(running=False, is_error=True,
                                   terminal_state="interrupted")
-    assert "(context exhausted)" in row(running=False, is_error=True, terminal_state="context_exhausted")
+    assert "(context exhausted)" in row(running=False, is_error=True,
+                                       terminal_state="context_exhausted")
 
 
 def test_full_subagent_unchanged_shows_children() -> None:
