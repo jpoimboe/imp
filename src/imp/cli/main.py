@@ -846,6 +846,16 @@ async def _run_fresh_session(
     return await _clear_loop(change.control_root, tui=False, first=_first)
 
 
+def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
+    if getattr(args, "non_interactive", False):
+        return "--non-interactive"
+    if getattr(args, "message", None) is not None:
+        return "--message"
+    if getattr(args, "autonomous", False):
+        return "--autonomous"
+    return None
+
+
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -864,6 +874,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if getattr(args, "title", None):
             print("imp: --backlog and --title cannot be combined "
                   "(--backlog is the title)", file=sys.stderr)
+            return 2
+        run_only = _backlog_run_only_flag(args)
+        if run_only is not None:
+            print(f"imp: --backlog files an idea instantly and never runs; "
+                  f"{run_only} is for headless\nruns. Drop one. Start a filed "
+                  f"idea later with `imp resume <id>`.", file=sys.stderr)
             return 2
         if not args.idea.strip():
             print("imp: --backlog title must be non-empty", file=sys.stderr)

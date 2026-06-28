@@ -127,6 +127,60 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
     assert captured
 
 
+@pytest.mark.parametrize("flag,expected", [
+    ({"non_interactive": True}, "--non-interactive"),
+    ({"message": "do the thing"}, "--message"),
+    ({"autonomous": True}, "--autonomous"),
+])
+def test_backlog_with_run_only_flag_errors(
+        tmp_path: Path, monkeypatch, capsys, flag, expected) -> None:
+    import asyncio
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ns = dict(idea="My title", opening=None, title=None, depends_on=[],
+              non_interactive=False, message=None, autonomous=False,
+              tui=False, workflow=None)
+    ns.update(flag)
+    rc = asyncio.run(main._async_cmd_new(argparse.Namespace(**ns)))
+    assert rc == 2
+    assert not (tmp_path / ".imp" / "changes").exists()
+    err = capsys.readouterr().err
+    assert "files an idea instantly and never runs" in err
+    assert "imp resume" in err
+    assert expected in err
+
+
+def test_non_backlog_non_interactive_runs_headless(
+        tmp_path: Path, monkeypatch) -> None:
+    import anyio
+
+    from imp.cli import main as cli_main
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run_session_client(
+        change, *, driver, coord, solicit, seed_opening=None, status=None,
+        opening_intent=None, leave_mode=None, scope_only=False, title=None,
+        non_interactive=False, autonomous=False, leave_state=None,
+    ) -> int:
+        captured["non_interactive"] = non_interactive
+        captured["change_id"] = change.id
+        return 0
+
+    monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)
+
+    rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
+        idea=None, opening=None, title=None, depends_on=[],
+        non_interactive=True, message="reply one", autonomous=False,
+        tui=False, workflow=None))
+
+    assert rc == 0
+    assert captured["non_interactive"] is True
+
+
 def test_interactive_backlog_files_instantly_no_session(
         tmp_path: Path, monkeypatch) -> None:
     import sys
