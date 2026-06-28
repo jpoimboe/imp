@@ -7,8 +7,7 @@ Five namespaces (spec §7.5):
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
       because the dict is passed directly under StrictUndefined (strict-within)
   project.<fact> — project facts + guidance; missing key raises (strict-within)
-  run.scope_only — whether this is a scope-for-backlog session (bool);
-      run.autonomous — whether the run may auto-take recommendations at
+  run.autonomous — whether the run may auto-take recommendations at
       recommendation-bearing gates (bool); a missing attr under run raises
       (strict-within), like change/project
 
@@ -87,7 +86,6 @@ class _ChangeNamespace:
 
 @dataclass(frozen=True, slots=True)
 class _RunNamespace:
-    scope_only: bool = False
     autonomous: bool = False
 
 
@@ -132,7 +130,6 @@ def build_context(
     cur_base_head: str = "", orig_base_head: str = "",
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None, guidance: str = "",
-    scope_only: bool = False,
     autonomous: bool = False,
 ) -> PromptContext:
     facts = {**(project_facts or {}), "guidance": guidance}
@@ -143,7 +140,7 @@ def build_context(
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),
-        run=_RunNamespace(scope_only=scope_only, autonomous=autonomous),
+        run=_RunNamespace(autonomous=autonomous),
     )
 
 

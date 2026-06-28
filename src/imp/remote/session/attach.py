@@ -19,7 +19,6 @@ SpawnFn = Callable[[Change], None]
 
 def spawn_session_daemon(
     change: Change, *, seed_opening: str | None = None, resume: bool = False,
-    opening_intent: str | None = None, scope_only: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
 ) -> None:
     argv = [
@@ -29,12 +28,8 @@ def spawn_session_daemon(
     ]
     if seed_opening is not None:
         argv += [f"--seed-opening={seed_opening}"]
-    if opening_intent is not None:
-        argv += [f"--opening-intent={opening_intent}"]
     if resume:
         argv.append("--resume")
-    if scope_only:
-        argv.append("--scope-only")
     if non_interactive:
         argv.append("--non-interactive")
     if autonomous:
@@ -82,8 +77,6 @@ def build_session_attach(
     *,
     seed_opening: str | None = None,
     resume: bool = False,
-    opening_intent: str | None = None,
-    scope_only: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
     lease: bool = False,
@@ -95,7 +88,6 @@ def build_session_attach(
             lease=lease,
             spawn_fn=lambda ch: spawn_session_daemon(
                 ch, seed_opening=seed_opening, resume=resume,
-                opening_intent=opening_intent, scope_only=scope_only,
                 non_interactive=non_interactive, autonomous=autonomous),
         )
 

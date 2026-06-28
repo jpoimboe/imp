@@ -172,7 +172,6 @@ async def test_build_session_attach_threads_seed_into_spawn(
 
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            opening_intent: str | None = None, scope_only: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["change"] = ch
@@ -228,8 +227,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
         lambda ch, *, seed_opening=None, resume=False,
-        opening_intent=None, scope_only=False, non_interactive=False,
-        autonomous=False: spawned.append(ch))
+        non_interactive=False, autonomous=False: spawned.append(ch))
 
     received: list[dict[str, Any]] = []
     server = SessionSocket(sock)
@@ -279,7 +277,6 @@ def test_spawn_session_daemon_seed_before_resume_when_both_set(
     ]
 
 
-
 @pytest.mark.anyio
 async def test_build_session_attach_threads_resume_into_spawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -300,7 +297,6 @@ async def test_build_session_attach_threads_resume_into_spawn(
 
         def fake_spawn(
             ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            opening_intent: str | None = None, scope_only: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["resume"] = resume
@@ -312,131 +308,6 @@ async def test_build_session_attach_threads_resume_into_spawn(
         client = await attach(lambda _e: None)
 
         assert captured["resume"] is True
-        with anyio.fail_after(5):
-            while holder.get("server") is None or holder["server"].attached_count != 1:
-                await anyio.sleep(0.02)
-        await client.aclose()
-        await holder["server"].close()
-        tg.cancel_scope.cancel()
-
-
-def test_spawn_session_daemon_includes_opening_intent_when_provided(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda argv, **kw: captured.update(argv=argv) or object())
-    spawn_session_daemon(change, opening_intent="add a --json flag")
-    assert "--opening-intent=add a --json flag" in captured["argv"]
-
-
-def test_spawn_session_daemon_omits_opening_intent_when_none(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda argv, **kw: captured.update(argv=argv) or object())
-    spawn_session_daemon(change)
-    assert not any(a.startswith("--opening-intent") for a in captured["argv"])
-
-
-
-@pytest.mark.anyio
-async def test_build_session_attach_threads_opening_intent_into_spawn(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from imp.remote.session import attach as attach_mod
-
-    change = _make_change(tmp_path, "2026-06-15-oi")
-    sock = str(session_socket_path(change.control_root, change.id))
-    captured: dict[str, Any] = {}
-    holder: dict[str, SessionSocket] = {}
-
-    async with anyio.create_task_group() as tg:
-        async def _start_server() -> None:
-            server = SessionSocket(sock)
-            await server.open()
-            holder["server"] = server
-            await server.serve()
-
-        def fake_spawn(
-            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            opening_intent: str | None = None, scope_only: bool = False,
-            non_interactive: bool = False, autonomous: bool = False,
-        ) -> None:
-            captured["opening_intent"] = opening_intent
-            tg.start_soon(_start_server)
-
-        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
-
-        attach = attach_mod.build_session_attach(change, opening_intent="add a flag")
-        client = await attach(lambda _e: None)
-
-        assert captured["opening_intent"] == "add a flag"
-        with anyio.fail_after(5):
-            while holder.get("server") is None or holder["server"].attached_count != 1:
-                await anyio.sleep(0.02)
-        await client.aclose()
-        await holder["server"].close()
-        tg.cancel_scope.cancel()
-
-
-def test_spawn_session_daemon_includes_scope_only_when_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda argv, **kw: captured.update(argv=argv) or object())
-    spawn_session_daemon(change, scope_only=True)
-    assert "--scope-only" in captured["argv"]
-
-
-def test_spawn_session_daemon_omits_scope_only_when_false(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda argv, **kw: captured.update(argv=argv) or object())
-    spawn_session_daemon(change)
-    assert "--scope-only" not in captured["argv"]
-
-
-@pytest.mark.anyio
-async def test_build_session_attach_threads_scope_only_into_spawn(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from imp.remote.session import attach as attach_mod
-
-    change = _make_change(tmp_path, "2026-06-15-sco")
-    sock = str(session_socket_path(change.control_root, change.id))
-    captured: dict[str, Any] = {}
-    holder: dict[str, SessionSocket] = {}
-
-    async with anyio.create_task_group() as tg:
-        async def _start_server() -> None:
-            server = SessionSocket(sock)
-            await server.open()
-            holder["server"] = server
-            await server.serve()
-
-        def fake_spawn(
-            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            opening_intent: str | None = None, scope_only: bool = False,
-            non_interactive: bool = False, autonomous: bool = False,
-        ) -> None:
-            captured["scope_only"] = scope_only
-            tg.start_soon(_start_server)
-
-        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
-
-        attach = attach_mod.build_session_attach(change, scope_only=True)
-        client = await attach(lambda _e: None)
-
-        assert captured["scope_only"] is True
         with anyio.fail_after(5):
             while holder.get("server") is None or holder["server"].attached_count != 1:
                 await anyio.sleep(0.02)

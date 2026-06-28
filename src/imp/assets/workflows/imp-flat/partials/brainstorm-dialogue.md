@@ -91,14 +91,8 @@ set up until you confirm the build.
 
 This is a **recommendation-bearing gate**: it has a safe, input-driven **default**, so
 it sits below the human-decision "Ask vs. decide" bar.
-{% if run.scope_only %}
-This is a **scope-for-backlog** session (`imp new --backlog`): the user reached for
-"save it for later," so the default is **save to the backlog** (building now is the
-opt-in).
-{% else %}
 The default is **build it out now** (saving it as a draft you can resume later is the
 opt-in).
-{% endif %}
 
 Settle this only once the design is settled (the user has approved it) and **before you
 write and commit the spec**.
@@ -106,11 +100,6 @@ write and commit the spec**.
 {% if run.autonomous %}
 **Autonomous run:** take the default and proceed without yielding — state the choice
 plainly in your prose.
-{% if run.scope_only %}
-Save it as a draft: do **not** call `create_and_enter_worktree`. Say it is saved to the
-backlog and resumable later with `imp resume <id>`. The spec phase pauses with the work
-saved — nothing is built, no branch, no worktree.
-{% else %}
 Build it now: call `create_and_enter_worktree` (it takes no arguments). It forks the
 branch and worktree from the base branch's current tip and switches this change into it
 — your subsequent `Read`/`Bash`/edit tools operate in the new worktree immediately. It
@@ -118,18 +107,12 @@ reports whether the base branch advanced since the draft was created. **If it re
 `head_changed=true`, re-ground the spec against current code in this same turn** —
 re-read the files the brainstorm assumed and reconcile any drift — before writing the
 spec. Then proceed to front-door's **Going live** section to write and commit the spec.
-{% endif %}
 {% else %}
 **Attended run:** present the default and **end your turn to yield** to confirm it. Ask
 exactly one question at this gate —
-{% if run.scope_only %}
-the save affirmative, e.g. **"Want me to save this to your backlog? I can build it out
-now instead if you'd rather start."**
-{% else %}
 the bare build affirmative, e.g. **"Want me to build this out now?"** As a follow-on to
 the question (not a co-equal option), name plainly what declining does: it saves the
 work as a draft you can resume later with `imp resume <id>`.
-{% endif %}
 Do not present a numbered Build/Save list, do not pair it with a co-equal "…, or save?"
 alternative, and do not script reply tokens. There is no separate "does this sound
 right?" approval question here — design approval was settled continuously through the

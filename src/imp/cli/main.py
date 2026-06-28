@@ -182,7 +182,6 @@ class SeedError(Exception):
 class SeedResolution(NamedTuple):
     title: str | None
     seed_text: str | None
-    opening_intent: str | None = None
 
 
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
@@ -195,9 +194,9 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     opening = getattr(args, "opening", None)
 
     if opening is not None and opening.strip():
-        return SeedResolution(title, opening, opening_intent=opening)
+        return SeedResolution(title, opening)
 
-    return SeedResolution(title, None, opening_intent=None)
+    return SeedResolution(title, None)
 
 
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
@@ -650,19 +649,16 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 async def _run_tui_session(
         change: Change, *, seed_opening: str | None = None,
         resume: bool = False,
-        opening_intent: str | None = None,
         leave_mode: str | None = None,
-        scope_only: bool = False,
         autonomous: bool = False,
         leave_state: dict[str, str] | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width(),
-                 opening_intent=opening_intent, display_width=_display_width())
+                 seed_opening=seed_opening, display_width=_display_width())
     attach = build_session_attach(
         change, seed_opening=seed_opening, resume=resume,
-        opening_intent=opening_intent, scope_only=scope_only,
         autonomous=autonomous, lease=True)
     leave_state = {} if leave_state is None else leave_state
 
@@ -724,7 +720,7 @@ async def _run_cleared_session(
         opening_text = _normalize_opening_reply(reply)
         if tui:
             return await _run_tui_session(
-                change, seed_opening=opening_text, opening_intent=opening_text,
+                change, seed_opening=opening_text,
                 leave_mode="new", leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
@@ -736,7 +732,7 @@ async def _run_cleared_session(
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_text, leave_mode="new",
+            leave_mode="new",
             leave_state=leave_state, title=term_title)
     finally:
         if not _session_started:
@@ -846,6 +842,16 @@ async def _run_fresh_session(
     return await _clear_loop(change.control_root, tui=False, first=_first)
 
 
+def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
+    if getattr(args, "non_interactive", False):
+        return "--non-interactive"
+    if getattr(args, "message", None) is not None:
+        return "--message"
+    if getattr(args, "autonomous", False):
+        return "--autonomous"
+    return None
+
+
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -860,30 +866,27 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
 
-    backlog_interactive = False
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
             print("imp: --backlog and --title cannot be combined "
                   "(--backlog is the title)", file=sys.stderr)
             return 2
+        run_only = _backlog_run_only_flag(args)
+        if run_only is not None:
+            print(f"imp: --backlog files an idea instantly and never runs; "
+                  f"{run_only} is for headless\nruns. Drop one. Start a filed "
+                  f"idea later with `imp resume <id>`.", file=sys.stderr)
+            return 2
         if not args.idea.strip():
             print("imp: --backlog title must be non-empty", file=sys.stderr)
             return 2
-        if bool(getattr(args, "non_interactive", False)):
-            return _record_idea(args, control)
-        backlog_interactive = True
+        return _record_idea(args, control)
 
-    if backlog_interactive:
-        seed_text = backlog.seed_opening(
-            {"title": args.idea, "description": getattr(args, "opening", None) or ""})
-        seed = SeedResolution(
-            title=args.idea, seed_text=seed_text, opening_intent=seed_text)
-    else:
-        try:
-            seed = resolve_spec_seed(args)
-        except (SeedError, ValueError) as e:
-            print(f"imp: {e}", file=sys.stderr)
-            return 2
+    try:
+        seed = resolve_spec_seed(args)
+    except (SeedError, ValueError) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
 
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
@@ -900,27 +903,20 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     interactive = _is_interactive(non_interactive=non_interactive)
     opening_text = seed.seed_text
-    opening_intent = seed.opening_intent
     color = should_use_color(sys.stdout)
 
     change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
-    scope_only = backlog_interactive
-    origin = "idea" if backlog_interactive else "draft"
     try:
         change = Change.create_draft(
             control, title=title, change_id=change_id, base_branch=base,
-            workflow=wf_arg, origin=origin,
-            depends_on=(list(getattr(args, "depends_on", None) or [])
-                        if backlog_interactive else None),
-            seed_opening=(opening_text if backlog_interactive else None))
+            workflow=wf_arg, origin="draft",
+            depends_on=None, seed_opening=None)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-
-    _scope_kw: dict[str, Any] = {"scope_only": True} if scope_only else {}
 
     # Build the title before the opening prompt so the escape is written at startup,
     # not after the user answers.
@@ -945,7 +941,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (front-door opens
         # by asking); a real answer becomes the opening intent.
         opening_text = reply
-        opening_intent = reply
 
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
@@ -965,8 +960,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, title=term_title,
-            non_interactive=True, autonomous=autonomous, **_scope_kw)
+            title=term_title,
+            non_interactive=True, autonomous=autonomous)
 
     if _tui_requested(args):
         if not header_printed:
@@ -975,8 +970,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
                 change, seed_opening=opening_text,
-                opening_intent=opening_intent, leave_mode=leave_mode,
-                leave_state=leave_state, autonomous=autonomous, **_scope_kw)
+                leave_mode=leave_mode,
+                leave_state=leave_state, autonomous=autonomous)
 
         return await _clear_loop(control, tui=True, first=_first_tui)
 
@@ -994,8 +989,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            opening_intent=opening_intent, leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, autonomous=autonomous, **_scope_kw)
+            leave_mode=leave_mode,
+            leave_state=leave_state, title=term_title, autonomous=autonomous)
 
     return await _clear_loop(control, tui=False, first=_first)
 
@@ -2402,25 +2397,24 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Set the Change title explicitly; front-door "
                             "names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
-                       help="Headless: no live prompt; supply the reply via --message.")
+                       help="Run headless: no live prompt; supply the first reply "
+                            "via --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Auto-take the recommendation at recommendation-bearing "
                             "gates instead of confirming each; genuine intent-forks "
                             "still pause for a human. Independent of --non-interactive.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Headless reply consumed by the first bare-turn-end prompt; "
-                            "pause+resume with another --message. "
+                            "pause then resume with another --message. "
                             "Requires --non-interactive.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
     p_new.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
-                       help="Scope a Change for your backlog with this TITLE. "
-                            "Non-interactive: files it instantly with no "
-                            "conversation (the positional MESSAGE is an optional "
-                            "longer brief). Interactive: opens a scoping "
-                            "conversation biased toward saving for later. Start it "
-                            "later with `imp resume <id>`.")
+                       help="File an idea for your backlog with this TITLE and "
+                            "exit immediately without running (the positional "
+                            "MESSAGE is an optional longer brief). Start it later "
+                            "with `imp resume <id>`.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
                        help="A change id this backlog Change depends on "

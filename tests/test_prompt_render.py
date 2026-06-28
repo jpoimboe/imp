@@ -210,21 +210,6 @@ def test_change_home_defaults_empty(tmp_path: Path) -> None:
     assert render_prompt("{{ change.home }}", ctx) == ""
 
 
-def test_renders_run_scope_only_true(tmp_path: Path) -> None:
-    log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log, scope_only=True)
-    assert render_prompt("{{ run.scope_only }}", ctx) == "True"
-    assert render_prompt(
-        "{% if run.scope_only %}save{% else %}build{% endif %}", ctx) == "save"
-
-
-def test_renders_run_scope_only_false_default(tmp_path: Path) -> None:
-    log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
-    assert render_prompt("{{ run.scope_only }}", ctx) == "False"
-    assert render_prompt(
-        "{% if run.scope_only %}save{% else %}build{% endif %}", ctx) == "build"
-
 
 def test_missing_run_attr_raises(tmp_path: Path) -> None:
     ctx = build_context(
@@ -264,17 +249,6 @@ def test_render_without_workflow_dir_cannot_resolve_include(tmp_path: Path) -> N
         render_prompt('{% include "partials/frag.md" %}', ctx)
 
 
-def test_scope_only_gate_recommends_saving(tmp_path: Path) -> None:
-    src = Path(
-        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
-    ).read_text()
-    log = _log(tmp_path / "events.jsonl", [])
-    rendered = render_prompt(
-        src, build_context(change_title="t", event_log=log, scope_only=True),
-        workflow_dir=bundled_workflow_dir("imp"))
-    assert "save this to your backlog" in rendered
-    assert "Want me to build this out now?" not in rendered
-
 
 def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     src = Path(
@@ -283,7 +257,7 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
         src,
-        build_context(change_title="t", event_log=log, scope_only=False),
+        build_context(change_title="t", event_log=log),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "Want me to build this out now?" in rendered
     assert "save this to your backlog" not in rendered
@@ -357,17 +331,3 @@ def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     assert "Want me to build this out now?" not in rendered
     assert "create_and_enter_worktree" in rendered
 
-
-def test_build_or_save_autonomous_scope_only_takes_save_default(tmp_path: Path) -> None:
-    src = Path(
-        "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
-    ).read_text()
-    log = _log(tmp_path / "events.jsonl", [])
-    rendered = render_prompt(
-        src,
-        build_context(change_title="t", event_log=log,
-                      scope_only=True, autonomous=True),
-        workflow_dir=bundled_workflow_dir("imp"))
-    assert "take the default and proceed without yielding" in rendered
-    assert "Save it as a draft: do **not** call `create_and_enter_worktree`" in rendered
-    assert "Want me to save this to your backlog?" not in rendered

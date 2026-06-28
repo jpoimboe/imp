@@ -112,7 +112,7 @@ def test_new_tui_on_non_tty_warns_and_routes_to_session_client(
     called = {"n": 0}
 
     async def _fake_client(change, *, driver, coord, solicit,
-                           seed_opening=None, status=None, opening_intent=None,
+                           seed_opening=None, status=None,
                            leave_mode=None, leave_state=None, title=None,
                            autonomous=False) -> int:
         called["n"] += 1

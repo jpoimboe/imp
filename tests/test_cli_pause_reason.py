@@ -46,7 +46,7 @@ def test_new_non_interactive_routes_through_session_client(
     async def _fake_run_session_client(
         change: Change, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
-        opening_intent: object = None, leave_mode: object = None,
+        leave_mode: object = None,
         title: object = None,
         non_interactive: object = False,
         autonomous: object = False,
@@ -94,7 +94,7 @@ def test_new_interactive_routes_through_session_client(
     async def _fake_run_session_client(
         change: Change, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
-        opening_intent: object = None, leave_mode: object = None,
+        leave_mode: object = None,
         leave_state: object = None, title: object = None,
         autonomous: object = False,
     ) -> int:

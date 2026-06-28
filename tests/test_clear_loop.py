@@ -172,7 +172,6 @@ async def test_run_cleared_session_tui_arm(
     assert captured["leave_mode"] == "new"
     assert captured["leave_state"] is ls
     assert captured["seed_opening"] == "build a parser"
-    assert captured["opening_intent"] == "build a parser"
 
 
 @pytest.mark.anyio
