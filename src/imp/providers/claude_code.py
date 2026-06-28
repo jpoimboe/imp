@@ -104,7 +104,6 @@ from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_store_for,
-    store_has_conversation_body,
 )
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -1301,7 +1300,8 @@ class ClaudeCodeAgentRunner:
         # store (session_id pins the key). A resume drives claude-p's NATIVE
         # session resume when that store holds bytes (resume= materializes from
         # imp's own bytes — faithful, no stream-json placeholder corruption);
-        # absent a stored session it falls back to stream-json replay + manifest.
+        # absent a stored session it reconstructs the store from the transcript
+        # and still resumes natively (the no-store branch).
         # resume= and session_id are mutually exclusive in the SDK: native resume
         # passes resume= and leaves session_id unset.
         existing = transcript.load()
@@ -1317,10 +1317,11 @@ class ClaudeCodeAgentRunner:
         # store before claude-p loads its native session. A genuinely DANGLING
         # tool_use likewise resumes natively (with a store) — claude-p's own pairing
         # injects the is_error placeholder, which is correct for an unfinished call.
-        # Only three cases downgrade to stream-json replay: the no-store fallback;
-        # a trailing complete_step (imp must inject a SUCCESS result, not the
-        # error one native pairing would give); and pending retry_feedback (the
-        # handback text must be co-located on the balancing user turn). The
+        # Only two cases stay on stream-json replay: a trailing complete_step
+        # (imp must inject a SUCCESS result, not the error one native pairing
+        # would give); and pending retry_feedback (the handback text must be
+        # co-located on the balancing user turn). A no-store resume no longer
+        # downgrades — the store is reconstructed from the transcript. The
         # `balance_on_resume` flag does NOT by itself force replay — the executor
         # sets it on every kept resume, so the actual selector is the tail shape.
         store_body = await store.load(skey)
@@ -1338,7 +1339,6 @@ class ClaudeCodeAgentRunner:
         native_resume = (
             (not is_fresh)
             and not needs_imp_balance
-            and store_has_conversation_body(store_body)
             and classify_resume(existing) in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
                 ResumeState.DANGLING_TOOL_USE)
@@ -1535,9 +1535,8 @@ class ClaudeCodeAgentRunner:
             return rec
 
         if native_resume:
-            assert store_body  # native_resume gate guarantees store_has_conversation_body
             reconciled = reconcile_store_tail(
-                messages[:resume_base], store_body,
+                messages[:resume_base], store_body or [],
                 session_id=skey["session_id"],
                 cwd=str(invocation.change_context.project_root),
                 model=self.model,
