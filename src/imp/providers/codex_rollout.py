@@ -21,6 +21,7 @@ from imp.agents.tools.limits import KEEP_RECENT_TURNS
 from imp.providers.history_compaction import (
     EVICTION_PLACEHOLDER,
     HistoryRecord,
+    is_cold,
     results_to_evict,
 )
 
@@ -62,12 +63,19 @@ def persist_rollout(*, codex_home: Path, thread_id: str, transcript_dir: Path) -
     return True
 
 
-def restore_rollout(*, codex_home: Path, transcript_dir: Path) -> str:
+def restore_rollout(
+    *, codex_home: Path, transcript_dir: Path, events_path: Path,
+) -> str:
     """Restore the persisted rollout into the fresh CODEX_HOME and return the
     saved thread_id. Call AFTER provisioning the fresh CODEX_HOME and BEFORE
     `Codex.resume_thread`. Fails loudly (`FileNotFoundError`) if the thread
     metadata or rollout bytes are missing — converting otherwise-silent amnesia
-    (teardown ran too early, ephemeral CI, cross-host) into a real error."""
+    (teardown ran too early, ephemeral CI, cross-host) into a real error.
+
+    When the turn is cold (`is_cold(events_path)`), the restored rollout is
+    rewritten in place to clear old compactable tool-result bodies (spec:
+    evict-tool-results-when-cache-cold). Warm resumes leave the file untouched.
+    """
     meta_path = transcript_dir / _THREAD_JSON
     if not meta_path.exists():
         raise FileNotFoundError(
@@ -86,6 +94,11 @@ def restore_rollout(*, codex_home: Path, transcript_dir: Path) -> str:
     if not dest.exists():  # the spec's explicit "assert it exists" guard
         raise FileNotFoundError(
             f"codex resume: rollout restore failed at {dest}")
+    if is_cold(events_path):
+        lines = dest.read_text().splitlines()
+        rewritten = evict_rollout_lines(lines)
+        if rewritten is not lines:
+            dest.write_text("\n".join(rewritten) + "\n")
     return thread_id
 
 
