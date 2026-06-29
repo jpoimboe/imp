@@ -26,6 +26,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from imp.providers.history_compaction import EVICTION_PLACEHOLDER
 
 
 def _sanitize(value: str) -> str:
@@ -302,3 +303,40 @@ def message_to_session_records(
         })
         parent = rec_uuid
     return records
+
+
+def evict_session_record_bodies(
+    entries: list[dict[str, Any]], evicted_ids: frozenset[str],
+) -> list[dict[str, Any]]:
+    if not evicted_ids:
+        return entries
+    return [_evict_record_bodies(e, evicted_ids) for e in entries]
+
+
+def _evict_record_bodies(
+    entry: dict[str, Any], evicted_ids: frozenset[str],
+) -> dict[str, Any]:
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return entry
+    content = message.get("content")
+    if not isinstance(content, list):
+        return entry
+    if not any(
+        isinstance(b, dict)
+        and b.get("type") == "tool_result"
+        and b.get("tool_use_id") in evicted_ids
+        for b in content
+    ):
+        return entry
+    new_content = [
+        {**b, "content": EVICTION_PLACEHOLDER}
+        if (
+            isinstance(b, dict)
+            and b.get("type") == "tool_result"
+            and b.get("tool_use_id") in evicted_ids
+        )
+        else b
+        for b in content
+    ]
+    return {**entry, "message": {**message, "content": new_content}}
