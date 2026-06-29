@@ -78,3 +78,10 @@ def restore_rollout(*, codex_home: Path, transcript_dir: Path) -> str:
         raise FileNotFoundError(
             f"codex resume: rollout restore failed at {dest}")
     return thread_id
+
+
+def _canonical_tool_name(name: str | None) -> str | None:
+    """Return the bare tool name after the last ``__`` separator, or None."""
+    if name is None:
+        return None
+    return name.rsplit("__", 1)[-1]
