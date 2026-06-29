@@ -10,6 +10,10 @@ Schema (post 2026-06-04-roles-to-tiers):
       openai: {env: OPENAI_API_KEY}
     verify_command: "..."                 # optional combined verify gate (tests+lint+typecheck)
     verify_timeout: 1200                  # optional verify-gate ceiling, seconds (default 300)
+    test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast tests); per-plan
+    test_cmd_slow: "..."                  # complete run; once-per-change at integration-verify
+    test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
+    test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
 """
@@ -49,6 +53,10 @@ class Config:
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
     verify_command: str | None = field(hash=False, default=None)
     verify_timeout: int | None = field(hash=False, default=None)
+    test_cmd_fast: str | None = field(hash=False, default=None)
+    test_cmd_slow: str | None = field(hash=False, default=None)
+    test_cmd_fast_timeout: int | None = field(hash=False, default=None)
+    test_cmd_slow_timeout: int | None = field(hash=False, default=None)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
@@ -212,6 +220,22 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
             raise LoadError(
                 "'verify_timeout' must be a positive integer (seconds, e.g. 1200)", src)
         out["verify_timeout"] = v
+    for cmd_key in ("test_cmd_fast", "test_cmd_slow"):
+        if cmd_key in raw:
+            v = raw[cmd_key]
+            if not isinstance(v, str):
+                raise LoadError(
+                    f"'{cmd_key}' must be a string (e.g. \"make check\")", src)
+            out[cmd_key] = v
+    for timeout_key in ("test_cmd_fast_timeout", "test_cmd_slow_timeout"):
+        if timeout_key in raw:
+            v = raw[timeout_key]
+            # bool is an int subclass; reject it so `..._timeout: true` isn't read as 1.
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                raise LoadError(
+                    f"'{timeout_key}' must be a positive integer "
+                    "(seconds, e.g. 120)", src)
+            out[timeout_key] = v
     if "editing_mode" in raw:
         v = raw["editing_mode"]
         if v not in ("vi", "emacs"):

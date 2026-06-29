@@ -203,6 +203,14 @@ def test_context_max_reincarnations_zero_accepted(tmp_path: Path) -> None:
     assert out["context"] == {"max_reincarnations": 0}
 
 
+def test_test_cmd_fast_in_tiers_less_layer(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")
+    layer, src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer["test_cmd_fast"] == "make check"
+    assert src.file == p
+
+
 def test_context_merges_one_level(tmp_path: Path) -> None:
     # user layer sets max_reincarnations; project sets checkpoint_threshold — both survive.
     src = SourceLoc(file=tmp_path / "x", line=1)

@@ -182,3 +182,64 @@ def test_context_accessors_default_when_unset() -> None:
     cfg = Config()
     assert cfg.context_checkpoint_threshold() == 0.8
     assert cfg.context_max_reincarnations() == 2
+
+
+def test_parses_test_cmd_fast(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, "test_cmd_fast: \"make check\"\n" + _OK_BODY)
+    assert layer["test_cmd_fast"] == "make check"
+
+
+def test_parses_test_cmd_slow(tmp_path: Path) -> None:
+    layer = _layer(tmp_path,
+                   "test_cmd_slow: \"make check && make test-live\"\n" + _OK_BODY)
+    assert layer["test_cmd_slow"] == "make check && make test-live"
+
+
+def test_test_cmd_fast_empty_string_preserved(tmp_path: Path) -> None:
+    # Tri-state opt-out: explicit "" parses to "" (NOT dropped), distinct from absent.
+    layer = _layer(tmp_path, "test_cmd_fast: \"\"\n" + _OK_BODY)
+    assert layer["test_cmd_fast"] == ""
+
+
+def test_test_cmd_absent_omitted(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, _OK_BODY)
+    assert "test_cmd_fast" not in layer
+    assert "test_cmd_slow" not in layer
+    assert "test_cmd_fast_timeout" not in layer
+    assert "test_cmd_slow_timeout" not in layer
+
+
+def test_test_cmd_fast_not_string_raises(tmp_path: Path) -> None:
+    with pytest.raises(LoadError, match="test_cmd_fast"):
+        _layer(tmp_path, "test_cmd_fast: [make, check]\n" + _OK_BODY)
+
+
+def test_parses_test_cmd_timeouts(tmp_path: Path) -> None:
+    layer = _layer(
+        tmp_path,
+        "test_cmd_fast_timeout: 120\ntest_cmd_slow_timeout: 300\n" + _OK_BODY)
+    assert layer["test_cmd_fast_timeout"] == 120
+    assert layer["test_cmd_slow_timeout"] == 300
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "\"120\"", "1.5", "true"])
+def test_test_cmd_fast_timeout_invalid_raises(tmp_path: Path, bad: str) -> None:
+    # Zero/negative, strings, floats, and bool (an int subclass) are all rejected.
+    with pytest.raises(LoadError, match="test_cmd_fast_timeout"):
+        _layer(tmp_path, f"test_cmd_fast_timeout: {bad}\n" + _OK_BODY)
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "\"300\"", "1.5", "true"])
+def test_test_cmd_slow_timeout_invalid_raises(tmp_path: Path, bad: str) -> None:
+    with pytest.raises(LoadError, match="test_cmd_slow_timeout"):
+        _layer(tmp_path, f"test_cmd_slow_timeout: {bad}\n" + _OK_BODY)
+
+
+def test_test_cmd_slow_not_string_raises(tmp_path: Path) -> None:
+    with pytest.raises(LoadError, match="test_cmd_slow"):
+        _layer(tmp_path, "test_cmd_slow: [make, check]\n" + _OK_BODY)
+
+
+def test_test_cmd_slow_empty_string_preserved(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, "test_cmd_slow: \"\"\n" + _OK_BODY)
+    assert layer["test_cmd_slow"] == ""
