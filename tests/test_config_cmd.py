@@ -33,6 +33,70 @@ def test_render_shows_floor_provenance(tmp_path: Path, monkeypatch: pytest.Monke
     assert "theme" in text and "light" in text  # user-set leaf shown
 
 
+def test_render_shows_test_cmd_unset_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    text = out.getvalue()
+    lines = text.splitlines()
+    fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
+    slow_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_slow ")), None)
+    assert fast_line is not None and "(unset)" in fast_line
+    assert slow_line is not None and "(unset)" in slow_line
+    assert "test_cmd_fast_timeout" in text and "(default 120s)" in text
+    assert "test_cmd_slow_timeout" in text and "(default 300s)" in text
+    assert "verify_command" not in text and "verify_timeout" not in text
+
+
+def test_render_shows_configured_test_cmds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text(
+        "providers: [openai]\n"
+        "test_cmd_fast: make check\n"
+        "test_cmd_slow: make check && make test-live\n"
+        "test_cmd_slow_timeout: 600\n"
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    text = out.getvalue()
+    lines = text.splitlines()
+    fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
+    slow_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_slow ")), None)
+    assert fast_line is not None and "make check" in fast_line
+    assert "make check && make test-live" not in fast_line
+    assert slow_line is not None and "make check && make test-live" in slow_line
+    assert "600s" in text
+
+
+def test_render_shows_disabled_test_cmds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text(
+        "providers: [openai]\n"
+        'test_cmd_fast: ""\n'
+        'test_cmd_slow: ""\n'
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    text = out.getvalue()
+    lines = text.splitlines()
+    fast_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_fast ")), None)
+    slow_line = next((ln.strip() for ln in lines if ln.strip().startswith("test_cmd_slow ")), None)
+    assert fast_line is not None and "(disabled)" in fast_line
+    assert slow_line is not None and "(disabled)" in slow_line
+
+
 def test_explain_traces_one_tier(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()

@@ -51,10 +51,14 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
         ("providers", ", ".join(cfg.providers) or "(none)"),
         ("theme", cfg.theme),
         ("editing_mode", cfg.editing_mode),
-        ("verify_command", "(disabled)" if cfg.verify_command == ""
-         else (cfg.verify_command or "(unset)")),
-        ("verify_timeout", "(default 300s)" if cfg.verify_timeout is None
-         else f"{cfg.verify_timeout}s"),
+        ("test_cmd_fast", "(disabled)" if cfg.test_cmd_fast == ""
+         else (cfg.test_cmd_fast or "(unset)")),
+        ("test_cmd_slow", "(disabled)" if cfg.test_cmd_slow == ""
+         else (cfg.test_cmd_slow or "(unset)")),
+        ("test_cmd_fast_timeout", "(default 120s)" if cfg.test_cmd_fast_timeout is None
+         else f"{cfg.test_cmd_fast_timeout}s"),
+        ("test_cmd_slow_timeout", "(default 300s)" if cfg.test_cmd_slow_timeout is None
+         else f"{cfg.test_cmd_slow_timeout}s"),
     ):
         leaf_src = prov.get((key,))
         label = _label(leaf_src.file) if leaf_src is not None else "default"
