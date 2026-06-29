@@ -28,7 +28,7 @@ def test_first_draw_writes_owned_blank_then_each_row_col_reset() -> None:
     s = LiveStatus(out, now=lambda: 0.0)
     s._width_fn = lambda: 80
     s.update(lambda f, e: ["activity", "", "position bar"])
-    assert out.getvalue() == "\n\r\x1b[Kactivity\n\r\x1b[K\n\r\x1b[Kposition bar"
+    assert out.getvalue() == "\x1b[?25l\n\r\x1b[Kactivity\n\r\x1b[K\n\r\x1b[Kposition bar"
 
 
 def test_in_place_rewrite_climbs_to_first_row_then_rewrites_each() -> None:
@@ -231,7 +231,7 @@ def test_ack_on_fresh_status_draws_in_place_no_leading_newline() -> None:
     s = LiveStatus(out, now=lambda: 0.0)
     s._width_fn = lambda: 80
     s.show_stop_ack("stopping…")             # ack on a fresh (never-drawn) status
-    assert out.getvalue() == "\r\x1b[K\x1b[2mstopping…\x1b[0m"
+    assert out.getvalue() == "\x1b[?25l\r\x1b[K\x1b[2mstopping…\x1b[0m"
     assert s._rows == 1 and s._visible is True
 
 
@@ -319,3 +319,99 @@ def test_atexit_not_registered_for_non_tty(monkeypatch) -> None:
     )
     LiveStatus(_Pipe(), now=lambda: 0.0)
     assert registered == []
+
+
+def test_first_visible_draw_hides_cursor() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])
+    assert "\x1b[?25l" in out.getvalue()
+    assert s._cursor_hidden is True
+
+
+def test_hide_cursor_emitted_once_across_frames() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])
+    s._frame += 1
+    s._draw()
+    s._frame += 1
+    s._draw()
+    assert out.getvalue().count("\x1b[?25l") == 1     # no duplicate while already hidden
+
+
+def test_erase_shows_cursor() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])
+    out.truncate(0)
+    out.seek(0)
+    s.hide()                                   # hide() -> _erase()
+    assert "\x1b[?25h" in out.getvalue()
+    assert s._cursor_hidden is False
+
+
+def test_reset_shows_cursor() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])
+    out.truncate(0)
+    out.seek(0)
+    s.reset()                                  # reset() -> _erase()
+    assert "\x1b[?25h" in out.getvalue()
+    assert s._cursor_hidden is False
+
+
+def test_suspend_entry_shows_cursor_and_exit_rehides() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])
+    out.truncate(0)
+    out.seek(0)
+    with s.suspend():
+        assert "\x1b[?25h" in out.getvalue()   # shown for the interactive prompt
+        assert s._cursor_hidden is False
+    assert s._cursor_hidden is True            # exit redraws -> re-hidden
+
+
+def test_hide_then_erase_ends_cursor_shown() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])
+    s.hide()
+    assert s._cursor_hidden is False
+
+
+def test_narrowing_redraw_ends_cursor_hidden() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    widths = iter([20, 4])
+    s._width_fn = lambda: next(widths)
+    s.update(lambda f, e: ["first frame here"])     # drawn at width 20, cursor hidden
+    out.truncate(0)
+    out.seek(0)
+    s.update(lambda f, e: ["second"])               # width now 4 -> narrowing
+    v = out.getvalue()
+    assert "\x1b[?25h" in v and "\x1b[?25l" in v     # clear shows, frame re-hides
+    assert v.rindex("\x1b[?25l") > v.index("\x1b[?25h")   # re-hide sequenced AFTER the show
+    assert s._cursor_hidden is True
+
+
+def test_non_tty_emits_no_cursor_escapes() -> None:
+    out = _Pipe()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s.update(lambda f, e: ["x"])
+    s._frame += 1
+    s._draw()
+    s.hide()
+    s.reset()
+    with s.suspend():
+        pass
+    v = out.getvalue()
+    assert "\x1b[?25l" not in v and "\x1b[?25h" not in v

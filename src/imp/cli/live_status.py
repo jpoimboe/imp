@@ -130,6 +130,7 @@ class LiveStatus:
         # onto it — not one row too high onto committed scroll-back. On a fresh status
         # (_erase was a no-op) draw in place, identical to the single-line path.
         lead = "\n" if was_visible else ""
+        self._hide_cursor()
         self._stream.write(f"{lead}{_ERASE}{_DIM}{text}{_RESET_SGR}")
         self._stream.flush()
         self._visible = True
@@ -166,6 +167,7 @@ class LiveStatus:
             self._visible = False
             self._prev_width = None
         if self._visible and self._rows == len(rows):
+            self._hide_cursor()
             self._stream.write("\r")
             if self._rows > 1:
                 self._stream.write(f"\x1b[{self._rows - 1}A")
@@ -173,6 +175,7 @@ class LiveStatus:
         else:
             if self._visible:
                 self._erase()
+            self._hide_cursor()
             self._stream.write("\n" + "\n".join(_ERASE + r for r in rows))
         self._stream.flush()
         self._visible = True
@@ -190,6 +193,7 @@ class LiveStatus:
             self._stream.write("\x1b[K")
             if i < self._rows - 1:
                 self._stream.write("\n")
+        self._show_cursor()
         self._stream.flush()
         self._rows = 0
 
@@ -200,6 +204,7 @@ class LiveStatus:
             self._stream.write("\r")
             for _ in range(self._rows):
                 self._stream.write("\x1b[K" + _UP)
+            self._show_cursor()
             self._stream.flush()
         self._visible = False
         self._prev_width = None
