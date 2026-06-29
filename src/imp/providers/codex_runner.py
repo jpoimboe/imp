@@ -484,7 +484,8 @@ class CodexAgentRunner:
             from imp.providers.codex_rollout import restore_rollout
             thread_id = restore_rollout(
                 codex_home=codex_home,
-                transcript_dir=invocation.transcript_dir)
+                transcript_dir=invocation.transcript_dir,
+                events_path=invocation.events_path)
             # Seed thread_id now so a subsequent pause persists the resumed
             # thread even if the SDK does not re-emit thread.started on resume
             # (process_event overwrites this with the same id if it does).

@@ -57,6 +57,8 @@ from imp.engine.agent_run import (
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers.base import Provider
+from imp.providers.history_compaction import is_cold
+from imp.providers.message_eviction import apply_eviction, evicted_result_ids
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
@@ -575,6 +577,11 @@ class AnthropicAgentRunner:
         handoff_phase: str | None = None
         handoff_path = handoff_path_for(invocation.transcript_dir)
 
+        # Cold-cache eviction: computed ONCE here and reapplied each round so
+        # the evicted prefix region stays byte-stable across tool-rounds.
+        evicted_ids = evicted_result_ids(
+            messages, cold=is_cold(invocation.events_path))
+
         while not self._cancel:
             anthropic_tools = [_anthropic_tool_schema(t) for t in tools.values()]
             anthropic_tools.extend(web_specs)
@@ -583,7 +590,10 @@ class AnthropicAgentRunner:
                 model=self.model,
                 system=invocation.system_prompt,
                 tools=anthropic_tools,
-                messages=[_message_to_anthropic(m) for m in messages],
+                messages=[
+                    _message_to_anthropic(m)
+                    for m in apply_eviction(messages, evicted_ids)
+                ],
                 max_tokens=8192,
                 cache_control={"type": "ephemeral"},
                 # §4: explicitly PERMIT parallel tool calls per assistant message

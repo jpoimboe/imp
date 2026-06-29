@@ -100,11 +100,14 @@ from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
     _SESSION_LIMIT_RE,
+    evict_session_record_bodies,
     reconcile_store_tail,
     resume_session_id,
     session_key,
     session_store_for,
 )
+from imp.providers.history_compaction import is_cold
+from imp.providers.message_eviction import apply_eviction, evicted_result_ids
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -1553,13 +1556,18 @@ class ClaudeCodeAgentRunner:
             pending_complete = False
             return rec
 
+        # Cold-cache eviction: one evict set, reused for store body and delta.
+        evicted_ids: frozenset[str] = frozenset()
         if native_resume:
+            evicted_ids = evicted_result_ids(
+                messages, cold=is_cold(invocation.events_path))
             reconciled = reconcile_store_tail(
                 messages[:resume_base], store_body or [],
                 session_id=skey["session_id"],
                 cwd=str(invocation.change_context.project_root),
                 model=self.model,
             )
+            reconciled = evict_session_record_bodies(reconciled, evicted_ids)
             await store.overwrite(skey, reconciled)
 
         llm_group_open = False
@@ -1605,7 +1613,8 @@ class ClaudeCodeAgentRunner:
             # follow-up turn is consumed from a fresh generator (issue 7:
             # receive_response() terminates after the first ResultMessage).
             next_query: Any = _stream_history(
-                messages[resume_base:] if native_resume else messages)
+                apply_eviction(messages[resume_base:], evicted_ids)
+                if native_resume else messages)
             from imp.engine.reincarnation import handoff_instruction, handoff_path_for
             from imp.providers.catalog import sdk_context_threshold_crossed
             # Tier A proactive-handoff watch state (Mechanism 3).
