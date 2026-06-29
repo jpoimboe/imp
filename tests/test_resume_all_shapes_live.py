@@ -27,6 +27,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.agents.transcript import Transcript
+from imp.engine.completion import completion_instruction
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers import claude_code
@@ -60,10 +61,20 @@ def _live_inv(tmp_path: Path) -> AgentInvocation:
     return AgentInvocation(
         agent_def=agent_def,
         provider_name="claude_code", model_name=_MODEL,
+        # Carry imp's production completion instruction verbatim (every real
+        # invocation appends completion_instruction(schema) — agent_run.py). The
+        # hand-rolled "call complete_step" line alone left haiku free to end the
+        # turn in prose, which under the bare-turn-end yield contract is a
+        # legitimate yield (imp can't tell a question from a forgotten
+        # complete_step), so the terse prompt — not the resume plumbing — was the
+        # flake source. This makes the prompt faithful to what imp actually sends.
         system_prompt=(
-            "You are resuming a step. The file you needed was already read and "
-            "its contents are in the conversation above. Do NOT read any file "
-            "again. Immediately call complete_step with status=Success."
+            completion_instruction(agent_def.output_schema)
+            + "\n\nYou are resuming a step. The file you needed (a.txt) was "
+            "ALREADY read and its contents are in the conversation above — the "
+            "earlier 'Read a.txt, then finish' instruction is DONE. Do NOT call "
+            "read_file again; re-reading is wrong. Your only remaining action is "
+            "to call complete_step with status=Success now."
         ),
         # Ignored on the resume path (the runner uses the seeded transcript); a
         # required field, so a placeholder turn.

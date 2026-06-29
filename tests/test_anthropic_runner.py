@@ -703,14 +703,15 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
 
 
 @pytest.mark.anyio
-async def test_headless_top_level_nudges_then_pauses(tmp_path: Path) -> None:
-    """A headless top-level run (non_interactive=True) nudges NUDGE_LIMIT times,
-    then the channel (no client attached) pauses via AwaitingUserInput — a pause,
-    not an agent_incomplete error."""
+async def test_headless_top_level_pauses_immediately(tmp_path: Path) -> None:
+    """A headless top-level run (non_interactive=True) NEVER nudges: the first
+    bare turn-end IS the yield, so it solicits the channel at once and (no client
+    attached) pauses via AwaitingUserInput — a pause, not an agent_incomplete
+    error, and not preceded by any nudge."""
     from dataclasses import replace
 
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-    from imp.engine.completion import NUDGE_LIMIT, build_continuation_fn
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    from imp.engine.completion import build_continuation_fn
 
     (tmp_path / "art").mkdir()
     fake = FakeAsyncAnthropic(
@@ -739,10 +740,9 @@ async def test_headless_top_level_nudges_then_pauses(tmp_path: Path) -> None:
         and e["payload"].get("category") == "agent_incomplete"
         for e in log.read()
     )
-    # The nudges happened before the pause: NUDGE_LIMIT nudge user messages were
-    # appended on top of the initial "go" message.
+    # No nudges: only the initial "go" user message, then an immediate pause.
     user_msgs = [e for e in log.read() if e["type"] == "user_message"]
-    assert len(user_msgs) == 1 + NUDGE_LIMIT
+    assert len(user_msgs) == 1
 
 
 @pytest.mark.anyio

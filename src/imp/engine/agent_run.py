@@ -35,7 +35,7 @@ from imp.agents.tools.limits import (
     AGENT_INACTIVITY_TIMEOUT_S,
     PROCESS_KILL_GRACE_S,
 )
-from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
     INTERRUPT_STEER_HINT as INTERRUPT_STEER_HINT,
 )
@@ -440,7 +440,9 @@ def build_agent_invocation(
     """Construct one AgentInvocation, owning the completion-contract invariant
     that drifted between the two creation paths: append
     `completion_instruction(schema)` to the system prompt AND build the
-    continuation_fn (always the nudge backstop) from that SAME instruction.
+    continuation_fn (the completion handler — attended yields inline, headless
+    top-level yields/parks, a subagent nudges-then-fails) from that SAME
+    instruction.
 
     The caller renders the prompt with its own PromptContext and resolves its
     own (provider, model) — the builder never branches on agent kind. `model`

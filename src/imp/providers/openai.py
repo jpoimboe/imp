@@ -46,7 +46,6 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, change_home_path
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
@@ -58,6 +57,7 @@ from imp.engine.agent_run import (
     deliver_interject,
     drain_all_interjects_at_resume,
 )
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider

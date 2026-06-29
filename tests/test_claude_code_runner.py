@@ -2738,8 +2738,8 @@ async def test_cooperative_interrupt_headless_pauses_balanced(
     so the resume continues with no 400)."""
     import asyncio
 
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
     from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
     from tests.cc_fakes import CooperativeClient
 
     (tmp_path / "art").mkdir()

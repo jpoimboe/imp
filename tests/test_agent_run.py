@@ -1090,8 +1090,8 @@ async def test_pull_watchdog_restores_finite_window_after_tool_end(monkeypatch) 
 
 @pytest.mark.anyio
 async def test_inline_solicit_raises_awaiting_when_no_channel() -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
     from imp.engine.agent_run import build_inline_solicit
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     fn = build_inline_solicit(user_input_fn=None)
     with pytest.raises(AwaitingUserInput):

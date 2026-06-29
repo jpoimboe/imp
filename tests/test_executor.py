@@ -1012,10 +1012,10 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
     for token in ("status", "Success", "Error", "verdict", "approve", "rework"):
         assert token in inv.system_prompt, token
     assert inv.continuation_fn is not None
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-    assert inv.continuation_fn("prose") is not None   # nudge 1
-    assert inv.continuation_fn("prose") is not None   # nudge 2
-    with pytest.raises(AwaitingUserInput):            # exhausted (N=2): pause, not None
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    # Headless top-level step: the bare turn-end IS the yield, so it parks
+    # immediately (no nudge), not agent_incomplete.
+    with pytest.raises(AwaitingUserInput):
         inv.continuation_fn("prose")
 
 

@@ -60,7 +60,7 @@ async def test_outer_except_reraises_subagent_suspended() -> None:
 
 @pytest.mark.anyio
 async def test_outer_except_reraises_awaiting_user_input() -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     runner = _runner_with_failing_loop(AwaitingUserInput("the question"))
     runner._cancel = False

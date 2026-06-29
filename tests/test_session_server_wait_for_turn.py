@@ -1,7 +1,7 @@
 import anyio
 import pytest
 
-from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.remote.session.server import SessionServer
 
 

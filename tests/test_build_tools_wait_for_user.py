@@ -43,5 +43,5 @@ def test_wait_for_user_absent_when_not_declared(provider):
 
 
 def test_make_wait_for_user_tool_no_longer_exists():
-    import imp.agents.tools.wait_for_user as wfu
+    import imp.engine.awaiting_user_input as wfu
     assert not hasattr(wfu, "make_wait_for_user_tool")

@@ -1,7 +1,7 @@
 import pytest
 
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli.main import make_message_reply_fn
+from imp.engine.awaiting_user_input import AwaitingUserInput
 
 
 @pytest.fixture

@@ -77,7 +77,6 @@ from imp.agents.tools.context import (
 )
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.agents.transcript import (
     RESUME_MANIFEST_HEADER,
     Transcript,
@@ -92,6 +91,7 @@ from imp.engine.agent_run import (
     build_inline_solicit,
     drain_all_interjects_at_resume,
 )
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.drivers import driver_allowed_tools
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr

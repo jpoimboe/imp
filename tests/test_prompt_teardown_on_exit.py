@@ -23,9 +23,9 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli.prompt import Prompt
 from imp.cli.slash import _ask_or_exit, ask_line_with_slash
+from imp.engine.awaiting_user_input import AwaitingUserInput
 
 
 @pytest.fixture

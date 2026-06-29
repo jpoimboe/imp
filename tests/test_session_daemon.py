@@ -89,7 +89,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_change_seams(
 
 @pytest.mark.anyio
 async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     change = _make_change(tmp_path, "2026-06-15-def")
 

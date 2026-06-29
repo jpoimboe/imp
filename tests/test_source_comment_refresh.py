@@ -33,9 +33,8 @@ def test_executor_resume_comment_drops_dangling_tool_use_framing():
 
 
 def test_agent_run_source_drops_wait_for_user_framing():
-    """agent_run.py's refreshed AwaitingUserInput-pause and resume-helper
-    comments keep only the AwaitingUserInput import path; all stale wait_for_user
-    / dangling-tool_use framing is gone."""
+    """agent_run.py imports the pause signal from its post-rename home and holds
+    no stale wait_for_user / dangling-tool_use framing at all."""
     src = Path(agent_run_mod.__file__).read_text()
-    assert src.count("wait_for_user") == 1
-    assert "from imp.agents.tools.wait_for_user import AwaitingUserInput" in src
+    assert "wait_for_user" not in src
+    assert "from imp.engine.awaiting_user_input import AwaitingUserInput" in src

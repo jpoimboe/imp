@@ -25,7 +25,6 @@ from typing import Any, NamedTuple, NoReturn
 import anyio
 
 from imp import __version__
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.inert_resume import (
@@ -55,6 +54,7 @@ from imp.engine.abandon import (
     tear_down_change,
 )
 from imp.engine.archive import read as archive_read
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors

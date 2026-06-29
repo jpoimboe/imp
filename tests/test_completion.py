@@ -97,28 +97,24 @@ def test_nudge_text_does_not_name_wait_for_user() -> None:
     assert "wait_for_user" not in out
 
 
-def test_top_level_no_channel_pauses_after_nudges() -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+def test_top_level_no_channel_pauses_immediately() -> None:
+    from imp.engine.awaiting_user_input import AwaitingUserInput
     fn = build_continuation_fn(instruction=_instruction(), subagent=False)
-    for _ in range(NUDGE_LIMIT):
-        assert fn("prose") is not None
-    # Top-level with no channel: pause carrying the last text, not agent_incomplete.
+    # Headless top-level NEVER nudges: the bare turn-end IS the yield, so the
+    # first call pauses carrying the last text (not agent_incomplete).
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("the final question")
     assert exc_info.value.prompt == "the final question"
 
 
 def test_top_level_no_channel_pause_emits_awaiting_user_input() -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
     log = _RecordingLog()
     fn = build_continuation_fn(
         instruction=_instruction(), event_log=log, agent_id="a1",
         subagent=False)
-    # Nudge phase: no channel, so the nudge backstop fires first and emits nothing.
-    for _ in range(NUDGE_LIMIT):
-        assert isinstance(fn("prose"), str)
-    assert not any(e["type"] == "awaiting_user_input" for e in log.events)
-    # Exhausted with no channel: pause carrying the last text AND emit the marker.
+    # No nudge phase for headless top-level: the first bare turn-end pauses
+    # carrying the last text AND emits the marker.
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("the final question")
     assert exc_info.value.prompt == "the final question"
@@ -165,7 +161,7 @@ async def test_attended_human_reply_becomes_next_message(
 
 
 @pytest.mark.anyio
-async def test_headless_with_channel_nudges_then_solicits(
+async def test_headless_with_channel_solicits_immediately(
     anyio_backend: str,
 ) -> None:
     log = _RecordingLog()
@@ -179,14 +175,8 @@ async def test_headless_with_channel_nudges_then_solicits(
         instruction=_instruction(), user_input_fn=channel,
         coordinator=InterruptCoordinator(), event_log=log, agent_id="a1",
         non_interactive=True, subagent=False)
-    # Headless top-level: nudge FIRST, channel untouched, no awaiting_user_input.
-    for _ in range(NUDGE_LIMIT):
-        out = fn("still prose")
-        assert isinstance(out, str)
-        assert "complete_step" in out
-    assert calls["n"] == 0
-    assert not any(e["type"] == "awaiting_user_input" for e in log.events)
-    # Exhausted: now solicit the channel and emit awaiting_user_input.
+    # Headless top-level NEVER nudges: the first bare turn-end solicits the
+    # channel and emits awaiting_user_input.
     out = fn("still prose")
     assert inspect.isawaitable(out)
     assert await out == "the --message reply"

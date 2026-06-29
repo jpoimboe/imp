@@ -663,7 +663,7 @@ def _decisions_body(spec_path: Path) -> str | None:
 async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
     """Default wait_for_turn used when run_change runs without a session server
     (tests, or a non-daemon caller): proceed iff already head, else hibernate."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
     if predicate():
         return
     raise AwaitingUserInput()
@@ -680,8 +680,8 @@ async def _route_acquire(
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
     from imp.engine import merge_queue
+    from imp.engine.awaiting_user_input import AwaitingUserInput
     if wait_for_turn_fn is None:
         raise RuntimeError("wait_for_turn_fn is required for acquire steps")
     assert step.acquire is not None

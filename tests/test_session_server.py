@@ -218,7 +218,7 @@ async def test_lock_is_held_during_serve_and_released_after(tmp_path: Path) -> N
 async def test_gate_with_zero_clients_hibernates(tmp_path: Path) -> None:
     """No client attaches within first_attach_timeout -> the startup gate falls
     back to hibernation (avoids a daemon hung on the lock after a crashed client)."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True, first_attach_timeout=0.1)
@@ -286,7 +286,7 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
 
 @pytest.mark.anyio
 async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
@@ -345,7 +345,7 @@ async def test_lock_is_released_when_run_fn_raises(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True)
@@ -392,7 +392,7 @@ async def test_gate_waits_for_first_attach_before_hibernating(tmp_path: Path) ->
     gate before the spawning client has finished attaching. The gate must wait for
     that first attach and return its input, NOT hibernate on the transient
     zero-client startup window."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True, first_attach_timeout=5.0)
@@ -440,7 +440,7 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
     server = SessionServer(sock, hibernate=True)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        from imp.engine.awaiting_user_input import AwaitingUserInput
 
         with anyio.fail_after(5):
             while server.attached_count < 1:
@@ -555,7 +555,7 @@ async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
     server = SessionServer(sock, hibernate=True)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        from imp.engine.awaiting_user_input import AwaitingUserInput
 
         with anyio.fail_after(5):
             while server.attached_count < 1:
@@ -976,7 +976,7 @@ async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> N
 async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
     tmp_path: Path,
 ) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     # Leg 1: the client detaches before the bare-turn-end gate gets an input.
     # Attendance resolves at end-of-turn -> the gate raises AwaitingUserInput and
@@ -1059,7 +1059,7 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
 async def test_lease_less_client_does_not_satisfy_keep_alive_gate(
     tmp_path: Path,
 ) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True, first_attach_timeout=0.2)
@@ -1212,7 +1212,7 @@ async def test_lease_less_input_at_hibernating_gate_is_delivered_not_dropped(
     # the rehydrate daemon runs hibernate=True. Leases gate KEEP-ALIVE, never the
     # input channel — so the gate must still open next_input() and consume the
     # injected reply rather than routing to hibernation and silently dropping it.
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=True, first_attach_timeout=2.0)

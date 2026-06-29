@@ -71,7 +71,7 @@ def build_inline_solicit(
     `steer_prompt` rides in the awaiting_user_input payload and surfaces as the
     gate placeholder. The bare turn-end leaves it "" (its prose is the question);
     the interrupt steer passes INTERRUPT_STEER_HINT so the human is oriented."""
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     def _emit_awaiting() -> None:
         if event_log is not None:
@@ -118,26 +118,34 @@ def build_continuation_fn(
     non_interactive: bool = False,
     subagent: bool = False,
 ) -> Callable[[str], str | Awaitable[str] | None]:
-    """End-of-turn handler: a bare turn-end (assistant text, no complete_step)
-    IS the yield to the human. Resolved at end-of-turn:
+    """End-of-turn handler for a bare turn-end (assistant text, no
+    complete_step). Whether that is a question to the human or a forgotten
+    complete_step is indistinguishable, so resolution turns on WHO can take the
+    yield, never on guessing intent:
 
       1. A pending interject (a line the human typed mid-run) satisfies the
          yield — return it as the next user message.
-      2. An interactive run (user_input_fn present and not non_interactive) is
-         SOLICITED inline; the reply becomes the next user message. The
-         inactivity watchdog is frozen for the blocked await. Never nudges. A
-         live human who detaches mid-turn is handled by the channel itself
-         (it raises AwaitingUserInput when no client is attached).
-      3. No live human (headless top-level, or a subagent): nudge up to
-         NUDGE_LIMIT to recover a forgotten complete_step, then on exhaustion —
-           * subagent -> return None (the provider emits agent_incomplete,
-             failing loudly to the parent);
-           * top-level WITH a channel -> solicit it (delivers a headless
-             --message, else pauses via AwaitingUserInput from the channel);
-           * top-level WITHOUT a channel -> raise AwaitingUserInput carrying the
-             agent's last text, pausing the run.
+      2. Attended (user_input_fn present and not non_interactive): a human is
+         here, so SOLICIT inline and let them decide; the reply becomes the next
+         user message. NEVER nudges — the bare turn-end IS the yield. The
+         inactivity watchdog is frozen for the blocked await; a human who
+         detaches mid-turn is handled by the channel itself (it raises
+         AwaitingUserInput when no client is attached).
+      3. No live human — resolution differs by who (if anyone) can take the
+         yield:
+           * subagent -> its bare prose is no return value (dispatch_task needs
+             complete_step's typed output) and there is no human to yield to, so
+             nudge up to NUDGE_LIMIT to recover a forgotten complete_step, then
+             return None (the provider emits agent_incomplete, failing loudly to
+             the parent);
+           * headless top-level -> the bare turn-end IS the yield (a question the
+             human sees on attach/resume), indistinguishable from a forgotten
+             complete_step, so NEVER nudged: solicit the channel if present
+             (delivers a --message, else pauses via AwaitingUserInput from the
+             channel), or with no channel raise AwaitingUserInput carrying the
+             agent's last text to park the run.
     """
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.awaiting_user_input import AwaitingUserInput
 
     inline = build_inline_solicit(
         user_input_fn=user_input_fn, coordinator=coordinator,
@@ -162,17 +170,23 @@ def build_continuation_fn(
                 return pending
         if user_input_fn is not None and not non_interactive:
             return inline(last_text)
-        if count < NUDGE_LIMIT:
-            count += 1
-            return nudge
+        # No live human. A subagent has no one to take the yield, and its bare
+        # prose is never captured as a return value (dispatch_task requires
+        # complete_step's typed output), so nudge up to NUDGE_LIMIT to recover a
+        # forgotten complete_step before failing loudly to the parent.
         if subagent:
+            if count < NUDGE_LIMIT:
+                count += 1
+                return nudge
             return None
+        # Headless top-level: a bare turn-end IS the yield — a question the human
+        # will see on attach/resume. imp cannot tell it from a forgotten
+        # complete_step, so it never nudges: solicit the channel if one is
+        # present, else park. Synchronous raise (not the async inline tail)
+        # because callers invoke _cont without awaiting and rely on the raise to
+        # pause the run.
         if user_input_fn is not None:
             return inline(last_text)
-        # Top-level with no channel: synchronously emit the pause marker and
-        # raise, carrying the agent's last text. Synchronous (not the async
-        # inline tail) because callers invoke _cont without awaiting and rely on
-        # the raise to pause the run.
         _emit_awaiting()
         raise AwaitingUserInput(last_text)
 

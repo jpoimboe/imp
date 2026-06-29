@@ -3,8 +3,8 @@ from pathlib import Path
 import anyio
 
 import imp.remote.session.attach as attach_mod
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine import merge_queue as mq
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.change import Change
 from imp.engine.executor import _release_lane, _route_acquire
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State

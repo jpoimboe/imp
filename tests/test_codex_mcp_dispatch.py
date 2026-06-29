@@ -362,8 +362,9 @@ def test_codex_has_no_wait_for_user_pause_intercept() -> None:
 
     runner_src = inspect.getsource(runner_mod)
     assert "state.awaiting_user" not in runner_src
-    # Only the AwaitingUserInput import path keeps the module name.
-    assert runner_src.count("wait_for_user") == 1
+    # The pause signal now imports from imp.engine.awaiting_user_input; no stale
+    # wait_for_user module name remains in either source.
+    assert runner_src.count("wait_for_user") == 0
     assert inspect.getsource(mcp_mod).count("wait_for_user") == 0
 
 

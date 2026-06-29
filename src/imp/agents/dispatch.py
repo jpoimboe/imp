@@ -36,7 +36,7 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
 from imp.agents.tools.context import suspend_inactivity_watchdog
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.schema import validate_agent_output
 
 

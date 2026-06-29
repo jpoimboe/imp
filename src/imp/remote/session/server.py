@@ -161,13 +161,13 @@ class SessionServer:
         and left (_first_leased_attach_fired) hibernates now; otherwise this is
         the startup window before the spawning keep-alive client lands — wait
         for it, and only hibernate if it never shows."""
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        from imp.engine.awaiting_user_input import AwaitingUserInput
 
         if self._first_leased_attach_fired or not await self._await_first_attach():
             raise AwaitingUserInput()
 
     async def _hibernation_gate(self) -> str:
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        from imp.engine.awaiting_user_input import AwaitingUserInput
 
         holder: dict[str, str] = {}
         async with anyio.create_task_group() as tg:

@@ -11,31 +11,6 @@ from enum import Enum
 from imp.agents.runner import Message, ToolUseBlock
 
 
-class LegacyWaitForUserError(RuntimeError):
-    """A transcript still carries a `wait_for_user` tool_use — it predates the
-    tool's removal and must be migrated to the bare-turn-end shape before it can
-    resume. (The one-shot migration lived at scripts/migrate_wfu_data.py; recover
-    it from git history if it has since been removed.)"""
-
-
-def _is_legacy_wfu_name(name: str) -> bool:
-    # Transcripts recorded the tool either bare ("wait_for_user") or under its
-    # MCP-server name ("mcp__imp__wait_for_user"). Match both so the tripwire
-    # isn't silently bypassed by the prefixed form.
-    return name == "wait_for_user" or name.endswith("__wait_for_user")
-
-
-def _assert_no_legacy_wfu(messages: list[Message]) -> None:
-    for m in messages:
-        if m.role != "assistant":
-            continue
-        for b in m.content:
-            if isinstance(b, ToolUseBlock) and _is_legacy_wfu_name(b.name):
-                raise LegacyWaitForUserError(
-                    "transcript predates the wait_for_user removal and must be "
-                    "migrated to the bare-turn-end shape before resuming")
-
-
 class ResumeState(Enum):
     FRESH = "fresh"                            # no history; yield initial_messages
     SEND_TO_LLM = "send_to_llm"                # last message is user; LLM responds next
@@ -45,7 +20,6 @@ class ResumeState(Enum):
 
 
 def classify_resume(messages: list[Message]) -> ResumeState:
-    _assert_no_legacy_wfu(messages)
     if not messages:
         return ResumeState.FRESH
 
@@ -81,4 +55,4 @@ def count_tool_uses(messages: list[Message]) -> int:
     )
 
 
-__all__ = ["LegacyWaitForUserError", "ResumeState", "classify_resume", "count_tool_uses"]
+__all__ = ["ResumeState", "classify_resume", "count_tool_uses"]

@@ -115,7 +115,7 @@ async def serve_change_session(
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        from imp.engine.awaiting_user_input import AwaitingUserInput
 
         if resume:
             log = change.event_log()
