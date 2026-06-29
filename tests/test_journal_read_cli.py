@@ -520,7 +520,7 @@ def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     # Runtime snapshot is archived (record/blob/index), not journaled.
     assert archive_read.read_state_json(tmp_path, "doomed") is not None
     assert subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/doomed"],
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/artifacts/doomed"],
         cwd=tmp_path, capture_output=True).returncode == 0
 
 
@@ -537,7 +537,7 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
     # Runtime state is archived even without any artifact; no wip ref was ever created.
     assert archive_read.read_state_json(tmp_path, "bare") is not None
     assert subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/bare"],
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/artifacts/bare"],
         cwd=tmp_path, capture_output=True).returncode != 0
 
 
@@ -604,7 +604,7 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     assert archive_read.read_change_json(tmp_path, "doc-thing") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet",
-         "refs/imp/journal-wip/doc-thing"],
+         "refs/imp/artifacts/doc-thing"],
         cwd=tmp_path, capture_output=True).returncode == 0
 
 

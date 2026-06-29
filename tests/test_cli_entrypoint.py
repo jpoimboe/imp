@@ -228,3 +228,9 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
         args=args, seed_opening=None)
     assert rc == 0
     assert captured.get("autonomous") is True
+
+
+def test_artifact_commit_subcommand_is_removed() -> None:
+    # The nested-CLI artifact surface is gone — the engine journals artifacts
+    # in-process at each step boundary. The subcommand must not be registered.
+    assert "artifact-commit" not in _command_names(_build_parser())

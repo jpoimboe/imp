@@ -245,7 +245,7 @@ def test_front_door_authors_summary_on_express() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["front-door"].prompt_template_source
-    assert "imp artifact-commit summary" in body
+    assert "imp artifact-commit" not in body
     assert "{{ change.home }}/artifacts/summary/{{ change.id }}.md" in body
     low = body.lower()
     # Only on the express path; the full path defers to the end-of-change summarizer.
@@ -382,7 +382,7 @@ def test_spec_finalizer_prompt_has_minors_integration_branch() -> None:
     # The clean-review branch keys on the injected `blocking:` line and integrates minors.
     assert "blocking: false" in body
     assert "minors" in body.lower()
-    assert "without committing" in body.lower()
+    assert "without changing the file" in body.lower()
 
 
 def test_plan_writer_prompt_has_minors_integration_branch() -> None:
@@ -391,7 +391,7 @@ def test_plan_writer_prompt_has_minors_integration_branch() -> None:
     body = wf.agents["plan-writer"].prompt_template_source
     assert "blocking: false" in body
     assert "minors" in body.lower()
-    assert "without committing" in body.lower()
+    assert "without changing the file" in body.lower()
 
 
 
@@ -765,7 +765,7 @@ def test_spec_finalizer_replaces_spec_writer() -> None:
     assert "## Naming the Change" not in body
     # Its finalize core remains.
     assert "Front-door handoff" in body
-    assert "imp artifact-commit spec" in body
+    assert "imp artifact-commit" not in body
     # Its self-tag in the deferred reader form is renamed.
     assert "DEFERRED spec-finalizer:" in body
     assert "DEFERRED spec-writer:" not in body

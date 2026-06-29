@@ -106,7 +106,7 @@ You still **decide the corrective's depth** yourself from the findings/`comments
 - **Approach change** — the findings show the prior approach is wrong. Author a
   corrective plan with the new tasks needed, still scoped to the finding.
 
-Write `…-plan-(N+1).md`, run `imp artifact-commit plan`, then the corrective flows
+Write `…-plan-(N+1).md`, then the corrective flows
 through `plan-reviewer` → `task-lead` exactly like a first-time plan (a trivial
 corrective takes `fast_path` and skips `plan-reviewer`). Code review of the corrective
 is scoped to its own `review_base..HEAD` diff; the settled work is neither re-planned
@@ -457,23 +457,18 @@ Write to `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md` (substitu
 
 Do NOT write code. Only write the plan document.
 
-## Commit
+## Write the plan file
 
-Commit the plan to the change's artifact lineage — NOT the code branch
-(`main` stays pure code). The agent writes the plain file; `imp artifact-commit`
-commits it to refs/imp/journal-wip/<id>. Do not run `git add`/`git commit`
-yourself, do not add a `Change:` trailer, and do not amend or fixup commits:
-the wip lineage is an append-only archive, so a first write and a revision are
-the same single step.
-
-```
-imp artifact-commit plan
-```
+Write the plan to the change's artifact area — NOT the code branch (`main` stays
+pure code). You only write the plain file under
+`{{ change.home }}/artifacts/plans/`; the engine journals it to the change's
+artifact ref at the step boundary. Do not run `git add`/`git commit` yourself and
+do not add a `Change:` trailer.
 
 This is identical for a fresh plan (plan N, or a corrective `…-plan-(N+1).md`
 authored on a post-settlement rework) and an in-place revision of an existing plan N
-(a minors-integration pass): re-write the relevant plan
-file under `{{ change.home }}/artifacts/plans/`, then run the command.
+(a minors-integration pass): re-write the relevant plan file under
+`{{ change.home }}/artifacts/plans/`. There is no separate commit step.
 
 ## Minors-integration pass (a review follows)
 
@@ -496,18 +491,18 @@ complete, so you revise N in place). On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
    `findings:` to plan N, re-write `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md`,
-   then run `imp artifact-commit plan` and finish tool-terminal:
+   then finish tool-terminal (the engine journals the rewritten file at the step
+   boundary):
 
    ```
-   imp artifact-commit plan
    complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
-   acting on), **complete WITHOUT committing** — just call
-   `complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)`.
-   Do NOT run `imp artifact-commit plan` when nothing changed. The verification
-   review still runs on the unchanged plan and will pass it through.
+   acting on), just call
+   `complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)`
+   without changing the file. The verification review still runs on the unchanged
+   plan and will pass it through.
 
 End the turn tool-terminal with the `complete_step` call. Do not re-solicit the
 user and do not reopen planning — this pass exists only to incorporate the

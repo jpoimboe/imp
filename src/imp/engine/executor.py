@@ -566,9 +566,24 @@ def _emit_started(
                  agent_id=None)
 
 
+def _harvest_artifacts(change: Change, step: Step) -> None:
+    """Journal change_dir/artifacts/** to the change's artifact ref (no-op if none)."""
+    from imp.engine import worktree
+    art_root = change.change_dir / "artifacts"
+    if not art_root.is_dir():
+        return
+    files = {
+        str(p.relative_to(art_root)): p
+        for p in sorted(art_root.rglob("*")) if p.is_file()
+    }
+    worktree.artifact_commit(
+        change.control_root, change.id, files, message=f"artifact: {step.name}")
+
+
 def _finish(
-    log: EventLog, step: Step, match: Any, state: State
+    log: EventLog, step: Step, change: Change, match: Any, state: State
 ) -> tuple[Action, str | None, dict[str, object]]:
+    _harvest_artifacts(change, step)
     _emit(log, "step_completed", {
         "step": step.name, "kind": step.kind,
         "action": _action_payload(match.action),
@@ -586,7 +601,7 @@ def _route_branch(
     _emit_started(log, step, state, change)
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
-    return _finish(log, step, match, state)            # branch goto carries NO feedback
+    return _finish(log, step, change, match, state)            # branch goto carries NO feedback
 
 
 async def _route_script(
@@ -623,7 +638,7 @@ async def _route_script(
             policy=sandbox_policy, command=command))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
-    action, _, muts = _finish(log, step, match, state)
+    action, _, muts = _finish(log, step, change, match, state)
     feedback = None
     if isinstance(action, Goto):
         # exit-0 Goto is a success forward-route; only non-zero exit is a failure-retry.
@@ -710,7 +725,7 @@ async def _route_acquire(
     _emit(log, "lane_acquired", {"base": lane, "step": step.name})
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
-    return _finish(log, step, match, state)
+    return _finish(log, step, change, match, state)
 
 
 def _release_held_lane(
@@ -782,7 +797,7 @@ async def _route_merge_and_exit_worktree(
         _exit_worktree(change)
         match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
         state.vars.update(match.var_mutations)
-        return _finish(log, step, match, state)
+        return _finish(log, step, change, match, state)
 
     spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
     body = _decisions_body(spec_path)
@@ -809,7 +824,7 @@ async def _route_merge_and_exit_worktree(
               {"status": result.status, "attempt": attempt + 1,
                "max": step.max_loops, "base": change.base_branch})
         state.vars.update(match.var_mutations)
-        action, _, muts = _finish(log, step, match, state)
+        action, _, muts = _finish(log, step, change, match, state)
         # _finish hardcodes its feedback element to None; thread the rule's own
         # feedback so a DIRTY route's preamble reaches the reconciler (mirrors the
         # agent route).
@@ -819,7 +834,7 @@ async def _route_merge_and_exit_worktree(
         return _merge_blocked_pause(log, step, change, result.status, result.detail)
 
     state.vars.update(match.var_mutations)
-    return _finish(log, step, match, state)
+    return _finish(log, step, change, match, state)
 
 
 async def _route_agent(
@@ -1023,7 +1038,7 @@ async def _route_agent(
     state.vars.update(match.var_mutations)
     state.current_step = None
     state.save(change.state_dir)
-    action, _, muts = _finish(log, step, match, state)
+    action, _, muts = _finish(log, step, change, match, state)
     feedback = None
     if isinstance(action, Goto) and action.feedback is not None:
         feedback = f"{action.feedback}\n{render_output_fields(result.output)}"

@@ -301,36 +301,65 @@ def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
 
 
 
-def test_artifact_commit_writes_flat_and_accumulates(tmp_path: Path) -> None:
+def test_artifact_commit_snapshots_full_tree_with_guard(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     stage = tmp_path / ".imp"
     stage.mkdir(exist_ok=True)
     spec = stage / "spec.md"
     spec.write_text("# the spec\n")
-    # First artifact commit: wip ref does not exist yet -> root commit, no parent.
-    wt.artifact_commit(tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec")
-    assert _git(tmp_path, "show",
-                "refs/imp/journal-wip/feat:spec/feat.md").stdout == "# the spec\n"
-    first = _git(tmp_path, "rev-parse", "refs/imp/journal-wip/feat").stdout.strip()
-
-    # Second commit accumulates: the prior file survives, a new one is added,
-    # and the new commit is parented on the first (history grows, not replaced).
     plan = stage / "plan.md"
     plan.write_text("# plan 1\n")
-    wt.artifact_commit(tmp_path, "feat", {"plans/feat-plan-1.md": plan},
-                       message="artifact: plan")
+
+    # First snapshot: ref does not exist yet -> root commit; returns True.
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec") is True
     assert _git(tmp_path, "show",
-                "refs/imp/journal-wip/feat:plans/feat-plan-1.md").stdout == "# plan 1\n"
+                "refs/imp/artifacts/feat:spec/feat.md").stdout == "# the spec\n"
+    first = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
+
+    # Second snapshot carries the FULL set: the plan is added, the spec survives,
+    # and the new commit is parented on the first (lineage grows, not replaced).
+    assert wt.artifact_commit(
+        tmp_path, "feat",
+        {"spec/feat.md": spec, "plans/feat-plan-1.md": plan},
+        message="artifact: plan") is True
     assert _git(tmp_path, "show",
-                "refs/imp/journal-wip/feat:spec/feat.md").returncode == 0
-    second = _git(tmp_path, "rev-parse", "refs/imp/journal-wip/feat").stdout.strip()
+                "refs/imp/artifacts/feat:plans/feat-plan-1.md").stdout == "# plan 1\n"
+    assert _git(tmp_path, "show",
+                "refs/imp/artifacts/feat:spec/feat.md").returncode == 0
+    second = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
     assert second != first
     assert _git(tmp_path, "rev-parse",
-                "refs/imp/journal-wip/feat~1").stdout.strip() == first
+                "refs/imp/artifacts/feat~1").stdout.strip() == first
+
+    # Re-snapshotting the identical set is a no-op: returns False, ref unmoved.
+    assert wt.artifact_commit(
+        tmp_path, "feat",
+        {"spec/feat.md": spec, "plans/feat-plan-1.md": plan},
+        message="artifact: plan") is False
+    assert _git(tmp_path, "rev-parse",
+                "refs/imp/artifacts/feat").stdout.strip() == second
+
+    # Dropping the plan from the set deletes it at the tip (full snapshot), while
+    # the spec remains — this is what distinguishes snapshot from accumulate.
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec") is True
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/artifacts/feat:plans/feat-plan-1.md").returncode != 0
+    assert _git(tmp_path, "show",
+                "refs/imp/artifacts/feat:spec/feat.md").returncode == 0
+
     # Files live FLAT at the tree root (no <id>/ prefix) and the code tree is untouched.
     assert "feat/" not in _git(tmp_path, "ls-tree", "--name-only",
-                               "refs/imp/journal-wip/feat").stdout
+                               "refs/imp/artifacts/feat").stdout
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_artifact_commit_empty_files_is_noop(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    assert wt.artifact_commit(tmp_path, "feat", {}, message="artifact: spec") is False
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/artifacts/feat").returncode != 0
 
 
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:

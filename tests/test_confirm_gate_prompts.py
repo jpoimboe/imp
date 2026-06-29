@@ -46,9 +46,9 @@ def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
     assert "decide and record" in text.lower()
 
 
-def test_spec_writer_uses_artifact_commit_not_amend() -> None:
+def test_spec_writer_does_not_invoke_artifact_commit() -> None:
     text = _spec_writer()
-    assert "imp artifact-commit spec" in text
+    assert "imp artifact-commit" not in text
     assert "--fixup" not in text
     assert "git commit --amend" not in text
 
