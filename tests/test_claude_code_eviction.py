@@ -70,9 +70,10 @@ def _inv(tmp_path: Path) -> AgentInvocation:
     )
 
 
-def _history(name: str = "read_file") -> list[Message]:
+def _history(names: str | list[str] = "read_file") -> list[Message]:
     msgs: list[Message] = [Message(role="user", content=(TextBlock(text="go"),))]
     for t in range(6):  # assistant turns 0..5
+        name = names[t] if isinstance(names, list) else names
         msgs.append(Message(role="assistant", content=(
             ToolUseBlock(id=f"u{t}", name=name, input={"path": "x"}),)))
         msgs.append(Message(role="user", content=(
@@ -81,7 +82,7 @@ def _history(name: str = "read_file") -> list[Message]:
 
 
 async def _setup_native_resume(
-    tmp_path: Path, *, timestamp: str, name: str = "read_file",
+    tmp_path: Path, *, timestamp: str, names: str | list[str] = "read_file",
 ) -> tuple[AgentInvocation, Any, dict]:
     """Populate transcript + session store from a 6-turn history, seed
     events.jsonl with `timestamp`, and return (inv, store, skey). The trailing
@@ -89,7 +90,7 @@ async def _setup_native_resume(
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    msgs = _history(name)
+    msgs = _history(names)
     transcript = Transcript(inv.transcript_dir / "transcript.jsonl")
     for m in msgs:
         transcript.append(m)
@@ -185,7 +186,7 @@ async def test_cold_native_resume_keeps_non_compactable_bodies(
     tmp_path: Path,
 ) -> None:
     inv, store, skey = await _setup_native_resume(
-        tmp_path, timestamp=OLD_TS, name="edit_file")
+        tmp_path, timestamp=OLD_TS, names="edit_file")
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=_completing_factory())
     async for _ in runner.run(inv):
@@ -196,3 +197,26 @@ async def test_cold_native_resume_keeps_non_compactable_bodies(
     results = _store_results(loaded)
     assert {tuid: b["content"] for tuid, b in results.items()} == {
         f"u{t}": f"body-{t}" for t in range(6)}
+
+
+@pytest.mark.anyio
+async def test_cold_native_resume_mixed_selectivity(tmp_path: Path) -> None:
+    # turn 0 = edit_file (non-compactable), turn 1 = read_file (compactable),
+    # both in eviction zone (turns 0..1); turns 2..5 in keep window
+    inv, store, skey = await _setup_native_resume(
+        tmp_path, timestamp=OLD_TS,
+        names=["edit_file", "read_file", "read_file", "read_file", "read_file", "read_file"])
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_completing_factory())
+    async for _ in runner.run(inv):
+        pass
+
+    loaded = await store.load(skey)
+    assert loaded is not None
+    results = _store_results(loaded)
+    assert results["u0"]["content"] == "body-0"    # edit_file in eviction zone → kept
+    assert results["u1"]["content"] == PLACEHOLDER  # read_file in eviction zone → cleared
+    assert results["u2"]["content"] == "body-2"    # keep window
+    assert results["u3"]["content"] == "body-3"
+    assert results["u4"]["content"] == "body-4"
+    assert results["u5"]["content"] == "body-5"
