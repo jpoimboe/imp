@@ -140,10 +140,14 @@ async def serve_change_session(
         first_kwargs: dict[str, Any] = {}
         if seed_opening is not None:
             first_kwargs["seed_opening"] = seed_opening
-        if resume_target == "prompt":
+        if resume_target == "prompt" and not (non_interactive or autonomous):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
             # a detach re-leaves it paused, re-stamping "prompt".
+            # Only an interactive resume can answer the prompt; a headless or
+            # autonomous resume has no channel to type a redirect, so honoring it
+            # would re-pause without progress. Fall through to run the agent — it
+            # replays the interrupted step (§6.15 mid-step ctrl-c resume).
             result: Any = RunResult.PAUSED
             prompt: str | None = _RESUME_PROMPT
         else:

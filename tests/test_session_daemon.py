@@ -1647,6 +1647,40 @@ async def test_resume_agent_target_runs_straight_away(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("flag", ["non_interactive", "autonomous"])
+async def test_resume_prompt_target_runs_agent_without_interactive_channel(
+    tmp_path: Path, flag: str,
+) -> None:
+    """A resume_target=='prompt' resteer hold only makes sense when a human can
+    type. A headless or autonomous resume has no channel to answer the prompt, so
+    honoring it would re-pause without progress — it must continue the agent
+    instead (§6.15 mid-step ctrl-c resume completes the interrupted step)."""
+    change = _make_change(tmp_path, "2026-06-15-rph")
+    st = State.load(change.state_dir)
+    st.resume_target = "prompt"
+    st.save(change.state_dir)
+
+    seen: dict[str, bool] = {"ran": False}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+        non_interactive: bool = False, autonomous: bool = False,
+    ) -> RunResult:
+        seen["ran"] = True
+        return RunResult.COMPLETED
+
+    kwargs = {flag: True}
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True, resume=True,
+            first_attach_timeout=0.1, **kwargs)
+
+    assert result is RunResult.COMPLETED
+    assert seen["ran"] is True
+
+
+@pytest.mark.anyio
 async def test_interrupt_leave_control_pauses_with_ctrl_d_reason(tmp_path: Path) -> None:
     from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
     from imp.remote.session.server import SessionServer
