@@ -2200,26 +2200,6 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_artifact_commit(args: argparse.Namespace) -> int:
-    control = _control_root()
-    change_id = os.environ.get("IMP_CHANGE_ID")
-    if not change_id:
-        print("imp: IMP_CHANGE_ID not set", file=sys.stderr)
-        return 1
-    change = Change.load(control, change_id)
-    art_root = change.change_dir / "artifacts"
-    files = {
-        str(p.relative_to(art_root)): p
-        for p in sorted(art_root.rglob("*")) if p.is_file()
-    }
-    if not files:
-        print(f"imp: no artifacts under {art_root}", file=sys.stderr)
-        return 1
-    worktree.artifact_commit(control, change_id, files,
-                             message=f"artifact: {args.kind}")
-    return 0
-
-
 def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
     homes = _scan_change_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
@@ -2583,14 +2563,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--clear-deps", action="store_true",
         help="Empty the dependency list.")
     p_edit.set_defaults(func=_cmd_edit)
-
-    p_artifact = sub.add_parser(
-        "artifact-commit",
-        help="Commit the change's live artifacts to its journal-wip ref "
-             "(invoked by artifact-commit.sh; not for direct use).")
-    p_artifact.add_argument("kind", choices=["spec", "plan", "summary"],
-                            help="Artifact kind being committed (labels the commit).")
-    p_artifact.set_defaults(func=_cmd_artifact_commit)
 
     p_rc = sub.add_parser(
         "remote-control",
