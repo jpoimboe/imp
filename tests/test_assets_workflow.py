@@ -680,11 +680,13 @@ def test_finalize_merge_gate_is_recommendation_anchored() -> None:
     # Removed verbatim example and token scripting.
     assert "Reply `merge`, or describe the rework" not in body
     assert "Merge this into the base branch, or send it back for rework" not in body
-    # New instruction: a recommendation-anchored affirmative asked after the walk.
+    # New instruction: a recommendation-anchored affirmative, with the phrasing and
+    # yielding conventions deferred to the shared dialogue partial (no inline scripting,
+    # no prescribed one-item-per-turn cadence).
     assert "recommendation-anchored" in body
-    assert "after the per-item walk" in body
+    assert "phrasing and yielding conventions in the dialogue guidance" in body
+    assert "one item per turn" not in body
     # Guardrails retained.
-    assert "never announce it" in body
     assert "underspecified" in body
     # §2 pulls in the shared live-gate posture partial.
     assert '{% include "partials/live-gate-dialogue.md" %}' in body

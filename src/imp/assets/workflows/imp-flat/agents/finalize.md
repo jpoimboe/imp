@@ -66,8 +66,20 @@ triage did **not converge** — an unrecognized flake or a hard regression that 
 neither fixed nor tolerated. Read it as a non-converging triage that needs a human,
 not a transient.
 
-## 2. Present in prose, then walk the open items one at a time
+## 2. Decide the gate
 
+{% if run.autonomous %}
+**Autonomous run — no human at the gate.** Do not yield or solicit a decision. Hand
+every **needs-decision** item (the closed set from §1) to the backlog: call
+`create_change(title="<short title>", description="<self-contained brief that needs no
+other context>", depends_on=["{{ change.id }}"])` — group related items into one Change
+or split unrelated ones across several, whatever fits best — then rewrite each item's
+`deferred.md` line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`.
+With every item now either trusted-and-merged or seeded to the backlog, take the
+**merge** disposition. The one exception is an **unrecoverable problem** (e.g. the
+non-converging verify-triage case above) — that still **pauses** for a human even under
+autonomy; do not force it through. Then route on the dispositions below.
+{% else %}
 This is the final **merge gate**, and a human reads it. Speak in **prose**, never
 a labelled **field-dump**.
 
@@ -81,11 +93,13 @@ structured fields are the audit record (§1); your prose is what the human reads
 When you recap the reader's own choice at the gate, address them directly — "you
 chose to ignore it," not "the human chose ignore."
 
-Then walk the **needs-decision** items ONE AT A TIME. This walk has a **closed set**
+Then work through the **needs-decision** items. This walk has a **closed set**
 of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`
 (including tolerations the `verify` / `sweep-verify` gates recorded there) — and
 nothing else. Do not add an item here from something you noticed while reading the
-diff. For EACH item, ending your turn after each (one item per turn):
+diff. Drive the conversation however reads best — there is no required one-item-per-turn
+cadence; take the items in whatever order and grouping the discussion warrants. For each
+item:
 
 - Present the item in detail and give your **recommendation** — what you would do,
   and why.
@@ -114,22 +128,18 @@ Both `seeded <id>` and `ignored-at-gate` are **terminal**: a later
 re-raises them, so a rework pass re-surfaces only the fix-now work — no
 double-seeding, no re-asking.
 
-The closing question is a single recommendation-anchored affirmative — the bare
-yes/no of whatever you recommend: if you recommend merging, ask the plain merge
-affirmative (e.g. "Ready to merge?"); if you recommend rework, the rework is the
-affirmative (e.g. "Send this back to fix X?"). No co-equal "…, or rework?" pairing
-and no scripted reply tokens. When there are no needs-decision items, present the
-prose summary and end with this question; otherwise ask it last, after the per-item walk.
-Then end your turn to yield — the human reads only your prose (a bare turn-end shows no
-separate prompt), so ask the question — never announce it ("I'll solicit the merge
-decision"). Applies to every yield here, including the per-item walk above.
+Close on a recommendation-anchored affirmative — the bare yes/no of whatever you
+recommend (e.g. "Ready to merge?", or "Send this back to fix X?") — following the
+phrasing and yielding conventions in the dialogue guidance above. When there are no
+needs-decision items, it is just the prose summary and that closing question.
 
 When a human-requested rework is underspecified, settle the details first (a
-brainstorming-like posture) — end your turn with your question to clarify the desired outcome and scope before returning a rework decision — then hand a crisp brief to the
-plan-writer. An agent-detected `review` rework does NOT ask the human here. Separate
-sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). In a
-headless run a bare turn-end with no human attached pauses the run; yield this way
-only when you genuinely need a human.
+brainstorming-like posture) —
+clarify the desired outcome and scope before returning a rework decision — then hand a
+crisp brief to the plan-writer. An agent-detected `review` rework does NOT ask the human
+here. Separate sections with short labels or blank lines —
+do **not** draw full-width horizontal rules (`---` / `===`).
+{% endif %}
 
 Then route on the dispositions:
 - At least one **fix now** -> `complete_step(status="Success", decision="rework", comments="<ONLY

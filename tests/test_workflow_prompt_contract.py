@@ -233,13 +233,15 @@ def test_finalize_prompt_states_merge_gate_affordance() -> None:
     low = FINALIZE.read_text().lower()
     assert "merge gate" in low
     assert "rework" in low
-    assert "reply" in low
+    assert "natural-language response" in low
 
 
-def test_finalize_walks_open_items_one_at_a_time() -> None:
+def test_finalize_walks_open_items_fix_defer_ignore() -> None:
     low = FINALIZE.read_text().lower()
-    # Per-item walk with a recommendation, one item per solicit.
-    assert "one at a time" in low or "one item per" in low
+    # The fix / defer / ignore three-outcome walk, each item with a recommendation —
+    # but the one-item-per-turn cadence is gone; the agent drives the conversation.
+    assert "one at a time" not in low
+    assert "one item per turn" not in low
     assert "recommendation" in low
     assert "fix now" in low
     assert "create_change" in low
@@ -565,7 +567,10 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         workflow_dir=bundled_workflow_dir("imp")).lower()
     # Key on a phrase unique to the handoff true-branch.
     assert "the base branch advanced since the draft started" in moved   # head_changed=true
-    assert "yield — by ending your turn with the question" in moved
+    # Drift reconciles silently in-turn; the branch carries no yield encouragement —
+    # only a genuine intent-fork parks, via the Surfacing-a-decision machinery below.
+    assert "reconcile it yourself and proceed; do not yield for it" in moved
+    assert "yield — by ending your turn with the question" not in moved
     assert "adopt near-silently" not in moved
 
     same = render_prompt(body, build_context(
@@ -577,6 +582,8 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     assert "adopt near-silently" in same           # head_changed=false branch
     assert "the base branch advanced since the draft started" not in same
 
+    # Autonomy no longer changes this branch — the drift-reconcile prompt is identical
+    # whether or not the run is autonomous (the conditional was removed).
     autonomous_moved = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
@@ -584,9 +591,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         autonomous=True,
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    assert "the base branch advanced since the draft started" in autonomous_moved
-    assert "reconcile it yourself and proceed without yielding" in autonomous_moved
-    assert "do **not** yield to a human" not in autonomous_moved
+    assert autonomous_moved == moved
 
 
 HUMAN_DECISION_PARTIAL = Path(
@@ -748,10 +753,31 @@ def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None
         render_prompt("{{ run.non_interactive }}", ctx)
 
 
-def test_finalize_parks_needs_decision_without_autonomy_escape() -> None:
+def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
+        tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
     for tree in ("imp", "imp-flat"):
-        text = Path(
-            f"src/imp/assets/workflows/{tree}/agents/finalize.md").read_text()
-        assert "run.non_interactive" not in text
-        assert "run.autonomous" not in text   # the needs-decision walk never auto-resolves
-        assert "needs-decision" in text       # the per-item walk exists
+        wdir = bundled_workflow_dir(tree)
+        body = (wdir / "agents" / "finalize.md").read_text()
+        assert "run.non_interactive" not in body   # transport flag never leaks
+
+        def render(autonomous: bool, body: str = body, wdir: Path = wdir) -> str:
+            return render_prompt(body, build_context(
+                change_title="t", event_log=log, change_id="abc",
+                change_home=".imp/changes/abc",
+                project_facts={}, guidance="", autonomous=autonomous),
+                workflow_dir=wdir).lower()
+
+        attended = render(False)
+        autonomous = render(True)
+
+        # Attended: a human walks the needs-decision items at the gate.
+        assert "needs-decision" in attended
+        assert "no human at the gate" not in attended
+
+        # Autonomous: no human walk — every needs-decision item is seeded to the
+        # backlog and the gate takes the merge disposition itself; only an
+        # unrecoverable problem still pauses for a human.
+        assert "no human at the gate" in autonomous
+        assert "seeded <new-change-id>" in autonomous
+        assert "pauses** for a human even under" in autonomous

@@ -152,10 +152,9 @@ front of you. You can spin it off with the `create_change` tool, with the user's
 approval, instead of forcing every idea into the current change.
 
 - **Confirm before spinning off.** A split-off is a **recommendation-bearing** proposal.
-  Under an **attended** run, propose the split in plain language and confirm it by
-  **ending your turn to yield** before calling `create_change`. Under an **autonomous**
-  run (`run.autonomous`), state the split plainly and then call `create_change` without
-  yielding. This one rule covers both "the user asks for it" and "you suggest it."
+  Propose the split in plain language and confirm it by
+  **ending your turn to yield** before calling `create_change`. This one rule covers
+  both "the user asks for it" and "you suggest it."
 - **Set `depends_on` only on a real ordering need.** Pass
   `depends_on=["{{ change.id }}"]` only when the spun-off work genuinely needs this
   change finished first; otherwise omit it.

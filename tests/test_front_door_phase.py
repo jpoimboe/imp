@@ -101,7 +101,9 @@ def test_front_door_split_off_is_unconditional_and_rekeyed(tmp_path) -> None:
         project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "## Splitting off a separate change" in autonomous
-    assert "call `create_change` without\n  yielding" in autonomous
+    # Split-off no longer branches on autonomy — it always confirms by yielding.
+    assert "ending your turn to yield** before calling `create_change`" in autonomous
+    assert "call `create_change` without\n  yielding" not in autonomous
 
 
 def test_front_door_has_no_headless_branch(tmp_path) -> None:
