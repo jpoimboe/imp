@@ -91,3 +91,19 @@ def test_test_cmd_fields_default_to_none_when_unset(
     assert eff.config.test_cmd_slow is None
     assert eff.config.test_cmd_fast_timeout is None
     assert eff.config.test_cmd_slow_timeout is None
+
+
+def test_repo_project_yaml_uses_tiered_test_cmds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The shipped imp/project.yaml is migrated to the tiered keys; guard against a
+    # regression to the removed verify_command/verify_timeout surface.
+    repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(repo_root / "nonexistent-xdg"))
+    eff = load_effective_config(project_root=repo_root, control_root=None)
+    assert eff.config.test_cmd_fast == "make check"
+    assert eff.config.test_cmd_slow == "make check && make test-live"
+    assert eff.config.test_cmd_fast_timeout == 120
+    assert eff.config.test_cmd_slow_timeout == 300
+    raw = (repo_root / "imp" / "project.yaml").read_text()
+    assert "verify_command" not in raw and "verify_timeout" not in raw
