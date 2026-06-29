@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.providers.message_eviction import evicted_result_ids
+from imp.providers.message_eviction import apply_eviction, evicted_result_ids
 
 
 def _convo(n_turns: int, name: str = "read_file") -> list[Message]:
@@ -65,3 +65,58 @@ def test_parallel_tool_calls_in_one_assistant_turn() -> None:
         msgs.append(Message(role="user", content=(
             ToolResultBlock(tool_use_id=f"u{t}", content=f"body-{t}"),)))
     assert evicted_result_ids(msgs, cold=True) == frozenset({"a0", "b0"})
+
+
+def test_apply_swaps_targeted_body_only() -> None:
+    msgs = _convo(2)
+    out = apply_eviction(msgs, frozenset({"u0"}))
+    bodies = {b.tool_use_id: b.content for m in out for b in m.content
+              if isinstance(b, ToolResultBlock)}
+    assert bodies == {"u0": "[old tool result cleared]", "u1": "body-1"}
+    # Non-targeted messages are returned as the SAME object.
+    assert out[1] is msgs[1]
+    assert out[4] is msgs[4]
+
+
+def test_apply_empty_set_returns_same_object() -> None:
+    msgs = _convo(2)
+    assert apply_eviction(msgs, frozenset()) is msgs
+
+
+def test_apply_preserves_is_error_flag() -> None:
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="u0", name="bash", input={}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="u0", content="boom", is_error=True),)),
+    ]
+    out = apply_eviction(msgs, frozenset({"u0"}))
+    blk = next(b for m in out for b in m.content
+              if isinstance(b, ToolResultBlock))
+    assert blk.content == "[old tool result cleared]"
+    assert blk.is_error is True
+
+
+def test_apply_leaves_tool_use_and_text_intact() -> None:
+    out = apply_eviction(_convo(2), frozenset({"u0"}))
+    uses = {b.id: b.name for m in out for b in m.content
+            if isinstance(b, ToolUseBlock)}
+    assert uses == {"u0": "read_file", "u1": "read_file"}
+    assert out[0].content[0] == TextBlock(text="go")
+
+
+def test_apply_only_swaps_matched_block_in_mixed_message() -> None:
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="ka", name="read_file", input={}),
+            ToolUseBlock(id="kb", name="edit_file", input={}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="ka", content="a-body"),
+            ToolResultBlock(tool_use_id="kb", content="b-body"),
+        )),
+    ]
+    out = apply_eviction(msgs, frozenset({"ka"}))
+    bodies = {b.tool_use_id: b.content for m in out for b in m.content
+              if isinstance(b, ToolResultBlock)}
+    assert bodies == {"ka": "[old tool result cleared]", "kb": "b-body"}

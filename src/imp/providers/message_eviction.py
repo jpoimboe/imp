@@ -17,7 +17,11 @@ from __future__ import annotations
 
 from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
 from imp.agents.tools.limits import KEEP_RECENT_TURNS
-from imp.providers.history_compaction import HistoryRecord, results_to_evict
+from imp.providers.history_compaction import (
+    EVICTION_PLACEHOLDER,
+    HistoryRecord,
+    results_to_evict,
+)
 
 
 def evicted_result_ids(
@@ -48,3 +52,30 @@ def _messages_to_records(messages: list[Message]) -> list[HistoryRecord]:
                     HistoryRecord(turn=turn, result_id=b.tool_use_id,
                                   result_body=b.content))
     return records
+
+
+def apply_eviction(
+    messages: list[Message], to_evict: frozenset[str],
+) -> list[Message]:
+    if not to_evict:
+        return messages
+    return [_evict_message(m, to_evict) for m in messages]
+
+
+def _evict_message(m: Message, to_evict: frozenset[str]) -> Message:
+    if not any(
+        isinstance(b, ToolResultBlock) and b.tool_use_id in to_evict
+        for b in m.content
+    ):
+        return m
+    new_content = tuple(
+        ToolResultBlock(
+            tool_use_id=b.tool_use_id,
+            content=EVICTION_PLACEHOLDER,
+            is_error=b.is_error,
+        )
+        if isinstance(b, ToolResultBlock) and b.tool_use_id in to_evict
+        else b
+        for b in m.content
+    )
+    return Message(role=m.role, content=new_content)
