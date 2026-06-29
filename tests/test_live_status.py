@@ -264,3 +264,58 @@ def test_ack_over_block_then_redraw_climbs_one_row_and_preserves_blank() -> None
     assert v.startswith("\r\x1b[K\x1b[1A")
     assert "\n\r\x1b[Ka2" in v
     assert v.rstrip().endswith("bar2")
+
+
+def test_hide_cursor_writes_hide_once_and_is_idempotent() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._hide_cursor()
+    s._hide_cursor()                          # already hidden → no second write
+    assert out.getvalue() == "\x1b[?25l"
+    assert s._cursor_hidden is True
+
+
+def test_show_cursor_writes_show_once_and_is_idempotent() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._hide_cursor()
+    out.truncate(0)
+    out.seek(0)
+    s._show_cursor()
+    s._show_cursor()                          # already shown → no second write
+    assert out.getvalue() == "\x1b[?25h"
+    assert s._cursor_hidden is False
+
+
+def test_show_cursor_is_noop_when_not_hidden() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._show_cursor()                          # never hidden → strict no-op
+    assert out.getvalue() == ""
+    assert s._cursor_hidden is False
+
+
+def test_non_tty_hide_cursor_writes_nothing() -> None:
+    out = _Pipe()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._hide_cursor()
+    assert out.getvalue() == ""
+    assert s._cursor_hidden is False
+
+
+def test_atexit_registers_show_cursor_for_tty(monkeypatch) -> None:
+    registered: list = []
+    monkeypatch.setattr(
+        "imp.cli.live_status.atexit.register", lambda fn: registered.append(fn)
+    )
+    s = LiveStatus(_TTY(), now=lambda: 0.0)
+    assert s._show_cursor in registered
+
+
+def test_atexit_not_registered_for_non_tty(monkeypatch) -> None:
+    registered: list = []
+    monkeypatch.setattr(
+        "imp.cli.live_status.atexit.register", lambda fn: registered.append(fn)
+    )
+    LiveStatus(_Pipe(), now=lambda: 0.0)
+    assert registered == []
