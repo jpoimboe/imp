@@ -385,7 +385,7 @@ def _fake_change(tmp_path):
 
 
 def _fake_config(**over):
-    base = dict(sandbox={}, verify_command=None, verify_timeout=None,
+    base = dict(sandbox={},
                 test_cmd_fast=None, test_cmd_slow=None,
                 test_cmd_fast_timeout=None, test_cmd_slow_timeout=None)
     base.update(over)

@@ -16,11 +16,11 @@ def test_absent_file_returns_none(tmp_path: Path) -> None:
 
 def test_tiers_less_layer_is_valid(tmp_path: Path) -> None:
     p = tmp_path / "project.yaml"
-    p.write_text("default-workflow: imp\nverify_command: make check\n")
+    p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")
     layer, src = parse_config_layer(p)  # type: ignore[misc]
     assert "tiers" not in layer
     assert "providers" not in layer
-    assert layer["verify_command"] == "make check"
+    assert layer["test_cmd_fast"] == "make check"
     assert src.file == p
 
 

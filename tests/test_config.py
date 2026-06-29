@@ -98,44 +98,6 @@ def test_provider_envs_override(tmp_path: Path) -> None:
     assert layer["provider_envs"] == {"openai": "OAI_KEY"}
 
 
-def test_parses_verify_command(tmp_path: Path) -> None:
-    layer = _layer(tmp_path, "verify_command: \"make check\"\n" + _OK_BODY)
-    assert layer["verify_command"] == "make check"
-
-
-def test_verify_command_empty_string_preserved(tmp_path: Path) -> None:
-    # Tri-state opt-out: an explicit empty string parses to "" (NOT dropped),
-    # distinct from key-absent — the gate no-ops but never nudges again.
-    layer = _layer(tmp_path, "verify_command: \"\"\n" + _OK_BODY)
-    assert layer["verify_command"] == ""
-
-
-def test_verify_command_absent_omitted(tmp_path: Path) -> None:
-    assert "verify_command" not in _layer(tmp_path, _OK_BODY)
-
-
-def test_verify_command_not_string_raises(tmp_path: Path) -> None:
-    with pytest.raises(LoadError, match="verify_command"):
-        _layer(tmp_path, "verify_command: [make, check]\n" + _OK_BODY)
-
-
-def test_parses_verify_timeout(tmp_path: Path) -> None:
-    layer = _layer(tmp_path, "verify_timeout: 1200\n" + _OK_BODY)
-    assert layer["verify_timeout"] == 1200
-
-
-def test_verify_timeout_absent_omitted(tmp_path: Path) -> None:
-    assert "verify_timeout" not in _layer(tmp_path, _OK_BODY)
-
-
-@pytest.mark.parametrize("bad", ["0", "-5", "\"1200\"", "1.5", "true"])
-def test_verify_timeout_invalid_raises(tmp_path: Path, bad: str) -> None:
-    # Zero/negative, strings, floats, and bool (an int subclass) are all rejected —
-    # only a positive integer number of seconds is a meaningful gate ceiling.
-    with pytest.raises(LoadError, match="verify_timeout"):
-        _layer(tmp_path, f"verify_timeout: {bad}\n" + _OK_BODY)
-
-
 def test_editing_mode_absent_omitted(tmp_path: Path) -> None:
     assert "editing_mode" not in _layer(tmp_path, _OK_BODY)
 

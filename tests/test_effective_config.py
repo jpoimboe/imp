@@ -38,28 +38,6 @@ def test_project_leaf_override_is_additive_over_floor(
     assert "provider code" in str(eff.provenance[("tiers", "high", "openai")].file)
 
 
-def test_verify_timeout_flows_from_project_to_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # End-to-end: a project.yaml verify_timeout lands on Config.verify_timeout,
-    # which is what the engine threads into IMP_VERIFY_TIMEOUT for the gate.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    proj = tmp_path / "proj"
-    (proj / "imp").mkdir(parents=True)
-    (proj / "imp" / "project.yaml").write_text("verify_command: make check\nverify_timeout: 1200\n")
-    eff = load_effective_config(project_root=proj, control_root=None)
-    assert eff.config.verify_timeout == 1200
-    assert eff.config.verify_command == "make check"
-
-
-def test_verify_timeout_defaults_to_none_when_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    eff = load_effective_config(project_root=None, control_root=None)
-    assert eff.config.verify_timeout is None   # absent => run-verify.sh's 300s default
-
-
 def test_local_beats_user_beats_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

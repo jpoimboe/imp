@@ -8,8 +8,6 @@ Schema (post 2026-06-04-roles-to-tiers):
       high:   {claude_code: opus,   openai: gpt-5.5}
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
-    verify_command: "..."                 # optional combined verify gate (tests+lint+typecheck)
-    verify_timeout: 1200                  # optional verify-gate ceiling, seconds (default 300)
     test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast tests); per-plan
     test_cmd_slow: "..."                  # complete run; once-per-change at integration-verify
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
@@ -51,8 +49,6 @@ class Config:
         default_factory=lambda: SourceLoc(file=Path("config.yaml"), line=1),
     )
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
-    verify_command: str | None = field(hash=False, default=None)
-    verify_timeout: int | None = field(hash=False, default=None)
     test_cmd_fast: str | None = field(hash=False, default=None)
     test_cmd_slow: str | None = field(hash=False, default=None)
     test_cmd_fast_timeout: int | None = field(hash=False, default=None)
@@ -208,18 +204,6 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["provider_envs"] = _parse_provider_envs(raw["provider_envs"], src)
     if raw.get("vars") is not None:
         out["vars"] = _parse_var_overrides(raw["vars"], src)
-    if "verify_command" in raw:
-        v = raw["verify_command"]
-        if not isinstance(v, str):
-            raise LoadError("'verify_command' must be a string (e.g. \"make check\")", src)
-        out["verify_command"] = v
-    if "verify_timeout" in raw:
-        v = raw["verify_timeout"]
-        # bool is an int subclass; reject it so `verify_timeout: true` isn't read as 1.
-        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
-            raise LoadError(
-                "'verify_timeout' must be a positive integer (seconds, e.g. 1200)", src)
-        out["verify_timeout"] = v
     for cmd_key in ("test_cmd_fast", "test_cmd_slow"):
         if cmd_key in raw:
             v = raw[cmd_key]
