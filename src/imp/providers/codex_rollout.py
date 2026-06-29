@@ -13,7 +13,16 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
+
+from imp.agents.tools.limits import KEEP_RECENT_TURNS
+from imp.providers.history_compaction import (
+    EVICTION_PLACEHOLDER,
+    HistoryRecord,
+    results_to_evict,
+)
 
 _THREAD_JSON = "codex_thread.json"
 _ROLLOUT_SUBDIR = "codex_rollout"
@@ -85,3 +94,77 @@ def _canonical_tool_name(name: str | None) -> str | None:
     if name is None:
         return None
     return name.rsplit("__", 1)[-1]
+
+
+def _rollout_records(objs: Iterable[dict[str, Any]]) -> list[HistoryRecord]:
+    """Decode rollout objects into the neutral HistoryRecord sequence.
+
+    A turn index increments at the start of each function_call batch (a
+    function_call whose preceding tool record was an output, or the first call),
+    so consecutive calls in one model turn share a turn and each function_call_output
+    inherits its batch's turn.
+    """
+    records: list[HistoryRecord] = []
+    turn = -1
+    prev_was_call = False
+    for o in objs:
+        if o.get("type") != "response_item":
+            continue
+        p = o.get("payload")
+        if not isinstance(p, dict):
+            continue
+        pt = p.get("type")
+        if pt == "function_call":
+            if not prev_was_call:
+                turn += 1
+            prev_was_call = True
+            records.append(HistoryRecord(
+                turn=turn, call_id=p.get("call_id"),
+                call_name=_canonical_tool_name(p.get("name"))))
+        elif pt == "function_call_output":
+            prev_was_call = False
+            records.append(HistoryRecord(
+                turn=turn, result_id=p.get("call_id"),
+                result_body=p.get("output")))
+    return records
+
+
+def _is_evicted_output(obj: dict[str, Any], evicted: frozenset[str]) -> bool:
+    if obj.get("type") != "response_item":
+        return False
+    p = obj.get("payload")
+    return (
+        isinstance(p, dict)
+        and p.get("type") == "function_call_output"
+        and p.get("call_id") in evicted
+    )
+
+
+def evict_rollout_lines(
+    lines: list[str], *, keep_recent_turns: int = KEEP_RECENT_TURNS,
+) -> list[str]:
+    """Clear the body of every old compactable function_call_output in a cold
+    rollout, swapping payload.output for EVICTION_PLACEHOLDER. Non-matched lines
+    are returned verbatim; the input list object is returned unchanged when
+    nothing is evicted (byte-stable no-op). Callers gate on the cold signal —
+    this is the cold-path rewrite, so the core is asked with cold=True.
+    """
+    parsed: list[tuple[str, dict[str, Any] | None]] = []
+    for raw in lines:
+        try:
+            parsed.append((raw, json.loads(raw)))
+        except json.JSONDecodeError:
+            parsed.append((raw, None))
+    records = _rollout_records(o for _, o in parsed if isinstance(o, dict))
+    evicted = results_to_evict(
+        records, cold=True, keep_recent_turns=keep_recent_turns)
+    if not evicted:
+        return lines
+    out: list[str] = []
+    for raw, obj in parsed:
+        if isinstance(obj, dict) and _is_evicted_output(obj, evicted):
+            obj["payload"]["output"] = EVICTION_PLACEHOLDER
+            out.append(json.dumps(obj))
+        else:
+            out.append(raw)
+    return out
