@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -161,3 +162,37 @@ async def test_cold_native_resume_evicts_old_compactable_bodies(
     transcript_text = (inv.transcript_dir / "transcript.jsonl").read_text()
     assert "body-0" in transcript_text
     assert PLACEHOLDER not in transcript_text
+
+
+@pytest.mark.anyio
+async def test_warm_native_resume_keeps_full_bodies(tmp_path: Path) -> None:
+    inv, store, skey = await _setup_native_resume(
+        tmp_path, timestamp=datetime.now(UTC).isoformat())
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_completing_factory())
+    async for _ in runner.run(inv):
+        pass
+
+    loaded = await store.load(skey)
+    assert loaded is not None
+    results = _store_results(loaded)
+    assert {tuid: b["content"] for tuid, b in results.items()} == {
+        f"u{t}": f"body-{t}" for t in range(6)}
+
+
+@pytest.mark.anyio
+async def test_cold_native_resume_keeps_non_compactable_bodies(
+    tmp_path: Path,
+) -> None:
+    inv, store, skey = await _setup_native_resume(
+        tmp_path, timestamp=OLD_TS, name="edit_file")
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_completing_factory())
+    async for _ in runner.run(inv):
+        pass
+
+    loaded = await store.load(skey)
+    assert loaded is not None
+    results = _store_results(loaded)
+    assert {tuid: b["content"] for tuid, b in results.items()} == {
+        f"u{t}": f"body-{t}" for t in range(6)}
