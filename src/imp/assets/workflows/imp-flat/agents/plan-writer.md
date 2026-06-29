@@ -385,7 +385,7 @@ git commit -m "feat: add specific feature"
 A plan MUST NOT contain a task or step whose **only** purpose is running the
 whole-project test suite, lint, or typecheck with no source change and no
 commit. The workflow's mechanical `verify` gate runs the project's
-`verify_command` after the implement phase and routes any failure back to
+`test_cmd_fast` after the implement phase and routes any failure back to
 `task-lead`, so re-running the full gate by hand is wasted tokens and a wasted
 suite run. The plan ends at the last real task's `Commit` step.
 
@@ -434,7 +434,7 @@ After writing the complete plan, check it against the spec and prior plans with 
 
 **4. Bite-size check:** Could any task be split to give a natural commit boundary? Could any step be clarified without inflating the plan?
 
-**5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only — it never licenses a lint-dirty or type-dirty tree. The mechanical `verify` gate (the project's `verify_command`) runs after the implement phase and routes back on any failure, so even a waived-tests task is still lint/typecheck-gated there.
+**5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only — it never licenses a lint-dirty or type-dirty tree. The mechanical `verify` gate (the project's `test_cmd_fast`) runs after the implement phase and routes back on any failure, so even a waived-tests task is still lint/typecheck-gated there.
 
 **6. Falsifiability:** For each test, would it fail if the implementation were wrong or
 absent? A test whose expected value is just the literal the implementation returns is a

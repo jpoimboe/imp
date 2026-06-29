@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -1014,3 +1015,17 @@ def test_imp_flat_gate_steps_pass_tier_arg() -> None:
     assert steps["verify"].command == "./scripts/run-verify.sh fast"
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
     assert "sweep-verify" not in steps   # imp-flat has no sweep-verify gate
+
+
+def test_no_legacy_verify_surface_under_src_imp() -> None:
+    # The verify_command/verify_timeout/IMP_VERIFY_* surface is fully removed;
+    # guard production code AND bundled workflow assets against its return.
+    root = Path(__file__).resolve().parents[1] / "src" / "imp"
+    pattern = re.compile(r"verify_command|verify_timeout|IMP_VERIFY_")
+    offenders = [
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if p.suffix in {".py", ".md", ".yaml", ".yml", ".sh", ".toml"}
+        and pattern.search(p.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []

@@ -166,9 +166,10 @@ Review your work with fresh eyes. Ask yourself:
 
 **Verification is the gate's job, not yours:**
 Do **not** run the project's full suite, lint, or typecheck before committing — the
-phase-level `verify` gate runs the project's combined `verify_command` after this
-phase and routes back if anything (a failing test, a lint error, a type error)
-breaks. Run only the *focused* tests for your change to catch obvious mistakes early.
+phase-level `verify` gate runs the project's `test_cmd_fast` (lint + typecheck +
+fast tests) after this phase and routes back if anything (a failing test, a lint
+error, a type error) breaks; the complete suite incl. slow tests runs once at
+integrate. Run only the *focused* tests for your change to catch obvious mistakes early.
 
 If you find issues during self-review, fix them now before reporting.
 

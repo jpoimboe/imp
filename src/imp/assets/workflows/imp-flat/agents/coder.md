@@ -194,7 +194,8 @@ Review your work with fresh eyes:
 
 **Verification is the gate's job, not yours:** do **not** run the project's full suite,
 lint, or typecheck before returning — the phase-level `verify` gate runs the project's
-combined `verify_command` after this phase and routes back on any failure. Run only the
+`test_cmd_fast` (lint + typecheck + fast tests) after this phase and routes back on any
+failure; the complete suite incl. slow tests runs once at integrate. Run only the
 *focused* tests for your changes to catch obvious mistakes early.
 
 Fix anything you find before returning.
