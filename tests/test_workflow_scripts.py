@@ -148,15 +148,16 @@ def test_run_verify_slow_falls_back_to_fast_command_when_slow_empty(
 
 
 def test_run_verify_slow_timeout_default_when_unset(tmp_path: Path) -> None:
-    # No IMP_TEST_CMD_SLOW_TIMEOUT => the script applies its own 300s default, so a
-    # quick command finishes well within it (exit 0, never 124).
+    # No IMP_TEST_CMD_SLOW_TIMEOUT => script applies its 300s default; sleep 2
+    # would exit 124 if the default were accidentally set to <= 1s.
     project = tmp_path / "proj"
     project.mkdir()
     proc = _run("run-verify.sh", "slow", env_extra={
-        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "true",
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "sleep 2",
         "IMP_CHANGE_DIR": str(project / ".imp" / "change")},
         env_remove=("IMP_TEST_CMD_SLOW_TIMEOUT",))
     assert proc.returncode == 0, proc.stderr
+    assert "timed out" not in proc.stderr
 
 
 def test_fast_and_slow_skip_caches_are_independent(tmp_path: Path) -> None:
