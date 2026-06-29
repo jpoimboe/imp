@@ -420,8 +420,94 @@ async def test_drive_invocation_stalls_on_inactivity(
             _inv(tmp_path), _StallRunner(), coordinator=None, log=None,
             emit_events=False)
     assert result.errored is True
-    assert result.error is not None and result.error.kind == "stalled"
+    assert result.error is not None
+    assert result.error.category == "stalled"   # not "config"
+    assert result.error.kind == "stalled"
+    # Routed through the policy: a non-None backoff delay drives the executor's
+    # budgeted-backoff path. prior_backoff_attempts defaults to 0 -> 1.0s.
+    assert result.delay == 1.0
     assert interrupted["called"] is True
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_stall_logs_stalled_category(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """D2: the watchdog stall logs an `error` event with category 'stalled'
+    (not 'config') and returns a RetryWithBackoff result, so the executor's
+    self-healed-retry path handles it."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+
+    class _Log:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def append(self, *, agent_id, type, payload):
+            self.calls.append({"agent_id": agent_id, "type": type, "payload": payload})
+            return {"id": "e"}
+
+    class _StallRunner:
+        async def interrupt(self) -> None:
+            pass
+
+        async def run(self, _invocation):
+            await anyio.sleep(3600)
+            yield {"type": "agent_output", "payload": {}}  # never reached
+
+    log = _Log()
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _StallRunner(), coordinator=None, log=log,
+            emit_events=True, prior_backoff_attempts=2)
+
+    errors = [c for c in log.calls if c["type"] == "error"]
+    assert errors, f"no error event logged: {log.calls}"
+    assert errors[0]["payload"]["category"] == "stalled"
+    assert errors[0]["payload"]["kind"] == "stalled"
+    # prior_backoff_attempts=2 -> schedule term 4.0s, plumbed onto the result.
+    assert result.error is not None and result.error.category == "stalled"
+    assert result.delay == 4.0
+
+
+@pytest.mark.anyio
+async def test_watchdog_teardown_force_kills_when_interrupt_ignores_grace(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """AC6 bounded teardown: a wedged runner is force-killed within PROCESS_KILL_GRACE_S."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(ar, "PROCESS_KILL_GRACE_S", 0.3)
+
+    forced = {"called": False}
+
+    class _IgnoresInterruptRunner:
+        async def interrupt(self) -> None:
+            await anyio.sleep(3600)   # ignores the graceful interrupt forever
+
+        async def force_kill(self) -> None:
+            forced["called"] = True
+
+        async def run(self, _invocation):
+            await anyio.sleep(3600)   # emit nothing, ever
+            yield {"type": "agent_output", "payload": {}}  # never reached
+
+    start = anyio.current_time()
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _IgnoresInterruptRunner(), coordinator=None,
+            log=None, emit_events=False)
+    elapsed = anyio.current_time() - start
+
+    assert forced["called"] is True
+    assert result.errored is True
+    assert result.error is not None and result.error.category == "stalled"
+    assert result.delay == 1.0
+    # Bounded: ~AGENT_INACTIVITY_TIMEOUT_S + ~PROCESS_KILL_GRACE_S, NOT ~3600s.
+    # Generous ceiling for CI jitter, far below the hang it replaces.
+    assert elapsed < 2.0
 
 
 @pytest.mark.anyio
@@ -878,7 +964,7 @@ async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
     stalls = [
         e for e in log.events
         if e["type"] == "error"
-        and e["payload"].get("category") == "config"
+        and e["payload"].get("category") == "stalled"
         and e["payload"].get("kind") == "stalled"
     ]
     assert stalls == []                            # no false config/stalled teardown
