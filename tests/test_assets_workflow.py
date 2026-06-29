@@ -998,3 +998,19 @@ def test_task_lead_escalates_coder_tier_for_single_task_plan(tmp_path: Path) -> 
         workflow_dir=bundled_workflow_dir("imp"))
     assert 'subagent_name="coder", tier="medium"' in multi
     assert 'subagent_name="coder", tier="high"' not in multi
+
+
+def test_imp_gate_steps_pass_tier_arg() -> None:
+    from imp.assets import bundled_workflow_dir
+    steps = _steps(load_workflow(bundled_workflow_dir("imp")))
+    assert steps["verify"].command == "./scripts/run-verify.sh fast"
+    assert steps["sweep-verify"].command == "./scripts/run-verify.sh fast"
+    assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
+
+
+def test_imp_flat_gate_steps_pass_tier_arg() -> None:
+    from imp.assets import bundled_workflow_dir
+    steps = _steps(load_workflow(bundled_workflow_dir("imp-flat")))
+    assert steps["verify"].command == "./scripts/run-verify.sh fast"
+    assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
+    assert "sweep-verify" not in steps   # imp-flat has no sweep-verify gate
