@@ -66,3 +66,24 @@ class LayoutMismatch(LoadError):
             f"layout, or hand-migrate {change_dir}; its events and transcripts "
             f"are accessible via `imp log {change_dir.name}`."
         )
+
+
+class StateDecodeError(LoadError):
+    """Raised when `State.load` cannot parse `state.json`."""
+
+    def __init__(self, *, live: Path, sidecar: Path | None, reason: str) -> None:
+        self.live = live
+        self.sidecar = sidecar
+        self.reason = reason
+        if sidecar is not None:
+            evidence = f"  preserved corrupt bytes at: {sidecar}"
+        else:
+            evidence = (
+                "  corrupt bytes could NOT be preserved "
+                "(sidecar write failed)"
+            )
+        super().__init__(
+            f"could not parse {live}: {reason}\n{evidence}",
+            hint="restore a good state.json from backup, or "
+                 "abandon-and-restart this change.",
+        )

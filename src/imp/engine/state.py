@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 import filelock
 
+from imp.engine.errors import StateDecodeError
+
 Status = Literal[
     "new", "paused", "merge_blocked", "completed", "saved", "abandoned"
 ]
@@ -34,6 +36,17 @@ Status = Literal[
 # status (now `new`); `errored` was a derived crash label that no longer persists
 # (a crash is resumable → `paused`).
 _LEGACY_STATUS = {"running": "new", "errored": "paused"}
+
+
+def _write_corrupt_sidecar(state_dir: Path, raw: bytes) -> Path | None:
+    """Best-effort preserve corrupt bytes beside state.json; None if the write fails."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    sidecar = state_dir / f"state.json.corrupt-{stamp}-{os.getpid()}"
+    try:
+        sidecar.write_bytes(raw)
+        return sidecar
+    except OSError:
+        return None
 
 
 @dataclass
@@ -84,7 +97,14 @@ class State:
     @classmethod
     def load(cls, state_dir: Path) -> State:
         from imp.providers.config import ProviderModel  # local: avoid import cycle
-        data = json.loads((state_dir / "state.json").read_text())
+        state_path = state_dir / "state.json"
+        raw = state_path.read_bytes()
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            sidecar = _write_corrupt_sidecar(state_dir, raw)
+            raise StateDecodeError(
+                live=state_path, sidecar=sidecar, reason=str(e)) from e
         cur = data.pop("current_step", None)
         raw_rt = data.pop("resolved_tiers", None)
         # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`
