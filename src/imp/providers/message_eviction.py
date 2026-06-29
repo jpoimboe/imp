@@ -3,8 +3,10 @@
 
 anthropic and openai both re-send their own list[Message] each turn, so they
 share this decode/re-encode adapter over the provider-neutral core in
-history_compaction. The subprocess providers (claude_code, codex) rewrite their
-own resume artifacts instead and do not use this module.
+history_compaction. claude_code also reuses this module's evicted_result_ids
+(to compute the set over its full message history) and apply_eviction (for its
+streamed delta tail), while rewriting its session-store resume artifact
+separately; codex rewrites its rollout artifact and does not use this module.
 
 evicted_result_ids decodes a list[Message] into neutral HistoryRecords (turn
 index increments per assistant message; a call and its result share that turn)
