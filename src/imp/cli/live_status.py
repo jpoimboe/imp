@@ -11,6 +11,7 @@ callback `(frame: int, elapsed: float) -> list[str] | None` that renders the
 footer rows (top→bottom). compose returning None means "nothing to show"."""
 from __future__ import annotations
 
+import atexit
 import contextlib
 import shutil
 import time
@@ -24,6 +25,8 @@ _UP = "\x1b[1A"         # cursor up one row
 _DIM = "\x1b[2m"        # SGR 2 (dim)
 _RESET_SGR = "\x1b[0m"  # SGR 0 (reset all attributes)
 _ACK_MAX_WIDTH = 120    # clip the transient ack line so it never wraps
+_HIDE = "\x1b[?25l"     # DECTCEM: hide cursor
+_SHOW = "\x1b[?25h"     # DECTCEM: show cursor
 
 
 def term_width() -> int:
@@ -42,6 +45,9 @@ class LiveStatus:
     def __init__(self, stream: Any, *, now: Callable[[], float] = time.monotonic) -> None:
         self._stream = stream
         self._enabled = bool(getattr(stream, "isatty", lambda: False)())
+        self._cursor_hidden = False
+        if self._enabled:
+            atexit.register(self._show_cursor)
         self._now = now
         self._compose: Callable[[int, float], list[str] | None] | None = None
         self._session_start: float | None = None
@@ -124,12 +130,24 @@ class LiveStatus:
         # onto it — not one row too high onto committed scroll-back. On a fresh status
         # (_erase was a no-op) draw in place, identical to the single-line path.
         lead = "\n" if was_visible else ""
+        self._hide_cursor()
         self._stream.write(f"{lead}{_ERASE}{_DIM}{text}{_RESET_SGR}")
         self._stream.flush()
         self._visible = True
         self._rows = 1
 
     # -- internals ------------------------------------------------------------
+    def _hide_cursor(self) -> None:
+        if self._enabled and not self._cursor_hidden:
+            self._stream.write(_HIDE)
+            self._cursor_hidden = True
+
+    def _show_cursor(self) -> None:
+        if self._cursor_hidden:
+            self._stream.write(_SHOW)
+            self._stream.flush()
+            self._cursor_hidden = False
+
     def _draw(self) -> None:
         if not self._enabled or self._compose is None or self._suspended:
             return
@@ -149,6 +167,7 @@ class LiveStatus:
             self._visible = False
             self._prev_width = None
         if self._visible and self._rows == len(rows):
+            self._hide_cursor()
             self._stream.write("\r")
             if self._rows > 1:
                 self._stream.write(f"\x1b[{self._rows - 1}A")
@@ -156,6 +175,7 @@ class LiveStatus:
         else:
             if self._visible:
                 self._erase()
+            self._hide_cursor()
             self._stream.write("\n" + "\n".join(_ERASE + r for r in rows))
         self._stream.flush()
         self._visible = True
@@ -173,6 +193,7 @@ class LiveStatus:
             self._stream.write("\x1b[K")
             if i < self._rows - 1:
                 self._stream.write("\n")
+        self._show_cursor()
         self._stream.flush()
         self._rows = 0
 
@@ -183,6 +204,7 @@ class LiveStatus:
             self._stream.write("\r")
             for _ in range(self._rows):
                 self._stream.write("\x1b[K" + _UP)
+            self._show_cursor()
             self._stream.flush()
         self._visible = False
         self._prev_width = None
