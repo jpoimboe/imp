@@ -70,14 +70,14 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/change/` (gitignored) and are committed to a per-change `refs/imp/journal-wip/<id>` ref as they're written. The final merge is lock-protected; at completion the change is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each change's events and artifacts survive even after the worktree is pruned (the `journal-wip` ref persists the artifacts; the archive persists the events).
+All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/change/` (gitignored); the engine journals them in-process to a per-change `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the change is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each change's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events).
 
 ```mermaid
 flowchart LR
   WT["worktree.py"] --> ADD["add -b imp/&lt;id&gt;"]
   WT --> MERGE["merge-to-base<br/>(RepoGitLock)"]
   WT --> RM["remove worktree<br/>(on completion)"]
-  WT --> WIP[("refs/imp/journal-wip/&lt;id&gt;<br/>spec · plan artifacts")]
+  WT --> WIP[("refs/imp/artifacts/&lt;id&gt;<br/>spec · plan artifacts")]
   RM -. "on completion" .-> ARC[("archive/__init__.py<br/>.imp/archive (blobs · record · index)<br/>events.jsonl")]
   ADD --> REPO[("git repo")]
   MERGE --> REPO
@@ -109,7 +109,7 @@ flowchart LR
 | Providers | `providers/*.py`, `providers/resolve.py` | `resolve_run()` maps tiers→(provider, model) once per run; each provider implements the `AgentRunner` protocol. |
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
-| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, per-change `journal-wip` artifact ref; at completion the change is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
+| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-change `refs/imp/artifacts/<id>` artifact ref; at completion the change is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
 | Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
@@ -148,7 +148,7 @@ Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedbac
 
 ### Phase ① spec
 
-Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the change → write the spec under `.imp/change/artifacts/spec/` and commit it to the change's journal-wip ref, verify it committed, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
+Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the change → write the spec under `.imp/change/artifacts/spec/` (the engine journals it to the change's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
 
 ```mermaid
 flowchart TD
@@ -268,7 +268,7 @@ flowchart TD
 
 ### Data files
 
-All four live under `.imp/change/` (gitignored); spec/plan artifacts are committed to the change's `journal-wip` ref (see *Zoom 4 — worktree & git*).
+All four live under `.imp/change/` (gitignored); spec/plan artifacts are journaled by the engine to the change's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
 
 | File | Written by | Read by |
 |---|---|---|
