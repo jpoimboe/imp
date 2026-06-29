@@ -15,6 +15,7 @@ from imp.remote.session.protocol import (
     CONTROL_DETACH,
     CONTROL_DISCARD,
     CONTROL_INTERRUPT,
+    CONTROL_INTERRUPT_LEAVE,
     CONTROL_SAVE,
 )
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
@@ -337,6 +338,8 @@ class SessionServer:
             return
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c")
+        elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
+            await self._coordinator.signal_pause(reason="ctrl-d")
         elif action == CONTROL_DETACH:
             await self._socket.detach_all()
         elif action == CONTROL_ABANDON:

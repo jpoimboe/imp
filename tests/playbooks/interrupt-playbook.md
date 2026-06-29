@@ -16,12 +16,16 @@ description: Fire Ctrl-C / Ctrl-D at imp across agent states and surfaces, judgi
 > while thinking — it never pauses). Work in a throwaway standalone `git clone` and
 > abandon everything at the end.
 >
-> This is the acceptance test for the **esc-and-clean-interrupt** feature
-> (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`); the TUI mode also covers the `--tui`
-> interrupt bindings from **tui-run-viewer** (`imp/specs/2026-06-11-tui-run-viewer.md`). Both
-> are **on `master`**. The "expected" behavior below is those features' target. If you somehow
-> run an older build that predates them, the pause-reason / clean-classification (and
-> `--tui`) checks are *expected* to fail — record them as to-dos, not surprises.
+> This is the acceptance test for imp's **uniform Ctrl-C / Ctrl-D interrupt and resume model**,
+> built atop the earlier **esc-and-clean-interrupt** and **tui-run-viewer** features (the TUI
+> mode covers the `--tui` interrupt bindings from the latter). The **"expected" behavior below
+> is the uniform model's target**, which **supersedes** esc-and-clean-interrupt's original
+> "materialized Ctrl-C pauses and exits (rc 130)" disposition: Ctrl-C now never exits — it drops
+> to a resteer/chat prompt and stays attached — and **Ctrl-D** is the uniform leave key, with a
+> persisted `resume_target` deciding where `imp resume` lands. If you run an older build that
+> predates the uniform model, the Ctrl-C-stays-attached, Ctrl-D-leave, `interrupt_reason ==
+> "ctrl-d"`, and resume-target checks are *expected* to fail — record them as to-dos, not
+> surprises.
 >
 > **Scope: one provider per run (default `claude_code`).** Run this playbook against a single
 > provider — `claude_code` unless the operator names another (`anthropic`, `openai`, or
@@ -82,10 +86,16 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 >   `send_signal`. Caveat: impty can drop the odd keystroke — re-send once, record only if it
 >   persists.
 
+> **Ctrl-D mid-run key delivery (both surfaces).** Unlike mid-run Ctrl-C, which needs
+> `send_signal(2)` in CLI mode for deterministic delivery, mid-run Ctrl-D does **not** need
+> the out-of-band signal path. In CLI mode a dedicated cbreak `/dev/tty` reader reads the `\x04`
+> byte directly (bypassing the cooked-mode line discipline); in TUI mode the app already owns
+> the tty in raw mode. Use `send("\x04", wait=False)` for mid-run Ctrl-D on **both** surfaces.
+
 | Trigger | `send` data | Path through imp |
 |---------|-------------|------------------|
-| **Ctrl-C** | `"\x03"` | **At a prompt** it is *intercepted and never raises* (`src/imp/cli/prompt.py`): a non-empty buffer is cleared in place, an empty buffer prints `press ctrl-d to exit` once per session — it does **not** pause. **Mid-run** a real SIGINT (CLI/cooked mode) → `anyio.open_signal_receiver` → `InterruptCoordinator.signal_pause("ctrl-c")`. In the **phase-0 chat** this pauses the turn and returns to the reply prompt; on a **materialized** Change it pauses the run and exits (rc 130, resumable). In TUI mode the app's key binding drives the same coordinator. |
-| **Ctrl-D** | `"\x04"` | EOF at a prompt → **leave**. **Phase-0** (non-materialized) draft: at the opening prompt with no exchange → `imp: cancelled` (no Change); after an exchange → `imp: saved '<id>' to your Backlog` (`imp new`) / `conversation saved` (`imp chat`), resumable. **On a materialized Change → pauses it** (rc 130, resumable via `imp resume`), *not* moved to the Backlog. (Only meaningful at a prompt; CLI mode.) |
+| **Ctrl-C** | `"\x03"` | **At a prompt** it is *intercepted and never raises* (`src/imp/cli/prompt.py`): a non-empty buffer is cleared in place, an empty buffer prints `press ctrl-d to pause & exit` once per session — it does **not** pause. **Mid-run** a real SIGINT (CLI/cooked mode) → `anyio.open_signal_receiver` → `InterruptCoordinator.signal_pause("ctrl-c")`. In **both** the **phase-0 chat** and a **materialized** Change it pauses the agent and stays **ATTACHED** (`alive=True`, does not exit) at an interactive prompt — steer (reply resumes the agent) or leave (a subsequent Ctrl-D detaches, rc 130, paused); the Ctrl-C **disposition** is identical across regimes, but the landing prompt **text** differs: **phase-0** → its chat `> type your reply` prompt; **materialized** → the resteer hold prompt `paused — type a message to redirect, or detach to leave it paused`. In TUI mode the app's key binding drives the same coordinator. |
+| **Ctrl-D** | `"\x04"` | **At a prompt** → **leave**. **Phase-0** (non-materialized) draft: at the opening prompt with no exchange → `imp: cancelled` (no Change); after an exchange → `imp: saved '<id>' to your Backlog` (`imp new`) / `conversation saved` (`imp chat`), resumable. **On a materialized Change at a prompt** (e.g. the resteer hold prompt after a Ctrl-C) → detaches (rc 130, resumable via `imp resume`); resume_target = "prompt" — `imp resume` lands back at the resteer hold prompt. **Mid-run** (both surfaces, delivered as `\x04` keystroke — see fidelity note above) → **suspend & detach**: tears down the in-flight request/tool/subagent (orphan check clean), emits `workflow_paused` with `interrupt_reason == "ctrl-d"`, rc 130, Change left paused; resume_target = "agent" — `imp resume` continues the agent (transcript replays, no intervening prompt). |
 
 > **ESC is a no-op.** A bare ESC byte (`"\x1b"`) never pauses imp: at a prompt prompt_toolkit
 > owns it (emacs meta-prefix / vi exit), and while an agent is thinking it is ignored. Do not
@@ -114,11 +124,19 @@ A correct imp does **all** of:
       your Backlog (resume with imp resume <id>)`; `imp chat` + exchange → `imp: conversation
       saved — resume with imp resume <id>` (archived).
   - **A materialized Change** (real in-flight work — the workflow is executing):
-    - **Ctrl-C / Ctrl-D** pause the *run* and **exit** (`alive=False`, exit code 130), leaving
-      the Change **paused** and resumable via `imp resume <id>`. It is **not** moved to the
-      Backlog: `_maybe_apply_leave_disposition` defers because `change.materialized`, and
-      `_session_exit_code` returns 130 (`main.py`:433, 457). This is the original
-      esc-and-clean-interrupt target.
+    - **Ctrl-C** drops to the resteer hold prompt `paused — type a message to redirect, or
+      detach to leave it paused` (`alive=True`, **ATTACHED** — does **not** exit). The Ctrl-C
+      **disposition** now matches phase-0 — pause, stay attached, steer-or-leave, never exit on
+      one press — but the prompt text is regime-specific: phase-0 lands at its chat
+      `> type your reply` prompt; materialized lands here, at the resteer hold prompt.
+    - **Ctrl-D mid-run** suspends the agent and **detaches** (`alive=False`, exit code 130),
+      leaving the Change **paused** and resumable via `imp resume <id>` (resume_target =
+      "agent": transcript replays, no intervening prompt). It is **not** moved to the Backlog.
+      `workflow_paused` records `interrupt_reason == "ctrl-d"`. Delivered as `\x04` keystroke
+      on both surfaces — no `send_signal` needed.
+    - **Ctrl-D at the resteer hold prompt** (after a Ctrl-C pause) → detaches (rc 130, paused);
+      `imp resume` lands back at the resteer hold prompt (resume_target = "prompt",
+      `awaiting_user_input`).
   - The Change is resumable in every case; the exit code is not directly observable through
     impty — judge from `alive=False` + the final line. In **TUI mode** the alt-screen restores
     on the clean pause/leave: `regime` goes `screen` → `scroll`, and the final line lands in
@@ -144,14 +162,16 @@ A correct imp does **all** of:
 - **Speaks clearly to the user.** Judge the human-visible text with fresh eyes; an unclear,
   missing, or misleading message **is a bug** even when the exit code is right.
 
-> **The interrupt outcome is regime-dependent (phase-0 chat vs materialized run).** In the
-> phase-0 front-door chat, a mid-run Ctrl-C pauses the turn and drops you back at the
-> interactive `> type your reply` prompt (`alive=True`) — steer (reply) or leave (Ctrl-D);
-> Ctrl-D's disposition is discard / Backlog / archive by leave-mode × exchange. Once the
-> Change has **materialized**, Ctrl-C / Ctrl-D pause the run and exit (rc 130), leaving it
-> **paused** and resumable via `imp resume <id>` — *not* moved to the Backlog (the original
-> esc-and-clean-interrupt behavior). If any provider/point does something else, record
-> exactly what it did.
+> **The Ctrl-C disposition is now uniform across regimes.** In both the phase-0 front-door chat
+> and a materialized run, a mid-run Ctrl-C pauses the agent, stays **ATTACHED** (`alive=True`),
+> and drops to an interactive prompt — steer (reply resumes) or leave (Ctrl-D detaches, rc 130,
+> paused) — and never exits on a single press. The **prompt text differs by regime**: phase-0
+> lands at its chat `> type your reply` prompt; a materialized Change lands at the resteer hold
+> prompt `paused — type a message to redirect, or detach to leave it paused`. Ctrl-D's phase-0
+> disposition is discard / Backlog / archive by leave-mode × exchange; on a materialized Change,
+> Ctrl-D at the hold prompt detaches (rc 130, paused, resume_target = "prompt"). Mid-run Ctrl-D
+> (either regime) suspends the agent and detaches immediately (rc 130, paused, resume_target =
+> "agent"). If any provider/point does something else, record exactly what it did.
 
 ---
 
@@ -351,14 +371,20 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
      Ctrl-C — the app's raw-mode bindings make keystrokes faithful.
 2. `wait()` then `view()` + `view(full=True)`.
 3. Assert the bar from §0, by regime + trigger:
-   - **Phase-0 mid-run Ctrl-C:** imp prints `⏸ paused (ctrl-c)` and returns to its interactive
-     `> type your reply` prompt (`alive=True`) — it does *not* exit. One SIGINT suffices (a
-     second within ~1s is suppressed). To then **leave**, send Ctrl-D and confirm the clean
-     line (`imp: cancelled` / `saved … to Backlog` / `conversation saved`), `alive=False`.
-   - **Materialized-run Ctrl-C / Ctrl-D:** `alive=False`, exit 130, `⏸ paused (ctrl-c|…)`, the
-     Change left **paused** and resumable via `imp resume <id>` — *not* in the Backlog.
+   - **Mid-run Ctrl-C (phase-0 or materialized — disposition identical, prompt differs):** imp
+     prints `⏸ paused (ctrl-c)`, stays **ATTACHED** (`alive=True`) — it does **not** exit. One
+     SIGINT suffices (a second within ~1s is suppressed). The landing prompt is regime-specific:
+     **phase-0** → its chat `> type your reply` prompt; **materialized** → the resteer hold
+     prompt `paused — type a message to redirect, or detach to leave it paused`. To then
+     **leave**, send Ctrl-D and confirm rc 130, `alive=False`, Change left paused and resumable.
+   - **Mid-run Ctrl-D (both surfaces, `\x04` keystroke):** `alive=False`, rc 130, `⏸ paused
+     (ctrl-d)`, Change left **paused**; `workflow_paused` `interrupt_reason == "ctrl-d"`;
+     `imp resume` continues the agent (resume_target = "agent", no intervening prompt). Not in
+     Backlog.
+   - **Ctrl-D at the resteer hold prompt** (after a Ctrl-C): `alive=False`, rc 130, Change
+     paused; `imp resume` lands back at the resteer hold prompt (resume_target = "prompt").
    - **Ctrl-C at a prompt (any regime):** neutered — clears a typed line, else `press ctrl-d
-     to exit`; `alive=True`, no pause.
+     to pause & exit`; `alive=True`, no pause.
    - In all cases: no `unclassified provider error` / `Cannot write to terminated process` /
      `paused: unknown`. **TUI mode:** also confirm `regime` went `screen` → `scroll` once the
      screen restored on the leave.
@@ -388,8 +414,15 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
 
 1. `start` `imp resume <id>` (§5 — add `--tui` in TUI mode). 2. Confirm it continues the *same*
 Change (matching `#<handle>` / `· resuming` header), reaches a prompt or runs forward — not
-`nothing to resume`, not a restart. 3. Note message clarity. (The resume *banner* legitimately
-shows the `#<handle>` display name; only the *pause* line in §5.6 must carry the change **id**.)
+`nothing to resume`, not a restart. 3. Note message clarity. 4. Assert the **resume_target**:
+   - **After Ctrl-C → resteer hold prompt → Ctrl-D:** `imp resume <id>` lands back at the
+     resteer hold prompt (`awaiting_user_input`) — **not** mid-agent. Expect the hold prompt to
+     appear before any new agent output.
+   - **After Ctrl-D mid-run:** `imp resume <id>` **continues the agent** (transcript replays,
+     no intervening prompt) — no resteer hold prompt is shown; the agent picks up where it left
+     off.
+(The resume *banner* legitimately shows the `#<handle>` display name; only the *pause* line in
+§5.6 must carry the change **id**.)
 
 ---
 
@@ -402,11 +435,11 @@ everything else is shared. Keep a tally (point × trigger → outcome) for the r
 
 | # | Point (imp state) | How to reach it | Trigger(s) | Expected (mode-aware) |
 |---|-------------------|-----------------|-----------|----------|
-| **A** | Opening prompt (pre-Change) | **CLI:** `imp new`; `wait()` until parked at the first prompt. **TUI:** `imp new --tui`; the opening intent is the in-app bottom buffer | **Ctrl-C**, then in a fresh run **Ctrl-D** (CLI); **Ctrl-C** (TUI) | **Ctrl-C is neutered at the prompt** — clears a typed line, else prints `press ctrl-d to exit` once; stays `alive=True`, does *not* pause. **Ctrl-D** at the empty opening prompt (no Change exists yet) → `imp: cancelled`, clean exit, no Change created. **No `interrupted` event** — nothing was running to classify. |
-| **B** | Model thinking / streaming (phase-0 front-door) | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C** | Phase-0: `⏸ paused (ctrl-c)`, then back at the interactive `> type your reply` prompt (`alive=True`) — steer, or Ctrl-D to leave. **CLI:** Ctrl-C via `send_signal(2)`. **TUI:** keystroke. In-flight model request torn down (orphan check). |
-| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C** | `⏸ paused (ctrl-c)` (phase-0 → reply prompt, `alive=True`; materialized → exit rc 130, paused). **The tool subprocess is killed** — orphan check must be clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
-| **D** | In-turn prompt (agent asks *you* mid-turn, or the reply prompt after a Ctrl-C pause) | Use an interactive step where the agent prompts you back, or the reply prompt left by a point-B/C pause | **Ctrl-C**, **ESC** | **Ctrl-C is neutered at this prompt too** — clears a typed line, else `press ctrl-d to exit`; `alive=True`, a normal reply still submits, Ctrl-D leaves. **ESC is a no-op** in both modes (prompt_toolkit owns it; `alive=True`). |
-| **E** | Subagent running (nested, materialized) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C** | Materialized regime: pauses the run and **exits** (`⏸ paused (ctrl-c)`, `alive=False`, rc 130), unwinds the subagent (SubagentSuspended path), Change left **paused** and resumable via `imp resume` (*not* Backlog). Orphan check clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
+| **A** | Opening prompt (pre-Change) | **CLI:** `imp new`; `wait()` until parked at the first prompt. **TUI:** `imp new --tui`; the opening intent is the in-app bottom buffer | **Ctrl-C**, then in a fresh run **Ctrl-D** (CLI); **Ctrl-C** (TUI) | **Ctrl-C is neutered at the prompt** — clears a typed line, else prints `press ctrl-d to pause & exit` once; stays `alive=True`, does *not* pause. **Ctrl-D** at the empty opening prompt (no Change exists yet) → `imp: cancelled`, clean exit, no Change created. **No `interrupted` event** — nothing was running to classify. |
+| **B** | Model thinking / streaming (phase-0 front-door) | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** `⏸ paused (ctrl-c)`, stays `alive=True` — drops to its chat `> type your reply` prompt (phase-0 regime); steer (reply), or Ctrl-D to leave. **CLI:** Ctrl-C via `send_signal(2)`. **TUI:** keystroke. **Ctrl-D (mid-run):** `\x04` keystroke both surfaces (`send("\x04", wait=False)`, no `send_signal`), rc 130, `⏸ paused (ctrl-d)`, `workflow_paused` `interrupt_reason == "ctrl-d"`, resume-to-agent. In-flight model request torn down (orphan check clean). |
+| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** `⏸ paused (ctrl-c)`, stays `alive=True`, disposition identical across phase-0 and materialized (pause, attached, steer-or-leave, never exit) — landing prompt differs: phase-0 → `> type your reply`; materialized → resteer hold prompt `paused — type a message to redirect, or detach to leave it paused`. **Ctrl-D (mid-run):** `\x04` keystroke both surfaces (`send("\x04", wait=False)`, no `send_signal`), rc 130, `⏸ paused (ctrl-d)`, suspend & detach, resume-to-agent. **The tool subprocess is killed** — orphan check must be clean. CLI Ctrl-C via `send_signal(2)`; TUI Ctrl-C via keystroke. |
+| **D** | In-turn prompt (agent asks *you* mid-turn, or the reply prompt after a Ctrl-C pause) | Use an interactive step where the agent prompts you back, or the reply prompt left by a point-B/C pause | **Ctrl-C**, **ESC** | **Ctrl-C is neutered at this prompt too** — clears a typed line, else `press ctrl-d to pause & exit`; `alive=True`, a normal reply still submits, Ctrl-D leaves. **ESC is a no-op** in both modes (prompt_toolkit owns it; `alive=True`). |
+| **E** | Subagent running (nested, materialized) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** drops to the resteer hold prompt `paused — type a message to redirect, or detach to leave it paused` (`⏸ paused (ctrl-c)`, `alive=True`), unwinds the subagent (SubagentSuspended path), Change **not** exited. **Ctrl-D (mid-run):** `\x04` keystroke both surfaces (`send("\x04", wait=False)`, no `send_signal`), rc 130, `⏸ paused (ctrl-d)`, suspend & detach, subagent torn down (orphan check clean), resume-to-agent. CLI Ctrl-C via `send_signal(2)`; TUI Ctrl-C via keystroke. |
 
 After the matrix: run `RESUME-AND-VERIFY` on the last paused change. Then deliver
 `send_signal(sig=15)` (SIGTERM) on a fresh `imp new` run mid-execution and verify
@@ -474,8 +507,9 @@ per point, headline defects (or "none"), report path.
 
 | Interrupt | `send` | Out-of-band | What fires |
 |-----------|--------|-------------|------------|
-| **Ctrl-C** (at prompt) | `"\x03"` | — | intercepted — clears the line / `press ctrl-d to exit` hint; never pauses |
-| **Ctrl-C** (mid-run, CLI) | unreliable | `send_signal(2)` | `SIGINT` → coordinator |
-| **Ctrl-C** (mid-run, TUI) | `"\x03"` | — | app binding → coordinator |
-| **Ctrl-D** (at prompt) | `"\x04"` | — | `EOFError` → phase-0 leave (`cancelled` / Backlog / archive); **materialized → pause** (rc 130, resumable) |
+| **Ctrl-C** (at prompt) | `"\x03"` | — | intercepted — clears the line / `press ctrl-d to pause & exit` hint; never pauses |
+| **Ctrl-C** (mid-run, CLI) | unreliable | `send_signal(2)` | `SIGINT` → coordinator → pause, stay attached (`alive=True`), never exit; landing prompt: phase-0 `> type your reply` / materialized resteer hold prompt |
+| **Ctrl-C** (mid-run, TUI) | `"\x03"` | — | app binding → coordinator → pause, stay attached (`alive=True`), never exit; landing prompt: phase-0 `> type your reply` / materialized resteer hold prompt |
+| **Ctrl-D** (at prompt / resteer hold) | `"\x04"` | — | `EOFError` → phase-0 leave (`cancelled` / Backlog / archive); **materialized at resteer hold → detach** (rc 130, resume-to-prompt) |
+| **Ctrl-D** (mid-run, both surfaces) | `"\x04"` | — | cbreak `/dev/tty` reader reads byte directly — no `send_signal` needed; suspend & detach (rc 130, `interrupt_reason == "ctrl-d"`, resume-to-agent) |
 | **SIGTERM** | — | `send_signal(15)` | coordinator |

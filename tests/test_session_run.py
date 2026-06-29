@@ -691,3 +691,21 @@ async def test_run_session_client_threads_autonomous_into_attach(
         change, driver=_Driver(), coord=coord, solicit=_solicit, autonomous=True)
     assert rc == 0
     assert captured["autonomous"] is True
+
+
+def test_should_run_ctrl_d_reader_requires_interactive_tty(monkeypatch) -> None:
+    from imp.cli.session_run import _should_run_ctrl_d_reader
+
+    class _FakeStdin:
+        def __init__(self, tty: bool) -> None:
+            self._tty = tty
+
+        def isatty(self) -> bool:
+            return self._tty
+
+    monkeypatch.setattr("sys.stdin", _FakeStdin(True))
+    assert _should_run_ctrl_d_reader(non_interactive=False) is True
+    assert _should_run_ctrl_d_reader(non_interactive=True) is False
+
+    monkeypatch.setattr("sys.stdin", _FakeStdin(False))
+    assert _should_run_ctrl_d_reader(non_interactive=False) is False

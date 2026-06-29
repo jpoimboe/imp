@@ -14,6 +14,7 @@ registration, not by sending a signal."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 
@@ -275,3 +276,100 @@ def test_dispatch_sigterm_fires_leave_not_pause() -> None:
     assert exited["v"] is False          # NOT the old pause/exit path
     assert coord.should_pause is False   # the client does not decide the run's fate
     assert coord.pause_reason is None
+
+
+def _can_pty() -> bool:
+    try:
+        import pty
+        m, s = pty.openpty()
+        os.close(m)
+        os.close(s)
+        return True
+    except Exception:
+        return False
+
+
+def _patch_dev_tty(monkeypatch, slave_fd: int) -> None:
+    real_open = os.open
+
+    def fake_open(path: str, flags: int, mode: int = 0o777) -> int:
+        if path == "/dev/tty":
+            return os.dup(slave_fd)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", fake_open)
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.anyio
+async def test_ctrl_d_byte_routes_to_leave_path_not_signal_pause(monkeypatch) -> None:
+    import pty
+
+    import anyio
+
+    from imp.cli.signals import CtrlDReader
+    master, slave = pty.openpty()
+    try:
+        _patch_dev_tty(monkeypatch, slave)
+        coord = InterruptCoordinator()
+        coord.escalation_event = anyio.Event()
+        runner_called = {"n": 0}
+
+        async def runner_interrupt() -> None:
+            runner_called["n"] += 1
+
+        coord.attach_runner(runner_interrupt)  # the signal_pause/ctrl-c forward
+        reader = CtrlDReader(coord)
+        async with anyio.create_task_group() as tg:
+            await tg.start(reader.run)
+            os.write(master, b"\x04")
+            with anyio.fail_after(5):
+                while not coord.should_pause:
+                    await anyio.sleep(0.02)
+            tg.cancel_scope.cancel()
+        assert coord.should_pause is True
+        assert coord.pause_reason == "ctrl-d"
+        assert coord.escalation_event.is_set()   # leave path taken
+        assert runner_called["n"] == 0           # NOT signal_pause
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.anyio
+async def test_tty_quiesced_parks_reader_then_rearms(monkeypatch) -> None:
+    import pty
+
+    import anyio
+
+    from imp.cli.signals import CtrlDReader
+    master, slave = pty.openpty()
+    try:
+        _patch_dev_tty(monkeypatch, slave)
+        coord = InterruptCoordinator()
+        coord.escalation_event = anyio.Event()
+        reader = CtrlDReader(coord)
+        async with anyio.create_task_group() as tg:
+            await tg.start(reader.run)
+            # While quiesced the reader is parked (termios restored, not reading),
+            # so it acts on nothing. We do NOT write \x04 here: under the restored
+            # canonical mode \x04 is VEOF and the line discipline would consume it
+            # as end-of-input rather than buffer it as a literal byte. Parking is
+            # proven by should_pause staying False across the sleep.
+            async with coord.tty_quiesced():
+                await anyio.sleep(0.2)
+                assert coord.should_pause is False
+            # Re-armed to cbreak on exit: a mid-run \x04 is now an ordinary raw
+            # byte the reader reads and routes to the leave path.
+            os.write(master, b"\x04")
+            with anyio.fail_after(5):
+                while not coord.should_pause:
+                    await anyio.sleep(0.02)
+            assert coord.pause_reason == "ctrl-d"
+            tg.cancel_scope.cancel()
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)

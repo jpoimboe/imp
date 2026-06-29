@@ -124,6 +124,9 @@ class TuiApp:
     async def interrupt_run(self) -> None:
         await self._coord.signal_pause(reason="ctrl-c")
 
+    async def leave_run(self) -> None:
+        await self._coord.leave_mid_run(reason="ctrl-d")
+
     # -- lifecycle / exit transcript -----------------------------------------
     def finish(self) -> None:
         pass
@@ -184,6 +187,10 @@ class TuiApp:
         @kb.add("c-c", filter=not_prompt)
         async def _(event: Any) -> None:
             await self.interrupt_run()
+
+        @kb.add("c-d", filter=not_prompt)
+        async def _(event: Any) -> None:
+            await self.leave_run()
 
         return kb
 

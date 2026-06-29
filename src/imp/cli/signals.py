@@ -30,8 +30,11 @@ import contextlib
 import os
 import signal
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
+
+from anyio import TASK_STATUS_IGNORED
+from anyio.abc import TaskStatus
 
 from imp.engine.change import Change
 from imp.engine.state import State
@@ -39,6 +42,7 @@ from imp.engine.state import State
 _suppress = contextlib.suppress
 
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
+_READ_TIMEOUT_S = 0.05  # cbreak select() poll window: lets the loop see quiesce state
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
@@ -125,6 +129,8 @@ class InterruptCoordinator:
 
     def __init__(self) -> None:
         self._runner_interrupt: Any = None
+        self._leave_runner_interrupt: Any = None
+        self._ctrl_d_reader: Any = None  # CtrlDReader | None — CLI cbreak /dev/tty reader
         self._should_pause = False
         self.pause_reason: str | None = None
         self._loop: Any = None          # event loop owning the signal handlers
@@ -310,6 +316,29 @@ class InterruptCoordinator:
     def detach_runner(self) -> None:
         self._runner_interrupt = None
 
+    def attach_leave_runner(self, interrupt_fn: Any) -> None:
+        """Attach the ctrl-d leave-interrupt forward, distinct from the Ctrl-C runner."""
+        self._leave_runner_interrupt = interrupt_fn
+
+    def detach_leave_runner(self) -> None:
+        self._leave_runner_interrupt = None
+
+    def attach_ctrl_d_reader(self, reader: Any) -> None:
+        self._ctrl_d_reader = reader
+
+    def detach_ctrl_d_reader(self) -> None:
+        self._ctrl_d_reader = None
+
+    @contextlib.asynccontextmanager
+    async def tty_quiesced(self) -> AsyncIterator[None]:
+        """Release the cbreak'd /dev/tty for a prompt; no-op when no reader is attached."""
+        reader = self._ctrl_d_reader
+        if reader is None:
+            yield
+            return
+        async with reader.tty_quiesced():
+            yield
+
     def set_escalation_hook(self, fn: Any) -> None:
         self._trigger_escalation = fn
 
@@ -356,6 +385,16 @@ class InterruptCoordinator:
         self._should_pause = True
         if fn is not None:
             await fn()
+
+    async def leave_mid_run(self, *, reason: str = "ctrl-d") -> None:
+        """Ctrl-D mid-run suspend & leave: forward the leave-interrupt and take the leave path."""
+        fn = self._leave_runner_interrupt
+        if fn is not None:
+            await fn()
+        self.request_exit(reason)
+        evt = self.escalation_event
+        if evt is not None:
+            evt.set()
 
     def _install_loop_signal_handlers(self) -> None:
         """(Re)install the coordinator's loop signal handlers (SIGINT plus the
@@ -458,3 +497,132 @@ class InterruptCoordinator:
             self._loop = None
             self._sig_send = None
             send.close()
+
+
+class CtrlDReader:
+    """Single-byte cbreak /dev/tty reader: routes a mid-run Ctrl-D (\\x04) to the leave path."""
+
+    def __init__(self, coord: InterruptCoordinator) -> None:
+        self._coord = coord
+        self._fd: int | None = None
+        self._orig_attrs: Any = None
+        self._armed = False
+        self._quiesce_depth = 0
+        self._unquiesce_evt: Any = None   # anyio.Event | None — wakes parked reader
+        self._parked_evt: Any = None      # anyio.Event — reader -> quiescer ack
+
+    async def run(self, *, task_status: TaskStatus[None] = TASK_STATUS_IGNORED) -> None:
+        try:
+            import termios
+            import tty
+        except ImportError:
+            task_status.started()
+            return                          # Windows / no termios
+        try:
+            self._fd = os.open("/dev/tty", os.O_RDONLY | getattr(os, "O_NOCTTY", 0))
+        except OSError:
+            task_status.started()
+            return                          # no controlling tty
+        try:
+            try:
+                self._orig_attrs = termios.tcgetattr(self._fd)
+                tty.setcbreak(self._fd)
+            except termios.error:
+                task_status.started()
+                return                      # not a tty after all
+            import anyio
+            self._parked_evt = anyio.Event()
+            self._armed = True
+            self._coord.attach_ctrl_d_reader(self)
+            task_status.started()           # armed: prompts may now quiesce
+            while True:
+                if self._quiesce_depth > 0:
+                    if self._unquiesce_evt is None:
+                        self._unquiesce_evt = anyio.Event()
+                    self._parked_evt.set()
+                    await self._unquiesce_evt.wait()
+                    self._unquiesce_evt = None
+                    continue
+                byte = await anyio.to_thread.run_sync(
+                    self._read_one_byte, abandon_on_cancel=True)
+                if byte == b"\x04":
+                    await self._coord.leave_mid_run(reason="ctrl-d")
+                    return
+                # Any other byte (incl. b"" timeout / quiesce race) → keep watching.
+        finally:
+            self._armed = False
+            self._coord.detach_ctrl_d_reader()
+            if self._parked_evt is not None:
+                self._parked_evt.set()      # release any quiescer awaiting a park ack
+            if self._fd is not None and self._orig_attrs is not None:
+                try:
+                    import termios
+                except ImportError:
+                    pass
+                else:
+                    with contextlib.suppress(OSError, termios.error):
+                        termios.tcsetattr(
+                            self._fd, termios.TCSADRAIN, self._orig_attrs)
+            if self._fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(self._fd)
+                self._fd = None
+
+    def _read_one_byte(self) -> bytes:
+        """Blocking one-byte read with a short select timeout; b'' on timeout or non-fatal error."""
+        import select
+        fd = self._fd
+        if fd is None:
+            return b""
+        try:
+            ready, _, _ = select.select([fd], [], [], _READ_TIMEOUT_S)
+        except (OSError, ValueError):
+            return b""
+        if not ready:
+            return b""
+        if self._quiesce_depth > 0:
+            # A prompt began quiescing while this read was in flight: leave the
+            # byte in the tty buffer for prompt_toolkit instead of consuming it.
+            return b""
+        try:
+            return os.read(fd, 1)
+        except OSError:
+            return b""
+
+    @contextlib.asynccontextmanager
+    async def tty_quiesced(self) -> AsyncIterator[None]:
+        """Release termios for a prompt_toolkit prompt and re-arm cbreak on exit."""
+        if not self._armed or self._fd is None or self._orig_attrs is None:
+            yield
+            return
+        try:
+            import termios
+            import tty
+        except ImportError:
+            yield
+            return
+        self._quiesce_depth += 1
+        if self._quiesce_depth == 1:
+            # Wait until the reader has actually stopped reading /dev/tty BEFORE
+            # handing the terminal to prompt_toolkit — no shared-tty window. The
+            # reader's finally also sets _parked_evt, so a reader that exited
+            # releases us instead of deadlocking.
+            if self._parked_evt is not None:
+                await self._parked_evt.wait()
+            if self._fd is not None:
+                with contextlib.suppress(OSError, termios.error):
+                    termios.tcsetattr(
+                        self._fd, termios.TCSADRAIN, self._orig_attrs)
+        try:
+            yield
+        finally:
+            self._quiesce_depth -= 1
+            if self._quiesce_depth == 0:
+                if self._fd is not None:
+                    with contextlib.suppress(OSError, termios.error):
+                        tty.setcbreak(self._fd)
+                import anyio
+                self._parked_evt = anyio.Event()   # fresh ack for the next cycle
+                evt = self._unquiesce_evt
+                if evt is not None:
+                    evt.set()

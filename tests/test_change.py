@@ -373,7 +373,7 @@ def test_migrate_v1_to_v2(tmp_path: Path) -> None:
     meta_path.write_text(json.dumps(meta))
     loaded = Change.load(tmp_path, "mig1")
     migrated = json.loads(meta_path.read_text())
-    assert migrated["layout_version"] == 4
+    assert migrated["layout_version"] == 5
     assert "base_head" not in migrated
     assert migrated["orig_base_head"] == old_tip
     assert migrated["cur_base_head"] == old_tip      # backfill = merge-base(main, branch HEAD)
@@ -391,7 +391,7 @@ def test_migrate_v2_to_v3(tmp_path: Path) -> None:
     meta_path.write_text(json.dumps(meta))
     Change.load(tmp_path, "mig2")
     migrated = json.loads(meta_path.read_text())
-    assert migrated["layout_version"] == 4
+    assert migrated["layout_version"] == 5
 
 
 def test_migrate_v3_to_v4(tmp_path: Path) -> None:
@@ -404,7 +404,7 @@ def test_migrate_v3_to_v4(tmp_path: Path) -> None:
     meta_path.write_text(json.dumps(meta))
     Change.load(tmp_path, "mig3")
     migrated = json.loads(meta_path.read_text())
-    assert migrated["layout_version"] == 4
+    assert migrated["layout_version"] == 5
 
 
 def test_create_draft_persists_and_resolves_workflow_override(tmp_path: Path) -> None:

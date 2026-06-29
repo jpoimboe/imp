@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 4
+# LAYOUT_VERSION: 5
 [paths]
 change.json
 events.jsonl
@@ -31,6 +31,7 @@ reincarnations
 resolved_steps
 resolved_tiers
 resume_pending
+resume_target
 retry_feedback
 route_label
 status

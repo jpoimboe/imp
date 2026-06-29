@@ -60,6 +60,7 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
+    resume_target: str | None = None  # "agent"|"prompt"; absent/None ⇒ "agent".
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
     project_facts: dict[str, str] | None = None
@@ -137,6 +138,7 @@ class State:
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
+            "resume_target": self.resume_target,
             "resolved_tiers": (
                 {t: {"provider": pm.provider, "model": pm.model}
                  for t, pm in self.resolved_tiers.items()}

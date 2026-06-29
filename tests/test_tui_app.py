@@ -16,9 +16,13 @@ from tests._event_fixtures import SAMPLE, ev
 class _FakeCoord:
     def __init__(self) -> None:
         self.pauses: list[str] = []
+        self.leaves: list[str] = []
 
     async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
         self.pauses.append(reason)
+
+    async def leave_mid_run(self, *, reason: str = "ctrl-d") -> None:
+        self.leaves.append(reason)
 
 
 def _app() -> TuiApp:
@@ -100,6 +104,15 @@ async def test_interrupt_run_routes_ctrl_c_to_coordinator() -> None:
     assert coord.pauses == ["ctrl-c"]
 
 
+@pytest.mark.anyio
+async def test_leave_run_routes_ctrl_d_to_coordinator() -> None:
+    coord = _FakeCoord()
+    app = TuiApp(coord=coord, color=False, width=80)
+    await app.leave_run()
+    assert coord.leaves == ["ctrl-d"]
+    assert coord.pauses == []
+
+
 def test_build_app_registers_all_bindings() -> None:
     from prompt_toolkit.keys import Keys
 
@@ -107,7 +120,7 @@ def test_build_app_registers_all_bindings() -> None:
     app._build_app()
     bound = {k for b in app._app.key_bindings.bindings for k in b.keys}
     for key in (Keys.PageUp, Keys.PageDown, Keys.End, Keys.ControlO,
-                Keys.ControlC, Keys.ScrollUp, Keys.ScrollDown):
+                Keys.ControlC, Keys.ControlD, Keys.ScrollUp, Keys.ScrollDown):
         assert key in bound, key
     assert Keys.Escape not in bound          # ESC is no longer an interrupt gesture
     assert app._app.full_screen is True

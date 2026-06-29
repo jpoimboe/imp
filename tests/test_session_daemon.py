@@ -9,6 +9,7 @@ import pytest
 
 from imp.engine.change import Change
 from imp.engine.executor import RunResult
+from imp.engine.state import State
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
 from imp.remote.session.discover import session_socket_path
@@ -26,7 +27,7 @@ def anyio_backend() -> str:
 
 
 def _make_change(tmp_path: Path, change_id: str) -> Change:
-    return Change(
+    change = Change(
         id=change_id,
         title="T",
         base_branch="main",
@@ -34,6 +35,9 @@ def _make_change(tmp_path: Path, change_id: str) -> Change:
         project_root=tmp_path,
         change_dir=tmp_path / ".imp" / "change",
     )
+    State(id=change_id, step=None, step_attempt=0, status="paused").save(
+        change.state_dir)
+    return change
 
 
 async def _wait_for_socket(sock: str) -> None:
@@ -344,7 +348,6 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
             while not any(
                     e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("go left")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -451,7 +454,6 @@ async def test_seed_opening_is_forwarded_to_the_first_run_only(
             while not any(
                     e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("go")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1127,7 +1129,6 @@ async def test_script_blocked_pause_holds_and_surfaces_stderr(tmp_path: Path) ->
                 await anyio.sleep(0.02)
         prompts = [e for e in received if e.get("type") == "awaiting_user_input"]
         assert "integration blocked: worktree dirty" in prompts[0]["payload"]["prompt"]
-        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
         await client.send_input("go")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1412,7 +1413,6 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
         with anyio.fail_after(5):
             while not any(e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (user_chat_input_fn is awaiting)
         await client.send_input("redirect")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1459,7 +1459,6 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
         with anyio.fail_after(5):
             while not any(e.get("type") == "awaiting_user_input" for e in received):
                 await anyio.sleep(0.02)
-        await anyio.sleep(0.05)  # let the resume gate open (user_chat_input_fn is awaiting)
         await client.send_input("redirect")
         with anyio.fail_after(5):
             while "r" not in result:
@@ -1519,3 +1518,147 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
             change, run_fn=fake_run, hibernate=False, autonomous=True)
     assert result is RunResult.COMPLETED
     assert captured["autonomous"] is True
+
+
+@pytest.mark.anyio
+async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-dph")
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        await coordinator.signal_pause(reason="ctrl-c")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+
+    assert result is RunResult.PAUSED
+    assert State.load(change.state_dir).resume_target == "prompt"
+
+
+@pytest.mark.anyio
+async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-cda")
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        await coordinator.signal_pause(reason="ctrl-d")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+
+    assert result is RunResult.PAUSED
+    assert State.load(change.state_dir).resume_target == "agent"
+
+
+@pytest.mark.anyio
+async def test_resume_prompt_target_holds_before_running_agent(
+    tmp_path: Path,
+) -> None:
+    import imp.remote.session.daemon as daemon
+
+    change = _make_change(tmp_path, "2026-06-15-rpt")
+    st = State.load(change.state_dir)
+    st.resume_target = "prompt"
+    st.save(change.state_dir)
+    sock = str(session_socket_path(change.control_root, change.id))
+
+    calls: dict[str, Any] = {"n": 0, "interject": None}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        calls["interject"] = coordinator.drain_interject()
+        on_event({"type": "agent_output", "payload": {}})
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False, resume=True)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(
+                    e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        # The hold prompt is surfaced FIRST — the agent has not run yet.
+        assert calls["n"] == 0
+        prompts = [e["payload"]["prompt"] for e in received
+                   if e.get("type") == "awaiting_user_input"]
+        assert prompts[-1] == daemon._RESUME_PROMPT
+        await client.send_input("steer me")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 1
+        assert calls["interject"] == "steer me"
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("target", [None, "agent"])
+async def test_resume_agent_target_runs_straight_away(
+    tmp_path: Path, target: str | None,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-rat")
+    st = State.load(change.state_dir)
+    st.resume_target = target
+    st.save(change.state_dir)
+
+    seen: dict[str, bool] = {"ran": False}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        seen["ran"] = True
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert result is RunResult.COMPLETED
+    assert seen["ran"] is True
+
+
+@pytest.mark.anyio
+async def test_interrupt_leave_control_pauses_with_ctrl_d_reason(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+    from imp.remote.session.server import SessionServer
+
+    class _FakeCoord:
+        def __init__(self) -> None:
+            self.reasons: list[str] = []
+
+        async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
+            self.reasons.append(reason)
+
+    coord = _FakeCoord()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+    await server._dispatch_control(CONTROL_INTERRUPT_LEAVE)
+    assert coord.reasons == ["ctrl-d"]

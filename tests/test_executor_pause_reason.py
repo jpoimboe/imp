@@ -227,3 +227,39 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_ctrl_d_interrupt_records_interrupt_reason_on_workflow_paused(
+    tmp_path: Path,
+) -> None:
+    change = _seed_single_agent(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+
+    class _InterruptingRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="ctrl-d")
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _InterruptingRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append, coordinator=coord)
+    assert result is RunResult.PAUSED
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["interrupt_reason"] == "ctrl-d"
