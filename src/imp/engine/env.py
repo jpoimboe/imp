@@ -13,7 +13,33 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class TestGates:
+    """Resolved tiered gate commands + per-tier timeouts, threaded to every gate
+    subprocess. A falsy command (None or "") => its IMP_TEST_CMD_* var is omitted
+    (treated as not configured); a None timeout => its var is omitted and the gate
+    script applies its own default."""
+    fast: str | None = None
+    slow: str | None = None
+    fast_timeout: int | None = None
+    slow_timeout: int | None = None
+
+    @classmethod
+    def from_config(cls, config: Any) -> TestGates:
+        """Bundle the four `test_cmd_*` config fields. Duck-typed on `config` so
+        this stays free of an `imp.providers.config` import."""
+        return cls(
+            fast=config.test_cmd_fast,
+            slow=config.test_cmd_slow,
+            fast_timeout=config.test_cmd_fast_timeout,
+            slow_timeout=config.test_cmd_slow_timeout,
+        )
+
 
 # Every env var this module manages. `engine_env` is the AUTHORITY for these: a
 # subprocess must see exactly what `engine_env` produces, never an inherited copy.
@@ -28,6 +54,10 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_CHANGE_DIR",
     "IMP_VERIFY_COMMAND",
     "IMP_VERIFY_TIMEOUT",
+    "IMP_TEST_CMD_FAST",
+    "IMP_TEST_CMD_SLOW",
+    "IMP_TEST_CMD_FAST_TIMEOUT",
+    "IMP_TEST_CMD_SLOW_TIMEOUT",
 })
 
 
@@ -66,6 +96,7 @@ def engine_env(
     *, project_root: Path, change_id: str, change_title: str,
     change_dir: Path | None = None,
     verify_command: str | None = None, verify_timeout: int | None = None,
+    test_gates: TestGates | None = None,
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
 
@@ -87,6 +118,14 @@ def engine_env(
                             absent => run-verify.sh applies its own 300s default. IMP_-
                             prefixed, so the sandbox allowlist passes it through with no
                             edit (a bare ambient value would be cleared by --clearenv).
+        IMP_TEST_CMD_FAST / IMP_TEST_CMD_SLOW — tiered gate commands (cheap fast
+                            gate vs. complete slow gate). Each injected only when
+                            its TestGates field is truthy; a falsy value => absent.
+        IMP_TEST_CMD_FAST_TIMEOUT / IMP_TEST_CMD_SLOW_TIMEOUT — per-tier wall-clock
+                            ceilings (seconds). Injected only when set; absent =>
+                            run-verify.sh applies its own per-tier default (120/300).
+                            IMP_-prefixed, so the sandbox allowlist passes them
+                            through with no edit.
         PYTHONPATH        — prefix pointing at `<project_root>/src`, injected only
                             for an imp source checkout (imp-on-imp dogfooding), so
                             unrelated projects' subprocesses are never perturbed.
@@ -108,6 +147,15 @@ def engine_env(
         env["IMP_VERIFY_COMMAND"] = verify_command
     if verify_timeout is not None:
         env["IMP_VERIFY_TIMEOUT"] = str(verify_timeout)
+    if test_gates is not None:
+        if test_gates.fast:
+            env["IMP_TEST_CMD_FAST"] = test_gates.fast
+        if test_gates.slow:
+            env["IMP_TEST_CMD_SLOW"] = test_gates.slow
+        if test_gates.fast_timeout is not None:
+            env["IMP_TEST_CMD_FAST_TIMEOUT"] = str(test_gates.fast_timeout)
+        if test_gates.slow_timeout is not None:
+            env["IMP_TEST_CMD_SLOW_TIMEOUT"] = str(test_gates.slow_timeout)
     # imp-on-imp only: when the project being changed is itself an imp source
     # checkout, an editable install (pip install -e) pins `import imp` to the
     # parent repo, so a worktree's agent would import the parent's code, not the
