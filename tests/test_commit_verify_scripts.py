@@ -1,8 +1,10 @@
-"""The artifact commit-verify gate scripts (spec/plan): the live artifact must
-match the blob committed to the change's wip lineage."""
+"""The spec/plan commit-verify gates: each passes iff the agent produced its
+artifact file on disk under the change's artifacts/ dir. The engine owns
+journaling now, so the gates check on-disk presence, not git commit state."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -11,154 +13,75 @@ from imp.assets import bundled_workflow_dir
 SCRIPTS = bundled_workflow_dir("imp") / "scripts"
 
 
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=cwd, check=True,
-                   capture_output=True, text=True)
-
-
-def _repo(tmp_path: Path) -> Path:
-    _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@t")
-    _git(tmp_path, "config", "user.name", "t")
-    return tmp_path
-
-
-def _wip_commit(root: Path, change_id: str, rel: str, body: str) -> None:
-    """Write .imp/change/artifacts/<rel> and snapshot to refs/imp/journal-wip/<id>."""
-    from imp.engine import worktree
-    art = root / ".imp" / "change" / "artifacts"
-    dest = art / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(body)
-    files = {str(p.relative_to(art)): p for p in sorted(art.rglob("*")) if p.is_file()}
-    worktree.artifact_commit(root, change_id, files, message="artifact: test")
-
-
-def _run_id_capture(script: str, root: Path, change_id: str):
+def _run_capture(script: str, root: Path, change_dir: Path, change_id: str):
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
         env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_ID": change_id,
-             "IMP_CHANGE_DIR": str(root / ".imp" / "change"),
-             "PATH": __import__("os").environ["PATH"]},
+             "IMP_CHANGE_DIR": str(change_dir), "PATH": os.environ["PATH"]},
         capture_output=True, text=True,
     )
 
 
-def _run_id(script: str, root: Path, change_id: str) -> int:
-    return _run_id_capture(script, root, change_id).returncode
+def _run(script: str, root: Path, change_dir: Path, change_id: str) -> int:
+    return _run_capture(script, root, change_dir, change_id).returncode
 
 
-def test_spec_verify_passes_when_wip_matches_live(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()                       # gitignored stage for the temp index
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "spec/id1.md", "# spec\n")
-    assert _run_id("spec-commit-verify.sh", root, "id1") == 0
+def _write(change_dir: Path, rel: str, body: str) -> None:
+    dest = change_dir / "artifacts" / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body)
 
 
-def test_spec_verify_fails_when_wip_ref_absent(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
-    (root / ".imp" / "change" / "artifacts" / "spec" / "id1.md").write_text("# spec\n")
-    # No artifact_commit -> no wip ref.
-    assert _run_id("spec-commit-verify.sh", root, "id1") != 0
+def test_spec_verify_passes_when_artifact_present(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "spec/id1.md", "# spec\n")
+    assert _run("spec-commit-verify.sh", tmp_path, home, "id1") == 0
 
 
-def test_spec_verify_fails_when_blob_absent_from_wip(tmp_path: Path) -> None:
-    # Wip ref exists (from a different artifact kind) but carries no spec blob.
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    # Commit only a plan artifact — spec/<id>.md is absent from the wip tree.
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan\n")
-    # Live spec file exists but was never committed to the wip tree.
-    (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
-    (root / ".imp" / "change" / "artifacts" / "spec" / "id1.md").write_text("# spec\n")
-    assert _run_id("spec-commit-verify.sh", root, "id1") != 0
+def test_spec_verify_fails_when_artifact_absent(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / "artifacts" / "spec").mkdir(parents=True)   # dir exists, file does not
+    assert _run("spec-commit-verify.sh", tmp_path, home, "id1") != 0
 
 
-def test_spec_verify_fails_when_live_differs_from_committed(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "spec/id1.md", "# spec\n")
-    # The agent edited the live file after committing it -> blob mismatch.
-    (root / ".imp" / "change" / "artifacts" / "spec" / "id1.md").write_text("# edited\n")
-    assert _run_id("spec-commit-verify.sh", root, "id1") != 0
+def test_plan_verify_passes_on_newest_of_multiple(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _write(home, "plans/id1-plan-1.md", "# plan 1\n")
+    _write(home, "plans/id1-plan-2.md", "# plan 2\n")
+    proc = _run_capture("plan-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 0, proc.stderr
+    # The gate reports the newest plan by name.
+    assert "id1-plan-2.md" in proc.stdout
 
 
-def test_plan_verify_passes_on_newest_committed_plan(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
-    _wip_commit(root, "id1", "plans/id1-plan-2.md", "# plan 2\n")
-    assert _run_id("plan-commit-verify.sh", root, "id1") == 0
+def test_plan_verify_ignores_non_numeric_suffix(tmp_path: Path) -> None:
+    # A file whose -plan-<suffix> is not a number is skipped; the newest numeric
+    # plan is selected instead.
+    home = tmp_path / "home"
+    _write(home, "plans/id1-plan-1.md", "# plan 1\n")
+    _write(home, "plans/id1-plan-abc.md", "# not a plan\n")
+    proc = _run_capture("plan-commit-verify.sh", tmp_path, home, "id1")
+    assert proc.returncode == 0, proc.stderr
+    assert "id1-plan-1.md" in proc.stdout
+    assert "id1-plan-abc.md" not in proc.stdout
 
 
-def test_plan_verify_fails_when_newest_plan_uncommitted(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
-    # A newer plan file exists live but was never committed to the wip ref.
-    (root / ".imp" / "change" / "artifacts" / "plans"
-     / "id1-plan-2.md").write_text("# plan 2\n")
-    assert _run_id("plan-commit-verify.sh", root, "id1") != 0
-
-
-def test_plan_verify_passes_after_plan_revision(tmp_path: Path) -> None:
-    # A revision is just another wip commit (no fixup machinery): re-snapshot the
-    # edited plan and the gate passes off the latest blob.
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1 (revised)\n")
-    assert _run_id("plan-commit-verify.sh", root, "id1") == 0
-
-
-def test_plan_verify_fails_when_live_plan_differs_from_committed(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
-    # Agent edited the live plan after committing it -> blob mismatch.
-    (root / ".imp" / "change" / "artifacts" / "plans"
-     / "id1-plan-1.md").write_text("# plan 1 edited\n")
-    assert _run_id("plan-commit-verify.sh", root, "id1") != 0
+def test_plan_verify_fails_when_no_plan_present(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    (home / "artifacts" / "plans").mkdir(parents=True)   # dir exists, no plan files
+    assert _run("plan-commit-verify.sh", tmp_path, home, "id1") != 0
 
 
 def test_plan_verify_passes_large_plan_no_task_cap(tmp_path: Path) -> None:
-    # The task-count cap is gone: a 20-task plan (far above the old 12 ceiling)
-    # now passes, and the success line carries no "(N tasks)" suffix. Both
-    # workflow copies dropped the cap and stay byte-identical.
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
+    # No task-count ceiling: a 20-task plan passes, and the success line carries
+    # no "(N tasks)" suffix. Both workflow copies stay byte-identical and capless.
+    home = tmp_path / "home"
     body = "# plan 1\n\n" + "".join(
         f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 21))   # 20 tasks
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", body)
-    proc = _run_id_capture("plan-commit-verify.sh", root, "id1")
+    _write(home, "plans/id1-plan-1.md", body)
+    proc = _run_capture("plan-commit-verify.sh", tmp_path, home, "id1")
     assert proc.returncode == 0, proc.stderr
-    assert "matching" in proc.stdout
-    assert "tasks)" not in proc.stdout                 # no "(N tasks)" suffix
+    assert "tasks)" not in proc.stdout
     imp = (SCRIPTS / "plan-commit-verify.sh").read_text()
     flat = (bundled_workflow_dir("imp-flat") / "scripts"
             / "plan-commit-verify.sh").read_text()
@@ -167,47 +90,28 @@ def test_plan_verify_passes_large_plan_no_task_cap(tmp_path: Path) -> None:
 
 
 def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
-    import os
-    import shutil
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "spec/id1.md", "# spec\n")
-    # change-home is a separate dir; remove the in-project copy so a script that
-    # still read $IMP_PROJECT_ROOT/.imp/change would find nothing.
-    shutil.rmtree(root / ".imp" / "change" / "artifacts")
+    # The gate reads the artifact from IMP_CHANGE_DIR (the change-home), which can
+    # be a separate dir from the project tree.
+    root = tmp_path / "proj"
+    root.mkdir()
     home = tmp_path / "home"
-    (home / "artifacts" / "spec").mkdir(parents=True)
-    (home / "artifacts" / "spec" / "id1.md").write_text("# spec\n")
-    proc = subprocess.run(
-        ["bash", str(SCRIPTS / "spec-commit-verify.sh")], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root),
-             "IMP_CHANGE_ID": "id1", "IMP_CHANGE_DIR": str(home),
-             "PATH": os.environ["PATH"]},
-        capture_output=True, text=True)
+    _write(home, "spec/id1.md", "# spec\n")
+    proc = _run_capture("spec-commit-verify.sh", root, home, "id1")
     assert proc.returncode == 0, proc.stderr
 
 
 def test_plan_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
-    import os
-    import shutil
-    root = _repo(tmp_path)
-    (root / ".imp").mkdir()
-    (root / ".gitignore").write_text(".imp/\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "seed")
-    _wip_commit(root, "id1", "plans/id1-plan-1.md", "# plan 1\n")
-    # Live plan exists ONLY at a separate change-home, not under the project tree.
-    shutil.rmtree(root / ".imp" / "change" / "artifacts")
+    # The gate reads the plan from IMP_CHANGE_DIR, not the project tree.
+    root = tmp_path / "proj"
+    root.mkdir()
     home = tmp_path / "home"
-    (home / "artifacts" / "plans").mkdir(parents=True)
-    (home / "artifacts" / "plans" / "id1-plan-1.md").write_text("# plan 1\n")
-    proc = subprocess.run(
-        ["bash", str(SCRIPTS / "plan-commit-verify.sh")], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root),
-             "IMP_CHANGE_ID": "id1", "IMP_CHANGE_DIR": str(home),
-             "PATH": os.environ["PATH"]},
-        capture_output=True, text=True)
+    _write(home, "plans/id1-plan-1.md", "# plan 1\n")
+    proc = _run_capture("plan-commit-verify.sh", root, home, "id1")
     assert proc.returncode == 0, proc.stderr
+
+
+def test_both_spec_gate_copies_are_byte_identical() -> None:
+    imp = (SCRIPTS / "spec-commit-verify.sh").read_text()
+    flat = (bundled_workflow_dir("imp-flat") / "scripts"
+            / "spec-commit-verify.sh").read_text()
+    assert imp == flat
