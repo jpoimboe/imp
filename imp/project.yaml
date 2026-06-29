@@ -15,8 +15,14 @@ guidance: |
 # Optional lint-clean gate: a command the implementer runs before each
 # commit (separate from the test suite). Absent => no lint gate.
 # lint_command: "make lint"
-verify_command: "make check"
-# `make check` (lint + typecheck + the full test suite) runs well past the 300s
-# default verify ceiling, so give it room. On timeout the verify gate pauses to a
-# human (exit 124) rather than looping the implementer against an unwinnable clock.
-verify_timeout: 1200
+#
+# Tiered test gates: test_cmd_fast (lint + typecheck + fast tests) runs at every
+# per-plan gate (verify, sweep-verify); test_cmd_slow — the complete run, a
+# superset — runs once per Change at integration-verify. Each tier has its own
+# wall-clock timeout in seconds; on timeout the gate pauses to a human (exit 124)
+# rather than looping against an unwinnable clock. These equal the schema defaults
+# (120 fast / 300 slow) but are set explicitly for clarity.
+test_cmd_fast: "make check"
+test_cmd_slow: "make check && make test-live"
+test_cmd_fast_timeout: 120
+test_cmd_slow_timeout: 300

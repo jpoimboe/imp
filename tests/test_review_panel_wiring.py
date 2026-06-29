@@ -156,7 +156,7 @@ def test_deferred_sweep_step_then_sweep_verify() -> None:
     sweep = steps["deferred-sweep"]
     assert sweep.kind == "agent" and sweep.file.name == "deferred-sweep.md"
     st = steps["sweep-verify"]
-    assert st.kind == "script" and st.command.endswith("run-verify.sh")
+    assert st.kind == "script" and st.command.endswith("run-verify.sh fast")
     assert isinstance(st.rules[-1].action, Goto)
     assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 

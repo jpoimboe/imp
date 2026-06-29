@@ -151,7 +151,7 @@ phases:
           - {else: true, continue: true}
 
       - name: verify
-        command: ./scripts/run-verify.sh
+        command: ./scripts/run-verify.sh fast
         label: running tests
         max_loops: 5
         rules:
@@ -272,7 +272,7 @@ phases:
           - {else: true, continue: true}
 
       - name: integration-verify
-        command: ./scripts/run-verify.sh
+        command: ./scripts/run-verify.sh slow
         label: running tests
         max_loops: 5
         rules:

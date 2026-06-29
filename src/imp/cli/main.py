@@ -487,26 +487,26 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
     return None
 
 
-def _verify_command_nudge(
+def _test_cmd_fast_nudge(
     *, project_root: Path, control_root: Path, non_interactive: bool,
     input_fn: Callable[[str], str], output_fn: Callable[[str], None],
     err_fn: Callable[[str], None],
     detect_fn: Callable[[Path], str | None] | None = None,
 ) -> None:
-    """`imp new` backstop: nudge when verify_command is absent and a command is detected."""
+    """`imp new` backstop: nudge when test_cmd_fast is absent and a command is detected."""
     from imp.cli.verify_detect import (
-        detect_verify_command,
-        format_verify_command_yaml,
-        resolve_verify_choice,
+        detect_test_command,
+        format_test_cmd_fast_yaml,
+        resolve_test_cmd_choice,
     )
     from imp.providers.effective import load_effective_config
-    detect = detect_fn or detect_verify_command
+    detect = detect_fn or detect_test_command
     try:
         cfg = load_effective_config(
             project_root=project_root, control_root=control_root).config
     except (LoadError, LoadErrors):
         return
-    if cfg.verify_command is not None:
+    if cfg.test_cmd_fast is not None:
         return
     suggested = detect(project_root)
     if suggested is None:
@@ -514,15 +514,15 @@ def _verify_command_nudge(
     project_file = project_root / "imp" / "project.yaml"
     if non_interactive:
         err_fn(
-            f"imp: no verify_command configured; detected `{suggested}`. Set "
-            f"verify_command in {project_file} to gate regressions in-loop.")
+            f"imp: no test_cmd_fast configured; detected `{suggested}`. Set "
+            f"test_cmd_fast in {project_file} to gate regressions in-loop.")
         return
-    chosen = resolve_verify_choice(suggested, input_fn, output_fn)
+    chosen = resolve_test_cmd_choice(suggested, input_fn, output_fn)
     existing = project_file.read_text()
     with project_file.open("a") as f:
         if existing and not existing.endswith("\n"):
             f.write("\n")
-        f.write(format_verify_command_yaml(chosen))
+        f.write(format_test_cmd_fast_yaml(chosen))
 
 
 def _apply_theme() -> None:
@@ -895,7 +895,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=control, control_root=control,
         non_interactive=non_interactive,
         input_fn=input, output_fn=print,

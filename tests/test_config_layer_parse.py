@@ -16,11 +16,11 @@ def test_absent_file_returns_none(tmp_path: Path) -> None:
 
 def test_tiers_less_layer_is_valid(tmp_path: Path) -> None:
     p = tmp_path / "project.yaml"
-    p.write_text("default-workflow: imp\nverify_command: make check\n")
+    p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")
     layer, src = parse_config_layer(p)  # type: ignore[misc]
     assert "tiers" not in layer
     assert "providers" not in layer
-    assert layer["verify_command"] == "make check"
+    assert layer["test_cmd_fast"] == "make check"
     assert src.file == p
 
 
@@ -201,6 +201,14 @@ def test_context_max_reincarnations_zero_accepted(tmp_path: Path) -> None:
     p.write_text("default-workflow: imp\ncontext:\n  max_reincarnations: 0\n")
     out, _ = parse_config_layer(p)  # type: ignore[misc]
     assert out["context"] == {"max_reincarnations": 0}
+
+
+def test_test_cmd_fast_in_tiers_less_layer(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")
+    layer, src = parse_config_layer(p)  # type: ignore[misc]
+    assert layer["test_cmd_fast"] == "make check"
+    assert src.file == p
 
 
 def test_context_merges_one_level(tmp_path: Path) -> None:

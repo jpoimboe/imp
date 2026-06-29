@@ -279,7 +279,7 @@ class CodexAgentRunner:
         ctx.subagent_depth = invocation.subagent_depth
         ctx.coordinator = invocation.coordinator
         ctx.tiers = invocation.tiers
-        ctx.verify_command = invocation.verify_command
+        ctx.test_gates = invocation.test_gates
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.checkpoint_threshold = invocation.checkpoint_threshold

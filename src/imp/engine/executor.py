@@ -39,7 +39,7 @@ from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
 from imp.engine.change import Change
-from imp.engine.env import engine_env, overlay_engine_env
+from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
 from imp.engine.feedback import (
     format_script_feedback,
@@ -295,8 +295,7 @@ async def run_change(
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, change, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-                verify_command=config.verify_command,
-                verify_timeout=config.verify_timeout,
+                test_gates=TestGates.from_config(config),
                 non_interactive=non_interactive,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
@@ -490,8 +489,8 @@ async def _dispatch_step(
     step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    coordinator: Any, verify_command: str | None = None,
-    verify_timeout: int | None = None,
+    coordinator: Any,
+    test_gates: TestGates | None = None,
     non_interactive: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -521,13 +520,12 @@ async def _dispatch_step(
         return await _route_merge_and_exit_worktree(step, change, state, log)
     if step.kind == "script":
         return await _route_script(step, change, state, log,
-                                   verify_command=verify_command,
-                                   verify_timeout=verify_timeout,
+                                   test_gates=test_gates,
                                    sandbox_policy=sandbox_policy)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-        wrapper_text=wrapper_text, is_resume=is_resume, verify_command=verify_command,
+        wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
         non_interactive=non_interactive,
         autonomous=autonomous,
         sandbox_policy=sandbox_policy, seed_opening=seed_opening,
@@ -606,7 +604,7 @@ def _route_branch(
 
 async def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
-    *, verify_command: str | None = None, verify_timeout: int | None = None,
+    *, test_gates: TestGates | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step, state, change)
@@ -633,8 +631,7 @@ async def _route_script(
                                  change_id=change.id,
                                  change_title=change.title,
                                  change_dir=change.change_dir,
-                                 verify_command=verify_command,
-                                 verify_timeout=verify_timeout),
+                                 test_gates=test_gates),
             policy=sandbox_policy, command=command))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
@@ -842,7 +839,7 @@ async def _route_agent(
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
-    verify_command: str | None = None,
+    test_gates: TestGates | None = None,
     non_interactive: bool = False,  # forwarded to the invocation/child runs
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -898,7 +895,7 @@ async def _route_agent(
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
             initial_messages=initial, is_resume=is_resume,
-            verify_command=verify_command, non_interactive=non_interactive,
+            test_gates=test_gates, non_interactive=non_interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
             project_facts=project_facts, guidance=guidance)
@@ -966,7 +963,7 @@ async def _route_agent(
                 step, workflow, change, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 wrapper_text=wrapper_text, is_resume=False,
-                verify_command=verify_command, non_interactive=non_interactive,
+                test_gates=test_gates, non_interactive=non_interactive,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy, seed_opening=seed,
                 project_facts=project_facts, guidance=guidance)
@@ -992,7 +989,7 @@ async def _route_agent(
             step, workflow, change, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=False,
-            verify_command=verify_command, non_interactive=non_interactive,
+            test_gates=test_gates, non_interactive=non_interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed,
             project_facts=project_facts, guidance=guidance)
@@ -1025,7 +1022,7 @@ async def _route_agent(
         return await _route_agent(step, workflow, change, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
-                                  is_resume=is_resume, verify_command=verify_command,
+                                  is_resume=is_resume, test_gates=test_gates,
                                   non_interactive=non_interactive,
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
@@ -1075,7 +1072,7 @@ async def _run_agent_invocation(
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
-    verify_command: str | None = None,
+    test_gates: TestGates | None = None,
     non_interactive: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -1180,7 +1177,7 @@ async def _run_agent_invocation(
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
         log=log,
-        verify_command=verify_command,
+        test_gates=test_gates,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
         checkpoint_threshold=state.checkpoint_threshold,
@@ -1237,8 +1234,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
         engine_env(project_root=change.project_root, change_id=change.id,
                    change_title=change.title,
                    change_dir=change.change_dir,
-                   verify_command=config.verify_command,
-                   verify_timeout=config.verify_timeout),
+                   test_gates=TestGates.from_config(config)),
     )
     try:
         policy = resolve_policy(

@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
+from imp.engine.env import TestGates
 from imp.engine.types import AgentDef
 
 
@@ -102,9 +103,9 @@ class ToolContext:
     # provider. dispatch_task passes it to drive_invocation so a subagent gets
     # pause detection + interrupt attachment. None for legacy/test contexts.
     coordinator: Any = None
-    # Optional combined verify gate command (config.verify_command). Threaded onto
-    # the subprocess env (IMP_VERIFY_COMMAND) by the bash tool. None => no verify gate.
-    verify_command: str | None = None
+    # Resolved tiered gate commands+timeouts (TestGates). Threaded onto the
+    # subprocess env (IMP_TEST_CMD_*) by the bash tool. None => no gate vars.
+    test_gates: TestGates | None = None
     # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
     # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
     checkpoint_threshold: float | int | None = None

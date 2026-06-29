@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from imp.engine.env import TestGates
 from imp.engine.types import AgentDef
 
 
@@ -153,9 +154,9 @@ class AgentInvocation:
     # can drive a subagent with pause detection + interrupt attachment. Any to
     # avoid importing cli.signals here. None for legacy/test construction.
     coordinator: Any = None
-    # config.verify_command, threaded onto the child ToolContext by each provider
-    # so the agent bash tool can inject IMP_VERIFY_COMMAND. None => no verify gate.
-    verify_command: str | None = None
+    # Resolved tiered gate commands+timeouts (TestGates), threaded onto the child
+    # ToolContext by each provider so the agent bash tool injects IMP_TEST_CMD_*.
+    test_gates: TestGates | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
     # Threaded from run_change → _route_agent → _run_agent_invocation →

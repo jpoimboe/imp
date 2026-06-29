@@ -81,7 +81,7 @@ def merge_layers(
                 for k, v in val.items():
                     dst2[k] = v
                     prov[(key, k)] = src
-            else:  # leaf: providers, theme, editing_mode, verify_command, verify_timeout
+            else:  # leaf: providers, theme, editing_mode, test_cmd_*
                 out[key] = val
                 prov[(key,)] = src
     return out, prov
@@ -96,8 +96,10 @@ def _to_config(
         provider_envs=merged.get("provider_envs", {}),
         source=FLOOR_SRC,
         var_overrides=merged.get("vars", {}),
-        verify_command=merged.get("verify_command"),
-        verify_timeout=merged.get("verify_timeout"),
+        test_cmd_fast=merged.get("test_cmd_fast"),
+        test_cmd_slow=merged.get("test_cmd_slow"),
+        test_cmd_fast_timeout=merged.get("test_cmd_fast_timeout"),
+        test_cmd_slow_timeout=merged.get("test_cmd_slow_timeout"),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
         sandbox=merged.get("sandbox", {}),

@@ -46,6 +46,7 @@ from imp.engine.completion import (
 from imp.engine.completion import (
     build_inline_solicit as build_inline_solicit,
 )
+from imp.engine.env import TestGates
 from imp.engine.types import AgentDef, OutputField
 
 # Injected into the system prompt of every agent that has the `bash` tool (see
@@ -432,7 +433,7 @@ def build_agent_invocation(
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
     log: Any = None,
-    verify_command: str | None = None,
+    test_gates: TestGates | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
     checkpoint_threshold: float | int | None = None,
@@ -503,7 +504,7 @@ def build_agent_invocation(
         tier=tier,
         subagent_depth=subagent_depth,
         coordinator=coordinator,
-        verify_command=verify_command,
+        test_gates=test_gates,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
         checkpoint_threshold=checkpoint_threshold,
