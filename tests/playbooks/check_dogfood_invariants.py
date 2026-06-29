@@ -83,8 +83,8 @@ def check_artifacts_in_archive(repo: str) -> Result:
         return Result("artifacts_in_archive", False,
                       f"expected exactly one archived change, got {_fmt(ids)}")
     cid = ids[0]
-    spec = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal-wip/{cid}:spec")
-    plans = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal-wip/{cid}:plans")
+    spec = _git(repo, "ls-tree", "--name-only", f"refs/imp/artifacts/{cid}:spec")
+    plans = _git(repo, "ls-tree", "--name-only", f"refs/imp/artifacts/{cid}:plans")
     ok = (spec.returncode == 0
           and spec.stdout.strip().splitlines()[-1].endswith(".md")
           and plans.returncode == 0 and "-plan-" in plans.stdout)

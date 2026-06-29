@@ -121,7 +121,7 @@ def _git_bytes(control_root: Path, *args: str) -> subprocess.CompletedProcess[by
 
 def read_artifact(control_root: Path, change_id: str, rel: str) -> bytes | None:
     wip = _git_bytes(
-        control_root, "cat-file", "-p", f"refs/imp/journal-wip/{change_id}:{rel}")
+        control_root, "cat-file", "-p", f"refs/imp/artifacts/{change_id}:{rel}")
     if wip.returncode == 0:
         return wip.stdout
     return None
@@ -137,8 +137,8 @@ def pick_newest_plan(change_id: str, names: list[str]) -> str | None:
 
 
 def newest_plan_name(control_root: Path, change_id: str) -> str | None:
-    """Highest-N plan filename from the retained wip ref; bare filename."""
-    treeish = f"refs/imp/journal-wip/{change_id}:plans"
+    """Highest-N plan filename from the retained artifact ref; bare filename."""
+    treeish = f"refs/imp/artifacts/{change_id}:plans"
     proc = subprocess.run(
         ["git", "ls-tree", "--name-only", treeish],
         cwd=control_root, capture_output=True, text=True)

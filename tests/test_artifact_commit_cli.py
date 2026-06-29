@@ -33,13 +33,13 @@ def test_artifact_commit_snapshots_live_tree_to_wip_ref(
     assert rc == 0
     # The wip tip carries the live spec blob, byte-identical.
     committed = _git(tmp_path, "rev-parse",
-                     "refs/imp/journal-wip/feat:spec/feat.md").stdout.strip()
+                     "refs/imp/artifacts/feat:spec/feat.md").stdout.strip()
     live = _git(tmp_path, "hash-object",
                 str(art / "feat.md")).stdout.strip()
     assert committed == live
     # The kind labels the commit message.
     subject = _git(tmp_path, "log", "-1", "--format=%s",
-                   "refs/imp/journal-wip/feat").stdout.strip()
+                   "refs/imp/artifacts/feat").stdout.strip()
     assert subject == "artifact: spec"
 
 
@@ -77,7 +77,7 @@ def test_artifact_commit_rejects_review_kind(
         main(["artifact-commit", "review"])
     assert exc.value.code == 2
     assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
-                "refs/imp/journal-wip/rev").returncode != 0
+                "refs/imp/artifacts/rev").returncode != 0
 
 
 def test_artifact_commit_accepts_summary_kind(
@@ -98,5 +98,5 @@ def test_artifact_commit_accepts_summary_kind(
     assert rc == 0
     # The kind labels the commit message.
     subject = _git(tmp_path, "log", "-1", "--format=%s",
-                   "refs/imp/journal-wip/feat").stdout.strip()
+                   "refs/imp/artifacts/feat").stdout.strip()
     assert subject == "artifact: summary"

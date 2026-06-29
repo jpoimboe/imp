@@ -23,7 +23,7 @@ def _git_wip_present(control: Path, change_id: str) -> bool:
 
     return (
         subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/imp/journal-wip/{change_id}"],
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/imp/artifacts/{change_id}"],
             cwd=control,
             capture_output=True,
         ).returncode

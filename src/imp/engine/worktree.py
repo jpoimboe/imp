@@ -318,59 +318,52 @@ def _temp_index(control_root: Path):  # type: ignore[no-untyped-def]
         Path(index_file).unlink(missing_ok=True)
 
 
-def _commit_files_to_ref(
-    control_root: Path, *, ref: str, prefix: str, files: Mapping[str, Path],
-    message: str, extra_tree: tuple[str, str] | None = None,
-) -> None:
-    """Append one commit to `ref` via plumbing — never checks out the ref.
-
-    The index is seeded from `ref` (so existing content accumulates), then
-    `extra_tree=(p, treeish)` — when given — is read in under prefix `p`, then
-    each `files` entry is hashed and added at `prefix+name`. The commit is
-    parented on `ref` when it already exists (else a root commit). CAS on the
-    final update-ref is cheap insurance (moot under the lock)."""
-    with RepoGitLock(control_root).acquire(), _temp_index(control_root) as env:
-            parent = _git(control_root, "rev-parse", "--verify", "--quiet", ref)
-            have_parent = parent.returncode == 0
-            if have_parent:
-                subprocess.run(["git", "read-tree", ref], cwd=control_root, env=env,
-                               check=True, capture_output=True, text=True)
-            if extra_tree is not None:
-                p, treeish = extra_tree
-                subprocess.run(["git", "read-tree", f"--prefix={p}", treeish],
-                               cwd=control_root, env=env, check=True,
-                               capture_output=True, text=True)
-            for name, src in files.items():
-                blob = subprocess.run(
-                    ["git", "hash-object", "-w", "--stdin"], cwd=control_root,
-                    env=env, input=src.read_bytes(), capture_output=True, check=True,
-                ).stdout.decode().strip()
-                subprocess.run(
-                    ["git", "update-index", "--add", "--cacheinfo",
-                     f"100644,{blob},{prefix}{name}"],
-                    cwd=control_root, env=env, check=True, capture_output=True, text=True)
-            tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
-                                  check=True, capture_output=True, text=True).stdout.strip()
-            args = ["git", "commit-tree", tree, "-m", message]
-            if have_parent:
-                args += ["-p", ref]
-            commit = subprocess.run(args, cwd=control_root, env=env, check=True,
-                                    capture_output=True, text=True).stdout.strip()
-            cas = ["git", "update-ref", ref, commit]
-            cas += [parent.stdout.strip()] if have_parent else []
-            subprocess.run(cas, cwd=control_root, check=True,
-                           capture_output=True, text=True)
-
-
 def artifact_commit(
     control_root: Path, change_id: str, files: Mapping[str, Path], *, message: str,
-) -> None:
-    """Append one commit to the per-change artifact lineage
-    refs/imp/journal-wip/<id>, accumulating on the prior wip tip. Files sit FLAT
-    at the wip tree root (e.g. spec/<id>.md, plans/<id>-plan-N.md)."""
-    _commit_files_to_ref(
-        control_root, ref=f"refs/imp/journal-wip/{change_id}", prefix="",
-        files=files, message=message)
+) -> bool:
+    """Snapshot a change's artifacts to refs/imp/artifacts/<id> as a FULL tree.
+
+    The committed tree is exactly `files`, flat at the tree root (e.g.
+    spec/<id>.md, plans/<id>-plan-N.md) — a file dropped from `files` is gone at
+    the tip. Each commit is parented on the prior tip, preserving lineage. Built
+    with pure git plumbing under the repo lock, never checking out the ref.
+
+    Returns True iff a commit was written. Empty `files`, or a snapshot identical
+    to the current tip, is a no-op that returns False and leaves the ref untouched.
+    """
+    ref = f"refs/imp/artifacts/{change_id}"
+    if not files:
+        return False
+    with RepoGitLock(control_root).acquire(), _temp_index(control_root) as env:
+        for name, src in files.items():
+            blob = subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"], cwd=control_root,
+                env=env, input=src.read_bytes(), capture_output=True, check=True,
+            ).stdout.decode().strip()
+            subprocess.run(
+                ["git", "update-index", "--add", "--cacheinfo",
+                 f"100644,{blob},{name}"],
+                cwd=control_root, env=env, check=True, capture_output=True, text=True)
+        tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
+                              check=True, capture_output=True, text=True).stdout.strip()
+        parent = _git(control_root, "rev-parse", "--verify", "--quiet", ref)
+        have_parent = parent.returncode == 0
+        if have_parent:
+            prior_tree = _git(
+                control_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}",
+            ).stdout.strip()
+            if prior_tree == tree:
+                return False
+        args = ["git", "commit-tree", tree, "-m", message]
+        if have_parent:
+            args += ["-p", ref]
+        commit = subprocess.run(args, cwd=control_root, env=env, check=True,
+                                capture_output=True, text=True).stdout.strip()
+        cas = ["git", "update-ref", ref, commit]
+        cas += [parent.stdout.strip()] if have_parent else []
+        subprocess.run(cas, cwd=control_root, check=True,
+                       capture_output=True, text=True)
+    return True
 
 
 def _common_dir(control_root: Path) -> Path:
