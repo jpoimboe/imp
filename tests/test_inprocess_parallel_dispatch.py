@@ -61,6 +61,8 @@ def _parent_def() -> AgentDef:
         name="reviewer", description="", tools=frozenset({"complete_step"}),
         subagents=(), output_schema=_status_schema(),
         prompt_template_source="r", source_path=Path("r.md"), source=_SRC,
+        # non-low on purpose: must match the sole configured tier in `_inv`'s
+        # resolved_tiers ({"medium": ...}) so the subagent resolves to "rec".
         tier="medium")
     return reviewer
 

@@ -77,7 +77,7 @@ def _seed_project(tmp_path: Path) -> None:
         phases:
           - name: only
             steps:
-              - {name: w, file: agents/writer.md, tier: medium}
+              - {name: w, file: agents/writer.md, tier: low}
     """))
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp

@@ -61,7 +61,7 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\n"

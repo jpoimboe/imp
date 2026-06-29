@@ -83,7 +83,7 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Change:
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _cfg = (
         "providers: [fake]\n"

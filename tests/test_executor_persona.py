@@ -32,7 +32,7 @@ def _seed(root: Path, *, persona: str | None) -> object:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 1, max_loops: 6}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     if persona is not None:
         (wf / "persona.md").write_text(persona)

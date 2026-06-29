@@ -132,7 +132,7 @@ def _seed_single_step(root: Path) -> Change:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n")
+        "      - {name: w, file: agents/writer.md, tier: low}\n")
     _cfg = "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)

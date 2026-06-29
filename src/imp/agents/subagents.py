@@ -229,12 +229,16 @@ async def dispatch_task(
         )
     subagent_tier = subagent_def.tier
     if runtime_tier is not None:
+        chosen_tier: str | None = runtime_tier
         pm = resolved[runtime_tier]
         sub_provider, sub_model = pm.provider, pm.model
     elif subagent_tier is not None and subagent_tier in resolved:
+        chosen_tier = subagent_tier
         pm = resolved[subagent_tier]
         sub_provider, sub_model = pm.provider, pm.model
     else:
+        # Inherit the parent's provider/model with no explicit tier label.
+        chosen_tier = None
         sub_provider, sub_model = ctx.provider_name, ctx.model_name
 
     # Nesting enabled: the child may dispatch the subagents IT declares (resolved
@@ -272,6 +276,7 @@ async def dispatch_task(
             first_event_parent_id=tool_call_event_id or None,
             resolved_tiers=ctx.resolved_tiers,
             coordinator=ctx.coordinator,
+            tier=chosen_tier,
             subagent_depth=child_depth,
             tiers=ctx.tiers,
             # Same object as event_log= above, but a distinct role: log= is the

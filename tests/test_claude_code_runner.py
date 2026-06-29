@@ -908,7 +908,7 @@ def test_claude_code_provider_registered_and_resolves() -> None:
         prompt_template_source="", source_path=Path("a.md"), source=src)
     step = Step(name="s", phase="p", kind="agent", rules=(),
                 on_max_retries=Pause(), max_loops=6, source=src,
-                file=Path("agents/a.md"), tier="medium")
+                file=Path("agents/a.md"), tier="low")
     wf = Workflow(
         name="w", description="",
         phases=(Phase(name="p", steps=(step,), source=src),),

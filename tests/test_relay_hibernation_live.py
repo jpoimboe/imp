@@ -58,7 +58,7 @@ def _seed_cc_project(root: Path) -> None:
         phases:
           - name: only
             steps:
-              - {name: w, file: agents/writer.md, tier: medium}
+              - {name: w, file: agents/writer.md, tier: low}
     """))
     (root / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp

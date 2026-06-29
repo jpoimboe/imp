@@ -1160,6 +1160,7 @@ async def _run_agent_invocation(
         first_event_parent_id=started["id"],
         resolved_tiers=state.resolved_tiers,
         coordinator=coordinator,
+        tier=tier,
         subagent_depth=0,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,

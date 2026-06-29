@@ -109,7 +109,7 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
         "      - name: g\n"
         f"        command: 'echo {_GATE_TOKEN} >&2; exit 1'\n"
         "        rules:\n"

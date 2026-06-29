@@ -98,7 +98,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: build, file: agents/worker.md, tier: medium}\n"
+        "      - {name: build, file: agents/worker.md, tier: low}\n"
     )
     # run_change reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)

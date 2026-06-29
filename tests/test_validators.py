@@ -407,7 +407,7 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
               "rev": _agent("rev", tier="ghost")}
     step = Step(name="coder", phase="p", kind="agent", rules=(),
                 on_max_retries=Pause(), max_loops=6, source=src,
-                file=Path("agents/coder.md"), tier="medium")
+                file=Path("agents/coder.md"), tier="low")
     wf = Workflow(
         name="w", description="", phases=(Phase(name="p", steps=(step,),
                                                 source=src),),

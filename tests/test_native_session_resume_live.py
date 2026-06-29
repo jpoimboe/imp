@@ -56,7 +56,7 @@ def _seed_multiread_project(tmp_path: Path) -> None:
         phases:
           - name: only
             steps:
-              - {name: w, file: agents/writer.md, tier: medium}
+              - {name: w, file: agents/writer.md, tier: low}
     """))
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     # providers/tiers go in the gitignored .imp/config.yaml local layer (highest

@@ -1157,6 +1157,14 @@ class ClaudeCodeAgentRunner:
             # subdir or via Popen(cwd=...) which doesn't update $PWD).
             cwd=str(invocation.change_context.project_root),
             system_prompt=invocation.system_prompt,
+            # Low tier matches anthropic's posture (which sends no `thinking`,
+            # i.e. extended thinking off). claude-p otherwise applies its own
+            # per-model default effort (thinking on), which makes a weak model
+            # over-reason a trivial step and yield in prose. None preserves the
+            # claude-p default for medium/high and untiered invocations.
+            thinking=(
+                {"type": "disabled"} if invocation.tier == "low" else None
+            ),
             mcp_servers=mcp_servers,
             allowed_tools=(
                 [f"mcp__imp__{n}" for n in tool_names]

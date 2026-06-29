@@ -226,7 +226,7 @@ def _seed_minimal_workflow(
         "phases:\n"
         f"  - name: {phase_name}\n"
         "    steps:\n"
-        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: medium}}\n"
+        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: low}}\n"
     )
     _write_fake_config(root)
     change = _make_change(root)
@@ -283,7 +283,7 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: w\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
@@ -320,7 +320,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
         "    steps:\n"
         "      - name: writer\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
         "      - name: route\n"
@@ -377,7 +377,7 @@ def _seed_lane_release_workflow(root: Path) -> Change:
         "          - {else: true, continue: true}\n"
         "      - name: worker\n"
         "        file: agents/worker.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {if: {deviation: true}, release: base, goto: done}\n"
         "          - {else: true, continue: true}\n"
@@ -385,7 +385,7 @@ def _seed_lane_release_workflow(root: Path) -> Change:
         "    steps:\n"
         "      - name: done\n"
         "        file: agents/done.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
     )
     _write_fake_config(root)
     return _make_change(root)
@@ -435,10 +435,10 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "phases:\n"
         "  - name: work\n"
         "    steps:\n"
-        "      - {name: writer, file: agents/writer.md, tier: medium}\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        max_loops: 2\n"
         "        rules:\n"
         "          - {if: {verdict: rework}, goto: writer}\n"
@@ -504,7 +504,7 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: w\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, goto: done}\n"
         "  - name: done\n"
@@ -974,7 +974,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
@@ -1044,10 +1044,10 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, tier: medium}\n"
+        "      - {name: coder, file: agents/coder.md, tier: low}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {if: {verdict: Reject}, resume: coder, feedback: \"reviewer findings:\"}\n"
         "          - {else: true, continue: true}\n"
@@ -1231,10 +1231,10 @@ def _seed_back_edge_workflow(
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, tier: medium}\n"
+        "      - {name: coder, file: agents/coder.md, tier: low}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         f"          - {{if: {{verdict: rework}}, {verb}: coder{feedback_fragment}}}\n"
         "          - {else: true, continue: true}\n")
@@ -1809,7 +1809,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 1, max_loops: 6}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
@@ -1859,7 +1859,7 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
         "    steps:\n"
         "      - name: lead\n"
         "        file: agents/lead.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {if: {tol: true}, set: {carry: true}, goto: gate}\n"
         "          - {else: true, continue: true}\n"
@@ -2007,10 +2007,10 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
         "phases:\n"
         "  - name: work\n"
         "    steps:\n"
-        "      - {name: writer, file: agents/writer.md, tier: medium}\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        max_loops: 3\n"
         "        rules:\n"
         "          - {if: {verdict: rework}, goto: writer}\n"
@@ -2163,10 +2163,10 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, tier: medium, label: implementing}\n"
+        "      - {name: coder, file: agents/coder.md, tier: low, label: implementing}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {if: {verdict: Reject}, resume: coder, feedback: \"findings:\"}\n"
         "          - {else: true, continue: true}\n"
@@ -2238,10 +2238,10 @@ async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_pat
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, tier: medium, label: implementing}\n"
+        "      - {name: coder, file: agents/coder.md, tier: low, label: implementing}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {if: {verdict: Reject}, resume: coder, feedback: \"findings:\"}\n"
         "          - {else: true, continue: true}\n"
@@ -2345,8 +2345,8 @@ def _seed_two_step_workflow(root: Path) -> Change:
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: s1, file: agents/writer.md, tier: medium}\n"
-        "      - {name: s2, file: agents/writer.md, tier: medium}\n"
+        "      - {name: s1, file: agents/writer.md, tier: low}\n"
+        "      - {name: s2, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(root)
     return _make_change(root)
@@ -2393,7 +2393,7 @@ async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
         "      - name: w\n"
         "        file: agents/writer.md\n"
         "        label: writing the thing\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true}\n"
         "      - name: check\n"
@@ -2435,13 +2435,13 @@ async def test_complete_clears_step_label(tmp_path: Path) -> None:
         "      - name: w\n"
         "        file: agents/writer.md\n"
         "        label: writing the thing\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true}\n"
         "      - name: w2\n"
         "        file: agents/writer.md\n"
         "        label: second writer\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true}\n"
     )
@@ -2474,13 +2474,13 @@ async def test_goto_writes_target_step_label(tmp_path: Path) -> None:
         "      - name: src\n"
         "        label: source step\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, goto: dst}\n"
         "      - name: dst\n"
         "        label: destination step\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, pause: true}\n"
     )
@@ -2522,7 +2522,7 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 1, max_loops: 6}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
@@ -2551,7 +2551,7 @@ async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
@@ -2588,11 +2588,11 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: writer\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true, label: \"addressing review feedback\"}\n"
-        "      - {name: second, file: agents/writer.md, tier: medium}\n"
-        "      - {name: third, file: agents/writer.md, tier: medium}\n"
+        "      - {name: second, file: agents/writer.md, tier: low}\n"
+        "      - {name: third, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
@@ -2634,7 +2634,7 @@ async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
         "      - name: w\n"
         "        file: agents/writer.md\n"
         "        label: writing the thing\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, continue: true}\n"
         "      - name: check\n"
@@ -2677,13 +2677,13 @@ async def test_goto_renders_templated_target_label(tmp_path: Path) -> None:
         "      - name: src\n"
         "        label: source step\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, goto: dst}\n"
         "      - name: dst\n"
         "        label: 'arrived at {{ vars.n }}'\n"
         "        file: agents/writer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        rules:\n"
         "          - {else: true, pause: true}\n"
     )

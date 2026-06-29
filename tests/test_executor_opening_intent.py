@@ -32,7 +32,7 @@ def _seed(root: Path) -> object:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 1, max_loops: 6}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)

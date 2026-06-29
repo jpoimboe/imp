@@ -67,7 +67,7 @@ def _seed_single_agent(root: Path) -> Change:
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
@@ -125,8 +125,8 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\ndefaults: {max_retries: 3, max_loops: 6}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: s1, file: agents/a.md, tier: medium}\n"
-        "      - {name: s2, file: agents/a.md, tier: medium}\n")
+        "      - {name: s1, file: agents/a.md, tier: low}\n"
+        "      - {name: s2, file: agents/a.md, tier: low}\n")
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
@@ -188,8 +188,8 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\ndefaults: {max_retries: 3, max_loops: 6}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: code, file: agents/coder.md, tier: medium}\n"
-        "      - name: review\n        file: agents/rev.md\n        tier: medium\n"
+        "      - {name: code, file: agents/coder.md, tier: low}\n"
+        "      - name: review\n        file: agents/rev.md\n        tier: low\n"
         "        rules:\n"
         "          - {if: {verdict: rework}, resume: code}\n"
         "          - {else: true, continue: true}\n")

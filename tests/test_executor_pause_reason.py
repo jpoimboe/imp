@@ -100,7 +100,7 @@ def _seed_single_agent(root: Path) -> Change:
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
@@ -178,7 +178,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        tier: medium\n"
+        "        tier: low\n"
         "        max_loops: 2\n"
         "        rules:\n"
         "          - {if: {verdict: rework}, goto: reviewer}\n"

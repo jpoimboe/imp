@@ -139,6 +139,11 @@ class AgentInvocation:
     # cheapest->strongest). Copied onto ToolContext by the provider; surfaced to
     # the model as the `task` tool's optional `tier` enum. () = feature off.
     tiers: tuple[str, ...] = ()
+    # The tier label this invocation resolved against ("low"|"medium"|"high"), so
+    # a provider can set a per-tier posture (e.g. claude_code disables extended
+    # thinking on "low" to match anthropic). None = no tier label (legacy/test, or
+    # a subagent inheriting the parent's provider/model without an explicit tier).
+    tier: str | None = None
     # Nesting bound's threading path: dispatch_task sets the child's depth to
     # parent + 1 and refuses past MAX_SUBAGENT_DEPTH. A field WITHOUT this
     # threading would read 0 forever and never trip. Each provider copies it

@@ -96,7 +96,7 @@ def _seed_scripted_gate_project(root: Path) -> Path:
     (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
-        "      - name: gate\n        file: agents/gate.md\n        tier: medium\n")
+        "      - name: gate\n        file: agents/gate.md\n        tier: low\n")
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
