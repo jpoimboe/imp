@@ -80,7 +80,7 @@ async def bash(
         change_title=src.title if src else "",
         change_dir=(getattr(src, "change_dir", None)
                     or (Path(h) if (h := getattr(src, "change_home", None)) else None)),
-        verify_command=ctx.verify_command,
+        test_gates=ctx.test_gates,
     )
     env = overlay_engine_env(os.environ, eng)
     # POSIX: start_new_session=True makes the child a new session leader so

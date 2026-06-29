@@ -73,24 +73,24 @@ def test_bash_registers_and_clears_running_processes(tmp_path: Path) -> None:
     assert ctx.running_processes == []
 
 
-def test_bash_exposes_imp_verify_command(tmp_path: Path) -> None:
+def test_bash_exposes_imp_test_cmd_fast(tmp_path: Path) -> None:
+    from imp.engine.env import TestGates
     ctx = _ctx(tmp_path)
-    ctx.verify_command = "make check"
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_VERIFY_COMMAND"}))
+    ctx.test_gates = TestGates(fast="make check")
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_TEST_CMD_FAST"}))
     assert out["returncode"] == 0
     assert "make check" in out["stdout"]
 
 
-def test_bash_no_verify_command_means_empty(
+def test_bash_no_test_gates_means_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression (found by imp-on-imp dogfooding): a stale IMP_VERIFY_COMMAND in
-    # the ambient environment must NOT leak into the subprocess when the ctx has no
-    # verify_command. engine_env is authoritative; overlay_engine_env strips the
-    # inherited copy. Without that, `{**os.environ, ...}` would pass "make stale"
-    # straight through and falsely enable the verify gate.
-    monkeypatch.setenv("IMP_VERIFY_COMMAND", "make stale")
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "echo [$IMP_VERIFY_COMMAND]"}))
+    # Regression: a stale ambient IMP_TEST_CMD_FAST must NOT leak into the
+    # subprocess when ctx has no test_gates. engine_env is authoritative;
+    # overlay_engine_env strips the inherited copy.
+    monkeypatch.setenv("IMP_TEST_CMD_FAST", "make stale")
+    out = json.loads(_run_bash(_ctx(tmp_path),
+                               {"command": "echo [$IMP_TEST_CMD_FAST]"}))
     assert "[]" in out["stdout"]
 
 

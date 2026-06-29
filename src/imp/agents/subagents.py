@@ -283,7 +283,7 @@ async def dispatch_task(
             # nudge-event sink passed to build_continuation_fn; event_log= is the
             # invocation's stored audit log. For subagents both are ctx.event_log.
             log=ctx.event_log,
-            verify_command=ctx.verify_command,
+            test_gates=ctx.test_gates,
             non_interactive=ctx.non_interactive,
             sandbox_policy=ctx.sandbox_policy,
             checkpoint_threshold=ctx.checkpoint_threshold,
