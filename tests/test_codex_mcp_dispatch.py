@@ -264,7 +264,7 @@ def test_fatal_tool_error_captured_on_state(tmp_path: Path) -> None:
     from imp.agents.tools.errors import FatalToolError
 
     def _fn(ctx: Any, **k: Any) -> str:
-        raise FatalToolError("config missing: IMP_VERIFY_COMMAND")
+        raise FatalToolError("config missing: IMP_TEST_CMD_FAST")
     bad = Tool(name="lint", description="",
                input_schema={"type": "object", "properties": {}}, fn=_fn)
 
@@ -272,7 +272,7 @@ def test_fatal_tool_error_captured_on_state(tmp_path: Path) -> None:
     state = RunState(cap=10)
     out = asyncio.run(dispatch_tool(tool=bad, args={}, ctx=ctx, state=state))
 
-    assert state.fatal_tool_error == ("lint", "config missing: IMP_VERIFY_COMMAND")
+    assert state.fatal_tool_error == ("lint", "config missing: IMP_TEST_CMD_FAST")
     assert "config missing" in out  # is_error-ish body, not silently dropped
 
 

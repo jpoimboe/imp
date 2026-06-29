@@ -43,7 +43,7 @@ class TestGates:
 
 # Every env var this module manages. `engine_env` is the AUTHORITY for these: a
 # subprocess must see exactly what `engine_env` produces, never an inherited copy.
-# `IMP_VERIFY_COMMAND` is conditionally present (absent => no verify gate), so
+# `IMP_TEST_CMD_FAST` is conditionally present (absent => no fast gate), so
 # without explicit stripping a stale ambient value (e.g. from a parent imp process
 # during imp-on-imp dogfooding) would leak through a `{**os.environ, ...}` merge
 # and falsely enable the gate. Use `overlay_engine_env` to merge, not a raw dict spread.
@@ -52,8 +52,6 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_CHANGE_ID",
     "IMP_CHANGE_TITLE",
     "IMP_CHANGE_DIR",
-    "IMP_VERIFY_COMMAND",
-    "IMP_VERIFY_TIMEOUT",
     "IMP_TEST_CMD_FAST",
     "IMP_TEST_CMD_SLOW",
     "IMP_TEST_CMD_FAST_TIMEOUT",
@@ -68,8 +66,8 @@ def overlay_engine_env(
 
     Any engine-managed var inherited from `parent` is dropped first, so only the
     vars `overlay` actually provides reach the subprocess. This prevents a stale
-    ambient engine var — notably `IMP_VERIFY_COMMAND` from an outer imp process —
-    from leaking past `engine_env`'s "absent => no verify gate" contract.
+    ambient engine var — notably `IMP_TEST_CMD_FAST` from an outer imp process —
+    from leaking past `engine_env`'s "absent => no fast gate" contract.
 
     `PYTHONPATH` is special-cased: it is a *prefix*, not an authoritative value.
     The worktree's `src/` (set by `engine_env` for an imp checkout) is prepended
@@ -95,7 +93,6 @@ def overlay_engine_env(
 def engine_env(
     *, project_root: Path, change_id: str, change_title: str,
     change_dir: Path | None = None,
-    verify_command: str | None = None, verify_timeout: int | None = None,
     test_gates: TestGates | None = None,
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
@@ -109,15 +106,6 @@ def engine_env(
                             injected only when change_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/change/
                             so the state directory survives worktree relocation.
-        IMP_VERIFY_COMMAND — optional combined verify gate command (tests+lint+typecheck),
-                            injected only when configured. A falsy command (None or
-                            empty string) is treated as absent => no verify gate, so
-                            the var is omitted.
-        IMP_VERIFY_TIMEOUT — optional wall-clock ceiling (seconds) for the verify gate,
-                            from the `verify_timeout` config key. Injected only when set;
-                            absent => run-verify.sh applies its own 300s default. IMP_-
-                            prefixed, so the sandbox allowlist passes it through with no
-                            edit (a bare ambient value would be cleared by --clearenv).
         IMP_TEST_CMD_FAST / IMP_TEST_CMD_SLOW — tiered gate commands (cheap fast
                             gate vs. complete slow gate). Each injected only when
                             its TestGates field is truthy; a falsy value => absent.
@@ -143,10 +131,6 @@ def engine_env(
     }
     if change_dir is not None:
         env["IMP_CHANGE_DIR"] = str(change_dir)
-    if verify_command:
-        env["IMP_VERIFY_COMMAND"] = verify_command
-    if verify_timeout is not None:
-        env["IMP_VERIFY_TIMEOUT"] = str(verify_timeout)
     if test_gates is not None:
         if test_gates.fast:
             env["IMP_TEST_CMD_FAST"] = test_gates.fast

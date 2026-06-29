@@ -238,13 +238,13 @@ def test_resolve_policy_env_drops_secrets_keeps_imp_and_lc(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, change_id="abc", cfg=SandboxConfig(),
-        engine_env_result={"IMP_VERIFY_COMMAND": "make check"},
+        engine_env_result={"IMP_TEST_CMD_FAST": "make check"},
         environ={"PATH": "/usr/bin", "AWS_SECRET_ACCESS_KEY": "x",
                  "LC_ALL": "C", "ANTHROPIC_API_KEY": "k"},
         available=True,
     )
     keys = {k for k, _ in pol.setenv}
-    assert "PATH" in keys and "LC_ALL" in keys and "IMP_VERIFY_COMMAND" in keys
+    assert "PATH" in keys and "LC_ALL" in keys and "IMP_TEST_CMD_FAST" in keys
     assert "AWS_SECRET_ACCESS_KEY" not in keys
     assert "ANTHROPIC_API_KEY" not in keys
 

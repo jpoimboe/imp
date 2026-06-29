@@ -42,7 +42,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
         captured["kwargs"] = kwargs
         return object()
 
-    monkeypatch.setenv("IMP_VERIFY_COMMAND", "leaked-gate")
+    monkeypatch.setenv("IMP_TEST_CMD_FAST", "leaked-gate")
     monkeypatch.setenv("IMP_REMOTE_CONTROL_SOCK", "/tmp/stale.sock")
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
@@ -59,7 +59,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
     assert kw["stdin"] == subprocess.DEVNULL
     assert kw["stdout"] == subprocess.DEVNULL
     assert kw["stderr"] == subprocess.DEVNULL
-    assert "IMP_VERIFY_COMMAND" not in kw["env"]
+    assert "IMP_TEST_CMD_FAST" not in kw["env"]
     assert "IMP_REMOTE_CONTROL_SOCK" not in kw["env"]
 
 
