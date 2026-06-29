@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from imp.providers.codex_rollout import _canonical_tool_name, evict_rollout_lines
 from imp.providers.history_compaction import EVICTION_PLACEHOLDER
@@ -162,3 +163,29 @@ def test_orphan_output_without_call_is_kept() -> None:
              _call("a", "read_file"), _out("a", "BODY-A")]
     out = evict_rollout_lines(lines, keep_recent_turns=0)
     assert _output_of(out[1]) == "ORPHAN-BODY"   # orphan kept
+
+
+_FIXTURE = (Path(__file__).resolve().parents[1]
+            / "docs/superpowers/spikes/codex/codex-rollout-sample.jsonl")
+
+
+def test_evict_against_captured_sample_fixture() -> None:
+    lines = _FIXTURE.read_text().splitlines()
+    out = evict_rollout_lines(lines)  # default KEEP_RECENT_TURNS = 3
+    bodies = {json.loads(ln)["payload"]["call_id"]: _output_of(ln)
+              for ln in out if '"function_call_output"' in ln}
+    # turns 0..5, keep_recent 3 -> cutoff 2 -> only the old compactable call_a
+    # (read_file, turn 0) is cleared; call_b is non-compactable, call_c..call_f
+    # are inside the keep-recent window.
+    assert bodies == {
+        "call_a": PLACEHOLDER,                          # read_file, turn 0: evicted
+        "call_b": "FULL BODY B — patch applied",        # edit_file: not compactable
+        "call_c": "FULL BODY C — grep hits",            # grep: inside keep-recent
+        "call_d": "FULL BODY D — command output",       # bash: inside keep-recent
+        "call_e": "FULL BODY E — glob matches",         # glob: inside keep-recent
+        "call_f": "FULL BODY F — contents of b.py",     # read_file: recent
+    }
+    # header + ordering + count preserved
+    assert out[0] == lines[0]
+    assert json.loads(out[0])["type"] == "session_meta"
+    assert len(out) == len(lines)
