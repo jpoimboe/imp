@@ -23,9 +23,9 @@ from typing import Any
 import yaml
 
 from imp.cli.verify_detect import (
-    detect_verify_command,
-    format_verify_command_yaml,
-    resolve_verify_choice,
+    detect_test_command,
+    format_test_cmd_fast_yaml,
+    resolve_test_cmd_choice,
 )
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
@@ -311,17 +311,21 @@ def run_init(
         imp_dir.mkdir(parents=True, exist_ok=True)
         body = yaml.safe_dump(
             _build_project_config(), sort_keys=False, default_flow_style=False)
-        verify_detect = detect_verify_fn or detect_verify_command
-        suggested = verify_detect(project_root)
-        verify_block = ""
+        detect_cmd = detect_verify_fn or detect_test_command
+        suggested = detect_cmd(project_root)
+        test_block = ""
         if suggested is not None:
-            chosen = resolve_verify_choice(suggested, input_fn, output_fn)
-            verify_block = (
-                "\n# Verification gate: a command imp runs after each implement loop\n"
-                "# to catch regressions (tests + lint + typecheck). Empty string opts out.\n"
-                + format_verify_command_yaml(chosen)
+            chosen = resolve_test_cmd_choice(suggested, input_fn, output_fn)
+            test_block = (
+                "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
+                "# implement loop to catch regressions. Empty string opts out.\n"
+                "# The slow gate (test_cmd_slow) runs the full suite once per Change\n"
+                "# and falls back to test_cmd_fast when unset. Timeouts default to\n"
+                "# 120s (fast) / 300s (slow) — override with test_cmd_fast_timeout /\n"
+                "# test_cmd_slow_timeout.\n"
+                + format_test_cmd_fast_yaml(chosen)
             )
-        project_file.write_text(body + verify_block + _facts_hint())
+        project_file.write_text(body + test_block + _facts_hint())
 
     # --- bootstrap user config (only if the machine has none) ---
     user_path = user_config_path()

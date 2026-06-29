@@ -177,18 +177,18 @@ def test_init_no_verify_line_when_nothing_detected(tmp_path: Path) -> None:
         picker_fn=lambda _avail: ["anthropic"],
     )
     text = (tmp_path / "imp" / "project.yaml").read_text()
-    assert "verify_command" not in text
+    assert "test_cmd_fast" not in text
     assert "lint_command" not in text
 
 
-def test_init_writes_verify_command_on_yes(tmp_path: Path) -> None:
+def test_init_writes_test_cmd_fast_on_yes(tmp_path: Path) -> None:
     run_init(
         tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
         picker_fn=_picks("anthropic"),
         detect_verify_fn=lambda _root: "make check",
     )
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
-    assert data["verify_command"] == "make check"
+    assert data["test_cmd_fast"] == "make check"
 
 
 def test_init_writes_optout_on_skip(tmp_path: Path) -> None:
@@ -198,7 +198,20 @@ def test_init_writes_optout_on_skip(tmp_path: Path) -> None:
         detect_verify_fn=lambda _root: "make check",
     )
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
-    assert data["verify_command"] == ""
+    assert data["test_cmd_fast"] == ""
+
+
+def test_init_comment_names_timeout_defaults(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: "make check",
+    )
+    text = (tmp_path / "imp" / "project.yaml").read_text()
+    assert "120s" in text and "300s" in text
+    assert "test_cmd_fast_timeout" in text
+    assert "test_cmd_slow" in text
+    assert "test_cmd_slow_timeout" in text
 
 
 def test_init_surfaces_bwrap_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

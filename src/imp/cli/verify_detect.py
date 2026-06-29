@@ -1,4 +1,4 @@
-"""Language-agnostic detection of a project's verification command (suggestions only)."""
+"""Language-agnostic detection of a project's fast test command (suggestions only)."""
 
 from __future__ import annotations
 
@@ -48,9 +48,9 @@ def _from_justfile(text: str) -> str:
     return ""
 
 
-def detect_verify_command(project_root: Path) -> str | None:
-    """Return a suggested verify command for `project_root`, or None when nothing
-    is detected. First probe that yields a non-empty command wins."""
+def detect_test_command(project_root: Path) -> str | None:
+    """Return a suggested fast test command for `project_root`, or None when
+    nothing is detected. First probe that yields a non-empty command wins."""
     makefile = project_root / "Makefile"
     if makefile.is_file():
         cmd = _from_makefile(makefile.read_text(errors="ignore"))
@@ -73,22 +73,22 @@ def detect_verify_command(project_root: Path) -> str | None:
     return None
 
 
-def resolve_verify_choice(
+def resolve_test_cmd_choice(
     suggested: str,
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
 ) -> str:
     output_fn(
-        f"Detected `{suggested}` — use it as your verification gate? [Y / edit / skip]"
+        f"Detected `{suggested}` — use it as your fast test command? [Y / edit / skip]"
     )
     ans = input_fn("").strip().lower()
     if ans in ("e", "edit"):
-        entered = input_fn("verify command: ").strip()
+        entered = input_fn("fast test command: ").strip()
         return entered or suggested
     if ans in ("s", "skip", "n", "no"):
         return ""
     return suggested
 
 
-def format_verify_command_yaml(command: str) -> str:
-    return f"verify_command: {json.dumps(command)}\n"
+def format_test_cmd_fast_yaml(command: str) -> str:
+    return f"test_cmd_fast: {json.dumps(command)}\n"

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _verify_command_nudge
+from imp.cli.main import _test_cmd_fast_nudge
 from imp.providers import register_builtin_providers, resolve
 
 
@@ -29,13 +29,13 @@ def test_non_interactive_warns_and_does_not_write(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project(tmp_path, "default-workflow: imp\n")
     errs: list[str] = []
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: "make check",
     )
     assert any("make check" in e for e in errs)
-    assert "verify_command" not in (root / "imp" / "project.yaml").read_text()
+    assert "test_cmd_fast" not in (root / "imp" / "project.yaml").read_text()
 
 
 def test_interactive_yes_appends_command(
@@ -43,21 +43,21 @@ def test_interactive_yes_appends_command(
 ) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project(tmp_path, "default-workflow: imp\n")
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
         input_fn=_seq("y"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: "make check",
     )
-    assert 'verify_command: "make check"' in (root / "imp" / "project.yaml").read_text()
+    assert 'test_cmd_fast: "make check"' in (root / "imp" / "project.yaml").read_text()
 
 
 def test_no_nudge_when_already_configured(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = _project(tmp_path, "default-workflow: imp\nverify_command: make test\n")
+    root = _project(tmp_path, "default-workflow: imp\ntest_cmd_fast: make test\n")
     errs: list[str] = []
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: "make check",
@@ -69,9 +69,9 @@ def test_no_nudge_when_opted_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    root = _project(tmp_path, 'default-workflow: imp\nverify_command: ""\n')
+    root = _project(tmp_path, 'default-workflow: imp\ntest_cmd_fast: ""\n')
     errs: list[str] = []
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: "make check",
@@ -84,12 +84,12 @@ def test_interactive_skip_writes_optout(
 ) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project(tmp_path, "default-workflow: imp\n")
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
         input_fn=_seq("skip"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: "make check",
     )
-    assert 'verify_command: ""' in (root / "imp" / "project.yaml").read_text()
+    assert 'test_cmd_fast: ""' in (root / "imp" / "project.yaml").read_text()
 
 
 def test_interactive_edit_writes_custom_command(
@@ -97,12 +97,12 @@ def test_interactive_edit_writes_custom_command(
 ) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project(tmp_path, "default-workflow: imp\n")
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=False,
         input_fn=_seq("edit", "make ci"), output_fn=lambda _m: None, err_fn=lambda _m: None,
         detect_fn=lambda _r: "make check",
     )
-    assert 'verify_command: "make ci"' in (root / "imp" / "project.yaml").read_text()
+    assert 'test_cmd_fast: "make ci"' in (root / "imp" / "project.yaml").read_text()
 
 
 def test_no_nudge_when_nothing_detected(
@@ -111,7 +111,7 @@ def test_no_nudge_when_nothing_detected(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project(tmp_path, "default-workflow: imp\n")
     errs: list[str] = []
-    _verify_command_nudge(
+    _test_cmd_fast_nudge(
         project_root=root, control_root=root, non_interactive=True,
         input_fn=_seq(), output_fn=lambda _m: None, err_fn=errs.append,
         detect_fn=lambda _r: None,
