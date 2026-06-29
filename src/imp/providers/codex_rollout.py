@@ -177,7 +177,7 @@ def evict_rollout_lines(
     for raw, obj in parsed:
         if isinstance(obj, dict) and _is_evicted_output(obj, evicted):
             obj["payload"]["output"] = EVICTION_PLACEHOLDER
-            out.append(json.dumps(obj))
+            out.append(json.dumps(obj, separators=(',', ':'), ensure_ascii=False))
         else:
             out.append(raw)
     return out
