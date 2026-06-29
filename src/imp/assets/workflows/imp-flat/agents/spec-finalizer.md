@@ -69,8 +69,8 @@ questions.
 Normalize the draft just enough to imp's structure (ensure a **Goal** and
 **Acceptance criteria** are present), run the same pre-commit self-review as in
 "Writing the Spec", then **author the plan outline** (see **Author the plan outline**
-below), commit with `imp artifact-commit spec`, and finish with
-`complete_step(phase="written", …)`. Pin `complexity` from the draft's shape (see **Pinning complexity** below).
+below), and finish with `complete_step(phase="written", …)`. You only write the
+spec file; the engine journals it at the step boundary. Pin `complexity` from the draft's shape (see **Pinning complexity** below).
 
 ## Writing the Spec (the `phase: written` turn)
 
@@ -121,17 +121,13 @@ Shape:
 On a **rework or minors re-commit**, the `## Plan outline` already lives in the spec —
 keep it, and refresh it only if the rework changed scope (and thus the plan count).
 
-Append the outline, then commit it with the **Commit** step below and finish with the
-existing `complete_step(phase="written", …)` call.
+Append the outline, then finish with the existing
+`complete_step(phase="written", …)` call.
 
-**Commit** the spec to the change's artifact lineage. The agent writes the
-plain file; `imp artifact-commit` commits it to refs/imp/journal-wip/<id> (NOT
-the code branch — `main` stays pure code). Do not run `git add`/`git commit`
-yourself, and do not add a `Change:` trailer:
-
-```
-imp artifact-commit spec
-```
+You only write the spec file to the change's artifact area (NOT the code branch —
+`main` stays pure code); the engine journals it to the change's artifact ref at the
+step boundary. Do not run `git add`/`git commit` yourself, and do not add a
+`Change:` trailer.
 
 **Finish** with:
 
@@ -168,16 +164,14 @@ doesn't re-flag it. Never apply a finding you haven't verified, and never edit t
 spec into something you know to be wrong just to make a finding disappear.
 
 Address each verified finding, re-write `{{ change.home }}/artifacts/spec/{{ change.id }}.md`,
-then run `imp artifact-commit spec` — the wip lineage is an
-append-only archive, so a revision is simply another commit; there is no amend
-or fixup. Finish tool-terminal:
+then finish tool-terminal — you only write the file; the engine journals the
+revision at the step boundary:
 
 ```
-imp artifact-commit spec
 complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")
 ```
 
-A rework turn you resolve ends tool-terminal: `imp artifact-commit spec` then the
+A rework turn you resolve ends tool-terminal with the
 `complete_step(phase="written", …)` call — do not trail off with prose when you are
 done. Most rework decisions you **decide and record** (see
 "Ask vs. decide" below); escalate — by ending your turn with the question to yield
@@ -248,19 +242,18 @@ spec already passed; the reviewer's Minor/Nit `findings:` are advisory, not a re
 On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
-   `findings:`, re-write `{{ change.home }}/artifacts/spec/{{ change.id }}.md`, then run
-   `imp artifact-commit spec` — the wip lineage is append-only, so a
-   revision is another commit; there is no amend or fixup. Finish tool-terminal:
+   `findings:`, re-write `{{ change.home }}/artifacts/spec/{{ change.id }}.md`, then
+   finish tool-terminal — you only write the file; the engine journals the revision
+   at the step boundary:
 
    ```
-   imp artifact-commit spec
    complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
-   acting on), **complete WITHOUT committing** — just call
-   `complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")`.
-   Do not make an empty commit. The verification review still runs on the unchanged
+   acting on), just call
+   `complete_step(phase="written", spec_path="{{ change.home }}/artifacts/spec/{{ change.id }}.md", complexity="<trivial|standard>")`
+   without changing the file. The verification review still runs on the unchanged
    spec and will pass it through.
 
 **Pin `complexity` to its first-pass value.** Re-emit the SAME `complexity` you

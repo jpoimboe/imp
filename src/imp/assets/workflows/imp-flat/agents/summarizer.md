@@ -12,9 +12,8 @@ near the end of a full-ceremony change, after the code has been reviewed and set
 
 ## Source — read only; never modify project source
 
-You may write **only** under `{{ change.home }}/artifacts/` and run
-`imp artifact-commit summary`. Do **not** modify any project source file, do not run
-a build, and make no code change.
+You may write **only** under `{{ change.home }}/artifacts/`. Do **not** modify any
+project source file, do not run a build, and make no code change.
 
 Read, to ground the summary:
 - the spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` — imp's durable
@@ -38,14 +37,10 @@ Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md`:
   genuinely altered structure** (a new component, a changed data flow). It must
   render in a terminal — no mermaid. Omit it entirely when structure did not change.
 
-## Commit and finish
+## Finish
 
-Commit the artifact to the change's lineage — do not run `git add`/`git commit`
-yourself and do not add a `Change:` trailer:
-
-```
-imp artifact-commit summary
-```
+You only write the summary file under `{{ change.home }}/artifacts/`; the engine
+journals it at the step boundary. Do not run `git add`/`git commit` yourself.
 
 Then finish with `complete_step(status="Success")`. On an unrecoverable failure
 finish with `complete_step(status="Error")` instead — you route to `finalize`

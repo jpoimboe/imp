@@ -24,10 +24,10 @@ def test_finalize_prompt_avoids_full_width_rules() -> None:
     assert "do **not** draw full-width horizontal rules" in body
 
 
-def test_spec_finalizer_writes_to_artifacts_and_uses_commit_script() -> None:
+def test_spec_finalizer_writes_to_artifacts_no_commit_script() -> None:
     body = _agent_prompt("spec-finalizer")
     assert "{{ change.home }}/artifacts/spec/" in body
-    assert "imp artifact-commit spec" in body
+    assert "imp artifact-commit" not in body
     # The old code-branch path and git-commit machinery are gone.
     assert "imp/specs/" not in body
     assert "git commit --amend" not in body
@@ -65,10 +65,10 @@ def test_cli_new_help_does_not_name_the_old_spec_writer() -> None:
     assert "the spec-writer opens" not in text
 
 
-def test_plan_writer_writes_to_artifacts_and_uses_commit_script() -> None:
+def test_plan_writer_writes_to_artifacts_no_commit_script() -> None:
     body = _agent_prompt("plan-writer")
     assert "{{ change.home }}/artifacts/plans/" in body
-    assert "imp artifact-commit plan" in body
+    assert "imp artifact-commit" not in body
     # No plan fixup / amend machinery survives.
     assert "--fixup" not in body
     assert "git commit --amend" not in body
@@ -153,3 +153,14 @@ def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
     assert "Only validate at system boundaries (user input," in text
     # The old bare opener is gone.
     assert "- Don't add error handling, fallbacks, or validation for scenarios" not in text
+
+
+def test_no_workflow_prompt_invokes_artifact_commit() -> None:
+    for wf_name in ("imp", "imp-flat"):
+        wf = load_workflow(bundled_workflow_dir(wf_name))
+        for name, agent in wf.agents.items():
+            body = agent.prompt_template_source
+            assert "imp artifact-commit" not in body, \
+                f"{wf_name}/{name} still instructs imp artifact-commit"
+            assert "journal-wip" not in body, \
+                f"{wf_name}/{name} still names the journal-wip ref"

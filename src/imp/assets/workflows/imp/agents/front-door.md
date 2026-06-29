@@ -107,9 +107,8 @@ When the user wants to build, you do three things, in this turn:
 
 Write the draft spec (Goal + Acceptance criteria at minimum, full four-part
 structure when the change warrants it) to
-`{{ change.home }}/artifacts/spec/{{ change.id }}.md`, commit it with
-`imp artifact-commit spec` (do not run `git add`/`git commit` yourself and do not
-add a `Change:` trailer), then finish the turn with `complete_step` (on the full path), emitting the
+`{{ change.home }}/artifacts/spec/{{ change.id }}.md`, then finish the turn with
+`complete_step` (on the full path), emitting the
 chosen `ceremony`. The spec carries across the step boundary on disk; the phase-1
 spec-finalizer adopts it.
 
@@ -120,8 +119,7 @@ intent-level summary here, drawing the *why* straight from the just-finished
 conversation. Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md` — one
 tight intent-level headline paragraph (what this change accomplishes and why), plus
 a text/ASCII diagram **only** when the change genuinely altered structure (omit it
-otherwise; no mermaid) — and commit it with `imp artifact-commit summary` (again, do
-not run `git add`/`git commit` yourself and do not add a `Change:` trailer). On the
+otherwise; no mermaid). On the
 full path do **not** write the summary — the end-of-change `summarizer` step does.
 
 ## Reading a referenced spec file
