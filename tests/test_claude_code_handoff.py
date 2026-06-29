@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -54,22 +53,24 @@ def _inv(tmp_path: Path, log: InMemoryEventLog, *,
 
 
 @pytest.mark.anyio
-async def test_threshold_crossing_interrupts_replays_and_signals_handoff(
+async def test_threshold_crossing_continues_with_instruction_increment(
         tmp_path: Path) -> None:
-    """Crossing the live context threshold mid-turn drives interrupt ->
-    stream-json query() replay with the handoff instruction appended ->
-    captured handoff turn, WITHOUT a ContextWindowError."""
+    """Crossing the live context threshold mid-turn signals interrupt(), lets the
+    SDK close the turn balanced (error_during_execution), then continues the LIVE
+    session with a plain handoff-instruction increment — NOT a _stream_history
+    replay (the regression that doubled the context). The handoff event fires."""
     (tmp_path / "art").mkdir()
     hp = handoff_path_for(tmp_path / "step")
     log = InMemoryEventLog()
 
     scripted = [
-        # Turn 1: an assistant turn carrying a (soon-dangling) tool_use; the
-        # live context is at 170000/200000 = 0.85 >= 0.8, so the runner
-        # interrupts here and re-queries.
+        # Turn 1: an assistant turn carrying a (soon-dangling) tool_use; the live
+        # context is 170000/200000 = 0.85 >= 0.8, so the runner interrupts here.
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
-        # Turn 2 (after the handoff-instruction replay): the agent writes the
+        # The SDK closes the interrupted turn balanced.
+        result(subtype="error_during_execution", is_error=True),
+        # Turn 2 (after the plain instruction increment): the agent writes the
         # handoff note, the tool_result lands, the ResultMessage ends the turn.
         assistant(text("writing handoff"),
                   tool_use("u2", "write_file",
@@ -99,13 +100,63 @@ async def test_threshold_crossing_interrupts_replays_and_signals_handoff(
     assert not [e for e in events if e["type"] == "error"]
     client = holder["client"]
     assert client.interrupts == 1
-    # The re-query replayed history INCLUDING the appended handoff instruction.
-    replayed = [q for q in client.queries if isinstance(q, list)]
-    assert any("approaching the context limit" in json.dumps(q) for q in replayed)
-    # The interrupted turn's dangling tool_use ("u1") is balanced for replay in
+    # Regression: the FIRST query streams history (a drained list); EVERY requery
+    # after it is a plain increment string. If the handoff path re-streamed
+    # history, queries[1:] would contain a list — assert it never does.
+    assert isinstance(client.queries[0], list)
+    assert all(isinstance(q, str) for q in client.queries[1:])
+    # The handoff requery carried the instruction increment as a string.
+    assert any("approaching the context limit" in q
+               for q in client.queries if isinstance(q, str))
+    # The interrupted turn's dangling tool_use ("u1") is balanced for the stash in
     # `messages` only — NOT logged as a real tool_result (it never ran).
     tool_results = [e for e in log.read() if e["type"] == "tool_result"]
     assert not any(e["payload"]["id"] == "u1" for e in tool_results)
+
+
+@pytest.mark.anyio
+async def test_threshold_watchdog_does_not_refire_mid_interrupt(
+        tmp_path: Path) -> None:
+    """After a crossing sets handoff_phase = "interrupt_requested", a second
+    assistant message arriving before the balanced close (still above threshold)
+    must NOT trigger a second interrupt — interrupt() fires exactly once."""
+    (tmp_path / "art").mkdir()
+    hp = handoff_path_for(tmp_path / "step")
+    log = InMemoryEventLog()
+
+    scripted = [
+        assistant(text("working"),
+                  tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
+        # A second assistant message lands before the balanced close, still above
+        # threshold; the watchdog must stay quiet because a handoff is in flight.
+        assistant(text("still working"),
+                  tool_use("u1b", "write_file", {"path": "scratch2", "content": "y"})),
+        result(subtype="error_during_execution", is_error=True),
+        assistant(text("writing handoff"),
+                  tool_use("u2", "write_file",
+                           {"path": str(hp), "content": "# handoff\n"})),
+        user(tool_result("u2", "ok")),
+        result(),
+    ]
+
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
+                                     context_usage=cu)
+        holder["client"] = client
+        return client
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+
+    assert holder["client"].interrupts == 1
+    handoff = [e for e in events if e["type"] == "handoff"]
+    assert len(handoff) == 1
 
 
 @pytest.mark.anyio
