@@ -62,6 +62,8 @@ from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
 from imp.providers.catalog import context_tokens_from_usage
+from imp.providers.history_compaction import is_cold
+from imp.providers.message_eviction import apply_eviction, evicted_result_ids
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     WEB_TOOL_NAMES,
@@ -599,6 +601,11 @@ class OpenAIAgentRunner:
         prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)
         guard = LoopGuard()
 
+        # Cold-cache eviction: computed ONCE here and reapplied each round so
+        # the evicted prefix region stays byte-stable across tool-rounds.
+        evicted_ids = evicted_result_ids(
+            messages, cold=is_cold(invocation.events_path))
+
         while not self._cancel:
             client = self._get_client()
             # N4 race note: an interrupt() between the loop-head _cancel check and
@@ -613,7 +620,8 @@ class OpenAIAgentRunner:
                     async with client.responses.stream(
                         model=self.model,
                         instructions=invocation.system_prompt,
-                        input=_imp_to_responses_input(messages),
+                        input=_imp_to_responses_input(
+                            apply_eviction(messages, evicted_ids)),
                         tools=openai_tools,
                         store=False,
                         prompt_cache_key=prompt_cache_key,
