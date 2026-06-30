@@ -1594,10 +1594,18 @@ def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         is_warning=False, detail=detail))
 
 
+def _h_max_tokens_truncated(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Telemetry-only; the sibling runner_warning is the visible signal (no breadcrumb).
+    return
+
+
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
+NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
 
 
 def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

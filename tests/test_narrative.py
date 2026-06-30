@@ -2655,3 +2655,13 @@ def test_error_node_full_summary_wins_over_last_agent_text() -> None:
                      "last_agent_text": "secondary text"}))
     err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
     assert err.detail == "the full summary"
+
+
+def test_max_tokens_truncated_event_renders_no_fallback_node() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "max_tokens_truncated", agent_id="step:p/s",
+            tier="high", model="claude-sonnet-4-6", max_tokens=32000,
+            output_tokens=32000, thinking_tokens=5000),
+    ))
+    step = _only_step(tree)
+    assert not [c for c in step.children if isinstance(c, nv.FallbackLine)]
