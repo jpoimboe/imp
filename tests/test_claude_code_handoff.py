@@ -160,6 +160,47 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
 
 
 @pytest.mark.anyio
+async def test_handoff_reported_even_when_note_missing_and_error(
+        tmp_path: Path) -> None:
+    """The runner always reports handoff_path on a Tier A handoff turn — it does
+    NOT suppress on a missing note or an is_error close. (Failure detection is the
+    engine's job, via note existence.)"""
+    (tmp_path / "art").mkdir()
+    hp = handoff_path_for(tmp_path / "step")
+    log = InMemoryEventLog()
+
+    scripted = [
+        assistant(text("working"),
+                  tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
+        result(subtype="error_during_execution", is_error=True),
+        # Turn 2: the agent does NOT write the note and the turn ends is_error.
+        assistant(text("I am approaching the limit but will not write the note")),
+        result(is_error=True),
+    ]
+
+    cu = context_usage(raw_max_tokens=200_000, percentage=0.85,
+                       total_tokens=170_000)
+    holder: dict[str, Any] = {}
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        client = FakeClaudeSDKClient(opts, scripted_messages=scripted,
+                                     context_usage=cu)
+        holder["client"] = client
+        return client
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
+
+    handoff = [e for e in events if e["type"] == "handoff"]
+    assert len(handoff) == 1
+    assert handoff[0]["payload"]["handoff_path"] == str(hp)
+    # The agent never wrote the note; the runner still reports it.
+    assert not hp.exists()
+
+
+@pytest.mark.anyio
 async def test_below_threshold_does_not_interrupt_or_signal_handoff(
         tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()

@@ -2843,3 +2843,52 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
     cap_event = next(e for e in events if e["type"] == "step_completed")
     assert cap_event["payload"]["action"]["verb"] == "pause"
+
+
+@pytest.mark.anyio
+async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
+    """When the runner reports a Tier A handoff but the note file is absent, the
+    engine treats it as a FAILED handoff: it reincarnates from the stashed
+    transcript alone and emits the DISTINCT reason
+    'handoff failed — recovering from transcript' — never the clean threshold
+    reason. The runner always reports handoff_path; the engine arbitrates."""
+    from imp.engine.reincarnation import handoff_path_for
+    from imp.providers import resolve
+
+    change, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    class _HandoffNoNoteRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)   # non-empty transcript -> stashable
+            hp = handoff_path_for(invocation.transcript_dir)
+            # Note deliberately NOT written: the handoff turn failed to produce it.
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _HandoffNoNoteProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _HandoffNoNoteRunner:
+            return _HandoffNoNoteRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _HandoffNoNoteProvider(model))
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1
+    assert reincarnating[0]["payload"]["reason"] == \
+        "handoff failed — recovering from transcript"
+    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
