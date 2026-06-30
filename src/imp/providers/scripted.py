@@ -23,6 +23,7 @@ from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, change_home_path
 from imp.agents.transcript import Transcript
+from imp.engine.agent_run import last_assistant_text
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
 
@@ -51,7 +52,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             continue
         if name in reg:
             out[name] = reg[name]
-    out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
+    if invocation.subagent_depth == 0:
+        out["complete_step"] = make_complete_step_tool(
+            invocation.agent_def.output_schema)
     if "bash" in invocation.agent_def.tools:
         out["bash_output"] = reg["bash_output"]
         out["bash_kill"] = reg["bash_kill"]
@@ -162,6 +165,16 @@ class ScriptedAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
 
+                if not tool_uses and invocation.subagent_depth > 0:
+                    # Subagent bare turn-end is terminal SUCCESS: its final text
+                    # is the deliverable. Empty text walks back; none -> emit
+                    # nothing so drive_invocation surfaces an errored result.
+                    final_text = last_assistant_text(messages)
+                    if final_text:
+                        yield {"type": "agent_output",
+                               "payload": {"text": final_text}}
+                    return
+
                 if not tool_uses and invocation.continuation_fn is not None:
                     # Bare turn-end (assistant text, no tool call) IS the yield:
                     # route through the shared end-of-turn handler like the real
@@ -169,14 +182,6 @@ class ScriptedAgentRunner:
                     nxt = invocation.continuation_fn(text)
                     if inspect.isawaitable(nxt):
                         nxt = await nxt
-                    if nxt is None:
-                        yield {"type": "error", "payload": {
-                            "category": "agent_incomplete",
-                            "kind": "no_complete_step_after_nudges",
-                            "message": "scripted agent did not call complete_step after nudges",
-                            "detail": {"last_agent_text": text[:500]},
-                        }}
-                        return
                     reply_msg = Message(
                         role="user", content=(TextBlock(text=str(nxt)),))
                     messages.append(reply_msg)

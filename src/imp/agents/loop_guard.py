@@ -101,6 +101,9 @@ class TurnRecord:
     accumulates across assistant + following-user receive() iterations."""
     assistant_text: str
     tools: list[ToolOutcome] = field(default_factory=list)
+    # Top-level-only: subagents have no complete_step tool, so this is False for
+    # every subagent turn (a done subagent ends on a bare turn that terminates
+    # the loop before observe()).
     has_complete_step: bool = False
     error_category: str | None = None
     error_kind: str | None = None

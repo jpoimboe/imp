@@ -98,11 +98,10 @@ class AgentInvocation:
     # Set by the executor for the END-OF-TURN nudge — distinct from
     # user_input_fn, which serves the bare-turn-end / AWAITING_USER resume path.
     # Called with the agent's last text; returns the next user-message text to
-    # inject and continue, or None to stop (→ agent_incomplete). None means
-    # "no end-of-turn nudge wired" (legacy/test); providers then emit the
-    # immediate no_complete_step behavior.
+    # inject and continue. None means "no end-of-turn nudge wired"
+    # (legacy/test); providers then emit the immediate no_complete_step behavior.
     continuation_fn: (
-        Callable[[str], str | None | Awaitable[str | None]] | None
+        Callable[[str], str | Awaitable[str]] | None
     ) = None
     # Stable identity of this agent invocation (step/gate/subagent), used as
     # the strict filter key for reconstruction. Derived by the executor /

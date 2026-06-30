@@ -299,12 +299,15 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_runs_subagent_via_task(tmp_path: Path) -> None:
-    """Parent dispatches via task → child runner runs to complete_step →
-    parent receives JSON-stringified payload and emits its own complete_step."""
+    """Verifies the parent's receive-loop dual-write for complete_step and the
+    resulting agent_output payload.
 
-    # NOTE: the fake client bypasses the real MCP transport, so _impl for "sub_agent"
-    # is not invoked; the race-free tool_call-append path is integration-only
-    # (covered in Task 16). This test verifies dispatch wiring + return payload.
+    The fake bypasses the MCP transport, so _impl for sub_agent is never
+    invoked and no child runner is created — the child text-deliverable path is
+    integration-only. What is exercised: the dual-write at the AssistantMessage
+    tool_use scan (complete_step → state.complete_step_args) and the agent_output
+    event that follows.
+    """
     (tmp_path / "art").mkdir()
 
     sub_def = AgentDef(
@@ -336,27 +339,15 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
             tool_use("p1", "sub_agent",
                      {"subagent_name": "sub", "task_description": "do work"}),
         ),
-        # SDK will send a tool_result back from the MCP server's task wrapper.
-        # The fake doesn't simulate that round trip; the runner sees the
-        # parent's next agent turn directly.
         assistant(
             text("got result"),
             tool_use("p2", "complete_step", {"status": "Success"}),
         ),
         result(),
     ]
-    child_scripted = [
-        assistant(
-            text("sub working"),
-            tool_use("s1", "complete_step", {"status": "Success"}),
-        ),
-        result(),
-    ]
-
-    scripts = iter([parent_scripted, child_scripted])
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=next(scripts))
+        return FakeClaudeSDKClient(opts, scripted_messages=parent_scripted)
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
@@ -742,44 +733,6 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     assert "please call complete_step" in fake.queries, (
         f"expected nudge text in fake.queries, got: {fake.queries}"
     )
-
-
-@pytest.mark.anyio
-async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
-    """continuation_fn returning None after N nudges yields agent_incomplete."""
-    (tmp_path / "art").mkdir()
-
-    # Three turns of DISTINCT prose — agent never calls complete_step. Distinct
-    # so the loop_guard's repeated_failure detector (identical-signature x K)
-    # doesn't fire; with only 3 turns the no_progress detector (N=6) also stays
-    # below threshold, so the nudge-exhaustion path is what terminates the run.
-    scripted = [
-        assistant(text("prose one")), result(),
-        assistant(text("prose two")), result(),
-        assistant(text("prose three")), result(),
-    ]
-
-    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    log = InMemoryEventLog()
-    inv = _inv(tmp_path, event_log=log)
-    calls: dict[str, int] = {"n": 0}
-
-    def cont(_last: str) -> str | None:
-        if calls["n"] >= 2:
-            return None
-        calls["n"] += 1
-        return "please call complete_step"
-
-    inv = replace(inv, continuation_fn=cont)
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
-    )
-    events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "error"
-    assert events[-1]["payload"]["category"] == "agent_incomplete"
-    assert calls["n"] == 2
 
 
 @pytest.mark.anyio
@@ -1430,29 +1383,6 @@ async def test_result_is_error_with_known_quota_text_labels_quota(tmp_path: Path
     assert len(errs) == 1
     assert errs[0]["payload"]["category"] == "quota"
     assert errs[0]["payload"]["detail"]["is_error"] is True
-
-
-@pytest.mark.anyio
-async def test_clean_no_complete_step_still_nudges(tmp_path: Path) -> None:
-    """is_error=False keeps today's benign behavior: a continuation_fn that gives
-    up routes to agent_incomplete / no_complete_step_after_nudges, NOT terminated."""
-    (tmp_path / "art").mkdir()
-    scripted = [assistant(text("I'm still thinking about it.")), result()]   # is_error False
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    inv = _inv(tmp_path)
-    inv = replace(inv, continuation_fn=lambda _last: None)
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
-
-    events = [e async for e in runner.run(inv)]
-    errs = [e for e in events if e.get("type") == "error"]
-    assert len(errs) == 1
-    payload = errs[0]["payload"]
-    assert payload["category"] == "agent_incomplete"
-    assert payload["kind"] == "no_complete_step_after_nudges"
-
 
 
 def test_termination_from_result_nonzero_exit_is_terminated() -> None:
@@ -3776,3 +3706,36 @@ async def test_receive_loop_pulses_note_activity_per_message(tmp_path: Path) -> 
     # receive_response() yields the assistant message then the ResultMessage —
     # two received SDK messages, so two liveness pulses for this single turn.
     assert len(pulses) == 2
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_resume_returns_deliverable(
+        tmp_path: Path) -> None:
+    """A subagent resumed from a bare-turn-end terminal re-emits its final text
+    as the deliverable and returns — it does NOT native-resume (handing a
+    finished subagent back to claude-p) or solicit the human."""
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = replace(_inv(tmp_path, agent_id="sub:tc-1"), subagent_depth=1)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant",
+                     content=(TextBlock(text="the conclusion"),)))
+
+    created: list[Any] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=[])
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    yielded = [ev async for ev in runner.run(inv)]
+
+    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert yielded[-1]["payload"] == {"text": "the conclusion"}
+    # Short-circuited before any SDK client / native-resume session was built.
+    assert created == []

@@ -73,18 +73,18 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=7, agent_id="sub:abc", event_log=None,
         change_state=None, first_event_parent_id="tc-1",
-        resolved_tiers=None, coordinator=None, subagent_depth=2)
+        resolved_tiers=None, coordinator=None, subagent_depth=0)
 
-    # System prompt = base persona + rendered body + the complete_step contract.
+    # System prompt = base persona + rendered body + the completion instruction (top-level).
     assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "RENDERED BODY" in inv.system_prompt
     assert "complete_step" in inv.system_prompt
-    # Non-interactive -> a nudge continuation is wired (omission #1/#2 closed).
+    # Continuation fn is wired for top-level steps.
     assert inv.continuation_fn is not None
     # Ceiling resolved (omission #3 closed).
     assert inv.max_tool_calls == 7
     # Threaded fields land on the invocation.
-    assert inv.subagent_depth == 2
+    assert inv.subagent_depth == 0
     assert inv.agent_id == "sub:abc"
     assert inv.first_event_parent_id == "tc-1"
     assert inv.user_input_fn is None  # non-interactive
@@ -965,7 +965,6 @@ async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
 
         async def run(self, invocation):
             cont = build_continuation_fn(
-                instruction="Call complete_step to finish.",
                 user_input_fn=_blocking_input, coordinator=coord,
                 event_log=log, agent_id="step:p/s")
             captured["reply"] = await cont("merge?")

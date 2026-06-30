@@ -31,7 +31,7 @@ from typing import Any
 import anyio
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import AgentInvocation, ChangeContext, Message
+from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools.limits import (
     AGENT_INACTIVITY_TIMEOUT_S,
     PROCESS_KILL_GRACE_S,
@@ -93,6 +93,17 @@ user had addressed you, and do not quote it back."""
 # that, so on claude_code this line is a harmless duplicate of the same value.
 # Frozen on resume: the replay branch reuses the stored prompt and never re-appends.
 _CURRENT_DATE_NOTE = "Today's date is {date}."
+
+
+# Appended to a SUBAGENT's system prompt in place of the completion_instruction
+# (symmetric replacement; mirrors Claude Code's subagent model). A subagent has
+# no complete_step tool — its final assistant message IS its deliverable.
+SUBAGENT_DELIVERABLE_NOTE = """\
+## Your deliverable
+
+Your final message is your entire deliverable to the agent that dispatched you.
+Everything else you do — tool calls, intermediate notes — is invisible to them.
+State your full conclusion in your last message."""
 
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
@@ -331,6 +342,19 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
     return True
 
 
+def last_assistant_text(messages: list[Message]) -> str:
+    """The most recent assistant message text, walking back over empty turns.
+    Returns "" when no assistant message carries text (the caller then emits no
+    deliverable and drive_invocation surfaces a normal errored result)."""
+    for m in reversed(messages):
+        if m.role == "assistant":
+            text = "".join(
+                b.text for b in m.content if isinstance(b, TextBlock))
+            if text:
+                return text
+    return ""
+
+
 def _join_pending_interjects(coordinator: Any) -> str | None:
     """Drain ALL queued interjects and join them newline-separated into ONE
     string, or None if the queue is empty. Used to satisfy a bare-turn-end
@@ -466,11 +490,12 @@ def build_agent_invocation(
     inject_outcome_field: bool = False,
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
-    that drifted between the two creation paths: append
-    `completion_instruction(schema)` to the system prompt AND build the
+    that drifted between the two creation paths. A top-level agent gets
+    `completion_instruction(schema)` appended to its system prompt and a
     continuation_fn (the completion handler — attended yields inline, headless
-    top-level yields/parks, a subagent nudges-then-fails) from that SAME
-    instruction.
+    top-level yields/parks). A subagent (subagent_depth > 0) instead gets
+    SUBAGENT_DELIVERABLE_NOTE: it has no complete_step tool, and its final
+    message is its deliverable.
 
     The caller renders the prompt with its own PromptContext and resolves its
     own (provider, model) — the builder never branches on agent kind. `model`
@@ -478,7 +503,12 @@ def build_agent_invocation(
     """
     if inject_outcome_field:
         agent_def = with_outcome_field(agent_def)
-    instruction = completion_instruction(agent_def.output_schema)
+    is_subagent = subagent_depth > 0
+    # A subagent has no schema-bound completion: it gets the deliverable note
+    # instead of the complete_step instruction (and Part 3 drops its schema, so
+    # completion_instruction must NOT be called for it).
+    instruction = "" if is_subagent else completion_instruction(
+        agent_def.output_schema)
     if system_prompt_override is not None:
         # Resume-replay (Part B): the override IS the previously-assembled,
         # stored step_context.system_prompt — use it verbatim, never re-append
@@ -496,15 +526,14 @@ def build_agent_invocation(
         body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
         body = f"{body}\n\n{_CURRENT_DATE_NOTE.format(date=date.today().isoformat())}"
         body = reflow_markdown(body)
-        system_prompt = f"{body}\n\n{instruction}"
+        tail = SUBAGENT_DELIVERABLE_NOTE if is_subagent else instruction
+        system_prompt = f"{body}\n\n{tail}"
     continuation_fn = build_continuation_fn(
-        instruction=instruction,
         user_input_fn=user_chat_input_fn,
         coordinator=coordinator,
         event_log=event_log,
         agent_id=agent_id,
         non_interactive=non_interactive,
-        subagent=subagent_depth > 0,
     )
     return AgentInvocation(
         agent_def=agent_def,
@@ -694,6 +723,11 @@ async def drive_invocation(
 
     if agent_output is None:
         return AgentRunResult(None, True, False, False, None)
+
+    if invocation.subagent_depth > 0:
+        # Subagent payload is {"text": ...}; there is no output schema to
+        # validate against (Part 3 drops it entirely). Return it as success.
+        return AgentRunResult(agent_output, False, False, False, None)
 
     try:
         validate_agent_output(agent_output, invocation.agent_def.output_schema)

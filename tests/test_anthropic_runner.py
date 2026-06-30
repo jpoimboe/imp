@@ -363,7 +363,7 @@ def anyio_backend():
 async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_registry) -> None:
     """End-to-end runner path: agent declares `task` + subagent; LLM emits a
     tool_use for `task`; runner's special-case `await dispatch_task(...)`
-    fires; child runner's agent_output JSON-stringifies into the tool_result.
+    fires; child runner's final text becomes the plain-string tool_result.
     """
     import dataclasses
 
@@ -372,12 +372,10 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
     reviewer_def = AgentDef(
         name="reviewer", description="",
-        tools=frozenset({"complete_step"}), subagents=(),
+        tools=frozenset(), subagents=(),
         output_schema=OutputSchema(
             fields=(OutputField(name="status", type="enum",
-                                values=("Success", "Error"), required=True),
-                    OutputField(name="verdict", type="enum",
-                                values=("approve", "rework"), required=True)),
+                                values=("Success", "Error"), required=True),),
             source=SourceLoc(file=Path("r.md"), line=1),
         ),
         prompt_template_source="review",
@@ -397,15 +395,14 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
     )
 
     # Parent and child share the queue. Consumption order:
-    #   1. parent → tool_use task
-    #   2. child  → complete_step with verdict=approve (satisfies reviewer schema)
+    #   1. parent → tool_use sub_agent
+    #   2. child  → bare text turn (final message; no complete_step for subagents)
     #   3. parent → complete_step (status=Success) after task returns
     parent_fake = FakeAsyncAnthropic([
         response(tool_use("t1", "sub_agent", {
             "subagent_name": "reviewer", "task_description": "review the spec",
         })),
-        response(tool_use("rc", "complete_step",
-                          {"status": "Success", "verdict": "approve"})),
+        response(text("Looks good, approved."), stop_reason="end_turn"),
         response(tool_use("pc", "complete_step",
                           {"status": "Success", "note": "done"})),
     ])
@@ -432,14 +429,12 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
     log_types = [e["type"] for e in log.read()]
     assert "tool_call" in log_types
     assert "tool_result" in log_types
-    # Find the task tool_result in the log and verify it has the subagent output.
+    # Find the task tool_result in the log and verify it has the subagent's raw text.
     task_result_ev = next(
         e for e in log.read()
         if e["type"] == "tool_result" and e["payload"].get("id") == "t1"
     )
-    import json
-    parsed = json.loads(task_result_ev["payload"]["content"])
-    assert parsed.get("verdict") == "approve"
+    assert task_result_ev["payload"]["content"] == "Looks good, approved."
 
 
 @pytest.mark.anyio
@@ -671,38 +666,6 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
-    """Prose every turn; continuation returns None after 2 nudges → the runner
-    emits exactly one agent_incomplete error after exactly 2 injected nudges."""
-    from dataclasses import replace
-
-    (tmp_path / "art").mkdir()
-    fake = FakeAsyncAnthropic(
-        [], default_response=response(text("still prose, no tool call"), stop_reason="end_turn"),
-    )
-    log = InMemoryEventLog()
-    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
-                                  client_factory=lambda: fake)
-
-    calls = {"n": 0}
-    def cont(_last: str) -> str | None:
-        if calls["n"] >= 2:
-            return None
-        calls["n"] += 1
-        return "please call complete_step"
-
-    inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
-    events = [e async for e in runner.run(inv)]
-    final = events[-1]
-    assert final["type"] == "error"
-    assert final["payload"]["category"] == "agent_incomplete"
-    assert final["payload"]["kind"] == "no_complete_step_after_nudges"
-    assert calls["n"] == 2
-    user_msgs = [e for e in log.read() if e["type"] == "user_message"]
-    assert len(user_msgs) == 3  # initial "go" + 2 nudges
-
-
-@pytest.mark.anyio
 async def test_headless_top_level_pauses_immediately(tmp_path: Path) -> None:
     """A headless top-level run (non_interactive=True) NEVER nudges: the first
     bare turn-end IS the yield, so it solicits the channel at once and (no client
@@ -727,9 +690,8 @@ async def test_headless_top_level_pauses_immediately(tmp_path: Path) -> None:
         raise AwaitingUserInput()
 
     cont = build_continuation_fn(
-        instruction="CALL complete_step with: done (bool).",
         user_input_fn=channel, event_log=log, agent_id="root",
-        non_interactive=True, subagent=False)
+        non_interactive=True)
     inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
 
     with pytest.raises(AwaitingUserInput):
@@ -766,7 +728,7 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
 
         async def run(self, invocation):  # type: ignore[override]
             yield {"type": "agent_output", "payload": {
-                "status": "Success", "ran_on": self.name, "model": self.model}}
+                "text": f"ran_on={self.name} model={self.model}"}}
 
         async def interrupt(self) -> None:
             pass
@@ -822,9 +784,9 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
         task_result = next(
             e for e in log.read()
             if e["type"] == "tool_result" and e["payload"].get("id") == "t1")
-        child = _json.loads(task_result["payload"]["content"])
-        assert child["ran_on"] == "openai"      # forwarded → tier vendor
-        assert child["model"] == "gpt-5.5"      # forwarded → tier model
+        child_text = task_result["payload"]["content"]
+        assert "openai" in child_text      # forwarded → tier vendor
+        assert "gpt-5.5" in child_text     # forwarded → tier model
     finally:
         _resolve.reset_providers_for_tests()
 
@@ -1010,3 +972,88 @@ async def test_llm_response_carries_context_tokens(tmp_path: Path) -> None:
     resp = next(e for e in log.read() if e["type"] == "llm_response")
     # input + cache_read + cache_creation = 1000 + 5000 + 200
     assert resp["payload"]["context_tokens"] == 6200
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_returns_text(tmp_path: Path) -> None:
+    from dataclasses import replace
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(text("the final conclusion"),
+                                        stop_reason="end_turn")])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+    events = [e async for e in runner.run(inv)]
+    outs = [e for e in events if e["type"] == "agent_output"]
+    assert outs and outs[-1]["payload"] == {"text": "the final conclusion"}
+    assert not any(e["type"] == "error" for e in events)
+
+
+@pytest.mark.anyio
+async def test_subagent_observed_turns_never_set_has_complete_step(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """has_complete_step is a top-level-only loop-guard signal: every TurnRecord
+    the guard observes during a subagent run carries has_complete_step=False.
+    Driven through anthropic (a real LoopGuard user): the subagent takes a
+    read_file tool turn (reaching guard.observe) then ends on a bare text turn
+    (which short-circuits before observe)."""
+    from dataclasses import replace
+    import imp.agents.loop_guard as lg
+
+    (tmp_path / "art").mkdir()
+    (tmp_path / "data.txt").write_text("payload")
+
+    seen: list[lg.TurnRecord] = []
+    orig = lg.LoopGuard.observe
+
+    def spy(self, record):  # type: ignore[no-untyped-def]
+        seen.append(record)
+        return orig(self, record)
+
+    monkeypatch.setattr(lg.LoopGuard, "observe", spy)
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("u1", "read_file", {"path": "data.txt"})),
+        response(text("the conclusion"), stop_reason="end_turn"),
+    ])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+
+    events = [e async for e in runner.run(inv)]
+    outs = [e for e in events if e["type"] == "agent_output"]
+    assert outs and outs[-1]["payload"] == {"text": "the conclusion"}
+    # The guard WAS exercised (non-vacuous): the read_file tool-result turn
+    # reached observe. Every observed record must carry has_complete_step=False.
+    assert seen
+    assert all(r.has_complete_step is False for r in seen)
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_resume_returns_deliverable(
+        tmp_path: Path) -> None:
+    """A subagent (subagent_depth>0) resumed from a bare-turn-end terminal
+    (assistant prose, no complete_step) re-emits its final text as the
+    deliverable and returns terminal-success — a top-level step in the same
+    shape would solicit the human (AWAITING_USER) instead."""
+    from dataclasses import replace
+    inv_dir = tmp_path / "step"
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(
+        role="assistant", content=(TextBlock(text="the conclusion"),)))
+
+    # Empty fake: the LLM must NOT be called on this resume.
+    fake = FakeAsyncAnthropic([])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+
+    yielded = [ev async for ev in runner.run(inv)]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
+    assert yielded[-1]["payload"] == {"text": "the conclusion"}
+    # Short-circuited before the loop: no model call happened.
+    assert not any(e["type"] == "llm_response" for e in log.read())

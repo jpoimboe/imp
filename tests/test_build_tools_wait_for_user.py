@@ -34,6 +34,7 @@ class _Inv:
         self.agent_def = _agent(tools)
         self.provider_name = "anthropic"
         self.tiers = ()
+        self.subagent_depth = 0
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)

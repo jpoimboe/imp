@@ -19,7 +19,6 @@ building the child from the registry by provider_name.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -46,8 +45,7 @@ class _RecordingRunner:
     async def run(self, invocation):
         yield {
             "type": "agent_output",
-            "payload": {"status": "Success", "ran_on": self.name,
-                        "model": self.model},
+            "payload": {"text": f"ran_on={self.name} model={self.model}"},
         }
 
     async def interrupt(self) -> None:
@@ -154,10 +152,9 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
     task_result_ev = next(
         e for e in log.read()
         if e["type"] == "tool_result" and e["payload"].get("id") == "t1")
-    parsed = json.loads(task_result_ev["payload"]["content"])
-    assert parsed["ran_on"] == "openai"
-    assert parsed["model"] == "gpt-5.2"
-    assert parsed["status"] == "Success"
+    child_text = task_result_ev["payload"]["content"]
+    assert "openai" in child_text
+    assert "gpt-5.2" in child_text
 
     # The parent fake's TWO turns were both consumed; the child consumed none.
     assert len(parent_fake.messages.calls) == 2

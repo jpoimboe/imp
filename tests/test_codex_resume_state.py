@@ -69,3 +69,36 @@ def test_normal_resume_when_complete_step_present(tmp_path: Path) -> None:
     ])
     state, _ = derive_codex_resume_state(ev, "step:t")
     assert state is ResumeState.SEND_TO_LLM  # nothing to prompt; resume normally
+
+
+def test_subagent_bare_turn_end_resumes_without_nudge(tmp_path: Path) -> None:
+    # A subagent (subagent_depth>0) never calls complete_step; its bare-turn-end
+    # terminal IS the done-signal, so it resumes normally (SEND_TO_LLM) instead
+    # of the top-level MISSING_COMPLETE_STEP replay-and-continue nudge.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "sub:tc-1", "type": "llm_response",
+         "payload": {"raw": {"content": [
+             {"type": "text", "text": "the conclusion"}]}}},
+    ])
+    state, last_text = derive_codex_resume_state(
+        ev, "sub:tc-1", subagent_depth=1)
+    assert state is ResumeState.SEND_TO_LLM
+    assert last_text == "the conclusion"
+
+
+def test_subagent_awaiting_user_still_returns_awaiting(tmp_path: Path) -> None:
+    # Ordering invariant: the subagent_depth>0 branch sits AFTER the has_awaiting
+    # check, so a subagent that DID hit an awaiting-user signal still returns
+    # AWAITING_USER — it is not overridden into SEND_TO_LLM.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "sub:tc-1", "type": "llm_response",
+         "payload": {"raw": {"content": [
+             {"type": "text", "text": "the conclusion"}]}}},
+        {"agent_id": "sub:tc-1", "type": "awaiting_user_input"},
+    ])
+    state, last_text = derive_codex_resume_state(
+        ev, "sub:tc-1", subagent_depth=1)
+    assert state is ResumeState.AWAITING_USER
+    assert last_text == "the conclusion"

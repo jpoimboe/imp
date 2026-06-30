@@ -66,7 +66,7 @@ async def test_nesting_threads_depth_and_child_subagents(tmp_path: Path) -> None
 
     async def _spawn(_inv):
         return _FakeRunner(
-            [{"type": "agent_output", "payload": {"status": "Success"}}],
+            [{"type": "agent_output", "payload": {"text": "ok"}}],
             capture=capture)
 
     ctx.spawn_subagent = _spawn
@@ -82,7 +82,7 @@ async def test_nesting_past_max_depth_raises_to_parent(tmp_path: Path) -> None:
     ctx.subagent_defs = {"child": _agent("child")}
 
     async def _spawn(_inv):
-        return _FakeRunner([{"type": "agent_output", "payload": {"status": "Success"}}])
+        return _FakeRunner([{"type": "agent_output", "payload": {"text": "ok"}}])
 
     ctx.spawn_subagent = _spawn
     with pytest.raises(ValueError, match="exceeds MAX_SUBAGENT_DEPTH"):

@@ -23,7 +23,7 @@ SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 # Falsifiability-hardening guards: each component's edit leaves a marker in a
 # specific file. These are per-(path, marker) pairs spanning skills/ and direct
 # agents/ reads (including code-reviewer, already in SUBAGENT_FILES for the
-# complete_step guards — reused here for a *different* marker, not re-listed for
+# no-complete_step guard — reused here for a *different* marker, not re-listed for
 # the same purpose). NOT a uniform sweep over SUBAGENT_FILES. A presence guard
 # proves the marker exists somewhere in the file; section placement is left to
 # author self-review and the reviewer pass.
@@ -73,9 +73,10 @@ def _read(name: str) -> str:
 
 
 @pytest.mark.parametrize("name", SUBAGENT_FILES)
-def test_subagent_prompt_references_complete_step(name: str) -> None:
-    assert "complete_step" in _read(name), (
-        f"{name}: subagent prompt must name its terminal complete_step contract")
+def test_subagent_prompt_has_no_complete_step(name: str) -> None:
+    assert "complete_step" not in _read(name), (
+        f"{name}: a dispatched subagent has no complete_step tool — its final "
+        "message is its entire deliverable")
 
 
 @pytest.mark.parametrize("name", SUBAGENT_FILES)
@@ -85,7 +86,7 @@ def test_subagent_prompt_terminal_is_not_report_back_prose(name: str) -> None:
     # complete_step. We forbid the bare phrase "report back" entirely in
     # subagent prompts now that the contract is explicit.
     assert "report back" not in text, (
-        f"{name}: drop 'report back' framing — the terminal action is complete_step")
+        f"{name}: drop 'report back' framing — the terminal action is the subagent's final message")
 
 
 @pytest.mark.parametrize("name", SUBAGENT_FILES)
@@ -744,6 +745,37 @@ def test_no_prompt_references_transport_non_interactive() -> None:
     offenders = [str(p) for root in roots for p in root.rglob("*.md")
                  if "run.non_interactive" in p.read_text()]
     assert offenders == [], offenders
+
+
+def test_task_lead_reads_subagent_final_message_not_named_field() -> None:
+    text = TASK_LEAD.read_text()
+    # The coder's result/report are read from its prose final message, not a
+    # `result:` / `report` named output field (the subagent has no schema).
+    assert "`result: NEEDS_CONTEXT`" not in text
+    assert "subagent's\n`report` surfaced" not in text
+    assert "final message reports `NEEDS_CONTEXT` or `BLOCKED`" in text
+
+
+def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
+    text = SWEEP.read_text()
+    assert "When a subagent returns\n`result: NEEDS_CONTEXT`" not in text
+    assert "final message reports\n`NEEDS_CONTEXT` or `BLOCKED`" in text
+
+
+@pytest.mark.parametrize("tree", ["imp", "imp-flat", "patent"])
+def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None:
+    wf = load_workflow(bundled_workflow_dir(tree))
+    dispatchable: set[str] = set()
+    for a in wf.agents.values():
+        dispatchable.update(a.subagents)
+    assert dispatchable, f"{tree}: expected at least one dispatched subagent"
+    for name in sorted(dispatchable):
+        sub = wf.agents[name]
+        assert sub.output_schema.fields == (), (
+            f"{tree}:{name} still declares an output schema — a dispatched "
+            "subagent reports in prose")
+        assert "complete_step" not in sub.prompt_template_source, (
+            f"{tree}:{name} still instructs complete_step — it has no such tool")
 
 
 def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None:

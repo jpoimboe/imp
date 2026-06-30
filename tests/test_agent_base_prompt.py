@@ -97,7 +97,7 @@ def test_base_reaches_verbatim_provider_field(tmp_path: Path) -> None:
 def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
     from imp.providers.codex_runner import CodexAgentRunner
     inv = _build(tmp_path, name="rev", body="BODY")
-    built = CodexAgentRunner._build_prompt(None, inv.system_prompt)
+    built = CodexAgentRunner._build_prompt(None, inv)
     assert built.startswith(inv.system_prompt)
     assert reflow_markdown(_CORE_HEAD) in built
     assert reflow_markdown(_CORE_TAIL) in built

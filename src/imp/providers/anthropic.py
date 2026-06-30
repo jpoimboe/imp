@@ -54,6 +54,7 @@ from imp.engine.agent_run import (
     _resolve_wait_reply,
     deliver_interject,
     drain_all_interjects_at_resume,
+    last_assistant_text,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
@@ -156,7 +157,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         # the first time the LLM invokes `task` — much better than silently
         # advertising no tool at all and letting the LLM fumble.
         out["sub_agent"] = make_task_tool(invocation.tiers)
-    out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
+    if invocation.subagent_depth == 0:
+        out["complete_step"] = make_complete_step_tool(
+            invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "bash" in invocation.agent_def.tools:
         # Auto-granted with bash (precedent: load_skill injection):
@@ -487,6 +490,17 @@ class AnthropicAgentRunner:
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
+            # A subagent's done-signal is a bare-turn-end terminal (assistant
+            # prose, no complete_step), NOT a complete_step. On resume, re-emit
+            # its final text as the deliverable and return — a top-level step in
+            # the same shape (AWAITING_USER) solicits the human instead.
+            if (invocation.subagent_depth > 0
+                    and classify_resume(messages) is ResumeState.AWAITING_USER):
+                final_text = last_assistant_text(messages)
+                if final_text:
+                    yield {"type": "agent_output",
+                           "payload": {"text": final_text}}
+                return
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
             # the executor's pause check fires after `tool_result` was yielded
             # but before the user message was appended. Patch the transcript
@@ -696,19 +710,17 @@ class AnthropicAgentRunner:
                     b.text for b in assistant_msg.content
                     if isinstance(b, TextBlock)
                 )
+                if invocation.subagent_depth > 0:
+                    final_text = last_assistant_text(messages)
+                    if final_text:
+                        yield {"type": "agent_output",
+                               "payload": {"text": final_text}}
+                    return
                 cont = invocation.continuation_fn
                 if cont is not None:
                     next_text = cont(last_text)
                     if inspect.isawaitable(next_text):
                         next_text = await next_text
-                    if next_text is None:
-                        yield {"type": "error", "payload": {
-                            "category": "agent_incomplete",
-                            "kind": "no_complete_step_after_nudges",
-                            "message": "agent did not call complete_step after nudges",
-                            "detail": {"last_agent_text": last_text[:500]},
-                        }}
-                        return
                     user_msg = Message(role="user", content=(TextBlock(text=next_text),))
                     messages.append(user_msg)
                     transcript.append(user_msg)

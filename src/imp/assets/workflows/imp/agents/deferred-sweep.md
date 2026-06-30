@@ -230,8 +230,9 @@ saying the list was empty.
 
 When the list is drained (every parsable item has a disposition recorded; malformed
 lines left untouched), call `complete_step` with `status: Success`, `sweep_tolerated: false`,
-and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent returns
-`result: NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
+and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent's
+final message reports
+`NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
 `sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you
 write.
 

@@ -38,8 +38,6 @@ def completion_instruction(schema: OutputSchema) -> str:
     )
 
 
-NUDGE_LIMIT = 2
-
 # Placeholder shown at the cooperative-interrupt steer gate (Ctrl-C mid-turn).
 # The bare turn-end yield keeps an empty prompt — its preceding prose IS the
 # question — but an interrupt has no such framing, so it needs to orient the
@@ -121,14 +119,12 @@ def build_inline_solicit(
 
 def build_continuation_fn(
     *,
-    instruction: str,
     user_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
     coordinator: Any = None,
     event_log: Any = None,
     agent_id: str | None = None,
     non_interactive: bool = False,
-    subagent: bool = False,
-) -> Callable[[str], str | Awaitable[str] | None]:
+) -> Callable[[str], str | Awaitable[str]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten
     complete_step is indistinguishable, so resolution turns on WHO can take the
@@ -142,19 +138,12 @@ def build_continuation_fn(
          inactivity watchdog is frozen for the blocked await; a human who
          detaches mid-turn is handled by the channel itself (it raises
          AwaitingUserInput when no client is attached).
-      3. No live human — resolution differs by who (if anyone) can take the
-         yield:
-           * subagent -> its bare prose is no return value (dispatch_task needs
-             complete_step's typed output) and there is no human to yield to, so
-             nudge up to NUDGE_LIMIT to recover a forgotten complete_step, then
-             return None (the provider emits agent_incomplete, failing loudly to
-             the parent);
-           * headless top-level -> the bare turn-end IS the yield (a question the
-             human sees on attach/resume), indistinguishable from a forgotten
-             complete_step, so NEVER nudged: solicit the channel if present
-             (delivers a --message, else pauses via AwaitingUserInput from the
-             channel), or with no channel raise AwaitingUserInput carrying the
-             agent's last text to park the run.
+      3. No live human (headless top-level): the bare turn-end IS the yield (a
+         question the human sees on attach/resume), indistinguishable from a
+         forgotten complete_step, so NEVER nudged: solicit the channel if
+         present (delivers a --message, else pauses via AwaitingUserInput from
+         the channel), or with no channel raise AwaitingUserInput carrying the
+         agent's last text to park the run.
     """
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
@@ -162,34 +151,18 @@ def build_continuation_fn(
         user_input_fn=user_input_fn, coordinator=coordinator,
         event_log=event_log, agent_id=agent_id)
 
-    nudge = (
-        "You ended your turn without calling `complete_step` to finish the "
-        "step. " + instruction
-    )
-    count = 0
-
     def _emit_awaiting() -> None:
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
                              payload={"prompt": ""})
 
-    def _cont(last_text: str) -> str | Awaitable[str] | None:
-        nonlocal count
+    def _cont(last_text: str) -> str | Awaitable[str]:
         if coordinator is not None:
             pending: str | None = coordinator.drain_interject()
             if pending is not None:
                 return pending
         if user_input_fn is not None and not non_interactive:
             return inline(last_text)
-        # No live human. A subagent has no one to take the yield, and its bare
-        # prose is never captured as a return value (dispatch_task requires
-        # complete_step's typed output), so nudge up to NUDGE_LIMIT to recover a
-        # forgotten complete_step before failing loudly to the parent.
-        if subagent:
-            if count < NUDGE_LIMIT:
-                count += 1
-                return nudge
-            return None
         # Headless top-level: a bare turn-end IS the yield — a question the human
         # will see on attach/resume. imp cannot tell it from a forgotten
         # complete_step, so it never nudges: solicit the channel if one is

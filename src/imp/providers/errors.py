@@ -26,7 +26,6 @@ Category = Literal[
     "api",
     "loop",
     "agent_output_missing",
-    "agent_incomplete",
     "terminated",
     "unknown",
 ]

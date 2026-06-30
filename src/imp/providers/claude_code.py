@@ -91,6 +91,7 @@ from imp.engine.agent_run import (
     _resolve_wait_reply,
     build_inline_solicit,
     drain_all_interjects_at_resume,
+    last_assistant_text,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.drivers import driver_allowed_tools
@@ -461,7 +462,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         out[name] = reg[name]
     if "sub_agent" in invocation.agent_def.tools:
         out["sub_agent"] = make_task_tool(invocation.tiers)
-    out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
+    if invocation.subagent_depth == 0:
+        out["complete_step"] = make_complete_step_tool(
+            invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "bash" in invocation.agent_def.tools:
         # Auto-granted with bash (same block as anthropic/openai
@@ -1345,6 +1348,17 @@ class ClaudeCodeAgentRunner:
         # passes resume= and leaves session_id unset.
         existing = transcript.load()
         is_fresh = not existing
+        # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
+        # no complete_step), complementing _tail_has_complete_step's top-level
+        # complete_step tail: recognize it here and re-emit the final text as the
+        # deliverable rather than native-resuming (which hands a finished
+        # subagent back to claude-p) or soliciting the human (AWAITING_USER).
+        if (invocation.subagent_depth > 0 and not is_fresh
+                and classify_resume(existing) is ResumeState.AWAITING_USER):
+            final_text = last_assistant_text(existing)
+            if final_text:
+                yield {"type": "agent_output", "payload": {"text": final_text}}
+            return
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.change_context.project_root, aid)
         # Native resume is sound ONLY when existing's final turn was actually
@@ -2068,6 +2082,13 @@ class ClaudeCodeAgentRunner:
                                 classified, kind=getattr(classified, "kind", ""))
                             return
 
+                        if invocation.subagent_depth > 0:
+                            final_text = last_assistant_text(messages)
+                            if final_text:
+                                yield {"type": "agent_output",
+                                       "payload": {"text": final_text}}
+                            return
+
                         cont = invocation.continuation_fn
                         if cont is not None:
                             next_text = cont(last_text)
@@ -2085,14 +2106,6 @@ class ClaudeCodeAgentRunner:
                                     "category": "config",
                                     "kind": "interrupted",
                                     "message": "runner cancelled by interrupt",
-                                }}
-                                return
-                            if next_text is None:
-                                yield {"type": "error", "payload": {
-                                    "category": "agent_incomplete",
-                                    "kind": "no_complete_step_after_nudges",
-                                    "message": "agent did not call complete_step after nudges",
-                                    "detail": {"last_agent_text": last_text[:500]},
                                 }}
                                 return
                             user_msg = Message(

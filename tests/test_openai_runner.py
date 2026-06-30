@@ -239,7 +239,6 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
 async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None:
     """task tool dispatches to a same-provider child runner via the resolve
     registry; result flows back as the parent's tool_result content."""
-    import json
     from dataclasses import replace
 
     from imp.providers.openai import OpenAIProvider
@@ -271,8 +270,8 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
 
     # Sequence:
     #   1. parent emits task(sub, ...)
-    #   2. sub emits complete_step(status=Success)  ← consumed from fake queue
-    #   3. parent receives JSON tool_result, emits complete_step
+    #   2. sub bare-turn-end (no complete_step for subagents) ← consumed from fake queue
+    #   3. parent receives text tool_result, emits complete_step
     fake = FakeResponsesClient([
         # parent turn 1
         resp_response(
@@ -281,10 +280,9 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
                                '{"subagent_name": "sub",'
                                ' "task_description": "do work"}'),
         ),
-        # sub turn 1 (uses the same fake — order matters)
+        # sub turn 1 — bare turn-end (subagents use final text as deliverable)
         resp_response(
             resp_message("sub finishing"),
-            resp_function_call("s1", "complete_step", '{"status": "Success"}'),
         ),
         # parent turn 2
         resp_response(
@@ -327,8 +325,7 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
         e for e in log.read()
         if e["type"] == "tool_result" and e["payload"].get("id") == "p1"
     )
-    parsed = json.loads(task_result_ev["payload"]["content"])
-    assert parsed.get("status") == "Success"
+    assert task_result_ev["payload"]["content"] == "sub finishing"
     # All three fake responses must have been consumed: parent turn 1, sub turn
     # 1, parent turn 2. If the subagent ran on the real client instead of fake,
     # the sub's queued response would remain unconsumed here.
@@ -533,33 +530,6 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
                   continuation_fn=lambda _last: "please call complete_step")
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "agent_output"
-
-
-@pytest.mark.anyio
-async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
-    from dataclasses import replace
-
-    (tmp_path / "art").mkdir()
-    fake = FakeResponsesClient(
-        [], default_response=resp_response(resp_message("still prose")),
-    )
-    log = InMemoryEventLog()
-    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
-                               client_factory=lambda: fake)
-    calls: dict[str, int] = {"n": 0}
-
-    def cont(_last: str) -> str | None:
-        if calls["n"] >= 2:
-            return None
-        calls["n"] += 1
-        return "please call complete_step"
-
-    inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
-    events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "error"
-    assert events[-1]["payload"]["category"] == "agent_incomplete"
-    assert events[-1]["payload"]["kind"] == "no_complete_step_after_nudges"
-    assert calls["n"] == 2
 
 
 @pytest.mark.anyio
@@ -852,3 +822,41 @@ async def test_llm_response_carries_context_tokens(tmp_path: Path) -> None:
     resp = next(e for e in log.read() if e["type"] == "llm_response")
     # No cache fields, so the canonical value is input_tokens (not total_tokens).
     assert resp["payload"]["context_tokens"] == 1234
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_returns_text(tmp_path: Path) -> None:
+    from dataclasses import replace
+    fake = FakeResponsesClient([resp_response(resp_message("the final conclusion"))])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+    events = [e async for e in runner.run(inv)]
+    outs = [e for e in events if e["type"] == "agent_output"]
+    assert outs and outs[-1]["payload"] == {"text": "the final conclusion"}
+    assert not any(e["type"] == "error" for e in events)
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_resume_returns_deliverable(
+        tmp_path: Path) -> None:
+    """Subagent resume parity with anthropic: a bare-turn-end terminal re-emits
+    its final text as the deliverable instead of soliciting the human."""
+    from dataclasses import replace
+    inv_dir = tmp_path / "step"
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(
+        role="assistant", content=(TextBlock(text="the conclusion"),)))
+
+    fake = FakeResponsesClient([])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+
+    yielded = [ev async for ev in runner.run(inv)]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
+    assert yielded[-1]["payload"] == {"text": "the conclusion"}
+    assert not any(e["type"] == "llm_response" for e in log.read())

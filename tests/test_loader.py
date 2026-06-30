@@ -76,14 +76,14 @@ def test_parse_agent_missing_name(tmp_path: Path) -> None:
     assert "missing 'name'" in str(ei.value)
 
 
-def test_parse_agent_missing_output(tmp_path: Path) -> None:
+def test_parse_agent_missing_output_yields_empty_schema(tmp_path: Path) -> None:
+    # A dispatched subagent has no typed output; absent output: → empty schema.
     p = write_agent_md(
         tmp_path / "noout.md",
         frontmatter="name: x\ntools: [complete_step]",
     )
-    with pytest.raises(LoadError) as ei:
-        parse_agent_file(p)
-    assert "missing 'output'" in str(ei.value)
+    agent = parse_agent_file(p)
+    assert agent.output_schema.fields == ()
 
 
 def test_parse_agent_invalid_yaml(tmp_path: Path) -> None:

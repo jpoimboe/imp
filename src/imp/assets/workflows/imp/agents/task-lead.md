@@ -293,12 +293,12 @@ triage is **non-converging** — an unrecognized flake or a hard regression you 
 not fix in the budget. It escalates to a human; it is not a transient to retry.
 
 Discipline: never dispatch two coders in parallel; never skip the
-`code-reviewer`; never move on with blocking findings open. When a subagent returns
-`result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
-and **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty
-context window, you must **re-pack the full context into the new
+`code-reviewer`; never move on with blocking findings open. When a subagent's
+final message reports `NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the
+missing context and **re-dispatch**. Because the re-dispatch is a fresh subagent
+with an empty context window, you must **re-pack the full context into the new
 `task_description`** — the original task + your answer + what the subagent's
-`report` surfaced (and, if the report is thin, a `query_events` peek at the
+final message surfaced (and, if that message is thin, a `query_events` peek at the
 subagent's events, logged under `agent_id=sub:<…>`). The next subagent inherits
 *only* what you write. Before returning at the end of the plan, load
 verification-before-completion and confirm the plan's tasks are actually done.

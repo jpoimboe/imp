@@ -10,10 +10,9 @@ deadlock that would otherwise hit.
 from __future__ import annotations
 
 import contextlib
-import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.parallel import emit_parallelism_warning_once
 from imp.agents.prompts import build_context, render_prompt
@@ -93,7 +92,7 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         name="sub_agent",
         description=(
             "Dispatch a subtask to a named subagent. "
-            "Returns the subagent's structured output as a JSON string. "
+            "Returns the subagent's final message as a plain string. "
             "Independent subtasks issued as multiple sub_agent calls in ONE "
             "assistant message run concurrently; issue dependent subtasks "
             "sequentially across turns. The relative ordering of sub_agent "
@@ -280,8 +279,9 @@ async def dispatch_task(
             subagent_depth=child_depth,
             tiers=ctx.tiers,
             # Same object as event_log= above, but a distinct role: log= is the
-            # nudge-event sink passed to build_continuation_fn; event_log= is the
-            # invocation's stored audit log. For subagents both are ctx.event_log.
+            # event sink passed to build_continuation_fn (solicit/park events);
+            # event_log= is the invocation's stored audit log. For subagents both
+            # are ctx.event_log.
             log=ctx.event_log,
             test_gates=ctx.test_gates,
             non_interactive=ctx.non_interactive,
@@ -427,4 +427,4 @@ async def dispatch_task(
             # Keep the bracketed format and kind vocabulary in sync with that scan.
             suffix = f" [{kind}]" if kind else ""
             raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
-        return json.dumps(result.output)
+        return cast(str, result.output["text"])
