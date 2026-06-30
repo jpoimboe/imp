@@ -732,6 +732,36 @@ def test_read_only_rejects_home_path(tmp_path: Path) -> None:
     assert any("'~'" in str(e) for e in ei.value.errors)
 
 
+def test_v2_status_not_required_for_dispatched_subagent(tmp_path: Path) -> None:
+    # A dispatched subagent routes on no typed field, so it needs no status enum.
+    lead = """\
+        ---
+        name: lead
+        subagents: [helper]
+        output:
+          status: {type: enum, values: [Success, Error]}
+        ---
+        body
+        """
+    helper = """\
+        ---
+        name: helper
+        ---
+        body
+        """
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/lead.md
+        """, agents={"lead": textwrap.dedent(lead),
+                     "helper": textwrap.dedent(helper)})
+    load_workflow(wf)  # must not raise: helper is a subagent, not a step
+
+
 def test_read_only_on_non_agent_step_is_silently_ignored(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t

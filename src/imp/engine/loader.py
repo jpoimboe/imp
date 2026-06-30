@@ -46,6 +46,7 @@ from imp.engine.types import (
     Goto,
     Kind,
     Mutation,
+    OutputSchema,
     Pause,
     Phase,
     Rule,
@@ -94,15 +95,17 @@ def parse_agent_file(path: Path) -> AgentDef:
 
     if "name" not in fm:
         raise LoadError("missing 'name' in agent frontmatter", source)
-    if "output" not in fm:
-        raise LoadError("missing 'output' in agent frontmatter", source)
 
-    output_raw = fm["output"]
-    if not isinstance(output_raw, dict):
-        raise LoadError(
-            "'output' must be a mapping", source
-        )
-    schema = parse_output_schema(output_raw, loc(path, output_raw))
+    if "output" in fm:
+        output_raw = fm["output"]
+        if not isinstance(output_raw, dict):
+            raise LoadError(
+                "'output' must be a mapping", source
+            )
+        schema = parse_output_schema(output_raw, loc(path, output_raw))
+    else:
+        # A dispatched subagent has no typed output: absent output: → empty schema.
+        schema = OutputSchema(fields=(), source=source)
     if "tools" in fm and "deny_tools" in fm:
         raise LoadError(
             "agent may declare 'tools:' or 'deny_tools:', not both", source)
