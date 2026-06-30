@@ -30,6 +30,21 @@ def test_cold_evicts_old_compactable_turns() -> None:
     assert evicted_result_ids(_convo(6), cold=True) == frozenset({"u0", "u1"})
 
 
+@pytest.mark.parametrize(
+    "name", ["mcp__imp__read_file", "mcp__imp__bash", "mcp__imp__grep",
+             "mcp__imp__glob", "mcp__imp__bash_output"])
+def test_cold_evicts_mcp_prefixed_compactable(name: str) -> None:
+    # The claude_code provider names tools `mcp__imp__<tool>`; eviction must
+    # canonicalize before testing membership in COMPACTABLE_TOOLS, or it never
+    # matches any claude_code tool and the feature is a silent no-op there.
+    assert evicted_result_ids(_convo(6, name), cold=True) == frozenset({"u0", "u1"})
+
+
+@pytest.mark.parametrize("name", ["mcp__imp__edit_file", "mcp__imp__write_file"])
+def test_cold_keeps_mcp_prefixed_non_compactable(name: str) -> None:
+    assert evicted_result_ids(_convo(6, name), cold=True) == frozenset()
+
+
 def test_recent_turns_excluded_from_set() -> None:
     got = evicted_result_ids(_convo(6), cold=True)
     assert "u2" not in got and "u5" not in got

@@ -71,11 +71,14 @@ def _inv(tmp_path: Path) -> AgentInvocation:
 
 
 def _history(names: str | list[str] = "read_file") -> list[Message]:
+    # The live claude_code provider names tools `mcp__imp__<tool>`; mirror that
+    # here so the fixture exercises the namespace the provider actually emits.
+    # (A bare-name fixture passed while production silently evicted nothing.)
     msgs: list[Message] = [Message(role="user", content=(TextBlock(text="go"),))]
     for t in range(6):  # assistant turns 0..5
         name = names[t] if isinstance(names, list) else names
         msgs.append(Message(role="assistant", content=(
-            ToolUseBlock(id=f"u{t}", name=name, input={"path": "x"}),)))
+            ToolUseBlock(id=f"u{t}", name=f"mcp__imp__{name}", input={"path": "x"}),)))
         msgs.append(Message(role="user", content=(
             ToolResultBlock(tool_use_id=f"u{t}", content=f"body-{t}"),)))
     return msgs
@@ -154,7 +157,7 @@ async def test_cold_native_resume_evicts_old_compactable_bodies(
     uses = {b["id"]: b["name"] for e in loaded
             for b in (e.get("message", {}).get("content") or [])
             if isinstance(b, dict) and b.get("type") == "tool_use"}
-    assert uses["u0"] == "read_file"
+    assert uses["u0"] == "mcp__imp__read_file"  # tool_use name preserved verbatim
     # uuid/parentUuid chain intact (no null parent except the head record)
     parents = [e["parentUuid"] for e in loaded]
     assert parents[0] is None

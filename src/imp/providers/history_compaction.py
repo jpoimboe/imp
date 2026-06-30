@@ -28,6 +28,20 @@ COMPACTABLE_TOOLS: frozenset[str] = frozenset(
 EVICTION_PLACEHOLDER = "[old tool result cleared]"
 
 
+def _canonical_tool_name(name: str | None) -> str | None:
+    """Strip a provider namespace prefix to the bare tool name.
+
+    The claude_code provider names tools ``mcp__imp__<tool>`` (and codex uses a
+    similar ``__``-delimited prefix), while COMPACTABLE_TOOLS lists bare names.
+    Without this, the membership test below never matches a claude_code tool and
+    eviction is a silent no-op there. Bare names (anthropic/openai) pass through
+    unchanged, so canonicalizing here is safe for every provider.
+    """
+    if name is None:
+        return None
+    return name.rsplit("__", 1)[-1]
+
+
 @dataclass(frozen=True, slots=True)
 class HistoryRecord:
     """One neutral conversation record. A record may be a tool call (call_id +
@@ -55,7 +69,7 @@ def results_to_evict(
     for r in records:
         if r.result_id is None or r.turn >= cutoff:
             continue
-        if call_names.get(r.result_id) in COMPACTABLE_TOOLS:
+        if _canonical_tool_name(call_names.get(r.result_id)) in COMPACTABLE_TOOLS:
             evict.add(r.result_id)
     return frozenset(evict)
 
