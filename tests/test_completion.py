@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from imp.cli.signals import InterruptCoordinator
-from imp.engine.completion import NUDGE_LIMIT, build_continuation_fn, completion_instruction
+from imp.engine.awaiting_user_input import AwaitingUserInput
+from imp.engine.completion import (
+    NUDGE_LIMIT,
+    build_continuation_fn,
+    build_inline_solicit,
+    completion_instruction,
+)
 from imp.engine.types import OutputField, OutputSchema, SourceLoc
 
 
@@ -183,3 +189,58 @@ async def test_headless_with_channel_solicits_immediately(
     assert calls["n"] == 1
     assert any(e["type"] == "awaiting_user_input" for e in log.events)
 
+
+def test_inline_steer_no_channel_raises_interrupt_flag() -> None:
+    """The cooperative-interrupt steer (interrupt=True) with no channel pauses
+    carrying interrupt=True so the executor shadows State.interrupt_pending."""
+    inline = build_inline_solicit(steer_prompt="interrupted", interrupt=True)
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        import anyio
+        anyio.run(inline, "last prose")
+    assert exc_info.value.interrupt is True
+
+
+def test_inline_bare_turn_end_no_channel_has_no_interrupt_flag() -> None:
+    """A genuine bare-turn-end yield (interrupt=False default) never marks the
+    pause as an interrupt."""
+    inline = build_inline_solicit()
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        import anyio
+        anyio.run(inline, "the final question")
+    assert exc_info.value.interrupt is False
+
+
+@pytest.mark.anyio
+async def test_inline_steer_restamps_gate_awaiting_user_input(
+    anyio_backend: str,
+) -> None:
+    """When the steer solicits and the headless hibernation gate raises its own
+    AwaitingUserInput (interrupt=False), the steer re-stamps it interrupt=True."""
+
+    async def gate(_q: str) -> str:
+        raise AwaitingUserInput("gate prompt")
+
+    inline = build_inline_solicit(
+        user_input_fn=gate, coordinator=InterruptCoordinator(),
+        steer_prompt="interrupted", interrupt=True)
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        await inline("last prose")
+    assert exc_info.value.interrupt is True
+    assert exc_info.value.prompt == "gate prompt"
+
+
+@pytest.mark.anyio
+async def test_inline_bare_turn_end_does_not_restamp_gate(
+    anyio_backend: str,
+) -> None:
+    """A non-interrupt bare-turn-end leaves a gate-raised AwaitingUserInput as
+    interrupt=False — only the interrupt steer re-stamps."""
+
+    async def gate(_q: str) -> str:
+        raise AwaitingUserInput("gate prompt")
+
+    inline = build_inline_solicit(
+        user_input_fn=gate, coordinator=InterruptCoordinator())
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        await inline("still prose")
+    assert exc_info.value.interrupt is False

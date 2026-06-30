@@ -219,6 +219,10 @@ class AgentRunResult:
     # resumable so the paused step survives the reload. Stays False for every
     # other pause (coordinator, subagent).
     awaiting_user: bool = False
+    # True when the awaiting_user pause came from the cooperative-interrupt steer
+    # (Ctrl-C mid-turn), not a genuine bare-turn-end yield. The executor shadows
+    # it into State.interrupt_pending so a no-message resume continues the step.
+    interrupt: bool = False
     # Tier A proactive handoff: the runner captured an agent-authored handoff
     # note at this path before stopping. The caller (executor / dispatch_task)
     # reincarnates the session seeded from it. None on every other outcome.
@@ -652,11 +656,14 @@ async def drive_invocation(
     except SubagentSuspended:
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)
-    except AwaitingUserInput:
+    except AwaitingUserInput as exc:
         # A headless/subagent bare-turn-end yield with no human attached.
         # paused=True drives normal pause handling; awaiting_user=True tells the
         # executor to mark the step resumable so the paused step survives reload.
-        return AgentRunResult(None, False, True, False, None, awaiting_user=True)
+        # interrupt=True (cooperative-interrupt steer) shadows into
+        # State.interrupt_pending so a no-message resume continues the step.
+        return AgentRunResult(None, False, True, False, None,
+                              awaiting_user=True, interrupt=exc.interrupt)
 
     if stall["hit"]:
         # B.2: the watchdog tore the agent down. Route through the policy so the

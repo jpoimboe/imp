@@ -60,6 +60,7 @@ def build_inline_solicit(
     event_log: Any = None,
     agent_id: str | None = None,
     steer_prompt: str = "",
+    interrupt: bool = False,
 ) -> Callable[[str], Awaitable[str]]:
     """The turn-end yield-to-human tail, shared by BOTH the bare-turn-end
     continuation (build_continuation_fn) and the cooperative-interrupt steer.
@@ -91,7 +92,7 @@ def build_inline_solicit(
             try:
                 reply = await reply
             except (KeyboardInterrupt, _cancelled_exc()):
-                raise AwaitingUserInput() from None
+                raise AwaitingUserInput(interrupt=interrupt) from None
             finally:
                 if coordinator is not None:
                     coordinator.end_solicit_watchdog()
@@ -102,8 +103,18 @@ def build_inline_solicit(
         # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
         _emit_awaiting()
         if user_input_fn is not None:
-            return await _solicit()
-        raise AwaitingUserInput(last_text)
+            try:
+                return await _solicit()
+            except AwaitingUserInput as e:
+                # The headless hibernation gate raises its own AwaitingUserInput
+                # (interrupt=False) when the solicit blocks then detaches; for the
+                # cooperative-interrupt steer that supersedes the interrupt cause,
+                # so re-stamp it True. The executor shadows it into
+                # State.interrupt_pending → a no-message resume continues the step.
+                if interrupt and not e.interrupt:
+                    raise AwaitingUserInput(e.prompt, interrupt=True) from None
+                raise
+        raise AwaitingUserInput(last_text, interrupt=interrupt)
 
     return _inline
 

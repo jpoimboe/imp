@@ -43,6 +43,9 @@ class Retry(Action):
 class Pause(Action):
     reason: str | None = None
     kind: str | None = None
+    # True when this pause is a cooperative-interrupt steer (Ctrl-C mid-turn)
+    # that unwound as an awaiting_user pause; shadowed into State.interrupt_pending.
+    interrupt: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -320,8 +320,12 @@ async def run_change(
                     # step has a kept transcript, not by how the run stopped.
                     state.resume_pending = state.step
                     # Unconditional shadow of the pause cause: overwrites a stale
-                    # True on a non-interrupt park.
-                    state.interrupt_pending = coordinator.should_pause
+                    # True on a non-interrupt park. action.interrupt covers the
+                    # cooperative-interrupt steer (claude_code Ctrl-C), which
+                    # unwinds as an awaiting_user pause with should_pause already
+                    # cleared, so should_pause alone would miss it.
+                    state.interrupt_pending = (
+                        coordinator.should_pause or action.interrupt)
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
@@ -949,7 +953,7 @@ async def _route_agent(
             # edge's marker; cleared on the next forward Continue.
             state.resume_pending = state.step
             state.save(change.state_dir)
-        return Pause(), None, {}
+        return Pause(interrupt=result.interrupt), None, {}
     reincarnation_key = f"step:{step.phase}/{step.name}"
     if result.handoff_path is not None:
         # Tier A proactive handoff: the agent approached its window and (normally)

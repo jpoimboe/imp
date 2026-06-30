@@ -12,8 +12,14 @@ from __future__ import annotations
 
 class AwaitingUserInput(Exception):
     """Pause a run at a bare-turn-end yield when no human is attached; `prompt`
-    carries the agent's last text as the resume prompt."""
+    carries the agent's last text as the resume prompt.
 
-    def __init__(self, prompt: str = "") -> None:
+    `interrupt` is True only when the pause came from the cooperative-interrupt
+    steer (Ctrl-C mid-turn) rather than a genuine bare-turn-end yield; the
+    executor shadows it into State.interrupt_pending so a no-message resume
+    continues the interrupted step instead of soliciting."""
+
+    def __init__(self, prompt: str = "", *, interrupt: bool = False) -> None:
         super().__init__("awaiting user input")
         self.prompt = prompt
+        self.interrupt = interrupt
