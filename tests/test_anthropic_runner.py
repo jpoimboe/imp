@@ -991,6 +991,47 @@ async def test_subagent_bare_turn_end_returns_text(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_subagent_observed_turns_never_set_has_complete_step(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """has_complete_step is a top-level-only loop-guard signal: every TurnRecord
+    the guard observes during a subagent run carries has_complete_step=False.
+    Driven through anthropic (a real LoopGuard user): the subagent takes a
+    read_file tool turn (reaching guard.observe) then ends on a bare text turn
+    (which short-circuits before observe)."""
+    from dataclasses import replace
+    import imp.agents.loop_guard as lg
+
+    (tmp_path / "art").mkdir()
+    (tmp_path / "data.txt").write_text("payload")
+
+    seen: list[lg.TurnRecord] = []
+    orig = lg.LoopGuard.observe
+
+    def spy(self, record):  # type: ignore[no-untyped-def]
+        seen.append(record)
+        return orig(self, record)
+
+    monkeypatch.setattr(lg.LoopGuard, "observe", spy)
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("u1", "read_file", {"path": "data.txt"})),
+        response(text("the conclusion"), stop_reason="end_turn"),
+    ])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+
+    events = [e async for e in runner.run(inv)]
+    outs = [e for e in events if e["type"] == "agent_output"]
+    assert outs and outs[-1]["payload"] == {"text": "the conclusion"}
+    # The guard WAS exercised (non-vacuous): the read_file tool-result turn
+    # reached observe. Every observed record must carry has_complete_step=False.
+    assert seen
+    assert all(r.has_complete_step is False for r in seen)
+
+
+@pytest.mark.anyio
 async def test_subagent_bare_turn_end_resume_returns_deliverable(
         tmp_path: Path) -> None:
     """A subagent (subagent_depth>0) resumed from a bare-turn-end terminal
