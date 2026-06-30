@@ -747,6 +747,21 @@ def test_no_prompt_references_transport_non_interactive() -> None:
     assert offenders == [], offenders
 
 
+def test_task_lead_reads_subagent_final_message_not_named_field() -> None:
+    text = TASK_LEAD.read_text()
+    # The coder's result/report are read from its prose final message, not a
+    # `result:` / `report` named output field (the subagent has no schema).
+    assert "`result: NEEDS_CONTEXT`" not in text
+    assert "subagent's\n`report` surfaced" not in text
+    assert "final message reports `NEEDS_CONTEXT` or `BLOCKED`" in text
+
+
+def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
+    text = SWEEP.read_text()
+    assert "When a subagent returns\n`result: NEEDS_CONTEXT`" not in text
+    assert "final message reports\n`NEEDS_CONTEXT` or `BLOCKED`" in text
+
+
 def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log)
