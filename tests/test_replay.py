@@ -271,3 +271,23 @@ def test_stall_redrive_balances_torn_down_turn_no_replay(tmp_path) -> None:
     # Post-repair: the dangling tool_use is paired, so the re-drive sends a balanced transcript.
     assert classify_resume(messages) is not ResumeState.DANGLING_TOOL_USE
     assert classify_resume(messages) is ResumeState.SEND_TO_LLM
+
+
+def test_trailing_dangling_tool_use_with_thinking_drops_whole_turn() -> None:
+    log = InMemoryEventLog()
+    log.append_user_message(
+        agent_id="step:p/s",
+        message=Message(role="user", content=(TextBlock(text="begin"),)))
+    log.append_llm_response(
+        agent_id="step:p/s", provider="anthropic", model="m",
+        raw={"content": [{"type": "thinking", "thinking": "deciding",
+                          "signature": "sig-x"},
+                         {"type": "tool_use", "id": "t1",
+                          "name": "read_file", "input": {}}],
+             "stop_reason": "tool_use", "usage": {}},
+        usage={}, stop_reason="tool_use")
+    # t1 is never resolved → the trailing tool_use is dangling. After dropping
+    # it the turn would be thinking-only, which is not a valid resend turn, so
+    # the whole assistant message is dropped.
+    msgs = build_messages_from_events(list(log.read()), agent_id="step:p/s")
+    assert [m.role for m in msgs] == ["user"]
