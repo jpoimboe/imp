@@ -337,6 +337,7 @@ async def run_change(
                 state.loop_counts.pop(step.name, None)          # forward advance resets
                 nxt = idx + 1
                 if nxt >= len(flat):
+                    state.interrupt_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
@@ -351,6 +352,7 @@ async def run_change(
                         action.release, change, state, log, step_name=step.name)
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
+                    state.interrupt_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
