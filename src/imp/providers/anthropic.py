@@ -126,6 +126,20 @@ def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
     raise exc
 
 
+def _anthropic_thinking_posture(tier: str | None) -> dict[str, Any]:
+    """Per-tier thinking/output_config request kwargs, pinned identically across
+    providers. Empty for low/None (thinking off, the prior default); adaptive at
+    effort 'high' for medium/high so both thinking tiers run one fixed posture.
+    `display: "summarized"` keeps thinking text readable for imp's thinking events.
+    """
+    if tier in ("medium", "high"):
+        return {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        }
+    return {}
+
+
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     """Build the per-step tool dict.
 
@@ -631,6 +645,7 @@ class AnthropicAgentRunner:
                 # tool_choice must compose disable_parallel_tool_use deliberately.
                 tool_choice={"type": "auto", "disable_parallel_tool_use": False},
             )
+            create_kwargs.update(_anthropic_thinking_posture(invocation.tier))
             if web_headers:
                 create_kwargs["extra_headers"] = web_headers
             # N4 race note: if interrupt() lands AFTER `while not self._cancel`

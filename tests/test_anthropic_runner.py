@@ -1057,3 +1057,70 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
     assert yielded[-1]["payload"] == {"text": "the conclusion"}
     # Short-circuited before the loop: no model call happened.
     assert not any(e["type"] == "llm_response" for e in log.read())
+
+
+@pytest.mark.anyio
+async def test_medium_tier_request_carries_adaptive_thinking_and_effort(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), tier="medium")
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert call["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert call["output_config"] == {"effort": "high"}
+
+
+@pytest.mark.anyio
+async def test_high_tier_request_carries_adaptive_thinking_and_effort(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), tier="high")
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert call["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert call["output_config"] == {"effort": "high"}
+
+
+@pytest.mark.anyio
+async def test_low_tier_request_omits_thinking_and_output_config(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="haiku",
+                                  client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), tier="low")
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert "thinking" not in call
+    assert "output_config" not in call
+
+
+@pytest.mark.anyio
+async def test_none_tier_request_omits_thinking_and_output_config(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="sonnet",
+                                  client_factory=lambda: fake)
+    # _inv() leaves tier unset (None); None is treated as low (posture off).
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+    call = fake.messages.calls[0]
+    assert "thinking" not in call
+    assert "output_config" not in call
