@@ -365,6 +365,17 @@ class MergedNode:
 
 
 @dataclass
+class WarningsSummaryNode:
+    """Run-level tally of accumulated runner_warning messages, rendered as a
+    deduped footer immediately above a terminal outcome line. `lines` is the
+    distinct messages in first-seen order paired with their occurrence count;
+    `total` is the sum of all occurrences (the header count)."""
+    lines: list[tuple[str, int]] = field(default_factory=list)
+    total: int = 0
+    collapsible = False
+
+
+@dataclass
 class TiersResolvedNode:
     """Run-level summary of once-per-run tier resolution (the tiers_resolved
     event). Each row: {tier, provider, model, differ_tier, differ_from}.
@@ -397,6 +408,8 @@ class NarrativeBuilder:
 
     def __init__(self) -> None:
         self._root = WorkflowNode()
+        self._warnings: list[str] = []
+        self._warnings_flushed: bool = False
         self._tokens = TokenTotals()
         self._latest_prompt_tokens: int | None = None
         self._latest_context_pct: float | None = None
@@ -708,6 +721,25 @@ class NarrativeBuilder:
     def _append(self, node: Any) -> None:
         self._container().children.append(node)
 
+    def _flush_warnings_summary(self) -> None:
+        # Append ONE WarningsSummaryNode at the workflow root (bypassing _append so
+        # it lands at root regardless of open phases/steps) just before a terminal
+        # outcome node. Idempotent: a second call is a no-op, so co-occurring
+        # terminals still render the summary once. No-op when no warnings occurred.
+        if not self._warnings or self._warnings_flushed:
+            return
+        counts: dict[str, int] = {}
+        order: list[str] = []
+        for msg in self._warnings:
+            if msg not in counts:
+                counts[msg] = 0
+                order.append(msg)
+            counts[msg] += 1
+        self._root.children.append(WarningsSummaryNode(
+            lines=[(msg, counts[msg]) for msg in order],
+            total=len(self._warnings)))
+        self._warnings_flushed = True
+
     def _flush_burst(self) -> None:
         self._current_burst = None
 
@@ -768,6 +800,7 @@ def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     descriptor = self._root.id or ""
     # Append at the WORKFLOW ROOT (not the still-open phase): the merged footer is a
     # run-level terminal line that ends the whole transcript, after every phase.
+    self._flush_warnings_summary()
     self._root.children.append(MergedNode(change_id=descriptor, base=str(p.get("base", ""))))
 
 
@@ -1566,7 +1599,9 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
 def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Non-terminal: do NOT flush the burst (a warning can be emitted mid-burst
     # for a dropped block; flushing would split an otherwise-contiguous run).
-    self._append(ErrorNode(message=str(p.get("message", "?")), is_warning=True))
+    message = str(p.get("message", "?"))
+    self._warnings.append(message)
+    self._append(ErrorNode(message=message, is_warning=True))
 
 
 def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
