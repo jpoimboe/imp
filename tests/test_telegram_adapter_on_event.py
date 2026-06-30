@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.daemon.telegram_adapter import Inbound, TelegramNorthAdapter
 
@@ -28,7 +29,9 @@ def _subs(*change_ids: str) -> Subscriptions:
 
 
 def _adapter(
-    sent: list, *, message_id: int | None = 42, subscriptions: Subscriptions | None = None
+    sent: list, *, message_id: int | None = 42,
+    subscriptions: Subscriptions | None = None,
+    alert_all: AlertAll | None = None,
 ) -> TelegramNorthAdapter:
     def send(text: str, silent: bool) -> int | None:
         sent.append((text, silent))
@@ -37,7 +40,8 @@ def _adapter(
     return TelegramNorthAdapter(
         chat_id=4242, submit=lambda _: None,
         send=send, get_updates=lambda _: {"result": []},
-        subscriptions=subscriptions if subscriptions is not None else _subs("k3f9qa"))
+        subscriptions=subscriptions if subscriptions is not None else _subs("k3f9qa"),
+        alert_all=alert_all)
 
 
 def test_on_event_sends_a_message_carrying_the_handle() -> None:
@@ -168,3 +172,87 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
                       "change": {"id": "other", "title": "t"}, "payload": {"prompt": ""}})
     loud = [text for text, silent in sent if not silent]
     assert loud and all("A's secret context" not in text for text in loud)
+
+
+SILENT_K3 = {
+    "id": "S2", "type": "agent_output", "timestamp": TS,
+    "payload": {"text": "working on it"},
+    "change": {"id": "k3f9qa", "title": "Dark mode"},
+}
+
+
+def _alert_all_on() -> AlertAll:
+    a = AlertAll()
+    a.set(True)
+    return a
+
+
+def test_alert_all_off_drops_unsubscribed_buzz_and_records_no_maps() -> None:
+    sent: list = []
+    adapter = _adapter(sent, subscriptions=Subscriptions())  # alert-all default off
+    adapter.on_event(LOUD_EVENT)
+    assert sent == []
+    assert adapter._handle_to_change == {}
+    assert adapter._msg_to_change == {}
+
+
+def test_alert_all_on_sends_unsubscribed_buzz_loud_and_records_maps() -> None:
+    sent: list = []
+    adapter = _adapter(
+        sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    adapter.on_event(LOUD_EVENT)
+    assert len(sent) == 1
+    text, silent = sent[0]
+    assert silent is False
+    assert "Need your call" in text
+    assert adapter._handle_to_change == {"k3f9qa": "k3f9qa"}
+    assert adapter._msg_to_change == {42: "k3f9qa"}
+
+
+def test_alert_all_on_still_drops_unsubscribed_silent_narrative() -> None:
+    sent: list = []
+    adapter = _adapter(
+        sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    adapter.on_event(SILENT_K3)   # agent_output -> silent tier
+    assert sent == []
+
+
+def test_alert_all_dedups_replayed_buzz_by_event_id() -> None:
+    sent: list = []
+    adapter = _adapter(
+        sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    adapter.on_event(LOUD_EVENT)
+    adapter.on_event(LOUD_EVENT)   # same event id "L1"
+    assert len(sent) == 1
+
+
+def test_alert_all_is_best_effort_when_event_id_missing() -> None:
+    sent: list = []
+    adapter = _adapter(
+        sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    no_id = {k: v for k, v in LOUD_EVENT.items() if k != "id"}
+    adapter.on_event(no_id)
+    adapter.on_event(no_id)
+    assert len(sent) == 2
+
+
+def test_alert_all_failed_send_does_not_mark_so_replay_re_alerts() -> None:
+    sent: list = []
+    # message_id=None models a send that fails without raising.
+    adapter = _adapter(
+        sent, message_id=None,
+        subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    adapter.on_event(LOUD_EVENT)
+    adapter.on_event(LOUD_EVENT)   # same event id "L1"
+    assert len(sent) == 2   # not deduped: the failed send was never marked seen
+
+
+def test_subscribed_change_unaffected_by_alert_all_on() -> None:
+    sent: list = []
+    adapter = _adapter(
+        sent, subscriptions=_subs("k3f9qa"), alert_all=_alert_all_on())
+    adapter.on_event(LOUD_EVENT)
+    adapter.on_event(SILENT_K3)
+    assert len(sent) == 2
+    assert any(not silent for _, silent in sent)   # buzz delivered loud
+    assert any(silent for _, silent in sent)        # narrative delivered silent
