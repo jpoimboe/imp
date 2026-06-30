@@ -24,6 +24,7 @@ import contextlib
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,14 @@ Your first user-role message in this conversation is the literal token
 a message a human user typed. Treat it as a signal to begin the work
 described in the rest of this system prompt; do not reply to it as if a
 user had addressed you, and do not quote it back."""
+
+# Cribbed into the shared system prompt (non-resume only) so BOTH providers see
+# one identical date anchor — without it a model defaults to its training-cutoff
+# date and mis-handles relative->absolute dates, recency, and "latest version"
+# reasoning. claude-p natively injects its own currentDate too; no lever silences
+# that, so on claude_code this line is a harmless duplicate of the same value.
+# Frozen on resume: the replay branch reuses the stored prompt and never re-appends.
+_CURRENT_DATE_NOTE = "Today's date is {date}."
 
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
@@ -468,6 +477,7 @@ def build_agent_invocation(
         if "bash" in agent_def.tools:
             body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
         body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
+        body = f"{body}\n\n{_CURRENT_DATE_NOTE.format(date=date.today().isoformat())}"
         body = reflow_markdown(body)
         system_prompt = f"{body}\n\n{instruction}"
     continuation_fn = build_continuation_fn(

@@ -50,6 +50,18 @@ events_path=tmp_path / "e.jsonl", subagent_defs={},
     (frozenset({"complete_step"}), "imp_base_prompt_nobash.txt"),
     (frozenset({"complete_step", "bash"}), "imp_base_prompt_bash.txt"),
 ])
-def test_imp_assembled_prompt_byte_identical_after_split(tmp_path, tools, golden):
+def test_imp_assembled_prompt_byte_identical_after_split(
+    tmp_path, tools, golden, monkeypatch,
+):
+    import datetime as _dt
+
+    import imp.engine.agent_run as ar
+
+    class _FixedDate(_dt.date):
+        @classmethod
+        def today(cls) -> _dt.date:
+            return _dt.date(2026, 6, 29)
+
+    monkeypatch.setattr(ar, "date", _FixedDate)
     expected = (_GOLDEN / golden).read_text()
     assert _build(tmp_path, tools) == expected
