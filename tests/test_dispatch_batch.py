@@ -69,7 +69,7 @@ class _SlowRunner:
         self._gate["peak"] = max(self._gate["peak"], self._gate["active"])
         try:
             await anyio.sleep(self._delay)
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"text": "ok"}}
         finally:
             self._gate["active"] -= 1
 
@@ -467,7 +467,7 @@ class _NestingRunner:
                 ceiling=None):
             pass
         self._completed.append(len(leaf_results))
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_output", "payload": {"text": "ok"}}
 
     async def interrupt(self) -> None: ...
 

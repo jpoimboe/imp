@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -42,7 +41,7 @@ class _EchoRunner:
     async def run(self, invocation):
         td = invocation.initial_messages[0].content[0].text
         yield {"type": "agent_output",
-               "payload": {"status": "Success", "echo": td}}
+               "payload": {"text": td}}
 
     async def interrupt(self) -> None: ...
 
@@ -148,7 +147,7 @@ async def test_single_task_turn_routes_through_batch(
     res_idx = next(i for i, e in enumerate(rows)
                    if e["type"] == "tool_result" and e["payload"]["id"] == "t1")
     assert call_idx < res_idx
-    assert json.loads(rows[res_idx]["payload"]["content"])["echo"] == "only"
+    assert rows[res_idx]["payload"]["content"] == "only"
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
@@ -194,8 +193,8 @@ async def test_two_task_turn_both_results_land(
     results = {e["payload"]["id"]: e for e in log.read()
                if e["type"] == "tool_result" and e["agent_id"] == "step:p/s"}
     assert set(results) == {"t1", "t2"}
-    assert json.loads(results["t1"]["payload"]["content"])["echo"] == "first"
-    assert json.loads(results["t2"]["payload"]["content"])["echo"] == "second"
+    assert results["t1"]["payload"]["content"] == "first"
+    assert results["t2"]["payload"]["content"] == "second"
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])

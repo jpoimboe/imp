@@ -507,7 +507,7 @@ class CodexAgentRunner:
                 # Fakes ignore the options arg.
                 thread = client.start_thread()
         # Build initial prompt with anti-native-tool instruction prepended.
-        next_prompt = self._build_prompt(invocation.system_prompt)
+        next_prompt = self._build_prompt(invocation)
         # Hoist rstate so the §2 resume-entry drain below can reference it safely
         # even when balance_on_resume is False (fresh-entry path has no rstate).
         rstate = None
@@ -762,6 +762,11 @@ class CodexAgentRunner:
                         yield perr.make_error_event(
                             classified, kind=getattr(classified, "kind", ""))
                         return
+                    if invocation.subagent_depth > 0:
+                        if last_text:
+                            yield {"type": "agent_output",
+                                   "payload": {"text": last_text}}
+                        return
                     # Turn ended without complete_step. If a continuation_fn is
                     # wired, cross to the outer loop for the autonomous nudge;
                     # the closure itself decides when to stop
@@ -885,9 +890,12 @@ class CodexAgentRunner:
             networkAccessEnabled=False,
         )
 
-    def _build_prompt(self, system_prompt: str) -> str:
+    def _build_prompt(self, invocation: Any) -> str:
         """Prepend the anti-native-tool instruction (design: soft enforcement
-        backstopped by the tripwire).
+        backstopped by the tripwire). For a subagent the completion line is
+        replaced by the deliverable note; the tool_search and
+        no-native-apply_patch lines stay (a subagent still uses the other
+        mcp__imp__* tools).
 
         Codex DEFERS MCP tools behind its `tool_search` discovery tool: imp's
         `mcp__imp__*` tools are NOT in the model's initial tool list — the model
@@ -899,20 +907,28 @@ class CodexAgentRunner:
         refusal on gpt-5.4-mini. Telling the model to use `tool_search` to load
         the tools, with the completion tool named by its exposed id, drives that
         to ~0% (measured 30/30 first-turn vs 4/10 without)."""
-        return (
-            system_prompt
-            + "\n\n"
-            + "IMPORTANT — Tool policy:\n"
-            + "- Your imp tools (the `mcp__imp__*` tools) are exposed via codex's\n"
-            + "  `tool_search` tool, NOT in your initial tool list. If an\n"
-            + "  `mcp__imp__*` tool you need is not already available, call\n"
-            + "  `tool_search` to load it FIRST, then call it. These tools ARE\n"
-            + "  available — do not claim otherwise.\n"
-            + "- Use ONLY the `mcp__imp__*` tools. NEVER call native `apply_patch`\n"
-            + "  or any other built-in tool.\n"
-            + "- Finish the task by calling the `mcp__imp__complete_step` tool\n"
-            + "  with the structured answer.\n"
+        policy = (
+            "IMPORTANT — Tool policy:\n"
+            "- Your imp tools (the `mcp__imp__*` tools) are exposed via codex's\n"
+            "  `tool_search` tool, NOT in your initial tool list. If an\n"
+            "  `mcp__imp__*` tool you need is not already available, call\n"
+            "  `tool_search` to load it FIRST, then call it. These tools ARE\n"
+            "  available — do not claim otherwise.\n"
+            "- Use ONLY the `mcp__imp__*` tools. NEVER call native `apply_patch`\n"
+            "  or any other built-in tool.\n"
         )
+        if invocation.subagent_depth > 0:
+            policy += (
+                "- Your final message is your entire deliverable to the agent\n"
+                "  that dispatched you; state your full conclusion in your last\n"
+                "  message.\n"
+            )
+        else:
+            policy += (
+                "- Finish the task by calling the `mcp__imp__complete_step` tool\n"
+                "  with the structured answer.\n"
+            )
+        return invocation.system_prompt + "\n\n" + policy
 
     async def interrupt(self) -> None:
         """Cancel the run — four effects:

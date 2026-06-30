@@ -57,6 +57,7 @@ from imp.engine.agent_run import (
     _resolve_wait_reply,
     deliver_interject,
     drain_all_interjects_at_resume,
+    last_assistant_text,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
@@ -154,7 +155,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         out[name] = reg[name]
     if "sub_agent" in invocation.agent_def.tools:
         out["sub_agent"] = make_task_tool(invocation.tiers)
-    out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
+    if invocation.subagent_depth == 0:
+        out["complete_step"] = make_complete_step_tool(
+            invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "bash" in invocation.agent_def.tools:
         # Auto-granted with bash (precedent: load_skill injection):
@@ -692,6 +695,12 @@ class OpenAIAgentRunner:
                     b.text for b in assistant_msg.content
                     if isinstance(b, TextBlock)
                 )
+                if invocation.subagent_depth > 0:
+                    final_text = last_assistant_text(messages)
+                    if final_text:
+                        yield {"type": "agent_output",
+                               "payload": {"text": final_text}}
+                    return
                 cont = invocation.continuation_fn
                 if cont is not None:
                     next_text = cont(last_text)

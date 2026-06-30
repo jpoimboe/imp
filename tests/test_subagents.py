@@ -1,7 +1,6 @@
 # tests/test_subagents.py
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,7 @@ from imp.agents.subagents import (
 )
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
-from imp.engine.agent_run import _CORE_HEAD
+from imp.engine.agent_run import SUBAGENT_DELIVERABLE_NOTE, _CORE_HEAD
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 
@@ -93,7 +92,7 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}])
+        [{"type": "agent_output", "payload": {"text": "ok"}}])
     ctx.change_context = ChangeContext(
         id="change-42", title="Change 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
@@ -155,14 +154,14 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success", "note": "done"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="change-42", title="Change 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     out = await dispatch_task(ctx, "reviewer", "please review")
-    assert json.loads(out) == {"status": "Success", "note": "done"}
+    assert out == "ok"
     inv = capture["inv"]
     assert inv.agent_def.name == "reviewer"
     assert inv.user_input_fn is None  # subagents are headless
@@ -223,16 +222,16 @@ events_path=tmp_path / "events.jsonl",
 
     capture: dict = {}
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
 
     result = anyio.run(dispatch_task, ctx, "sub", "do the thing")
-    # build_agent_invocation appends the completion instruction after the rendered
+    # build_agent_invocation appends the deliverable note after the rendered
     # prompt — check the rendered portion is correct.
     assert capture["inv"].system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "hello change-7" in capture["inv"].system_prompt
-    # Sanity: dispatch_task still returns JSON-stringified agent_output.
-    assert "Success" in result
+    # Sanity: dispatch_task returns the raw text from agent_output.
+    assert result == "ok"
 
 
 @pytest.mark.anyio
@@ -252,11 +251,11 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
     ctx.event_log = shared
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
 
     out = await dispatch_task(ctx, "helper", "do it", tool_call_event_id="tc-99")
-    assert json.loads(out) == {"status": "Success"}
+    assert out == "ok"
     inv = capture["inv"]
     assert inv.agent_id == "sub:tc-99"
     assert inv.event_log is shared
@@ -288,7 +287,7 @@ async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="test", title="Test", project_root=tmp_path,
@@ -315,7 +314,7 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="test", title="Test", project_root=tmp_path,
@@ -382,7 +381,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="test", title="Test", project_root=tmp_path,
@@ -422,7 +421,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="test", title="Test", project_root=tmp_path,
@@ -462,7 +461,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="test", title="Test", project_root=tmp_path,
@@ -518,7 +517,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="test", title="Test", project_root=tmp_path,
@@ -531,7 +530,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     }
 
     out = await dispatch_task(ctx, "reviewer", "hard problem", tier="high")
-    assert json.loads(out) == {"status": "Success"}
+    assert out == "ok"
     inv = capture["inv"]
     assert inv.provider_name == "openai"
     assert inv.model_name == "gpt-5.2"
@@ -540,8 +539,8 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_subagent_construction_parity(tmp_path: Path) -> None:
     """Omissions #1/#2/#3 closed: a subagent invocation built by dispatch_task
-    carries the completion instruction, a nudge continuation, and a resolved
-    max_tool_calls — parity with a step invocation."""
+    carries the deliverable note (no completion instruction), a nudge
+    continuation, and a resolved ceiling — parity with a step invocation."""
     capture: dict = {}
     ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
@@ -551,7 +550,7 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(
         id="c", title="C c", project_root=tmp_path,
@@ -559,7 +558,8 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
 
     await dispatch_task(ctx, "reviewer", "review it")
     inv = capture["inv"]
-    assert "complete_step" in inv.system_prompt
+    assert SUBAGENT_DELIVERABLE_NOTE in inv.system_prompt
+    assert "complete_step" not in inv.system_prompt
     assert inv.continuation_fn is not None
     assert inv.max_tool_calls == 9
 
@@ -607,7 +607,7 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
             return _FakeRunner([{"type": "error", "payload": {
                 "category": "rate_limit", "kind": "429", "message": "slow"}}])
         return _FakeRunner([{"type": "agent_output",
-                             "payload": {"status": "Success"}}])
+                             "payload": {"text": "ok"}}])
 
     ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
@@ -621,7 +621,7 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
                                        workflow_dir=tmp_path / "wf")
 
     out = await dispatch_task(ctx, "reviewer", "review it")
-    assert json.loads(out) == {"status": "Success"}
+    assert out == "ok"
     # interruptible_sleep drives multiple tick-sized anyio.sleep calls per backoff
     # round, so sleeps will have more than one entry. Verify at least one sleep
     # happened (non-empty) and we retried with a fresh runner.
@@ -682,7 +682,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
                 "detail": {"retry_after_seconds": None}}}])
         # Second call would succeed, but coordinator should interrupt before we get here.
         return _FakeRunner([{"type": "agent_output",
-                             "payload": {"status": "Success"}}])
+                             "payload": {"text": "ok"}}])
 
     ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
@@ -775,7 +775,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -797,7 +797,7 @@ async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> N
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -824,7 +824,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -855,7 +855,7 @@ async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -886,11 +886,11 @@ async def test_dispatch_task_holds_limiter_during_drive(tmp_path: Path) -> None:
         seen["borrowed"] = ctx.parallel_limiter.borrowed_tokens
 
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        [{"type": "agent_output", "payload": {"text": "ok"}}],
         on_run=_capture_borrowed)
 
     out = await dispatch_task(ctx, "reviewer", "go")
-    assert json.loads(out) == {"status": "Success"}
+    assert out == "ok"
     assert seen["borrowed"] == 1                     # held during the drive
     assert ctx.parallel_limiter.borrowed_tokens == 0  # released afterwards
     reset_parallelism_cache()

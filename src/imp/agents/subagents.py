@@ -10,7 +10,6 @@ deadlock that would otherwise hit.
 from __future__ import annotations
 
 import contextlib
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -93,7 +92,7 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         name="sub_agent",
         description=(
             "Dispatch a subtask to a named subagent. "
-            "Returns the subagent's structured output as a JSON string. "
+            "Returns the subagent's final message as a plain string. "
             "Independent subtasks issued as multiple sub_agent calls in ONE "
             "assistant message run concurrently; issue dependent subtasks "
             "sequentially across turns. The relative ordering of sub_agent "
@@ -427,4 +426,4 @@ async def dispatch_task(
             # Keep the bracketed format and kind vocabulary in sync with that scan.
             suffix = f" [{kind}]" if kind else ""
             raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
-        return json.dumps(result.output)
+        return result.output["text"]

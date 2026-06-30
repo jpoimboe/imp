@@ -133,7 +133,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
 
     class _FakeRunner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"text": "done successfully"}}
         async def interrupt(self) -> None: ...
 
     async def fake_spawn(_inv: object) -> object:
@@ -148,9 +148,8 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     )
     out = await wrapped({"subagent_name": "sub", "task_description": "do"})
     assert state.complete_step_called is False  # routed to dispatch_task, not capture
-    text = out["content"][0]["text"]
-    # dispatch_task returns JSON-stringified agent_output.
-    assert json.loads(text) == {"status": "Success"}
+    # dispatch_task returns the subagent's raw final text.
+    assert out["content"][0]["text"] == "done successfully"
 
 
 @pytest.mark.anyio
@@ -189,7 +188,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
 
     class _FakeRunner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"text": "done successfully"}}
         async def interrupt(self) -> None: ...
 
     async def fake_spawn(_inv: object) -> object:
@@ -206,7 +205,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
     # The SDK passes the (empty) __tool_use_id__; the mint must ignore it.
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
-    assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
+    assert out["content"][0]["text"] == "done successfully"
 
     events = elog._events
     calls = [e for e in events
@@ -423,7 +422,7 @@ async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> No
 
     class _FakeRunner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_output", "payload": {"text": "done successfully"}}
         async def interrupt(self) -> None: ...
 
     async def fake_spawn(_inv: object) -> object:
@@ -437,7 +436,7 @@ async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> No
     wrapped = _wrap_one("sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
     out = await wrapped({"subagent_name": "sub", "task_description": "do",
                          "__tool_use_id__": ""})
-    assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
+    assert out["content"][0]["text"] == "done successfully"
 
     results = [e for e in elog.read() if e["type"] == "tool_result"]
     assert len(results) == 1
