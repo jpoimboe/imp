@@ -214,16 +214,8 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     pre = {Path(p).name for p in _read_paths(events)}
     assert {"a.txt", "b.txt"} <= pre, pre
 
-    # Headless resume after a mid-bash interrupt: deliver a continuation message
-    # so the low-tier resume agent finishes the step instead of bare-turn-ending
-    # with a clarifying question (which a no-message headless resume would then
-    # pause on — rc=1). The message is consumed only if the agent solicits; if it
-    # continues on its own the step completes and the message goes unused. Either
-    # way the replay/recall path under test runs identically.
     resume = subprocess.run(
-        [sys.executable, "-m", "imp", "resume", slug,
-         "--message", "The interrupted command is expected — do not re-run it. "
-         "Finish the step now."],
+        [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
         capture_output=True, text=True, timeout=240,
     )

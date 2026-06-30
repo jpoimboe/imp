@@ -385,14 +385,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     state = _wait_for_paused(state_path, timeout=30.0)
     assert state.get("status") == "paused", state
 
-    # Headless resume after a mid-bash interrupt: deliver a continuation message
-    # so the low-tier resume agent finishes the step instead of bare-turn-ending
-    # with a clarifying question (which a no-message headless resume would then
-    # pause on — rc=1). Consumed only if the agent solicits; harmless otherwise.
     resume = subprocess.run(
-        [sys.executable, "-m", "imp", "resume", slug,
-         "--message", "The interrupted command is expected — do not re-run it. "
-         "Finish the step now."],
+        [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
         capture_output=True, text=True, timeout=240,
     )
