@@ -74,6 +74,11 @@ class Save:
 
 
 @dataclass(frozen=True)
+class Alerts:
+    on: bool | None
+
+
+@dataclass(frozen=True)
 class ListResult:
     changes: list[ChangeInfo]
     resident: frozenset[str] = frozenset()
@@ -81,7 +86,7 @@ class ListResult:
 
 Command = (
     Reply | Create | Abandon | ListChanges | Help | Notice |
-    Subscribe | Unsubscribe | Replay | Search | Resume | Save)
+    Subscribe | Unsubscribe | Replay | Search | Resume | Save | Alerts)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
@@ -97,6 +102,8 @@ UNSUBSCRIBE_USAGE = (
     "To unsubscribe, reply to one of its messages or use @handle "
     "(e.g. /unsubscribe @ab12cd).")
 UNKNOWN_COMMAND = "Unknown command. Try /help."
+ALERTS_ON_REPLY = "Alerts: all Changes."
+ALERTS_OFF_REPLY = "Alerts: subscribed Changes only."
 ROUTE_HINT = (
     "Couldn't route that — reply to a Change's message, prefix @handle, or send /show.")
 HELP_TEXT = (
@@ -110,6 +117,7 @@ HELP_TEXT = (
     "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
     "/save (reply or @handle) — save a conversation to your Backlog\n"
+    "/alerts on|off — alert on every Change, not just the ones you follow\n"
     "/help — this message\n"
     "Reply to a Change's message (or @handle) to answer it.")
 
@@ -171,6 +179,13 @@ def parse(
             return Resume(rest) if rest else Notice(RESUME_USAGE)
         if verb == "save":
             return Save(_resolve_target(rest, reply_to, resolve_lookup, "save"))
+        if verb == "alerts":
+            arg = rest.lower()
+            if arg == "on":
+                return Alerts(True)
+            if arg == "off":
+                return Alerts(False)
+            return Alerts(None)
         return Notice(UNKNOWN_COMMAND)
     change_id, body = resolve_lookup(text, reply_to)
     return Reply(change_id, body) if change_id is not None else Notice(ROUTE_HINT)
