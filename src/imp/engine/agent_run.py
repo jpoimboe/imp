@@ -612,20 +612,30 @@ async def drive_invocation(
                     if event["type"] == "agent_output":
                         agent_output = event["payload"]
                     if event["type"] == "error":
-                        # A pause already in flight wins over the error's own
-                        # classification: a (process-group) interrupt kills a
-                        # provider's CLI child instantly, so the runner can surface
-                        # a teardown artifact (e.g. a subagent's `network`/
-                        # no_result_message) a beat before signal_pause's
-                        # interrupt() sets the runner's _cancel. Retrying that
-                        # replays an interrupted transcript (the 400 the runners
-                        # guard against); pause cleanly instead — same outcome as
-                        # the should_pause check below, just reached via an error.
-                        if coordinator is not None and coordinator.should_pause:
-                            return AgentRunResult(None, False, True, False, None)
                         payload = event.get("payload") or {}
                         category = payload.get("category", "unknown")
                         kind = payload.get("kind")
+                        # An interrupt-caused teardown pauses cleanly with
+                        # interrupt=True so the resume CONTINUES the step (shadowed
+                        # into State.interrupt_pending), NOT classified by the error's
+                        # own category. Two cases reach here:
+                        #   * kind == "interrupted": the runner surfaced the interrupt
+                        #     as an error event rather than the cooperative-steer
+                        #     AwaitingUserInput — and the steer may have ALREADY
+                        #     cleared should_pause, so the should_pause arm alone would
+                        #     misclassify it as a fatal `config` pause (interrupt lost
+                        #     → resume parks instead of continuing).
+                        #   * should_pause set: a pause is already in flight and wins.
+                        #     A (process-group) interrupt kills a provider's CLI child
+                        #     instantly, so the runner can surface a teardown artifact
+                        #     (e.g. a subagent's `network`/no_result_message) a beat
+                        #     before signal_pause's interrupt() sets _cancel; retrying
+                        #     that replays an interrupted transcript (a 400).
+                        interrupting = kind == "interrupted" or (
+                            coordinator is not None and coordinator.should_pause)
+                        if interrupting:
+                            return AgentRunResult(None, False, True, False, None,
+                                                  interrupt=True)
                         retry_after = (payload.get("detail") or {}).get(
                             "retry_after_seconds")
                         decision = error_policy.decide(
@@ -642,7 +652,8 @@ async def drive_invocation(
                         return AgentRunResult(None, True, False, False, None,
                                               ErrorInfo(category, kind))
                     if coordinator is not None and coordinator.should_pause:
-                        return AgentRunResult(None, False, True, False, None)
+                        return AgentRunResult(None, False, True, False, None,
+                                              interrupt=True)
         finally:
             # Close the generator on EVERY exit — the error/retry return, the
             # pause return, SubagentSuspended/AwaitingUserInput — so run()'s
