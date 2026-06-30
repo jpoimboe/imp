@@ -1944,6 +1944,15 @@ class ClaudeCodeAgentRunner:
                             next_query = reply
                             requery = True
                             break
+                        elif self._handoff_requested or self._steer_requested:
+                            # Non-error_during_execution close while a flag was set:
+                            # the cooperative interrupt() did not land. Reset both flags
+                            # so neither bleeds into a later unrelated
+                            # error_during_execution result.
+                            if self._handoff_requested:
+                                self._handoff_requested = False
+                                handoff_phase = None
+                            self._steer_requested = False
 
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE
