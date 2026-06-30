@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from imp.remote.daemon.alert_all import AlertAll
-from imp.remote.daemon.commands import Command, ListResult, Response, parse
+from imp.remote.daemon.commands import CatchupAlert, Command, ListResult, Response, parse
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.drivers.telegram import (
     _compose_message,
@@ -118,6 +118,9 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
 
 
 def render_response(response: Response, subscribed_ids: Iterable[str] = ()) -> str:
+    if isinstance(response, CatchupAlert):
+        return "\n".join(
+            f"@{handle_for(c.id)}  {c.title} — {c.status}" for c in response.changes)
     if isinstance(response, ListResult):
         subscribed = set(subscribed_ids)
         visible = [
@@ -269,6 +272,10 @@ class TelegramNorthAdapter:
             self._alert_all.mark(change_id, event_id)
 
     def on_response(self, response: Response) -> None:
+        if isinstance(response, CatchupAlert):
+            with self._lock:
+                for c in response.changes:
+                    self._handle_to_change[handle_for(c.id)] = c.id
         text = render_response(response, self._subscriptions.all())
         if text:
             self._send(text, True)

@@ -13,6 +13,7 @@ from imp.remote.daemon.commands import (
     ROUTE_HINT,
     Abandon,
     Alerts,
+    CatchupAlert,
     Create,
     Help,
     ListChanges,
@@ -309,3 +310,30 @@ async def test_alerts_bare_reports_on_state() -> None:
     assert alert_all.enabled() is True
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
     assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_alerts_on_enqueues_catchup_of_parked_changes_then_confirms() -> None:
+    rows = [
+        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement"),
+        ChangeInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
+    ]
+    control = FakeControl(changes=rows)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Alerts(True), control, responses, AlertAll())
+    catchup = responses.get_nowait()
+    assert isinstance(catchup, CatchupAlert)
+    assert [c.id for c in catchup.changes] == ["aaaaaa", "cccccc"]   # running excluded
+    assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
+    assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_alerts_on_with_no_parked_changes_sends_only_confirmation() -> None:
+    rows = [ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
+    control = FakeControl(changes=rows)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Alerts(True), control, responses, AlertAll())
+    assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
+    assert responses.empty()   # nothing parked -> no extra catch-up

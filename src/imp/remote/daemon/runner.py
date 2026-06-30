@@ -28,6 +28,7 @@ from imp.remote.daemon.commands import (
     SAVE_USAGE,
     Abandon,
     Alerts,
+    CatchupAlert,
     Command,
     Create,
     Help,
@@ -349,6 +350,11 @@ async def _handle_command(
                 ALERTS_ON_REPLY if alert_all.enabled() else ALERTS_OFF_REPLY))
         elif command.on:
             alert_all.set(True)
+            parked = [
+                c for c in await anyio.to_thread.run_sync(control.list_changes)
+                if c.status in ("paused", "merge_blocked")]
+            if parked:
+                responses.put(CatchupAlert(parked))
             responses.put(Notice(ALERTS_ON_REPLY))
         else:
             alert_all.set(False)

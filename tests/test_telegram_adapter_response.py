@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from imp.remote.daemon.commands import ListResult, Notice
+from imp.remote.daemon.commands import CatchupAlert, ListResult, Notice
 from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.subscriptions import Subscriptions
-from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, render_response
+from imp.remote.daemon.telegram_adapter import Inbound, TelegramNorthAdapter, render_response
 
 
 def _adapter(sent: list, subs: Subscriptions | None = None) -> TelegramNorthAdapter:
@@ -79,3 +79,23 @@ def test_on_response_marks_subscribed_rows() -> None:
     _adapter(sent, subs).on_response(ListResult([
         ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]))
     assert sent == [("● @bbbbbb  Beta — running · implement", True)]
+
+
+def test_render_catchup_is_one_line_per_change() -> None:
+    out = render_response(CatchupAlert([
+        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        ChangeInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
+    ]))
+    assert out == (
+        "@aaaaaa  Alpha — paused\n"
+        "@cccccc  Gamma — merge_blocked")
+
+
+def test_on_response_catchup_records_handle_map_for_reply_routing() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_response(CatchupAlert([
+        ChangeInfo(id="k3f9qa", title="Dark mode", status="paused", step="plan")]))
+    assert sent == [("@k3f9qa  Dark mode — paused", True)]
+    assert adapter.resolve(Inbound(text="@k3f9qa go", reply_to_message_id=None)) == (
+        "k3f9qa", "go")
