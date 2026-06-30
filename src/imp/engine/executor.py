@@ -470,6 +470,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
         state.status = "completed"
         state.save(change.state_dir)
+        _emit(log, "workflow_completed", {})
         shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 

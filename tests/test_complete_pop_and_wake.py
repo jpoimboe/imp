@@ -85,3 +85,20 @@ def test_complete_without_merge_releases_queue_slot(tmp_path, monkeypatch) -> No
     state = State.load(ch.state_dir)                     # merge_commit is None
     _complete(ch, state, JsonlEventLog(ch.events_path))
     assert mq.read(tmp_path) == []                       # lane released on completion
+
+
+def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    state = State.load(ch.state_dir)                     # merge_commit is None
+    log = JsonlEventLog(ch.events_path)
+    result = _complete(ch, state, log)
+    assert result == RunResult.COMPLETED
+    types = [e.get("type") for e in log.read()]
+    assert "workflow_completed" in types                 # generic terminal event emitted
+    # the merge-only event is NOT emitted on the no-merge path
+    assert "change_merged" not in types
+    completed = [e for e in log.read() if e.get("type") == "workflow_completed"]
+    assert completed and completed[0].get("payload") == {}
