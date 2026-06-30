@@ -762,6 +762,22 @@ def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
     assert "final message reports\n`NEEDS_CONTEXT` or `BLOCKED`" in text
 
 
+@pytest.mark.parametrize("tree", ["imp", "imp-flat", "patent"])
+def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None:
+    wf = load_workflow(bundled_workflow_dir(tree))
+    dispatchable: set[str] = set()
+    for a in wf.agents.values():
+        dispatchable.update(a.subagents)
+    assert dispatchable, f"{tree}: expected at least one dispatched subagent"
+    for name in sorted(dispatchable):
+        sub = wf.agents[name]
+        assert sub.output_schema.fields == (), (
+            f"{tree}:{name} still declares an output schema — a dispatched "
+            "subagent reports in prose")
+        assert "complete_step" not in sub.prompt_template_source, (
+            f"{tree}:{name} still instructs complete_step — it has no such tool")
+
+
 def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log)
