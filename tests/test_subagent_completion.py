@@ -15,7 +15,6 @@ from imp.engine.agent_run import (
     drive_invocation,
     last_assistant_text,
 )
-from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.scripted import ScriptedAgentRunner, _build_tools
 

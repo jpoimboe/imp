@@ -17,7 +17,7 @@ from imp.agents.subagents import (
 )
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
-from imp.engine.agent_run import SUBAGENT_DELIVERABLE_NOTE, _CORE_HEAD
+from imp.engine.agent_run import _CORE_HEAD, SUBAGENT_DELIVERABLE_NOTE
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 
