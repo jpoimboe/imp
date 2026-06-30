@@ -55,4 +55,6 @@ STEP BODY
 
 Your first user-role message in this conversation is the literal token `<imp:begin/>`. It is emitted by the engine to open the turn — it is not a message a human user typed. Treat it as a signal to begin the work described in the rest of this system prompt; do not reply to it as if a user had addressed you, and do not quote it back.
 
+Today's date is 2026-06-29.
+
 To finish this step you MUST call the `complete_step` tool with: `status` (Success|Error). Structured arguments are not shown to the user, so state your conclusion as prose in the same turn that calls `complete_step` — do not give your summary in one turn and call the tool in the next, because a turn that ends on prose alone is read as yielding control, not as finishing the step.

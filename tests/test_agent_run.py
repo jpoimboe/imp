@@ -658,6 +658,37 @@ def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
     assert inv.system_prompt == "EXACT STORED PROMPT"        # no notes appended
 
 
+def test_build_agent_invocation_appends_current_date_line(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The non-resume assembly appends exactly one `Today's date is <YYYY-MM-DD>.`
+    line, computed at invocation-build time. Pin the date by subclassing
+    datetime.date so the assertion is deterministic and falsifiable (it fails if
+    the line is absent, misworded, or wrongly formatted)."""
+    import datetime as _dt
+
+    import imp.engine.agent_run as ar
+
+    class _FixedDate(_dt.date):
+        @classmethod
+        def today(cls) -> _dt.date:
+            return _dt.date(2026, 6, 29)
+
+    monkeypatch.setattr(ar, "date", _FixedDate)
+    inv = _build_inv(tmp_path)
+    assert "Today's date is 2026-06-29." in inv.system_prompt
+
+
+def test_build_agent_invocation_omits_current_date_line_on_resume_override(
+    tmp_path: Path,
+) -> None:
+    """The resume-replay branch reuses the stored prompt verbatim — no date line
+    is appended, so a resumed step keeps its original frozen date."""
+    inv = _build_inv(tmp_path, system_prompt_override="EXACT STORED PROMPT")
+    assert inv.system_prompt == "EXACT STORED PROMPT"
+    assert "Today's date is" not in inv.system_prompt
+
+
 def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
     from imp.engine.agent_run import _CORE_HEAD
     inv = _build_inv(tmp_path)
