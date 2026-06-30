@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from imp.agents.runner import TextBlock, ThinkingBlock, ToolUseBlock
+from imp.agents.runner import Message, TextBlock, ThinkingBlock, ToolUseBlock
 from imp.providers.anthropic import (
     _extract_anthropic_diagnostics,
+    _message_to_anthropic,
     _parse_anthropic_message,
     _serialize_anthropic_response,
 )
 from tests.anthropic_fakes import (
-    redacted_thinking, response, text, thinking, tool_use,
+    redacted_thinking,
+    response,
+    text,
+    thinking,
+    tool_use,
 )
 
 
@@ -69,3 +74,50 @@ def test_redacted_thinking_is_not_a_diagnostic_warning() -> None:
            "stop_reason": "end_turn", "usage": {}}
     diag = _extract_anthropic_diagnostics(raw)
     assert diag.block_warnings == ()
+
+
+def test_message_to_anthropic_emits_thinking_first_with_signature() -> None:
+    msg = Message(role="assistant", content=(
+        ThinkingBlock(thinking="reasoning", signature="sig-1"),
+        ToolUseBlock(id="t1", name="read_file", input={"p": "x"}),
+    ))
+    wire = _message_to_anthropic(msg)["content"]
+    assert wire[0] == {"type": "thinking", "thinking": "reasoning",
+                       "signature": "sig-1"}
+    assert wire[1]["type"] == "tool_use"
+
+
+def test_message_to_anthropic_emits_redacted_thinking() -> None:
+    msg = Message(role="assistant", content=(
+        ThinkingBlock(redacted_thinking="ENC=="),
+        TextBlock(text="answer"),
+    ))
+    wire = _message_to_anthropic(msg)["content"]
+    assert wire[0] == {"type": "redacted_thinking", "data": "ENC=="}
+    assert wire[1]["type"] == "text"
+
+
+def test_tool_use_turn_with_thinking_round_trips_signed() -> None:
+    # Full raw -> parse -> request round-trip: a tool-use turn whose signed
+    # thinking block must survive verbatim and stay ahead of the tool_use.
+    raw = {"content": [
+        {"type": "thinking", "thinking": "deciding", "signature": "sig-rt"},
+        {"type": "tool_use", "id": "c1", "name": "complete_step",
+         "input": {"status": "Success"}},
+    ], "stop_reason": "tool_use", "usage": {}}
+    msg = _parse_anthropic_message(raw)
+    wire = _message_to_anthropic(msg)["content"]
+    assert wire[0] == {"type": "thinking", "thinking": "deciding",
+                       "signature": "sig-rt"}
+    assert wire[1] == {"type": "tool_use", "id": "c1", "name": "complete_step",
+                       "input": {"status": "Success"}}
+
+
+def test_message_to_anthropic_tolerates_no_thinking_block() -> None:
+    # Adaptive-skip turn: no thinking block at all still serializes cleanly.
+    msg = Message(role="assistant", content=(
+        TextBlock(text="answer"),
+        ToolUseBlock(id="t1", name="read_file", input={"p": "x"}),
+    ))
+    wire = _message_to_anthropic(msg)["content"]
+    assert [b["type"] for b in wire] == ["text", "tool_use"]

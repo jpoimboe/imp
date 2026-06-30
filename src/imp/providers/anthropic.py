@@ -194,7 +194,14 @@ def _anthropic_tool_schema(t: Tool) -> dict[str, Any]:
 def _message_to_anthropic(msg: Message) -> dict[str, Any]:
     content: list[dict[str, Any]] = []
     for b in msg.content:
-        if isinstance(b, TextBlock):
+        if isinstance(b, ThinkingBlock):
+            if b.redacted_thinking is not None:
+                content.append({"type": "redacted_thinking",
+                                "data": b.redacted_thinking})
+            else:
+                content.append({"type": "thinking", "thinking": b.thinking,
+                                "signature": b.signature})
+        elif isinstance(b, TextBlock):
             content.append({"type": "text", "text": b.text})
         elif isinstance(b, ToolUseBlock):
             content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
