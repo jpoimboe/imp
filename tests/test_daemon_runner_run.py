@@ -10,6 +10,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import Help
 from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
 from imp.remote.daemon.runner import (
@@ -67,7 +68,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
         tg.start_soon(sess.serve)
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions: adapter,
+            make_adapter=lambda env, submit, subscriptions, alert_all: adapter,
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):              # daemon up + pidfile written
@@ -121,7 +122,7 @@ async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) 
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions: SubmitOnceAdapter(submit),
+            make_adapter=lambda env, submit, subscriptions, alert_all: SubmitOnceAdapter(submit),
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):
@@ -147,7 +148,7 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
                 run_daemon, tmp_path, env={},
-                make_adapter=lambda env, submit, subscriptions: adapter,
+                make_adapter=lambda env, submit, subscriptions, alert_all: adapter,
                 install_signals=False, shutdown=shutdown))
 
             with anyio.fail_after(5):              # socket comes up
@@ -192,7 +193,7 @@ async def test_workers_run_as_daemon_threads(
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions: FakeAdapter(),
+            make_adapter=lambda env, submit, subscriptions, alert_all: FakeAdapter(),
             install_signals=False, shutdown=shutdown))
         with anyio.fail_after(5):
             while not socket_is_live(spath):
@@ -225,7 +226,7 @@ async def test_run_daemon_returns_while_poll_worker_is_blocked(tmp_path: Path) -
             async with anyio.create_task_group() as tg:
                 tg.start_soon(functools.partial(
                     run_daemon, tmp_path, env={},
-                    make_adapter=lambda env, submit, subscriptions: BlockingAdapter(),
+                    make_adapter=lambda env, submit, subscriptions, alert_all: BlockingAdapter(),
                     install_signals=False, shutdown=shutdown))
                 with anyio.fail_after(5):
                     while not socket_is_live(spath):
@@ -276,3 +277,28 @@ async def test_await_shutdown_signals_drains_then_escalates(
     assert any(
         "Ctrl-C again to force-quit" in record.message
         for record in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_run_daemon_injects_a_default_off_alert_all_into_the_adapter(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    captured: dict = {}
+
+    def make_adapter(env, submit, subscriptions, alert_all):
+        captured["alert_all"] = alert_all
+        return FakeAdapter()
+
+    shutdown = anyio.Event()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=make_adapter, install_signals=False, shutdown=shutdown))
+        with anyio.fail_after(5):
+            while "alert_all" not in captured:
+                await anyio.sleep(0.02)
+        shutdown.set()
+
+    assert isinstance(captured["alert_all"], AlertAll)
+    assert captured["alert_all"].enabled() is False

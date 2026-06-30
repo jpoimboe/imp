@@ -19,6 +19,7 @@ from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
+from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
     HELP_TEXT,
     ROUTE_HINT,
@@ -157,10 +158,11 @@ def check_not_running(control_root: Path) -> None:
 
 def _make_telegram_adapter(
     env: Mapping[str, str], submit: Callable[[Command], None],
-    subscriptions: Subscriptions,
+    subscriptions: Subscriptions, alert_all: AlertAll,
 ) -> TelegramNorthAdapter:
     """Default north adapter — Telegram, refusing without an allowlist."""
-    return TelegramNorthAdapter.from_env(dict(env), submit, subscriptions=subscriptions)
+    return TelegramNorthAdapter.from_env(
+        dict(env), submit, subscriptions=subscriptions, alert_all=alert_all)
 
 
 def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]:
@@ -394,7 +396,7 @@ async def run_daemon(
     *,
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
-        [Mapping[str, str], Callable[[Command], None], Subscriptions],
+        [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll],
         Any,
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[None]] | None = None,
@@ -427,6 +429,7 @@ async def run_daemon(
     responses: queue.Queue[Response] = queue.Queue()
     stop = threading.Event()
     subscriptions = Subscriptions()
+    alert_all = AlertAll()
 
     # on_event is a no-op: events now arrive via the supervisor's directory pull.
     # on_attach auto-subscribes a Change whose hello set autosubscribe (spec §6).
@@ -449,7 +452,7 @@ async def run_daemon(
             control_root, cid, n),
         search=search, resume=resume, save=save,
         full_history=lambda cid: discover.full_history(control_root, cid))
-    adapter = make_adapter(env, inbound.put, subscriptions)
+    adapter = make_adapter(env, inbound.put, subscriptions, alert_all)
 
     log_handlers = _install_file_logging(control_root, env)
     _log.info("remote-control daemon starting (control_root=%s)", control_root)
