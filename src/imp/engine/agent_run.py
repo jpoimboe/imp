@@ -342,18 +342,30 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
+_INTERRUPT_CONTINUATION_NUDGE = (
+    "Your previous turn was interrupted before you finished this step. "
+    "Continue from where you left off and call `complete_step` when the step "
+    "is done."
+)
+
+
 async def _resolve_wait_reply(
     coordinator: Any,
     user_input_fn: Callable[[str], str | Awaitable[str]],
+    resumed_from_interrupt: bool = False,
 ) -> str:
-    """Satisfy a bare-turn-end yield on resume (§2 F5, pending-satisfies-
-    solicit): if the interject queue is non-empty, drain+join it as the reply;
-    otherwise solicit via user_input_fn. Returns the reply string the caller
-    then journals + replays."""
+    """Satisfy a bare-turn-end / AWAITING_USER yield on resume. Precedence:
+    1. pending interject / --message present → drain+join and return it (a human
+       spoke; wins).
+    2. else if resumed_from_interrupt → return the continuation nudge so a
+       headless resume continues the step imp interrupted, instead of soliciting.
+    3. else → solicit empty via user_input_fn (a genuine yield → park)."""
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
         return joined
+    if resumed_from_interrupt:
+        return _INTERRUPT_CONTINUATION_NUDGE
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
         # Resume-side blocked solicit (all four providers route here): freeze the

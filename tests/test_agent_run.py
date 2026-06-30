@@ -1264,3 +1264,57 @@ def test_build_agent_invocation_resumed_from_interrupt_defaults_false(
         resolved_tiers=None, coordinator=None)
 
     assert inv.resumed_from_interrupt is False
+
+
+class _OneInterjectCoord:
+    """Drains exactly one queued interject, then empties. No watchdog needed:
+    the interject branch returns before any solicit."""
+
+    def __init__(self, text):
+        self._queue = [text]
+
+    def drain_interject(self):
+        return self._queue.pop(0) if self._queue else None
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_interject_wins_over_interrupt_flag() -> None:
+    import imp.engine.agent_run as ar
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when an interject is queued")
+
+    reply = await ar._resolve_wait_reply(
+        _OneInterjectCoord("human says go"), _ainput, True)
+    assert reply == "human says go"
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()  # drains no interjects
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when resumed_from_interrupt")
+
+    reply = await ar._resolve_wait_reply(coord, _ainput, True)
+    assert reply == ar._INTERRUPT_CONTINUATION_NUDGE
+    assert reply != ""
+    assert "complete_step" in reply
+    assert coord.events == []  # never entered the solicit watchdog bracket
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_no_flag_solicits_empty() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()
+    seen = {}
+
+    async def _ainput(q):
+        seen["prompt"] = q
+        return ""
+
+    reply = await ar._resolve_wait_reply(coord, _ainput, False)
+    assert reply == ""
+    assert seen["prompt"] == ""        # solicited with the empty prompt
+    assert coord.events == ["begin", "end"]  # the solicit watchdog bracket ran

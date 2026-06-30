@@ -1484,7 +1484,8 @@ class ClaudeCodeAgentRunner:
                 # Queued interjects satisfy the pending yield directly; fall back
                 # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
-                    invocation.coordinator, ctx.user_input_fn)
+                    invocation.coordinator, ctx.user_input_fn,
+                    invocation.resumed_from_interrupt)
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
