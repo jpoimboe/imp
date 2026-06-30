@@ -730,7 +730,9 @@ class AnthropicAgentRunner:
                     "output_tokens": usage.get("output_tokens"),
                     "thinking_tokens": thinking_tokens,
                 })
-                _thinking_note = "; thinking may be incomplete" if thinking_tokens is not None else ""
+                _thinking_note = (
+                    "; thinking may be incomplete" if thinking_tokens is not None else ""
+                )
                 elog.append(agent_id=aid, type="runner_warning", payload={
                     "message": (
                         f"Response truncated at the {max_output_tokens}-token "
