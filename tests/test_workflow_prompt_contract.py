@@ -23,7 +23,7 @@ SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 # Falsifiability-hardening guards: each component's edit leaves a marker in a
 # specific file. These are per-(path, marker) pairs spanning skills/ and direct
 # agents/ reads (including code-reviewer, already in SUBAGENT_FILES for the
-# complete_step guards — reused here for a *different* marker, not re-listed for
+# no-complete_step guard — reused here for a *different* marker, not re-listed for
 # the same purpose). NOT a uniform sweep over SUBAGENT_FILES. A presence guard
 # proves the marker exists somewhere in the file; section placement is left to
 # author self-review and the reviewer pass.
@@ -73,9 +73,10 @@ def _read(name: str) -> str:
 
 
 @pytest.mark.parametrize("name", SUBAGENT_FILES)
-def test_subagent_prompt_references_complete_step(name: str) -> None:
-    assert "complete_step" in _read(name), (
-        f"{name}: subagent prompt must name its terminal complete_step contract")
+def test_subagent_prompt_has_no_complete_step(name: str) -> None:
+    assert "complete_step" not in _read(name), (
+        f"{name}: a dispatched subagent has no complete_step tool — its final "
+        "message is its entire deliverable")
 
 
 @pytest.mark.parametrize("name", SUBAGENT_FILES)
@@ -85,7 +86,7 @@ def test_subagent_prompt_terminal_is_not_report_back_prose(name: str) -> None:
     # complete_step. We forbid the bare phrase "report back" entirely in
     # subagent prompts now that the contract is explicit.
     assert "report back" not in text, (
-        f"{name}: drop 'report back' framing — the terminal action is complete_step")
+        f"{name}: drop 'report back' framing — the terminal action is the subagent's final message")
 
 
 @pytest.mark.parametrize("name", SUBAGENT_FILES)
