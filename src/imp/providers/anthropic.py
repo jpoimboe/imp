@@ -34,6 +34,7 @@ from imp.agents.runner import (
     Event,
     Message,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -226,7 +227,11 @@ def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
                             "name": block.name, "input": block.input})
         elif kind == "thinking":
             content.append({"type": "thinking",
-                            "thinking": getattr(block, "thinking", "")})
+                            "thinking": getattr(block, "thinking", ""),
+                            "signature": getattr(block, "signature", "")})
+        elif kind == "redacted_thinking":
+            content.append({"type": "redacted_thinking",
+                            "data": getattr(block, "data", "")})
         else:
             content.append({"type": str(kind)})
     return {
@@ -253,7 +258,9 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
 
 def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
     """raw → assistant Message. Reconstruction-critical; shared with replay.py.
-    Thinking + unknown blocks are dropped (they're not conversation history)."""
+    Thinking blocks (signed + redacted) are PRESERVED as ThinkingBlocks so a
+    tool-use turn carrying thinking replays unchanged; unknown blocks are
+    dropped (they're not conversation history)."""
     content: list[Any] = []
     for block in raw.get("content", []):
         kind = block.get("type")
@@ -262,7 +269,14 @@ def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
         elif kind == "tool_use":
             content.append(ToolUseBlock(id=block["id"], name=block["name"],
                                         input=block.get("input", {})))
-        # thinking + unknown: skipped (see diagnostics)
+        elif kind == "thinking":
+            content.append(ThinkingBlock(
+                thinking=block.get("thinking", ""),
+                signature=block.get("signature", ""),
+            ))
+        elif kind == "redacted_thinking":
+            content.append(ThinkingBlock(redacted_thinking=block.get("data", "")))
+        # other unknown blocks: skipped (see diagnostics)
     return Message(role="assistant", content=tuple(content))
 
 
@@ -274,7 +288,7 @@ def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     thinkings: list[str] = []
     for block in raw.get("content", []):
         kind = block.get("type")
-        if kind in ("text", "tool_use"):
+        if kind in ("text", "tool_use", "redacted_thinking"):
             continue
         if kind in _WEB_BLOCK_TYPES:
             # Surfaced as normalized web events by _emit_anthropic_web_events
