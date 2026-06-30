@@ -719,6 +719,24 @@ class AnthropicAgentRunner:
                 context_tokens=context_tokens_from_usage(usage),
                 request_id=request_id,
                 duration_ms=(time.perf_counter() - _t0) * 1000.0)
+            if raw.get("stop_reason") == "max_tokens":
+                details = usage.get("output_tokens_details") or {}
+                model_name = raw.get("model") or self.model
+                elog.append(agent_id=aid, type="max_tokens_truncated", payload={
+                    "tier": invocation.tier,
+                    "model": model_name,
+                    "max_tokens": max_output_tokens,
+                    "output_tokens": usage.get("output_tokens"),
+                    "thinking_tokens": details.get("thinking_tokens"),
+                })
+                elog.append(agent_id=aid, type="runner_warning", payload={
+                    "message": (
+                        f"Response truncated at the {max_output_tokens}-token "
+                        f"output cap (stop_reason=max_tokens, tier="
+                        f"{invocation.tier}); thinking may be incomplete. No "
+                        f"retry — raise max_tokens if this recurs."
+                    ),
+                })
             _emit_anthropic_web_events(raw, elog, aid)
             # Post-API sweep + heartbeat (Decision 10): the model-API call is
             # the longest awaitable with no registry access — sweeping here
