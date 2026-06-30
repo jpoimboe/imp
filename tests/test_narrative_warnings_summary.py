@@ -90,3 +90,50 @@ def test_inline_runner_warning_node_still_appended() -> None:
             if isinstance(c, nv.ErrorNode) and c.is_warning]
     assert len(errs) == 1
     assert errs[0].message == "alpha"
+
+
+def _completed(eid: str = "k") -> dict:
+    return {"id": eid, "agent_id": None, "type": "workflow_completed", "payload": {}}
+
+
+def test_workflow_completed_appends_completed_node_at_root() -> None:
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _completed(),
+    ])
+    completed = [c for c in tree.root.children if isinstance(c, nv.CompletedNode)]
+    assert len(completed) == 1
+    assert completed[0].change_id == "abc123"
+    assert tree.root.status == "completed"
+
+
+def test_summary_sits_immediately_before_completed_node() -> None:
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _warn("w1", "alpha"),
+        _completed(),
+    ])
+    kinds = [type(c).__name__ for c in tree.root.children]
+    assert kinds.count("WarningsSummaryNode") == 1  # surfaces exactly once
+    si = kinds.index("WarningsSummaryNode")
+    ci = kinds.index("CompletedNode")
+    assert si + 1 == ci  # summary directly above the completion outcome
+
+
+def test_completed_node_lands_at_root_even_with_open_phase() -> None:
+    # A phase/step is still open when completion fires; the CompletedNode must
+    # bypass _append and land at the workflow root, not nested in the open phase.
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _started("s1"),
+        _warn("w1", "alpha"),
+        _completed(),
+    ])
+    completed = [c for c in tree.root.children if isinstance(c, nv.CompletedNode)]
+    assert len(completed) == 1  # at root, not nested in the open phase
+    summaries = [c for c in tree.root.children
+                 if isinstance(c, nv.WarningsSummaryNode)]
+    assert len(summaries) == 1

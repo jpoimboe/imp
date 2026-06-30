@@ -949,6 +949,8 @@ def test_structural_repr_covers_new_node_types() -> None:
     assert nv.structural_repr(bc) == {
         "t": "BreadcrumbLine", "step_name": "s", "elapsed_s": 1.0,
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
+    completed = nv.CompletedNode(change_id="abc123")
+    assert nv.structural_repr(completed) == {"t": "CompletedNode", "change_id": "abc123"}
 
 
 def test_current_activity_collapses_multiline_bash_command() -> None:

@@ -376,6 +376,13 @@ class WarningsSummaryNode:
 
 
 @dataclass
+class CompletedNode:
+    """Terminal workflow_completed footer (imp log only; live line owned by main.py)."""
+    change_id: str
+    collapsible = False
+
+
+@dataclass
 class TiersResolvedNode:
     """Run-level summary of once-per-run tier resolution (the tiers_resolved
     event). Each row: {tier, provider, model, differ_tier, differ_from}.
@@ -805,6 +812,19 @@ def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 
 
 NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
+
+
+def _h_workflow_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    self._root.status = "completed"
+    descriptor = self._root.id or ""
+    # Append at the WORKFLOW ROOT: a run-level terminal line ending the whole
+    # transcript, after every phase.
+    self._flush_warnings_summary()
+    self._root.children.append(CompletedNode(change_id=descriptor))
+
+
+NarrativeBuilder._HANDLERS["workflow_completed"] = _h_workflow_completed
 
 
 def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1763,4 +1783,6 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
     if isinstance(node, MergedNode):
         return {"t": t, "change_id": node.change_id, "base": node.base}
+    if isinstance(node, CompletedNode):
+        return {"t": t, "change_id": node.change_id}
     return {"t": t}
