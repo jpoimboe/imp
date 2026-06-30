@@ -836,3 +836,27 @@ async def test_subagent_bare_turn_end_returns_text(tmp_path: Path) -> None:
     outs = [e for e in events if e["type"] == "agent_output"]
     assert outs and outs[-1]["payload"] == {"text": "the final conclusion"}
     assert not any(e["type"] == "error" for e in events)
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_resume_returns_deliverable(
+        tmp_path: Path) -> None:
+    """Subagent resume parity with anthropic: a bare-turn-end terminal re-emits
+    its final text as the deliverable instead of soliciting the human."""
+    from dataclasses import replace
+    inv_dir = tmp_path / "step"
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(
+        role="assistant", content=(TextBlock(text="the conclusion"),)))
+
+    fake = FakeResponsesClient([])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+
+    yielded = [ev async for ev in runner.run(inv)]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
+    assert yielded[-1]["payload"] == {"text": "the conclusion"}
+    assert not any(e["type"] == "llm_response" for e in log.read())

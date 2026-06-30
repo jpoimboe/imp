@@ -988,3 +988,31 @@ async def test_subagent_bare_turn_end_returns_text(tmp_path: Path) -> None:
     outs = [e for e in events if e["type"] == "agent_output"]
     assert outs and outs[-1]["payload"] == {"text": "the final conclusion"}
     assert not any(e["type"] == "error" for e in events)
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_resume_returns_deliverable(
+        tmp_path: Path) -> None:
+    """A subagent (subagent_depth>0) resumed from a bare-turn-end terminal
+    (assistant prose, no complete_step) re-emits its final text as the
+    deliverable and returns terminal-success — a top-level step in the same
+    shape would solicit the human (AWAITING_USER) instead."""
+    from dataclasses import replace
+    inv_dir = tmp_path / "step"
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="go"),)))
+    transcript.append(Message(
+        role="assistant", content=(TextBlock(text="the conclusion"),)))
+
+    # Empty fake: the LLM must NOT be called on this resume.
+    fake = FakeAsyncAnthropic([])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
+
+    yielded = [ev async for ev in runner.run(inv)]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
+    assert yielded[-1]["payload"] == {"text": "the conclusion"}
+    # Short-circuited before the loop: no model call happened.
+    assert not any(e["type"] == "llm_response" for e in log.read())

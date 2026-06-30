@@ -490,6 +490,17 @@ class AnthropicAgentRunner:
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
+            # A subagent's done-signal is a bare-turn-end terminal (assistant
+            # prose, no complete_step), NOT a complete_step. On resume, re-emit
+            # its final text as the deliverable and return — a top-level step in
+            # the same shape (AWAITING_USER) solicits the human instead.
+            if (invocation.subagent_depth > 0
+                    and classify_resume(messages) is ResumeState.AWAITING_USER):
+                final_text = last_assistant_text(messages)
+                if final_text:
+                    yield {"type": "agent_output",
+                           "payload": {"text": final_text}}
+                return
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
             # the executor's pause check fires after `tool_result` was yielded
             # but before the user message was appended. Patch the transcript
