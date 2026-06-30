@@ -19,7 +19,7 @@ from imp.agents.classify import ResumeState
 
 
 def derive_codex_resume_state(
-    events_path: Path, agent_id: str,
+    events_path: Path, agent_id: str, *, subagent_depth: int = 0,
 ) -> tuple[ResumeState, str]:
     """Return (state, last_agent_text). last_agent_text is the tail
     agent_message text (needed by the resume seam, since proc_state is empty on
@@ -62,6 +62,12 @@ def derive_codex_resume_state(
     last_text = _text_of(last_llm)
     if has_awaiting:
         return ResumeState.AWAITING_USER, last_text
+    if subagent_depth > 0:
+        # A subagent never calls complete_step; its bare-turn-end terminal IS
+        # the done-signal. Resume normally with no continue-nudge — the live
+        # bare-turn-end arm re-emits the deliverable. Top-level keeps the
+        # MISSING_COMPLETE_STEP replay-and-continue below.
+        return ResumeState.SEND_TO_LLM, last_text
     return ResumeState.MISSING_COMPLETE_STEP, last_text
 
 

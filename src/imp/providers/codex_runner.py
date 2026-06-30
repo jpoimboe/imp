@@ -522,7 +522,8 @@ class CodexAgentRunner:
             from imp.agents.classify import ResumeState
             from imp.providers.codex_resume import derive_codex_resume_state
             rstate, _ = derive_codex_resume_state(
-                invocation.events_path, aid)
+                invocation.events_path, aid,
+                subagent_depth=invocation.subagent_depth)
             if rstate is ResumeState.AWAITING_USER:
                 if invocation.user_input_fn is None:
                     yield {"type": "error", "payload": {
