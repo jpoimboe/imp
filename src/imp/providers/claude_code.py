@@ -1162,6 +1162,16 @@ class ClaudeCodeAgentRunner:
         env: dict[str, str] = {
             "ANTHROPIC_API_KEY": "",
             "ANTHROPIC_AUTH_TOKEN": "",
+            # Neutralize inherited thinking/effort/output-token tuning so the
+            # spawned claude's posture is imp-owned (via thinking=/effort=), not
+            # host-floated. The SDK merges options.env over the inherited env, so
+            # an empty string wins over any hostile value.
+            "MAX_THINKING_TOKENS": "",
+            "CLAUDE_CODE_DISABLE_THINKING": "",
+            "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "",
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "",
+            "CLAUDE_CODE_EFFORT_LEVEL": "",
+            "USER_TYPE": "",
         }
         extra_args: dict[str, Any] = {}
         if config_dir is not None:
