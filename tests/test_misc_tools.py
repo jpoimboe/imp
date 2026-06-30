@@ -60,3 +60,12 @@ def test_query_events_description_states_jsonl_and_default_cap() -> None:
     desc = get_registry()["query_events"].description
     assert "JSONL" in desc
     assert "100" in desc
+
+
+def test_query_events_invalid_limit_returns_single_line_json_error(tmp_path: Path) -> None:
+    out = get_registry()["query_events"].invoke(_ctx(tmp_path), {"limit": "abc"})
+    # Error path: a single json.dumps({"error": ...}) line — valid JSONL.
+    lines = [l for l in out.splitlines() if l]
+    assert len(lines) == 1
+    obj = json.loads(lines[0])
+    assert "error" in obj
