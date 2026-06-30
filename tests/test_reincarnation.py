@@ -60,9 +60,22 @@ def test_seed_tier_a_names_handoff_as_primary() -> None:
     seed = reincarnation_seed(
         stashed_dir=Path("/x/a-1"), handoff_path=Path("/x/handoff.md"))
     assert "/x/handoff.md" in seed
-    assert "Primary" in seed
+    assert "- Primary: read the handoff note" in seed
     assert "/x/a-1/transcript.jsonl" in seed
     assert "summary above" in seed
+
+
+def test_seed_drops_false_claim_points_at_bounded_query_and_names_transcript_primary() -> None:
+    # Part 3: the orientation pointer must no longer claim query_events excludes
+    # this step's own tool calls (it doesn't), must point at a BOUNDED query_events
+    # limit=N call, and the stashed transcript must be labelled the primary detail
+    # source.
+    seed = reincarnation_seed(
+        stashed_dir=Path("/x/steps/impl/coder.attempt-1"), handoff_path=None)
+    assert "this step's own tool calls" not in seed
+    assert "query_events limit=N" in seed
+    assert "Primary detail source" in seed
+    assert "/x/steps/impl/coder.attempt-1/transcript.jsonl" in seed
 
 
 def test_seed_degrades_to_orientation_only_when_nothing_stashed() -> None:
