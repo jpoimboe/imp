@@ -5,10 +5,14 @@ import threading
 
 import pytest
 
+from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
+    ALERTS_OFF_REPLY,
+    ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
     Abandon,
+    Alerts,
     Create,
     Help,
     ListChanges,
@@ -257,9 +261,51 @@ async def test_dispatch_inbound_survives_a_failing_command(
     responses: queue.Queue = queue.Queue()
 
     with caplog.at_level("WARNING"):
-        await _dispatch_inbound(inbound, control, responses, stop)
+        await _dispatch_inbound(inbound, control, responses, stop, AlertAll())
 
     # The loop processed the good command *after* the failing one — proof it
     # neither crashed nor dropped the rest of the queue.
     assert control.calls == ["boom", "goodno"]
     assert "command failed" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_alerts_on_sets_mode_and_confirms() -> None:
+    alert_all = AlertAll()
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Alerts(True), FakeControl(), responses, alert_all)
+    assert alert_all.enabled() is True
+    assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
+    assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_alerts_off_clears_mode_and_confirms() -> None:
+    alert_all = AlertAll()
+    alert_all.set(True)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Alerts(False), FakeControl(), responses, alert_all)
+    assert alert_all.enabled() is False
+    assert responses.get_nowait() == Notice(ALERTS_OFF_REPLY)
+    assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_alerts_bare_reports_off_state() -> None:
+    alert_all = AlertAll()
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Alerts(None), FakeControl(), responses, alert_all)
+    assert alert_all.enabled() is False   # bare query must not change the mode
+    assert responses.get_nowait() == Notice(ALERTS_OFF_REPLY)
+    assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_alerts_bare_reports_on_state() -> None:
+    alert_all = AlertAll()
+    alert_all.set(True)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Alerts(None), FakeControl(), responses, alert_all)
+    assert alert_all.enabled() is True
+    assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
+    assert responses.empty()

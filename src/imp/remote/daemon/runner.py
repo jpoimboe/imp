@@ -21,10 +21,13 @@ from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
+    ALERTS_OFF_REPLY,
+    ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
     SAVE_USAGE,
     Abandon,
+    Alerts,
     Command,
     Create,
     Help,
@@ -253,7 +256,9 @@ def _sender_worker(
 
 async def _handle_command(
     command: Command, control: ControlPlane, responses: queue.Queue[Response],
+    alert_all: AlertAll | None = None,
 ) -> None:
+    alert_all = alert_all if alert_all is not None else AlertAll()
     if isinstance(command, Reply):
         try:
             await control.reply(command.change_id, command.text)
@@ -338,6 +343,16 @@ async def _handle_command(
             else:
                 responses.put(Notice(
                     f"Saved @{handle_for(change_id)} to your Backlog."))
+    elif isinstance(command, Alerts):
+        if command.on is None:
+            responses.put(Notice(
+                ALERTS_ON_REPLY if alert_all.enabled() else ALERTS_OFF_REPLY))
+        elif command.on:
+            alert_all.set(True)
+            responses.put(Notice(ALERTS_ON_REPLY))
+        else:
+            alert_all.set(False)
+            responses.put(Notice(ALERTS_OFF_REPLY))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
     elif isinstance(command, Notice):
@@ -346,7 +361,7 @@ async def _handle_command(
 
 async def _dispatch_inbound(
     inbound: queue.Queue[Command], control: ControlPlane,
-    responses: queue.Queue[Response], stop: threading.Event,
+    responses: queue.Queue[Response], stop: threading.Event, alert_all: AlertAll,
 ) -> None:
     def _get() -> Command | None:
         while not stop.is_set():
@@ -362,7 +377,7 @@ async def _dispatch_inbound(
             return
         _log.info("routing command: %r", command)
         try:
-            await _handle_command(command, control, responses)
+            await _handle_command(command, control, responses, alert_all)
         except Exception:
             _log.warning("command failed: %r", command, exc_info=True)
 
@@ -476,7 +491,7 @@ async def run_daemon(
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(supervisor.run)
-            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
+            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop, alert_all)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             try:
