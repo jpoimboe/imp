@@ -19,8 +19,8 @@ def test_explorer_agent_is_read_only_leaf() -> None:
                       "sub_agent", "wait_for_user"):
         assert forbidden not in tools
     assert a.subagents == ()
-    fields = {f.name for f in a.output_schema.fields}
-    assert {"status", "report"} <= fields
+    # A dispatched subagent carries no output schema — it reports in prose.
+    assert a.output_schema.fields == ()
 
 
 def test_researcher_agent_has_web_tools_read_only() -> None:
@@ -28,8 +28,7 @@ def test_researcher_agent_has_web_tools_read_only() -> None:
     assert set(a.tools) == {"read_file", "glob", "grep", "bash",
                              "query_events", "web_search", "web_fetch"}
     assert a.subagents == ()
-    fields = {f.name for f in a.output_schema.fields}
-    assert {"status", "report"} <= fields
+    assert a.output_schema.fields == ()
 
 
 def test_subagents_have_no_static_tier() -> None:
