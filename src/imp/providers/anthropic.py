@@ -59,6 +59,7 @@ from imp.engine.agent_run import (
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers.base import Provider
+from imp.providers.catalog import ANTHROPIC, model_info
 from imp.providers.history_compaction import is_cold
 from imp.providers.message_eviction import apply_eviction, evicted_result_ids
 from imp.providers.resolve import spawn_subagent_via_registry
@@ -469,6 +470,7 @@ class AnthropicAgentRunner:
         from imp.engine.state import JsonlEventLog
         elog = invocation.event_log or JsonlEventLog(invocation.events_path)
         aid = invocation.agent_id or "step:unnamed"
+        max_output_tokens = model_info(ANTHROPIC, self.model).max_output_tokens
 
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
@@ -592,7 +594,7 @@ class AnthropicAgentRunner:
                 provider=invocation.provider_name, model=self.model,
                 system_prompt=invocation.system_prompt,
                 tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
-                params={"max_tokens": 8192},
+                params={"max_tokens": max_output_tokens},
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
@@ -635,7 +637,7 @@ class AnthropicAgentRunner:
                     _message_to_anthropic(m)
                     for m in apply_eviction(messages, evicted_ids)
                 ],
-                max_tokens=8192,
+                max_tokens=max_output_tokens,
                 cache_control={"type": "ephemeral"},
                 # §4: explicitly PERMIT parallel tool calls per assistant message
                 # so multiple `task` tus can arrive in one turn. Unconditional and

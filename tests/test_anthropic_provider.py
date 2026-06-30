@@ -222,6 +222,15 @@ def test_real_sdk_accepts_cache_control() -> None:
     assert "cache_control" in params
 
 
+def test_no_hardcoded_8192_max_tokens_in_provider() -> None:
+    """max_tokens is catalog-derived; no flat 8192 literal remains."""
+    import inspect
+
+    import imp.providers.anthropic as anthropic_mod
+
+    assert "8192" not in inspect.getsource(anthropic_mod)
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

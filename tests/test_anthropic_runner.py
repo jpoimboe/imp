@@ -1124,3 +1124,45 @@ async def test_none_tier_request_omits_thinking_and_output_config(tmp_path: Path
     call = fake.messages.calls[0]
     assert "thinking" not in call
     assert "output_config" not in call
+
+
+@pytest.mark.anyio
+async def test_request_max_tokens_from_catalog_opus(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+    assert fake.messages.calls[0]["max_tokens"] == 64_000
+
+
+@pytest.mark.anyio
+async def test_request_max_tokens_dated_id_falls_to_default(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    # A dated id misses the alias table and resolves to the 32000 default.
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+    assert fake.messages.calls[0]["max_tokens"] == 32_000
+
+
+@pytest.mark.anyio
+async def test_step_context_audit_records_catalog_max_tokens(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+    sc = next(e for e in log.read() if e["type"] == "step_context")
+    assert sc["payload"]["params"]["max_tokens"] == 64_000
