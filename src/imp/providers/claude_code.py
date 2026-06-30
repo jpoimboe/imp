@@ -1081,9 +1081,12 @@ class ClaudeCodeAgentRunner:
         self._last_no_result_diag: dict[str, Any] = {}
         self._cancel = False
         self._ctx: ToolContext | None = None
-        # The live SDK client while a turn streams; interrupt() disconnects it to
-        # kill the CLI subprocess (the only effect that breaks a stalled
-        # receive_response()). None outside an active `async with client_ctx`.
+        # The live SDK client while a turn streams. The cooperative tier of
+        # interrupt() signals the running query (client.interrupt()) WITHOUT
+        # disconnecting: the subprocess stays connected and the turn closes
+        # balanced, so a steer or handoff continues with a plain increment. Only the
+        # hard-interrupt escalation disconnects, to break a frozen
+        # receive_response(). None outside an active `async with client_ctx`.
         self._client: Any = None
         self._impty_driver: Any = None
         # Per-step capture of the nested `claude` CLI's stderr. Built in
@@ -1101,6 +1104,11 @@ class ClaudeCodeAgentRunner:
         self._steer_requested = False
         self._steer_unblocked = asyncio.Event()
         self._steer_timeout = steer_timeout
+        # Tier A proactive-handoff intent flag (separate from _steer_requested):
+        # set when the threshold watchdog interrupts the live turn, consumed at the
+        # generalized balanced-close site to continue with a handoff-instruction
+        # increment.
+        self._handoff_requested = False
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None,
@@ -1604,8 +1612,10 @@ class ClaudeCodeAgentRunner:
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
-            # Publish the live client so interrupt() (called from the watchdog/
-            # pause task) can disconnect it and break a parked receive_response().
+            # Publish the live client so the cooperative interrupt() (called from
+            # the watchdog/pause task) can signal the running query and let the turn
+            # close balanced; only the hard-interrupt escalation disconnects, to
+            # break a parked receive_response().
             self._client = client
             # FIRST query streams the prepared history; re-queries send a plain
             # next_text string (asymmetry preserved from the pre-restructure
@@ -1683,14 +1693,20 @@ class ClaudeCodeAgentRunner:
                                 if frag.get("usage"):
                                     llm_usage = frag["usage"]
                                 # Tier A proactive handoff (Mechanism 3): on the
-                                # configured context-threshold crossing, interrupt the
-                                # live turn and replay history with a handoff
-                                # instruction appended — before the SDK auto-compacts
-                                # (so no ContextWindowError). complete_step_called is set
-                                # later (per-block loop), so detect the completing turn
-                                # from blocks here, canonicalizing the name: the SDK
-                                # presents it as mcp__imp__complete_step, so a bare
-                                # compare would miss it and wrongly preempt it.
+                                # configured context-threshold crossing, route
+                                # through the cooperative-interrupt path — signal the
+                                # running query and let the SDK close this turn
+                                # balanced, then continue the live session with a
+                                # plain handoff-instruction increment (handled at the
+                                # generalized balanced-close site below). Do NOT
+                                # re-stream history here: interrupt() does not
+                                # disconnect the subprocess, so a replay would append
+                                # on top of the already-near-full context and double
+                                # it. complete_step_called is set later (per-block
+                                # loop), so detect the completing turn from blocks
+                                # here, canonicalizing the name: the SDK presents it
+                                # as mcp__imp__complete_step, so a bare compare would
+                                # miss it and wrongly preempt it.
                                 if (handoff_phase is None
                                         and invocation.checkpoint_threshold is not None):
                                     completing = any(
@@ -1703,30 +1719,21 @@ class ClaudeCodeAgentRunner:
                                                 cu_fields.get("context_tokens"),
                                                 cu_fields.get("context_window"),
                                                 invocation.checkpoint_threshold)):
-                                        # Record the crossing turn before interrupting,
-                                        # then balance its dangling tool_use in
-                                        # messages/transcript for the replay contract.
-                                        # Do NOT log a synthetic tool_result: it never
-                                        # ran, and an orphan result (no matching
-                                        # tool_call event) renders as a stray errored
-                                        # "tool" entry.
+                                        # Flush the crossing turn's LLM group, signal
+                                        # the interrupt, and mark the phase so the
+                                        # watchdog cannot re-fire while the interrupt
+                                        # settles. `continue` (not break) skips this
+                                        # crossing message's remaining blocks but keeps
+                                        # the receive loop iterating, so the balanced
+                                        # error_during_execution ResultMessage reaches
+                                        # the generalized close handler below — exactly
+                                        # as the steer path's external interrupt does.
                                         await _flush_llm_group()
+                                        self._handoff_requested = True
+                                        handoff_phase = "interrupt_requested"
                                         with contextlib.suppress(Exception):
                                             await client.interrupt()
-                                        repair_dangling_tool_use_on_resume(
-                                            messages, transcript)
-                                        instr_msg = Message(
-                                            role="user",
-                                            content=(TextBlock(
-                                                text=handoff_instruction(handoff_path)),))
-                                        messages.append(instr_msg)
-                                        transcript.append(instr_msg)
-                                        elog.append_user_message(
-                                            agent_id=aid, message=instr_msg)
-                                        next_query = _stream_history(messages)
-                                        handoff_phase = "instruction_sent"
-                                        requery = True
-                                        break
+                                        continue
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
@@ -1860,9 +1867,38 @@ class ClaudeCodeAgentRunner:
                             api_error_status=getattr(sdk_msg, "api_error_status", None),
                             permission_denials=getattr(sdk_msg, "permission_denials", None),
                             errors=getattr(sdk_msg, "errors", None))
-                        if (self._steer_requested and getattr(
-                                sdk_msg, "subtype", None)
+                        if ((self._steer_requested or self._handoff_requested)
+                                and getattr(sdk_msg, "subtype", None)
                                 == "error_during_execution"):
+                            if self._handoff_requested:
+                                # Tier A proactive handoff: the SDK closed the
+                                # crossing turn balanced. Continue the LIVE (now
+                                # balanced) session with a plain handoff-instruction
+                                # increment — NOT a _stream_history replay, which
+                                # would double the already-near-full context.
+                                self._handoff_requested = False
+                                # Discard the interrupted turn's partial accumulators
+                                # so they don't bleed into the handoff requery's loop
+                                # guard (mirrors the steer cleanup below).
+                                _flush_pending()
+                                # Balance the crossing turn's dangling tool_use in
+                                # imp's in-memory messages/transcript (used by the
+                                # later transcript stash); it no longer feeds a live
+                                # replay.
+                                repair_dangling_tool_use_on_resume(
+                                    messages, transcript)
+                                instr = handoff_instruction(handoff_path)
+                                instr_msg = Message(
+                                    role="user",
+                                    content=(TextBlock(text=instr),))
+                                messages.append(instr_msg)
+                                transcript.append(instr_msg)
+                                elog.append_user_message(
+                                    agent_id=aid, message=instr_msg)
+                                next_query = instr
+                                handoff_phase = "instruction_sent"
+                                requery = True
+                                break
                             # Cooperative interrupt landed: the SDK closed this
                             # turn balanced. Unblock the waiting interrupt() and
                             # route into the attended inline-yield instead of
@@ -1908,6 +1944,15 @@ class ClaudeCodeAgentRunner:
                             next_query = reply
                             requery = True
                             break
+                        elif self._handoff_requested or self._steer_requested:
+                            # Non-error_during_execution close while a flag was set:
+                            # the cooperative interrupt() did not land. Reset both flags
+                            # so neither bleeds into a later unrelated
+                            # error_during_execution result.
+                            if self._handoff_requested:
+                                self._handoff_requested = False
+                                handoff_phase = None
+                            self._steer_requested = False
 
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE

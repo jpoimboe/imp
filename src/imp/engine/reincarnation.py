@@ -50,11 +50,12 @@ def reincarnation_seed(
                 if handoff_path is not None
                 else " — read_file it for the prior session's full detail.")
         lines.append(
-            f"- Deeper detail: the prior transcript is stashed at "
+            f"- Primary detail source: the prior transcript is stashed at "
             f"`{stashed_dir}/transcript.jsonl`{tail}")
     lines.append(
-        "- Orientation: `query_events` returns the change's event log "
-        "(change-level steps and notices, not this step's own tool calls).")
+        "- Orientation only: `query_events limit=N` returns the last N entries of "
+        "the change's event log (a bare call is bounded to the last 100). Use it "
+        "for change-level bearings, not as the primary source of detail.")
     return "\n".join(lines)
 
 

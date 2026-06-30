@@ -36,6 +36,7 @@ ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
     "PushNotification",
     "Read",
     "RemoteTrigger",
+    "ReportFindings",
     "ScheduleWakeup",
     "SendMessage",
     "Skill",

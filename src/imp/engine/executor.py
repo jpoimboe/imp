@@ -944,21 +944,27 @@ async def _route_agent(
         return Pause(), None, {}
     reincarnation_key = f"step:{step.phase}/{step.name}"
     if result.handoff_path is not None:
-        # Tier A proactive handoff: the agent approached its window and wrote a
-        # handoff note before stopping. Reincarnate the step fresh seeded from the
-        # handoff (primary) plus the stashed transcript, up to the per-session cap
-        # (shared with Tier B); at the cap, pause to the human (the note is on
-        # disk for them). Same cap counter as Tier B — both are reincarnations.
+        # Tier A proactive handoff: the agent approached its window and (normally)
+        # wrote a handoff note before stopping. Reincarnate the step fresh seeded
+        # from the handoff (primary) plus the stashed transcript, up to the
+        # per-session cap (shared with Tier B); at the cap, pause to the human.
+        # Same cap counter as Tier B — both are reincarnations. The runner ALWAYS
+        # reports handoff_path; the engine is the sole arbiter of handoff success
+        # via note existence. A missing note means the handoff failed: degrade to a
+        # transcript-only (Tier-B-shaped) reincarnation and log a DISTINCT reason so
+        # a failed proactive handoff is never mistaken for a clean one.
         if (state.reincarnation_count(reincarnation_key)
                 < state.max_reincarnations):
             state.bump_reincarnation(reincarnation_key)
             stashed = stash_transcript(transcript_dir)
-            _emit(log, "reincarnating",
-                  {"reason": "context threshold crossed"}, agent_id=None)
             hp = Path(result.handoff_path)
+            note_exists = hp.exists()
+            reason = ("context threshold crossed" if note_exists
+                      else "handoff failed — recovering from transcript")
+            _emit(log, "reincarnating", {"reason": reason}, agent_id=None)
             seed = reincarnation_seed(
                 stashed_dir=stashed,
-                handoff_path=hp if hp.exists() else None)
+                handoff_path=hp if note_exists else None)
             return await _route_agent(
                 step, workflow, change, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
