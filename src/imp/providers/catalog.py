@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_WINDOW = 200_000
+DEFAULT_MAX_OUTPUT_TOKENS = 32_000
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class ModelInfo:
     window: int = DEFAULT_WINDOW
     betas: tuple[str, ...] = ()
     cli_model: str | None = None
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
 
 
 # NOTE on two window surfaces: the structured catalogs below carry the
@@ -47,9 +49,9 @@ CLAUDE_CODE: dict[str, ModelInfo] = {
 }
 
 ANTHROPIC: dict[str, ModelInfo] = {
-    "haiku": ModelInfo(window=200_000),
-    "sonnet": ModelInfo(window=200_000),
-    "opus": ModelInfo(window=200_000),
+    "haiku": ModelInfo(window=200_000, max_output_tokens=32_000),
+    "sonnet": ModelInfo(window=200_000, max_output_tokens=32_000),
+    "opus": ModelInfo(window=200_000, max_output_tokens=64_000),
 }
 
 OPENAI: dict[str, ModelInfo] = {

@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.providers.catalog import (
     ANTHROPIC,
     CLAUDE_CODE,
+    DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_WINDOW,
     OPENAI,
     ModelInfo,
@@ -167,3 +168,21 @@ def test_context_tokens_from_usage_openai_inclusive() -> None:
 def test_context_tokens_from_usage_empty_is_zero() -> None:
     assert context_tokens_from_usage({}) == 0
     assert context_tokens_from_usage(None) == 0
+
+
+def test_anthropic_max_output_tokens_per_model() -> None:
+    # Opus class is the 64000 baseline; sonnet/haiku class is 32000.
+    assert model_info(ANTHROPIC, "opus").max_output_tokens == 64_000
+    assert model_info(ANTHROPIC, "sonnet").max_output_tokens == 32_000
+    assert model_info(ANTHROPIC, "haiku").max_output_tokens == 32_000
+
+
+def test_default_max_output_tokens_constant_is_32000() -> None:
+    assert DEFAULT_MAX_OUTPUT_TOKENS == 32_000
+
+
+def test_dated_anthropic_id_falls_to_default_max_output_tokens() -> None:
+    # An operator-pinned dated id misses the alias table and resolves through
+    # _DEFAULT to the sonnet/haiku-class 32000, never an unspecified or zero value.
+    assert model_info(ANTHROPIC, "claude-opus-4-8").max_output_tokens == 32_000
+    assert model_info(ANTHROPIC, "claude-sonnet-4-6").max_output_tokens == 32_000
