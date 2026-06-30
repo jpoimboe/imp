@@ -3706,3 +3706,36 @@ async def test_receive_loop_pulses_note_activity_per_message(tmp_path: Path) -> 
     # receive_response() yields the assistant message then the ResultMessage —
     # two received SDK messages, so two liveness pulses for this single turn.
     assert len(pulses) == 2
+
+
+@pytest.mark.anyio
+async def test_subagent_bare_turn_end_resume_returns_deliverable(
+        tmp_path: Path) -> None:
+    """A subagent resumed from a bare-turn-end terminal re-emits its final text
+    as the deliverable and returns — it does NOT native-resume (handing a
+    finished subagent back to claude-p) or solicit the human."""
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = replace(_inv(tmp_path, agent_id="sub:tc-1"), subagent_depth=1)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant",
+                     content=(TextBlock(text="the conclusion"),)))
+
+    created: list[Any] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=[])
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    yielded = [ev async for ev in runner.run(inv)]
+
+    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert yielded[-1]["payload"] == {"text": "the conclusion"}
+    # Short-circuited before any SDK client / native-resume session was built.
+    assert created == []

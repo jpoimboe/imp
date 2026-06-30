@@ -1348,6 +1348,17 @@ class ClaudeCodeAgentRunner:
         # passes resume= and leaves session_id unset.
         existing = transcript.load()
         is_fresh = not existing
+        # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
+        # no complete_step), complementing _tail_has_complete_step's top-level
+        # complete_step tail: recognize it here and re-emit the final text as the
+        # deliverable rather than native-resuming (which hands a finished
+        # subagent back to claude-p) or soliciting the human (AWAITING_USER).
+        if (invocation.subagent_depth > 0 and not is_fresh
+                and classify_resume(existing) is ResumeState.AWAITING_USER):
+            final_text = last_assistant_text(existing)
+            if final_text:
+                yield {"type": "agent_output", "payload": {"text": final_text}}
+            return
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.change_context.project_root, aid)
         # Native resume is sound ONLY when existing's final turn was actually
