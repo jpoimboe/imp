@@ -1203,6 +1203,7 @@ async def test_max_tokens_truncation_emits_event_and_warning(tmp_path: Path) -> 
     }
     warns = [e for e in log.read() if e["type"] == "runner_warning"]
     assert any("max_tokens" in w["payload"]["message"] for w in warns)
+    assert any("thinking may be incomplete" in w["payload"]["message"] for w in warns)
 
 
 @pytest.mark.anyio
@@ -1225,6 +1226,9 @@ async def test_max_tokens_truncation_thinking_tokens_none_without_details(tmp_pa
     assert len(trunc) == 1
     assert trunc[0]["payload"]["thinking_tokens"] is None
     assert trunc[0]["payload"]["output_tokens"] == 64000
+    warns = [e for e in log.read() if e["type"] == "runner_warning"]
+    assert len(warns) >= 1
+    assert not any("thinking may be incomplete" in w["payload"]["message"] for w in warns)
 
 
 @pytest.mark.anyio

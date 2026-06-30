@@ -722,18 +722,20 @@ class AnthropicAgentRunner:
             if raw.get("stop_reason") == "max_tokens":
                 details = usage.get("output_tokens_details") or {}
                 model_name = raw.get("model") or self.model
+                thinking_tokens = details.get("thinking_tokens")
                 elog.append(agent_id=aid, type="max_tokens_truncated", payload={
                     "tier": invocation.tier,
                     "model": model_name,
                     "max_tokens": max_output_tokens,
                     "output_tokens": usage.get("output_tokens"),
-                    "thinking_tokens": details.get("thinking_tokens"),
+                    "thinking_tokens": thinking_tokens,
                 })
+                _thinking_note = "; thinking may be incomplete" if thinking_tokens is not None else ""
                 elog.append(agent_id=aid, type="runner_warning", payload={
                     "message": (
                         f"Response truncated at the {max_output_tokens}-token "
                         f"output cap (stop_reason=max_tokens, tier="
-                        f"{invocation.tier}); thinking may be incomplete. No "
+                        f"{invocation.tier}){_thinking_note}. No "
                         f"retry — raise max_tokens if this recurs."
                     ),
                 })
