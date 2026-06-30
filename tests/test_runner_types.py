@@ -7,6 +7,7 @@ from pathlib import Path
 from imp.agents.runner import (
     Message,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     message_from_json,
@@ -166,3 +167,27 @@ def test_agent_invocation_resolved_tiers_defaults_none():
         transcript_dir=Path("."),
         events_path=Path("e.jsonl"))
     assert inv.resolved_tiers is None
+
+
+def test_round_trip_thinking_block() -> None:
+    msg = Message(role="assistant", content=(
+        ThinkingBlock(thinking="reasoning", signature="sig-abc"),
+        TextBlock(text="answer"),
+    ))
+    raw = message_to_json(msg)
+    back = message_from_json(json.loads(raw))
+    assert back == msg
+    assert back.content[0].signature == "sig-abc"
+    assert back.content[0].redacted_thinking is None
+
+
+def test_round_trip_redacted_thinking_block() -> None:
+    msg = Message(role="assistant", content=(
+        ThinkingBlock(redacted_thinking="encrypted-data"),
+        TextBlock(text="answer"),
+    ))
+    raw = message_to_json(msg)
+    back = message_from_json(json.loads(raw))
+    assert back == msg
+    assert back.content[0].redacted_thinking == "encrypted-data"
+    assert back.content[0].thinking == ""
