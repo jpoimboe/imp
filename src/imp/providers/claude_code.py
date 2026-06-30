@@ -40,7 +40,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import (
@@ -117,6 +117,9 @@ from imp.providers.web_native import (
     cc_enabled_web_builtins,
     check_web_capability,
 )
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import EffortLevel, ThinkingConfig
 
 _AUTH_PATTERNS = (
     "Invalid API key",
@@ -436,6 +439,21 @@ class _RunState:
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
+
+
+def _cc_thinking_posture(
+    tier: str | None,
+) -> tuple[ThinkingConfig | None, EffortLevel | None]:
+    """Per-tier (thinking, effort) for ClaudeAgentOptions, imp-owned so the
+    spawned claude's posture never re-floats to the subscriber/GrowthBook
+    default. medium/high run adaptive at effort 'high' (matching the anthropic
+    provider); low is thinking-off (haiku supports neither adaptive nor effort);
+    an untiered/legacy invocation keeps the claude-p default (no pin)."""
+    if tier in ("medium", "high"):
+        return {"type": "adaptive", "display": "summarized"}, "high"
+    if tier == "low":
+        return {"type": "disabled"}, None
+    return None, None
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
@@ -1166,6 +1184,7 @@ class ClaudeCodeAgentRunner:
         # controlled per-change worktree/snapshot git model). Static, unconditional.
         env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
         env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] = "1"
+        thinking_cfg, effort_cfg = _cc_thinking_posture(invocation.tier)
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
@@ -1179,14 +1198,8 @@ class ClaudeCodeAgentRunner:
             # subdir or via Popen(cwd=...) which doesn't update $PWD).
             cwd=str(invocation.change_context.project_root),
             system_prompt=invocation.system_prompt,
-            # Low tier matches anthropic's posture (which sends no `thinking`,
-            # i.e. extended thinking off). claude-p otherwise applies its own
-            # per-model default effort (thinking on), which makes a weak model
-            # over-reason a trivial step and yield in prose. None preserves the
-            # claude-p default for medium/high and untiered invocations.
-            thinking=(
-                {"type": "disabled"} if invocation.tier == "low" else None
-            ),
+            thinking=thinking_cfg,
+            effort=effort_cfg,
             mcp_servers=mcp_servers,
             allowed_tools=(
                 [f"mcp__imp__{n}" for n in tool_names]
