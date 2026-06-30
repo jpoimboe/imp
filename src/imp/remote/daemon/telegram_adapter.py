@@ -117,18 +117,21 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
     return f"{header_line(event)}\n{format_outbound(event, handle)}"
 
 
-def render_response(response: Response, subscribed_ids: Iterable[str] = ()) -> str:
+def render_response(
+    response: Response, subscribed_ids: Iterable[str] = (), alerts_on: bool = False,
+) -> str:
     if isinstance(response, CatchupAlert):
         return "\n".join(
             f"@{handle_for(c.id)}  {c.title} — {c.status}" for c in response.changes)
     if isinstance(response, ListResult):
+        header = "Alerts: all changes" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
         visible = [
             c for c in response.changes
             if c.id in response.resident or c.id in subscribed]
         if not visible:
-            return "Nothing running."
-        lines = []
+            return f"{header}\nNothing running."
+        lines = [header]
         for c in visible:
             mark = "● " if c.id in subscribed else ""
             lines.append(
@@ -276,7 +279,8 @@ class TelegramNorthAdapter:
             with self._lock:
                 for c in response.changes:
                     self._handle_to_change[handle_for(c.id)] = c.id
-        text = render_response(response, self._subscriptions.all())
+        text = render_response(
+            response, self._subscriptions.all(), self._alert_all.enabled())
         if text:
             self._send(text, True)
 
