@@ -319,6 +319,9 @@ async def run_change(
                     # re-runs fresh. The replay decision is driven by whether the
                     # step has a kept transcript, not by how the run stopped.
                     state.resume_pending = state.step
+                    # Unconditional shadow of the pause cause: overwrites a stale
+                    # True on a non-interrupt park.
+                    state.interrupt_pending = coordinator.should_pause
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
@@ -341,6 +344,7 @@ async def run_change(
                     or flat[nxt].name
                 )
                 state.resume_pending = None
+                state.interrupt_pending = False
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
                     _release_held_lane(
@@ -372,8 +376,10 @@ async def run_change(
                     # persistent error retry forever.
                     state.step_attempt = 0
                     state.resume_pending = flat[target_idx].name
+                    state.interrupt_pending = False
                 else:
                     state.resume_pending = None
+                    state.interrupt_pending = False
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
@@ -1182,6 +1188,7 @@ async def _run_agent_invocation(
         subagent_depth=0,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
+        resumed_from_interrupt=is_resume and state.interrupt_pending,
         log=log,
         test_gates=test_gates,
         non_interactive=non_interactive,
