@@ -299,12 +299,15 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_runs_subagent_via_task(tmp_path: Path) -> None:
-    """Parent dispatches via task → child runner runs to complete_step →
-    parent receives JSON-stringified payload and emits its own complete_step."""
+    """Verifies the parent's receive-loop dual-write for complete_step and the
+    resulting agent_output payload.
 
-    # NOTE: the fake client bypasses the real MCP transport, so _impl for "sub_agent"
-    # is not invoked; the race-free tool_call-append path is integration-only
-    # (covered in Task 16). This test verifies dispatch wiring + return payload.
+    The fake bypasses the MCP transport, so _impl for sub_agent is never
+    invoked and no child runner is created — the child text-deliverable path is
+    integration-only. What is exercised: the dual-write at the AssistantMessage
+    tool_use scan (complete_step → state.complete_step_args) and the agent_output
+    event that follows.
+    """
     (tmp_path / "art").mkdir()
 
     sub_def = AgentDef(
@@ -336,27 +339,15 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
             tool_use("p1", "sub_agent",
                      {"subagent_name": "sub", "task_description": "do work"}),
         ),
-        # SDK will send a tool_result back from the MCP server's task wrapper.
-        # The fake doesn't simulate that round trip; the runner sees the
-        # parent's next agent turn directly.
         assistant(
             text("got result"),
             tool_use("p2", "complete_step", {"status": "Success"}),
         ),
         result(),
     ]
-    child_scripted = [
-        assistant(
-            text("sub working"),
-            tool_use("s1", "complete_step", {"status": "Success"}),
-        ),
-        result(),
-    ]
-
-    scripts = iter([parent_scripted, child_scripted])
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=next(scripts))
+        return FakeClaudeSDKClient(opts, scripted_messages=parent_scripted)
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
