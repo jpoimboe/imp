@@ -875,9 +875,8 @@ async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
 
 
 @pytest.mark.anyio
-async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
-    """A runner that emits an agent_incomplete error makes the step Pause
-    (fatal), not retry."""
+async def test_fatal_api_error_pauses(tmp_path: Path) -> None:
+    """A runner that emits a fatal (Pause) error makes the step Pause, not retry."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
@@ -886,8 +885,8 @@ async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
     class _IncompleteRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             yield {"type": "error", "payload": {
-                "category": "agent_incomplete",
-                "kind": "no_complete_step_after_nudges",
+                "category": "api",
+                "kind": "api_error",
                 "message": "x",
             }}
 
@@ -1262,8 +1261,8 @@ def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list
                 kind, payload = coder_behavior(counts["coder"])
                 if kind == "incomplete":
                     yield {"type": "error", "payload": {
-                        "category": "agent_incomplete",
-                        "kind": "no_complete_step_after_nudges", "message": "x"}}
+                        "category": "api",
+                        "kind": "api_error", "message": "x"}}
                     return
                 yield {"type": "agent_output", "payload": {"outcome": "ok", **payload}}
             else:
@@ -1415,8 +1414,8 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
                 # (resumed re-entry after reload) ok.
                 if counts["coder"] == 2:
                     yield {"type": "error", "payload": {
-                        "category": "agent_incomplete",
-                        "kind": "no_complete_step_after_nudges", "message": "x"}}
+                        "category": "api",
+                        "kind": "api_error", "message": "x"}}
                     return
                 yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
             else:

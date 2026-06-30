@@ -82,12 +82,9 @@ def test_hint_ignored_for_pause_category() -> None:
     assert isinstance(d, ep.Pause)
 
 
-def test_pause_for_agent_incomplete() -> None:
-    for attempts in (0, 1, 99):
-        assert isinstance(
-            ep.decide("agent_incomplete", prior_backoff_attempts=attempts),
-            ep.Pause,
-        )
+def test_agent_incomplete_category_removed() -> None:
+    from imp.engine import error_policy
+    assert "agent_incomplete" not in error_policy._POLICY
 
 
 def test_policy_covers_every_category() -> None:
@@ -141,7 +138,7 @@ def test_budget_for_auth_is_1800() -> None:
 
 def test_budget_for_pause_and_retry_now_categories_is_none() -> None:
     for cat in ("config", "quota", "content_filter", "context_window",
-                "api", "loop", "agent_incomplete", "terminated", "unknown",
+                "api", "loop", "terminated", "unknown",
                 "agent_output_missing"):
         assert ep.budget_for(cat) is None
 

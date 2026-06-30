@@ -104,13 +104,9 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
     _git_init(tmp_path)
     runner = CodexAgentRunner(model_name="gpt-5.4-mini")
     # Nudge backstop, exactly as the engine wires it in production: a turn that
-    # ends without complete_step is re-prompted up to NUDGE_LIMIT times rather
-    # than failing instantly. subagent=True so exhaustion returns None (loud
-    # agent_incomplete) instead of pausing for human input.
+    # ends without complete_step is re-prompted rather than pausing for input.
     nudge = build_continuation_fn(
-        instruction='Call the `mcp__imp__complete_step` tool with word="banana".',
         non_interactive=True,
-        subagent=True,
     )
     ev_lines: list[str] = []
     tool_calls: list[Any] = []
@@ -213,10 +209,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
         # reliably calls glob then complete_step, tripping cap=1 on dispatch #2
         # (measured: 8/8 -> tool_call_ceiling_exceeded, vs 5/8 without).
         continuation_fn=build_continuation_fn(
-            instruction="Call the `mcp__imp__glob` tool, then the "
-            "`mcp__imp__complete_step` tool.",
             non_interactive=True,
-            subagent=True,
         ),
     )
     events = [ev async for ev in runner.run(inv)]
@@ -231,6 +224,5 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     assert err["payload"]["kind"] in (
         "tool_call_ceiling_exceeded",      # expected: cap tripped on dispatch #2
         "no_complete_step",                # model ended turn without completing
-        "no_complete_step_after_nudges",   # refused through every nudge
         "native_tool_violation",           # model reached for a native tool
     ), err

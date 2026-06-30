@@ -566,9 +566,8 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
-    """Omission #2 backstop: a prose-only subagent that the provider turns into
-    agent_incomplete (a Pause category) fails LOUDLY to the parent (RuntimeError
-    -> is_error tool_result), not a silent swallow."""
+    """A subagent whose provider surfaces a fatal error fails LOUDLY to the
+    parent (RuntimeError -> is_error tool_result), not a silent swallow."""
     ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
@@ -577,8 +576,8 @@ async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding([{"type": "error", "payload": {
-        "category": "agent_incomplete",
-        "kind": "no_complete_step_after_nudges", "message": "no complete_step"}}])
+        "category": "api",
+        "kind": "api_error", "message": "fatal provider error"}}])
     ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     with pytest.raises(RuntimeError):

@@ -745,44 +745,6 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
-    """continuation_fn returning None after N nudges yields agent_incomplete."""
-    (tmp_path / "art").mkdir()
-
-    # Three turns of DISTINCT prose — agent never calls complete_step. Distinct
-    # so the loop_guard's repeated_failure detector (identical-signature x K)
-    # doesn't fire; with only 3 turns the no_progress detector (N=6) also stays
-    # below threshold, so the nudge-exhaustion path is what terminates the run.
-    scripted = [
-        assistant(text("prose one")), result(),
-        assistant(text("prose two")), result(),
-        assistant(text("prose three")), result(),
-    ]
-
-    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    log = InMemoryEventLog()
-    inv = _inv(tmp_path, event_log=log)
-    calls: dict[str, int] = {"n": 0}
-
-    def cont(_last: str) -> str | None:
-        if calls["n"] >= 2:
-            return None
-        calls["n"] += 1
-        return "please call complete_step"
-
-    inv = replace(inv, continuation_fn=cont)
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
-    )
-    events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "error"
-    assert events[-1]["payload"]["category"] == "agent_incomplete"
-    assert calls["n"] == 2
-
-
-@pytest.mark.anyio
 async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
     """Non-interactive agent whose last text matches an auth pattern surfaces
     AuthError; continuation_fn is never consulted."""
@@ -1430,29 +1392,6 @@ async def test_result_is_error_with_known_quota_text_labels_quota(tmp_path: Path
     assert len(errs) == 1
     assert errs[0]["payload"]["category"] == "quota"
     assert errs[0]["payload"]["detail"]["is_error"] is True
-
-
-@pytest.mark.anyio
-async def test_clean_no_complete_step_still_nudges(tmp_path: Path) -> None:
-    """is_error=False keeps today's benign behavior: a continuation_fn that gives
-    up routes to agent_incomplete / no_complete_step_after_nudges, NOT terminated."""
-    (tmp_path / "art").mkdir()
-    scripted = [assistant(text("I'm still thinking about it.")), result()]   # is_error False
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    inv = _inv(tmp_path)
-    inv = replace(inv, continuation_fn=lambda _last: None)
-    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
-
-    events = [e async for e in runner.run(inv)]
-    errs = [e for e in events if e.get("type") == "error"]
-    assert len(errs) == 1
-    payload = errs[0]["payload"]
-    assert payload["category"] == "agent_incomplete"
-    assert payload["kind"] == "no_complete_step_after_nudges"
-
 
 
 def test_termination_from_result_nonzero_exit_is_terminated() -> None:

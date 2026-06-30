@@ -12,7 +12,7 @@ from __future__ import annotations
 import contextlib
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.parallel import emit_parallelism_warning_once
 from imp.agents.prompts import build_context, render_prompt
@@ -279,8 +279,9 @@ async def dispatch_task(
             subagent_depth=child_depth,
             tiers=ctx.tiers,
             # Same object as event_log= above, but a distinct role: log= is the
-            # nudge-event sink passed to build_continuation_fn; event_log= is the
-            # invocation's stored audit log. For subagents both are ctx.event_log.
+            # event sink passed to build_continuation_fn (solicit/park events);
+            # event_log= is the invocation's stored audit log. For subagents both
+            # are ctx.event_log.
             log=ctx.event_log,
             test_gates=ctx.test_gates,
             non_interactive=ctx.non_interactive,
@@ -426,4 +427,4 @@ async def dispatch_task(
             # Keep the bracketed format and kind vocabulary in sync with that scan.
             suffix = f" [{kind}]" if kind else ""
             raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
-        return result.output["text"]
+        return cast(str, result.output["text"])

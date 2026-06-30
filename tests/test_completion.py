@@ -8,7 +8,6 @@ import pytest
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (
-    NUDGE_LIMIT,
     build_continuation_fn,
     build_inline_solicit,
     completion_instruction,
@@ -68,10 +67,6 @@ def test_renders_non_enum_types() -> None:
     assert "optional" in text.lower()  # payload is optional
 
 
-def _instruction() -> str:
-    return "To finish this step you MUST call the `complete_step` tool with X."
-
-
 class _RecordingLog:
     def __init__(self) -> None:
         self.events: list[dict[str, object]] = []
@@ -85,29 +80,20 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_subagent_nudges_then_returns_none() -> None:
-    fn = build_continuation_fn(instruction=_instruction(), subagent=True)
-    for _ in range(NUDGE_LIMIT):
-        out = fn("still prose, no tool call")
-        assert isinstance(out, str)
-        assert "complete_step" in out
-    # Exhausted: a subagent fails loudly to its parent via None -> agent_incomplete.
-    assert fn("still prose") is None
+def test_build_continuation_fn_has_no_subagent_param() -> None:
+    import inspect
 
-
-def test_nudge_text_does_not_name_wait_for_user() -> None:
-    fn = build_continuation_fn(instruction=_instruction(), subagent=True)
-    out = fn("prose")
-    assert isinstance(out, str)
-    assert "complete_step" in out
-    assert "wait_for_user" not in out
+    from imp.engine.completion import build_continuation_fn
+    params = inspect.signature(build_continuation_fn).parameters
+    assert "subagent" not in params
+    assert "instruction" not in params
 
 
 def test_top_level_no_channel_pauses_immediately() -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
-    fn = build_continuation_fn(instruction=_instruction(), subagent=False)
+    fn = build_continuation_fn()
     # Headless top-level NEVER nudges: the bare turn-end IS the yield, so the
-    # first call pauses carrying the last text (not agent_incomplete).
+    # first call pauses carrying the last text.
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("the final question")
     assert exc_info.value.prompt == "the final question"
@@ -116,9 +102,7 @@ def test_top_level_no_channel_pauses_immediately() -> None:
 def test_top_level_no_channel_pause_emits_awaiting_user_input() -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
     log = _RecordingLog()
-    fn = build_continuation_fn(
-        instruction=_instruction(), event_log=log, agent_id="a1",
-        subagent=False)
+    fn = build_continuation_fn(event_log=log, agent_id="a1")
     # No nudge phase for headless top-level: the first bare turn-end pauses
     # carrying the last text AND emits the marker.
     with pytest.raises(AwaitingUserInput) as exc_info:
@@ -140,8 +124,7 @@ def test_pending_interject_satisfies_without_soliciting() -> None:
         return "should-not-be-used"
 
     fn = build_continuation_fn(
-        instruction=_instruction(), user_input_fn=reply_fn,
-        coordinator=coord, non_interactive=False, subagent=False)
+        user_input_fn=reply_fn, coordinator=coord, non_interactive=False)
     assert fn("which database?") == "actually, stop and reconsider"
     assert calls["n"] == 0
 
@@ -156,9 +139,8 @@ async def test_attended_human_reply_becomes_next_message(
         return "use postgres"
 
     fn = build_continuation_fn(
-        instruction=_instruction(), user_input_fn=reply_fn,
-        coordinator=InterruptCoordinator(), event_log=log, agent_id="a1",
-        non_interactive=False, subagent=False)
+        user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
+        event_log=log, agent_id="a1", non_interactive=False)
     out = fn("which database should I use?")
     assert inspect.isawaitable(out)
     assert await out == "use postgres"
@@ -178,9 +160,8 @@ async def test_headless_with_channel_solicits_immediately(
         return "the --message reply"
 
     fn = build_continuation_fn(
-        instruction=_instruction(), user_input_fn=channel,
-        coordinator=InterruptCoordinator(), event_log=log, agent_id="a1",
-        non_interactive=True, subagent=False)
+        user_input_fn=channel, coordinator=InterruptCoordinator(),
+        event_log=log, agent_id="a1", non_interactive=True)
     # Headless top-level NEVER nudges: the first bare turn-end solicits the
     # channel and emits awaiting_user_input.
     out = fn("still prose")

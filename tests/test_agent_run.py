@@ -965,7 +965,6 @@ async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
 
         async def run(self, invocation):
             cont = build_continuation_fn(
-                instruction="Call complete_step to finish.",
                 user_input_fn=_blocking_input, coordinator=coord,
                 event_log=log, agent_id="step:p/s")
             captured["reply"] = await cont("merge?")

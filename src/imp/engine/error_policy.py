@@ -65,7 +65,6 @@ _POLICY: dict[str, _Policy] = {
     "api":                  _Policy(Pause, None),
     "loop":                 _Policy(Pause, None),
     "agent_output_missing": _Policy(RetryNow, None),
-    "agent_incomplete":     _Policy(Pause, None),
     "terminated":           _Policy(Pause, None),
     "unknown":              _Policy(Pause, None),
 }

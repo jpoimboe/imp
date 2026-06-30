@@ -182,14 +182,6 @@ class ScriptedAgentRunner:
                     nxt = invocation.continuation_fn(text)
                     if inspect.isawaitable(nxt):
                         nxt = await nxt
-                    if nxt is None:
-                        yield {"type": "error", "payload": {
-                            "category": "agent_incomplete",
-                            "kind": "no_complete_step_after_nudges",
-                            "message": "scripted agent did not call complete_step after nudges",
-                            "detail": {"last_agent_text": text[:500]},
-                        }}
-                        return
                     reply_msg = Message(
                         role="user", content=(TextBlock(text=str(nxt)),))
                     messages.append(reply_msg)

@@ -94,9 +94,8 @@ def _inv_with_continuation(
     """Invocation with a `continuation_fn` for nudges.
 
     When the codex run finishes a turn without calling `complete_step`, the
-    runner must call `continuation_fn(last_agent_text)`. A non-None return →
-    next turn's prompt; `None` → exhausted, emit
-    `no_complete_step_after_nudges`."""
+    runner calls `continuation_fn(last_agent_text)` and uses the return value
+    as the next turn's prompt."""
     return AgentInvocation(
         agent_def=_agent_def(),
         provider_name="codex",
@@ -135,28 +134,6 @@ async def test_schema_validation_failure_yields_agent_output_missing(
     err = next(e for e in events if e.get("type") == "error")
     assert err["payload"]["category"] == "agent_output_missing"
     assert err["payload"]["kind"] == "output_validation"
-
-
-@pytest.mark.anyio
-async def test_no_complete_step_autonomous_yields_agent_output_missing(
-    tmp_path: Path,
-) -> None:
-    _seed_git_and_auth(tmp_path)
-    scripted = [[
-        thread_started(),
-        agent_message("forgot to call complete_step"),
-        turn_completed(),
-    ]]
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
-    )
-    runner._canonical_auth_override = tmp_path / "auth.json"
-    inv = _inv(tmp_path)
-    events = [ev async for ev in runner.run(inv)]
-    err = next(e for e in events if e.get("type") == "error")
-    assert err["payload"]["kind"] == "no_complete_step"
-    assert err["payload"]["category"] == "agent_output_missing"
 
 
 @pytest.mark.anyio
@@ -227,35 +204,4 @@ async def test_interactive_nudge_recovers_with_complete_step_on_second_turn(
                for (p, _opt) in fake.thread.run_calls)
 
 
-@pytest.mark.anyio
-async def test_interactive_nudge_exhausted_yields_no_complete_step_after_nudges(
-    tmp_path: Path,
-) -> None:
-    """Interactive + `continuation_fn` eventually returns `None` →
-    `agent_incomplete (no_complete_step_after_nudges)`. The terminal kind is
-    distinct from the autonomous `no_complete_step` so a post-mortem reader
-    can tell exhaustion from immediate failure."""
-    _seed_git_and_auth(tmp_path)
-    scripted = [
-        [thread_started(), agent_message("first miss"), turn_completed()],
-        [thread_started(), agent_message("second miss"), turn_completed()],
-    ]
-    calls: list[str] = []
 
-    def _cont(last: str) -> str | None:
-        calls.append(last)
-        # Allow one nudge; then exhaust.
-        return None if len(calls) >= 2 else "try again"
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
-    )
-    runner._canonical_auth_override = tmp_path / "auth.json"
-    inv = _inv_with_continuation(tmp_path, continuation_fn=_cont)
-    events = [ev async for ev in runner.run(inv)]
-    err = next(e for e in events if e.get("type") == "error")
-    assert err["payload"]["category"] == "agent_incomplete"
-    assert err["payload"]["kind"] == "no_complete_step_after_nudges"
-    # Both turns ran; continuation_fn was called twice (after each).
-    assert calls == ["first miss", "second miss"]

@@ -666,38 +666,6 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
-    """Prose every turn; continuation returns None after 2 nudges → the runner
-    emits exactly one agent_incomplete error after exactly 2 injected nudges."""
-    from dataclasses import replace
-
-    (tmp_path / "art").mkdir()
-    fake = FakeAsyncAnthropic(
-        [], default_response=response(text("still prose, no tool call"), stop_reason="end_turn"),
-    )
-    log = InMemoryEventLog()
-    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
-                                  client_factory=lambda: fake)
-
-    calls = {"n": 0}
-    def cont(_last: str) -> str | None:
-        if calls["n"] >= 2:
-            return None
-        calls["n"] += 1
-        return "please call complete_step"
-
-    inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
-    events = [e async for e in runner.run(inv)]
-    final = events[-1]
-    assert final["type"] == "error"
-    assert final["payload"]["category"] == "agent_incomplete"
-    assert final["payload"]["kind"] == "no_complete_step_after_nudges"
-    assert calls["n"] == 2
-    user_msgs = [e for e in log.read() if e["type"] == "user_message"]
-    assert len(user_msgs) == 3  # initial "go" + 2 nudges
-
-
-@pytest.mark.anyio
 async def test_headless_top_level_pauses_immediately(tmp_path: Path) -> None:
     """A headless top-level run (non_interactive=True) NEVER nudges: the first
     bare turn-end IS the yield, so it solicits the channel at once and (no client
@@ -722,9 +690,8 @@ async def test_headless_top_level_pauses_immediately(tmp_path: Path) -> None:
         raise AwaitingUserInput()
 
     cont = build_continuation_fn(
-        instruction="CALL complete_step with: done (bool).",
         user_input_fn=channel, event_log=log, agent_id="root",
-        non_interactive=True, subagent=False)
+        non_interactive=True)
     inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
 
     with pytest.raises(AwaitingUserInput):

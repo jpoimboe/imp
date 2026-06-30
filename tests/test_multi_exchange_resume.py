@@ -65,7 +65,6 @@ async def test_resumed_run_supports_multiple_exchanges_to_completion(
     solicit: Callable[[str], Awaitable[str]] = make_buffered_solicit(
         "first reply", inner)
     cont = build_continuation_fn(
-        instruction="call complete_step",
         user_input_fn=solicit,
         event_log=log,
         agent_id="step:p/s",

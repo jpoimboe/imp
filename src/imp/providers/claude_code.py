@@ -2097,14 +2097,6 @@ class ClaudeCodeAgentRunner:
                                     "message": "runner cancelled by interrupt",
                                 }}
                                 return
-                            if next_text is None:
-                                yield {"type": "error", "payload": {
-                                    "category": "agent_incomplete",
-                                    "kind": "no_complete_step_after_nudges",
-                                    "message": "agent did not call complete_step after nudges",
-                                    "detail": {"last_agent_text": last_text[:500]},
-                                }}
-                                return
                             user_msg = Message(
                                 role="user", content=(TextBlock(text=next_text),),
                             )

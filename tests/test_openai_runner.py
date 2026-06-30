@@ -533,33 +533,6 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
-    from dataclasses import replace
-
-    (tmp_path / "art").mkdir()
-    fake = FakeResponsesClient(
-        [], default_response=resp_response(resp_message("still prose")),
-    )
-    log = InMemoryEventLog()
-    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
-                               client_factory=lambda: fake)
-    calls: dict[str, int] = {"n": 0}
-
-    def cont(_last: str) -> str | None:
-        if calls["n"] >= 2:
-            return None
-        calls["n"] += 1
-        return "please call complete_step"
-
-    inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
-    events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "error"
-    assert events[-1]["payload"]["category"] == "agent_incomplete"
-    assert events[-1]["payload"]["kind"] == "no_complete_step_after_nudges"
-    assert calls["n"] == 2
-
-
-@pytest.mark.anyio
 async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
     """Every create() call within one invocation passes the same
     prompt_cache_key, equal to f"{change_id}:{agent_id}"."""

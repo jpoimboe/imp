@@ -768,20 +768,13 @@ class CodexAgentRunner:
                                    "payload": {"text": last_text}}
                         return
                     # Turn ended without complete_step. If a continuation_fn is
-                    # wired, cross to the outer loop for the autonomous nudge;
-                    # the closure itself decides when to stop
-                    # (returning None -> terminate via no_complete_step_after_
-                    # nudges). Without a continuation_fn there is no way to
-                    # continue, so emit the immediate `no_complete_step`.
+                    # wired, cross to the outer loop for the autonomous nudge.
                     if invocation.continuation_fn is not None:
                         need_nudge = True
                         break  # exit inner for; outer while handles nudge
-                    yield {"type": "error", "payload": {
-                        "category": "agent_output_missing",
-                        "kind": "no_complete_step",
-                        "message": ("codex completed turn without calling "
-                                    "complete_step"),
-                        "detail": {"last_agent_text": last_text[:500]}}}
+                    # No continuation_fn (degenerate top-level): the inline return
+                    # below ends the run, and drive_invocation surfaces the
+                    # errored (no agent_output) result.
                     return
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
@@ -816,21 +809,13 @@ class CodexAgentRunner:
                         "category": "config", "kind": "interrupted",
                         "message": "runner cancelled by interrupt"}}
                     return
-                nxt = None
+                raise  # unexpected cont() failure must not become a "None" nudge
             # A Ctrl-C that landed while the nudge was computed pauses cleanly
             # instead of re-running a turn.
             if self._is_cancelled():
                 yield {"type": "error", "payload": {
                     "category": "config", "kind": "interrupted",
                     "message": "runner cancelled by interrupt"}}
-                return
-            if nxt is None:
-                yield {"type": "error", "payload": {
-                    "category": "agent_incomplete",
-                    "kind": "no_complete_step_after_nudges",
-                    "message": ("codex did not call complete_step before the "
-                                "continuation hook stopped nudging"),
-                    "detail": {"last_agent_text": last_text[:500]}}}
                 return
             elog.append_user_message(
                 agent_id=aid,
@@ -890,7 +875,7 @@ class CodexAgentRunner:
             networkAccessEnabled=False,
         )
 
-    def _build_prompt(self, invocation: Any) -> str:
+    def _build_prompt(self, invocation: AgentInvocation) -> str:
         """Prepend the anti-native-tool instruction (design: soft enforcement
         backstopped by the tripwire). For a subagent the completion line is
         replaced by the deliverable note; the tool_search and

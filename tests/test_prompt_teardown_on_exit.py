@@ -206,7 +206,7 @@ async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
             return await _ask_or_exit(prompt, exit_event)
 
         cont = build_continuation_fn(
-            instruction="finish.", user_input_fn=user_input_fn,
+            user_input_fn=user_input_fn,
             coordinator=None, event_log=None, agent_id=None)
         _fire_soon(exit_event)
 
@@ -234,7 +234,7 @@ async def test_solicit_normal_reply_unchanged() -> None:
             return await _ask_or_exit(prompt, exit_event)
 
         cont = build_continuation_fn(
-            instruction="finish.", user_input_fn=user_input_fn,
+            user_input_fn=user_input_fn,
             coordinator=None, event_log=None, agent_id=None)
         pipe.send_text("do the thing\r")
         reply = await cont("")
