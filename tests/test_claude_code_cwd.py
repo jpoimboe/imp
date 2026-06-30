@@ -137,3 +137,26 @@ def test_build_options_drops_suppression_flags_when_no_config_dir(
     assert opts.extra_args == {}, (
         f"expected no --no-session-persistence, got extra_args={opts.extra_args!r}"
     )
+
+
+def test_build_options_silences_claudemd_and_git_instructions(
+    tmp_path: Path,
+) -> None:
+    """claude-p natively walks CLAUDE.md/memory files and injects a
+    start-of-conversation gitStatus snapshot on top of imp's system_prompt. imp
+    wants neither (the anthropic provider injects neither), so _build_options must
+    set both off-switches in the same local env dict it passes to
+    ClaudeAgentOptions."""
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    opts = runner._build_options(
+        _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
+    )
+    assert opts.env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1", (
+        "expected options.env['CLAUDE_CODE_DISABLE_CLAUDE_MDS']=='1' to suppress "
+        f"claude-p's CLAUDE.md walk, got {opts.env.get('CLAUDE_CODE_DISABLE_CLAUDE_MDS')!r}"
+    )
+    assert opts.env.get("CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS") == "1", (
+        "expected options.env['CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS']=='1' to "
+        "suppress claude-p's gitStatus snapshot + generic git instructions, got "
+        f"{opts.env.get('CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS')!r}"
+    )

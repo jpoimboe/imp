@@ -1155,6 +1155,13 @@ class ClaudeCodeAgentRunner:
         # undeclared (400 "tool use concurrency"). imp's tool-sets are small, so
         # up-front declaration is always the right trade.
         env["ENABLE_TOOL_SEARCH"] = "false"
+        # Silence two claude-p injection channels imp doesn't want (the anthropic
+        # provider injects neither, so off => true parity): the CLAUDE.md/memory
+        # walk, and the start-of-conversation gitStatus snapshot + generic git
+        # instructions (which go stale across a step's edits and fight imp's
+        # controlled per-change worktree/snapshot git model). Static, unconditional.
+        env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
+        env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] = "1"
         return ClaudeAgentOptions(
             model=info.cli_model or self.model,
             betas=cast(list[SdkBeta], list(info.betas)),
