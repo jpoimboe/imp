@@ -714,7 +714,6 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
     the high tier's resolved (cross-vendor) model. A dropped forward would
     inherit the parent's anthropic model and fail the assertion."""
     import dataclasses
-    import json as _json
 
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
     from imp.providers import resolve as _resolve
@@ -999,6 +998,7 @@ async def test_subagent_observed_turns_never_set_has_complete_step(
     read_file tool turn (reaching guard.observe) then ends on a bare text turn
     (which short-circuits before observe)."""
     from dataclasses import replace
+
     import imp.agents.loop_guard as lg
 
     (tmp_path / "art").mkdir()

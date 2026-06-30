@@ -19,11 +19,16 @@ from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
+from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
+    ALERTS_OFF_REPLY,
+    ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
     SAVE_USAGE,
     Abandon,
+    Alerts,
+    CatchupAlert,
     Command,
     Create,
     Help,
@@ -157,10 +162,11 @@ def check_not_running(control_root: Path) -> None:
 
 def _make_telegram_adapter(
     env: Mapping[str, str], submit: Callable[[Command], None],
-    subscriptions: Subscriptions,
+    subscriptions: Subscriptions, alert_all: AlertAll,
 ) -> TelegramNorthAdapter:
     """Default north adapter — Telegram, refusing without an allowlist."""
-    return TelegramNorthAdapter.from_env(dict(env), submit, subscriptions=subscriptions)
+    return TelegramNorthAdapter.from_env(
+        dict(env), submit, subscriptions=subscriptions, alert_all=alert_all)
 
 
 def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]:
@@ -251,7 +257,9 @@ def _sender_worker(
 
 async def _handle_command(
     command: Command, control: ControlPlane, responses: queue.Queue[Response],
+    alert_all: AlertAll | None = None,
 ) -> None:
+    alert_all = alert_all if alert_all is not None else AlertAll()
     if isinstance(command, Reply):
         try:
             await control.reply(command.change_id, command.text)
@@ -336,6 +344,21 @@ async def _handle_command(
             else:
                 responses.put(Notice(
                     f"Saved @{handle_for(change_id)} to your Backlog."))
+    elif isinstance(command, Alerts):
+        if command.on is None:
+            responses.put(Notice(
+                ALERTS_ON_REPLY if alert_all.enabled() else ALERTS_OFF_REPLY))
+        elif command.on:
+            alert_all.set(True)
+            parked = [
+                c for c in await anyio.to_thread.run_sync(control.list_changes)
+                if c.status in ("paused", "merge_blocked")]
+            if parked:
+                responses.put(CatchupAlert(parked))
+            responses.put(Notice(ALERTS_ON_REPLY))
+        else:
+            alert_all.set(False)
+            responses.put(Notice(ALERTS_OFF_REPLY))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
     elif isinstance(command, Notice):
@@ -344,7 +367,7 @@ async def _handle_command(
 
 async def _dispatch_inbound(
     inbound: queue.Queue[Command], control: ControlPlane,
-    responses: queue.Queue[Response], stop: threading.Event,
+    responses: queue.Queue[Response], stop: threading.Event, alert_all: AlertAll,
 ) -> None:
     def _get() -> Command | None:
         while not stop.is_set():
@@ -360,7 +383,7 @@ async def _dispatch_inbound(
             return
         _log.info("routing command: %r", command)
         try:
-            await _handle_command(command, control, responses)
+            await _handle_command(command, control, responses, alert_all)
         except Exception:
             _log.warning("command failed: %r", command, exc_info=True)
 
@@ -394,7 +417,7 @@ async def run_daemon(
     *,
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
-        [Mapping[str, str], Callable[[Command], None], Subscriptions],
+        [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll],
         Any,
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[None]] | None = None,
@@ -427,6 +450,7 @@ async def run_daemon(
     responses: queue.Queue[Response] = queue.Queue()
     stop = threading.Event()
     subscriptions = Subscriptions()
+    alert_all = AlertAll()
 
     # on_event is a no-op: events now arrive via the supervisor's directory pull.
     # on_attach auto-subscribes a Change whose hello set autosubscribe (spec §6).
@@ -449,7 +473,7 @@ async def run_daemon(
             control_root, cid, n),
         search=search, resume=resume, save=save,
         full_history=lambda cid: discover.full_history(control_root, cid))
-    adapter = make_adapter(env, inbound.put, subscriptions)
+    adapter = make_adapter(env, inbound.put, subscriptions, alert_all)
 
     log_handlers = _install_file_logging(control_root, env)
     _log.info("remote-control daemon starting (control_root=%s)", control_root)
@@ -473,7 +497,7 @@ async def run_daemon(
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(supervisor.run)
-            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
+            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop, alert_all)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             try:

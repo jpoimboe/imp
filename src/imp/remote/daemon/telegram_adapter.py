@@ -6,7 +6,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from imp.remote.daemon.commands import Command, ListResult, Response, parse
+from imp.remote.daemon.alert_all import AlertAll
+from imp.remote.daemon.commands import CatchupAlert, Command, ListResult, Response, parse
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.drivers.telegram import (
     _compose_message,
@@ -116,15 +117,21 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
     return f"{header_line(event)}\n{format_outbound(event, handle)}"
 
 
-def render_response(response: Response, subscribed_ids: Iterable[str] = ()) -> str:
+def render_response(
+    response: Response, subscribed_ids: Iterable[str] = (), alerts_on: bool = False,
+) -> str:
+    if isinstance(response, CatchupAlert):
+        return "\n".join(
+            f"@{handle_for(c.id)}  {c.title} — {c.status}" for c in response.changes)
     if isinstance(response, ListResult):
+        header = "Alerts: all changes" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
         visible = [
             c for c in response.changes
             if c.id in response.resident or c.id in subscribed]
         if not visible:
-            return "Nothing running."
-        lines = []
+            return f"{header}\nNothing running."
+        lines = [header]
         for c in visible:
             mark = "● " if c.id in subscribed else ""
             lines.append(
@@ -153,12 +160,14 @@ class TelegramNorthAdapter:
         send: Callable[[str, bool], int | None],
         get_updates: Callable[[int], dict[str, Any]],
         subscriptions: Subscriptions,
+        alert_all: AlertAll | None = None,
     ) -> None:
         self._chat_id = chat_id
         self._submit = submit
         self._send = send
         self._get_updates = get_updates
         self._subscriptions = subscriptions
+        self._alert_all = alert_all if alert_all is not None else AlertAll()
         self._offset = 0
         self._last_narration: dict[str, str] = {}
         self._msg_to_change: dict[int, str] = {}
@@ -174,6 +183,7 @@ class TelegramNorthAdapter:
         submit: Callable[[Command], None],
         *,
         subscriptions: Subscriptions,
+        alert_all: AlertAll | None = None,
         file_text: str | None = None,
     ) -> TelegramNorthAdapter:
         config = load_config(env, file_text)
@@ -184,21 +194,26 @@ class TelegramNorthAdapter:
         get_updates = make_get_updates(config.token)
 
         return cls(chat_id=config.chat_id, submit=submit,
-                   send=send, get_updates=get_updates, subscriptions=subscriptions)
+                   send=send, get_updates=get_updates, subscriptions=subscriptions,
+                   alert_all=alert_all)
 
     def on_event(self, event: dict[str, Any]) -> None:
-        """Curate one event for a subscribed Change, send it with its header and
-        handle, and record the reply maps.
+        """Curate one event and deliver it to chat.
 
-        Membership is the first decision (spec §2): an unsubscribed Change is
-        dropped entirely — no message, no buzz, no routing map. The replayed-id set
-        then suppresses any event already sent by replay-on-subscribe (spec §5.4).
-        A prompt-less awaiting_user_input falls back to that Change's preceding
-        llm_response narration; the per-Change _last_narration map is
-        sender-thread-only, like _offset, so it needs no lock."""
+        Membership is the first decision (spec §2): a subscribed Change takes the
+        full curated path below (buzz + silent, deduped via Subscriptions.seen). An
+        unsubscribed Change no longer returns here — it falls through to
+        _alert_all_event, which delivers only buzz events and only while alert-all
+        is on. A prompt-less awaiting_user_input on the subscribed path falls back
+        to that Change's preceding llm_response narration; the per-Change
+        _last_narration map is sender-thread-only, like _offset, so it needs no
+        lock."""
         change = event.get("change") or {}
         change_id = change.get("id")
-        if not change_id or not self._subscriptions.contains(change_id):
+        if not change_id:
+            return
+        if not self._subscriptions.contains(change_id):
+            self._alert_all_event(change_id, event)
             return
         event_id = event.get("id")
         if event_id is not None and self._subscriptions.seen(change_id, event_id):
@@ -229,8 +244,43 @@ class TelegramNorthAdapter:
             if message_id is not None:
                 self._msg_to_change[message_id] = change_id
 
+    def _alert_all_event(self, change_id: str, event: dict[str, Any]) -> None:
+        """An unsubscribed Change: deliver a buzz alert loud iff alert-all is on,
+        recording the same reply maps the subscribed path records and deduping on
+        (change_id, event id) against the AlertAll log. Silent narrative stays
+        suppressed for an unsubscribed Change. An event with no id is best-effort
+        (delivered, not deduped). mark fires only on a successful send (message_id
+        is not None), mirroring the map write: a send that fails without raising
+        must not record the event as delivered, or the re-attach replay that
+        re-surfaces this blocked Change would be permanently suppressed. A
+        prompt-less awaiting_user_input needs no special handling: format_outbound
+        renders the '[title] needs your input' header alone, a useful alert."""
+        if not self._alert_all.enabled():
+            return
+        etype = event.get("type")
+        if curate(etype, event.get("payload") or {}) != "buzz":
+            return
+        event_id = event.get("id")
+        if event_id is not None and self._alert_all.seen(change_id, event_id):
+            return
+        handle = handle_for(change_id)
+        with self._lock:
+            self._handle_to_change[handle] = change_id
+        full = f"{header_line(event)}\n{format_outbound(event, handle)}"
+        message_id = self._send(full, False)
+        with self._lock:
+            if message_id is not None:
+                self._msg_to_change[message_id] = change_id
+        if message_id is not None and event_id is not None:
+            self._alert_all.mark(change_id, event_id)
+
     def on_response(self, response: Response) -> None:
-        text = render_response(response, self._subscriptions.all())
+        if isinstance(response, CatchupAlert):
+            with self._lock:
+                for c in response.changes:
+                    self._handle_to_change[handle_for(c.id)] = c.id
+        text = render_response(
+            response, self._subscriptions.all(), self._alert_all.enabled())
         if text:
             self._send(text, True)
 

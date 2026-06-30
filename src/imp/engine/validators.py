@@ -70,7 +70,8 @@ def _v_agent_files_exist_and_named(workflow: Workflow, errors: list[LoadError]) 
 
 
 def _v_status_enum_present(workflow: Workflow, errors: list[LoadError]) -> None:
-    # Status is a step's routing signal; a dispatched subagent routes on no field, so require it only for step-agents.
+    # Status is a step's routing signal; a dispatched subagent routes on no field,
+    # so require it only for step-agents.
     step_agent_names = {
         s.file.stem for s in workflow.flat_steps()
         if s.kind == "agent" and s.file is not None

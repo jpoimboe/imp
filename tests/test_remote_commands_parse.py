@@ -9,6 +9,7 @@ from imp.remote.daemon.commands import (
     SEARCH_USAGE,
     UNKNOWN_COMMAND,
     Abandon,
+    Alerts,
     Create,
     Help,
     ListChanges,
@@ -140,3 +141,29 @@ def test_listresult_carries_the_resident_set() -> None:
 
 def test_show_help_line_says_running_changes() -> None:
     assert "/show — show running changes (● = subscribed)" in HELP_TEXT
+
+
+def test_slash_alerts_on_parses_to_alerts_true() -> None:
+    assert parse("/alerts on", None, fake_resolve) == Alerts(True)
+
+
+def test_slash_alerts_off_parses_to_alerts_false() -> None:
+    assert parse("/alerts off", None, fake_resolve) == Alerts(False)
+
+
+def test_slash_alerts_bare_parses_to_alerts_none() -> None:
+    assert parse("/alerts", None, fake_resolve) == Alerts(None)
+
+
+def test_slash_alerts_unknown_arg_parses_to_alerts_none() -> None:
+    assert parse("/alerts maybe", None, fake_resolve) == Alerts(None)
+
+
+def test_slash_alerts_arg_is_case_insensitive() -> None:
+    assert parse("/alerts ON", None, fake_resolve) == Alerts(True)
+
+
+def test_help_text_mentions_alerts() -> None:
+    assert (
+        "/alerts on|off — alert on every Change, not just the ones you follow"
+        in HELP_TEXT)
