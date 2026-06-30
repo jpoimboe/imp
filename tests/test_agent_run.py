@@ -1227,3 +1227,94 @@ async def test_drive_invocation_handoff_event_not_logged(tmp_path):
 
     assert result.handoff_path == "/x/s.handoff.md"
     assert log.calls == []
+
+
+def test_build_agent_invocation_threads_resumed_from_interrupt(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        resumed_from_interrupt=True)
+
+    assert inv.resumed_from_interrupt is True
+
+
+def test_build_agent_invocation_resumed_from_interrupt_defaults_false(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None)
+
+    assert inv.resumed_from_interrupt is False
+
+
+class _OneInterjectCoord:
+    """Drains exactly one queued interject, then empties. No watchdog needed:
+    the interject branch returns before any solicit."""
+
+    def __init__(self, text):
+        self._queue = [text]
+
+    def drain_interject(self):
+        return self._queue.pop(0) if self._queue else None
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_interject_wins_over_interrupt_flag() -> None:
+    import imp.engine.agent_run as ar
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when an interject is queued")
+
+    reply = await ar._resolve_wait_reply(
+        _OneInterjectCoord("human says go"), _ainput, True)
+    assert reply == "human says go"
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()  # drains no interjects
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when resumed_from_interrupt")
+
+    reply = await ar._resolve_wait_reply(coord, _ainput, True)
+    assert reply == ar._INTERRUPT_CONTINUATION_NUDGE
+    assert reply != ""
+    assert "complete_step" in reply
+    assert coord.events == []  # never entered the solicit watchdog bracket
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_no_flag_solicits_empty() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()
+    seen = {}
+
+    async def _ainput(q):
+        seen["prompt"] = q
+        return ""
+
+    reply = await ar._resolve_wait_reply(coord, _ainput, False)
+    assert reply == ""
+    assert seen["prompt"] == ""        # solicited with the empty prompt
+    assert coord.events == ["begin", "end"]  # the solicit watchdog bracket ran

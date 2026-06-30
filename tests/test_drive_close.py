@@ -85,6 +85,71 @@ async def test_gen_closed_on_subagent_suspended(tmp_path: Path) -> None:
     assert runner.closed is True
 
 
+class _NoPauseCoordinator(_PauseCoordinator):
+    """Cooperative-steer already cleared the pause: should_pause is False."""
+    should_pause = False
+
+
+@pytest.mark.anyio
+async def test_interrupted_error_pauses_with_interrupt_flag_when_pause_cleared(
+    tmp_path: Path,
+) -> None:
+    """A claude_code mid-tool Ctrl-C can surface as an `interrupted` error event
+    AFTER the cooperative steer cleared should_pause. It must still pause with
+    interrupt=True (not classify as a fatal `config` pause) so the resume
+    continues the step. This is the gate-only path the -n4 live load exposed."""
+    runner = _ClosableRunner([{
+        "type": "error",
+        "payload": {"category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"},
+    }])
+    result = await drive_invocation(
+        _inv(tmp_path, {"complete_step"}), runner,
+        coordinator=_NoPauseCoordinator(), log=None, emit_events=False)
+    assert result.paused is True
+    assert result.fatal is False
+    assert result.interrupt is True
+    assert runner.closed is True
+
+
+@pytest.mark.anyio
+async def test_should_pause_error_pauses_with_interrupt_flag(
+    tmp_path: Path,
+) -> None:
+    """An error event arriving with should_pause already set is an interrupt in
+    flight: pause with interrupt=True regardless of the error's own category."""
+    runner = _ClosableRunner([{
+        "type": "error",
+        "payload": {"category": "network", "kind": "x", "message": "boom"},
+    }])
+    result = await drive_invocation(
+        _inv(tmp_path, {"complete_step"}), runner,
+        coordinator=_PauseCoordinator(), log=None, emit_events=False)
+    assert result.paused is True
+    assert result.interrupt is True
+    assert runner.closed is True
+
+
+@pytest.mark.anyio
+async def test_non_interrupt_error_stays_fatal_without_interrupt_flag(
+    tmp_path: Path,
+) -> None:
+    """A genuine non-interrupt error (no should_pause, not interrupted-kind) is
+    still classified normally and never spuriously marked interrupt=True."""
+    runner = _ClosableRunner([{
+        "type": "error",
+        "payload": {"category": "config", "kind": "bad_request",
+                    "message": "boom"},
+    }])
+    result = await drive_invocation(
+        _inv(tmp_path, {"complete_step"}), runner,
+        coordinator=_NoPauseCoordinator(), log=None, emit_events=False)
+    assert result.errored is True
+    assert result.fatal is True
+    assert result.interrupt is False
+    assert runner.closed is True
+
+
 @pytest.mark.anyio
 async def test_gen_closed_on_success(tmp_path: Path) -> None:
     runner = _ClosableRunner([

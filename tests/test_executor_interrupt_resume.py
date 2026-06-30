@@ -325,3 +325,202 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
     assert r2 is RunResult.COMPLETED
     assert runs["n"] == runs_after_round1  # no second agent turn ran
     assert State.load(change.state_dir).status == "completed"
+
+
+@pytest.mark.anyio
+async def test_mid_turn_interrupt_sets_interrupt_pending_true(tmp_path: Path) -> None:
+    change = _seed_single_agent(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+
+    class _InterruptingRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="ctrl-c")
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _InterruptingRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_change(change, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.resume_pending == state.step
+    assert state.interrupt_pending is True  # marker shadows the interrupt park
+
+
+@pytest.mark.anyio
+async def test_non_interrupt_pause_overwrites_stale_interrupt_pending(
+    tmp_path: Path,
+) -> None:
+    """A non-interrupt park (here: a fatal agent error, should_pause == False)
+    runs the same Pause handler and must assign interrupt_pending = False,
+    overwriting a stale True from a prior interrupt that triggered a nudge."""
+    change = _seed_single_agent(tmp_path)
+    # Seed a stale True (as if a prior interrupt+nudge had set it).
+    s = State.load(change.state_dir)
+    s.interrupt_pending = True
+    s.save(change.state_dir)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _FatalRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            yield {"type": "error", "payload": {
+                "category": "terminated", "kind": "TerminatedError",
+                "message": "agent terminated with an error (cause unknown)"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _FatalRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+    result = await run_change(change)  # no coordinator interrupt
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.resume_pending == state.step  # fatal park keeps the transcript
+    assert state.interrupt_pending is False    # unconditional assignment cleared it
+
+
+@pytest.mark.anyio
+async def test_interrupt_after_complete_clears_interrupt_pending(tmp_path: Path) -> None:
+    """Two-step workflow; interrupt fires as step 1 completes (Continue). The
+    Continue clear sets interrupt_pending = False before the post-navigation
+    pause."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "a.md").write_text(
+        "---\nname: a\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n")
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\ndefaults: {max_retries: 3, max_loops: 6}\n"
+        "phases:\n  - name: only\n    steps:\n"
+        "      - {name: s1, file: agents/a.md, tier: low}\n"
+        "      - {name: s2, file: agents/a.md, tier: low}\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+    change = _make_change(tmp_path)
+
+    # Seed a stale True; the forward Continue must overwrite it to False.
+    s = State.load(change.state_dir)
+    s.interrupt_pending = True
+    s.save(change.state_dir)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    def _on_event(e: dict) -> None:
+        if (e.get("type") == "step_completed"
+                and (e.get("payload") or {}).get("step") == "s1"):
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.step == "s2"
+    assert state.resume_pending is None
+    assert state.interrupt_pending is False  # Continue cleared it
+
+
+@pytest.mark.anyio
+async def test_interrupt_on_resume_goto_clears_interrupt_pending(tmp_path: Path) -> None:
+    """The resume-Goto branch repoints resume_pending at its target; it must
+    clear interrupt_pending so a stale True does not carry forward onto the
+    goto-resume target. Seed a stale True (a single self-resume-goto step, so no
+    preceding Continue masks it), drive one rework self-resume-goto, and assert
+    the post-navigation interrupt park persists interrupt_pending == False."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "rev.md").write_text(
+        "---\nname: rev\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n")
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\ndefaults: {max_retries: 3, max_loops: 6}\n"
+        "phases:\n  - name: only\n    steps:\n"
+        "      - name: review\n        file: agents/rev.md\n        tier: low\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, resume: review}\n"
+        "          - {else: true, continue: true}\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+    change = _make_change(tmp_path)
+
+    # Seed a stale True; the resume-Goto branch must overwrite it to False.
+    s = State.load(change.state_dir)
+    s.interrupt_pending = True
+    s.save(change.state_dir)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success",
+                               "verdict": "rework"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    def _on_event(e: dict) -> None:
+        if (e.get("type") == "step_completed"
+                and (e.get("payload") or {}).get("step") == "review"):
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.step == "review"
+    assert state.resume_pending == "review"   # resume-goto target preserved
+    assert state.interrupt_pending is False   # cleared at the resume-Goto branch

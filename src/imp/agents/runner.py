@@ -131,6 +131,9 @@ class AgentInvocation:
     # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
     # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
+    # True when this resume re-enters a step imp itself interrupted (Ctrl-C),
+    # read from State.interrupt_pending by the executor.
+    resumed_from_interrupt: bool = False
     # tier name → ProviderModel, the run's tier map. Threaded by the executor
     # into every AgentInvocation; copied onto ToolContext so dispatch_task can
     # place a subagent on its tier's resolved provider. Typed Any to avoid

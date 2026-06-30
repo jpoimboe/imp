@@ -319,6 +319,13 @@ async def run_change(
                     # re-runs fresh. The replay decision is driven by whether the
                     # step has a kept transcript, not by how the run stopped.
                     state.resume_pending = state.step
+                    # Unconditional shadow of the pause cause: overwrites a stale
+                    # True on a non-interrupt park. action.interrupt covers the
+                    # cooperative-interrupt steer (claude_code Ctrl-C), which
+                    # unwinds as an awaiting_user pause with should_pause already
+                    # cleared, so should_pause alone would miss it.
+                    state.interrupt_pending = (
+                        coordinator.should_pause or action.interrupt)
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
@@ -334,6 +341,7 @@ async def run_change(
                 state.loop_counts.pop(step.name, None)          # forward advance resets
                 nxt = idx + 1
                 if nxt >= len(flat):
+                    state.interrupt_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
@@ -341,12 +349,14 @@ async def run_change(
                     or flat[nxt].name
                 )
                 state.resume_pending = None
+                state.interrupt_pending = False
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
                     _release_held_lane(
                         action.release, change, state, log, step_name=step.name)
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
+                    state.interrupt_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
@@ -372,8 +382,10 @@ async def run_change(
                     # persistent error retry forever.
                     state.step_attempt = 0
                     state.resume_pending = flat[target_idx].name
+                    state.interrupt_pending = False
                 else:
                     state.resume_pending = None
+                    state.interrupt_pending = False
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
@@ -941,7 +953,7 @@ async def _route_agent(
             # edge's marker; cleared on the next forward Continue.
             state.resume_pending = state.step
             state.save(change.state_dir)
-        return Pause(), None, {}
+        return Pause(interrupt=result.interrupt), None, {}
     reincarnation_key = f"step:{step.phase}/{step.name}"
     if result.handoff_path is not None:
         # Tier A proactive handoff: the agent approached its window and (normally)
@@ -1182,6 +1194,7 @@ async def _run_agent_invocation(
         subagent_depth=0,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
+        resumed_from_interrupt=is_resume and state.interrupt_pending,
         log=log,
         test_gates=test_gates,
         non_interactive=non_interactive,

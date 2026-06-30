@@ -50,6 +50,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
+    _INTERRUPT_CONTINUATION_NUDGE,
     _resolve_wait_reply,
     deliver_interject,
     drain_all_interjects_at_resume,
@@ -526,7 +527,8 @@ class AnthropicAgentRunner:
                 # Queued interjects satisfy the pending yield directly; fall back
                 # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
-                    invocation.coordinator, ctx.user_input_fn)
+                    invocation.coordinator, ctx.user_input_fn,
+                    invocation.resumed_from_interrupt)
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
@@ -534,8 +536,19 @@ class AnthropicAgentRunner:
             # §2 resume-entry drain: mid-turn pending texts fold into the first
             # request. (The AWAITING_USER dangling-wait join is handled above.)
             if state is not ResumeState.AWAITING_USER:
-                drain_all_interjects_at_resume(
+                drained = drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
+                # A mid-tool Ctrl-C resumes as SEND_TO_LLM (the dangling call was
+                # repaired with a synthetic result), never AWAITING_USER, so the
+                # _resolve_wait_reply nudge above can't reach it. Append the same
+                # continuation nudge as the trailing user turn so a no-message
+                # resume continues the step instead of bare-turn-ending on a
+                # clarifying question. A drained human interject already drives
+                # continuation, so it wins (parity with AWAITING_USER).
+                if invocation.resumed_from_interrupt and drained == 0:
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid,
+                        _INTERRUPT_CONTINUATION_NUDGE)
         else:
             messages = []
             for m in invocation.initial_messages:

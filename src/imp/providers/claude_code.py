@@ -86,6 +86,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
+    _INTERRUPT_CONTINUATION_NUDGE,
     INTERRUPT_STEER_HINT,
     _resolve_wait_reply,
     build_inline_solicit,
@@ -1484,7 +1485,8 @@ class ClaudeCodeAgentRunner:
                 # Queued interjects satisfy the pending yield directly; fall back
                 # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
-                    invocation.coordinator, ctx.user_input_fn)
+                    invocation.coordinator, ctx.user_input_fn,
+                    invocation.resumed_from_interrupt)
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
@@ -1494,8 +1496,9 @@ class ClaudeCodeAgentRunner:
             # is queried with the WHOLE transcript as a stream, so appending
             # user Messages here is sufficient — no separate string fold needed.
             # Guarded for non-AWAITING_USER: the AWAITING_USER join is handled above.
+            drained = 0
             if resume_state is not ResumeState.AWAITING_USER:
-                drain_all_interjects_at_resume(
+                drained = drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
             # ckx9f5: name prior tool calls succeeded so stream-json replay's
             # placeholder errors don't trigger redo. Build on every replay
@@ -1520,6 +1523,18 @@ class ClaudeCodeAgentRunner:
                         messages.append(manifest_msg)
                         transcript.append(manifest_msg)
                         elog.append_user_message(agent_id=aid, message=manifest_msg)
+            # A mid-tool Ctrl-C resumes as SEND_TO_LLM/DANGLING (the dangling call
+            # was repaired with a synthetic result), never AWAITING_USER, so the
+            # _resolve_wait_reply nudge above can't reach it. Append the same
+            # continuation nudge as the trailing user turn (after any manifest) so
+            # a no-message resume continues the step instead of bare-turn-ending on
+            # a clarifying question. A drained human interject already drives
+            # continuation, so it wins (parity with AWAITING_USER).
+            if (resume_state is not ResumeState.AWAITING_USER
+                    and invocation.resumed_from_interrupt and drained == 0):
+                deliver_reply_on_resume(
+                    messages, transcript, elog, aid,
+                    _INTERRUPT_CONTINUATION_NUDGE)
         else:
             messages = []
             for m in invocation.initial_messages:
@@ -1935,7 +1950,8 @@ class ClaudeCodeAgentRunner:
                                 user_input_fn=self._user_input_fn,
                                 coordinator=invocation.coordinator,
                                 event_log=elog, agent_id=aid,
-                                steer_prompt=INTERRUPT_STEER_HINT)
+                                steer_prompt=INTERRUPT_STEER_HINT,
+                                interrupt=True)
                             # Raises AwaitingUserInput when no human is attached;
                             # the balanced session makes a resume continue with no 400.
                             reply = await steer(last_text)

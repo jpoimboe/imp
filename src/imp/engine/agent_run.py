@@ -219,6 +219,10 @@ class AgentRunResult:
     # resumable so the paused step survives the reload. Stays False for every
     # other pause (coordinator, subagent).
     awaiting_user: bool = False
+    # True when the awaiting_user pause came from the cooperative-interrupt steer
+    # (Ctrl-C mid-turn), not a genuine bare-turn-end yield. The executor shadows
+    # it into State.interrupt_pending so a no-message resume continues the step.
+    interrupt: bool = False
     # Tier A proactive handoff: the runner captured an agent-authored handoff
     # note at this path before stopping. The caller (executor / dispatch_task)
     # reincarnates the session seeded from it. None on every other outcome.
@@ -342,18 +346,30 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
+_INTERRUPT_CONTINUATION_NUDGE = (
+    "Your previous turn was interrupted before you finished this step. "
+    "Continue from where you left off and call `complete_step` when the step "
+    "is done."
+)
+
+
 async def _resolve_wait_reply(
     coordinator: Any,
     user_input_fn: Callable[[str], str | Awaitable[str]],
+    resumed_from_interrupt: bool = False,
 ) -> str:
-    """Satisfy a bare-turn-end yield on resume (§2 F5, pending-satisfies-
-    solicit): if the interject queue is non-empty, drain+join it as the reply;
-    otherwise solicit via user_input_fn. Returns the reply string the caller
-    then journals + replays."""
+    """Satisfy a bare-turn-end / AWAITING_USER yield on resume. Precedence:
+    1. pending interject / --message present → drain+join and return it (a human
+       spoke; wins).
+    2. else if resumed_from_interrupt → return the continuation nudge so a
+       headless resume continues the step imp interrupted, instead of soliciting.
+    3. else → solicit empty via user_input_fn (a genuine yield → park)."""
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
         return joined
+    if resumed_from_interrupt:
+        return _INTERRUPT_CONTINUATION_NUDGE
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
         # Resume-side blocked solicit (all four providers route here): freeze the
@@ -441,6 +457,7 @@ def build_agent_invocation(
     subagent_depth: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
+    resumed_from_interrupt: bool = False,
     log: Any = None,
     test_gates: TestGates | None = None,
     non_interactive: bool = False,
@@ -509,6 +526,7 @@ def build_agent_invocation(
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
+        resumed_from_interrupt=resumed_from_interrupt,
         resolved_tiers=resolved_tiers,
         tiers=tiers,
         tier=tier,
@@ -594,20 +612,30 @@ async def drive_invocation(
                     if event["type"] == "agent_output":
                         agent_output = event["payload"]
                     if event["type"] == "error":
-                        # A pause already in flight wins over the error's own
-                        # classification: a (process-group) interrupt kills a
-                        # provider's CLI child instantly, so the runner can surface
-                        # a teardown artifact (e.g. a subagent's `network`/
-                        # no_result_message) a beat before signal_pause's
-                        # interrupt() sets the runner's _cancel. Retrying that
-                        # replays an interrupted transcript (the 400 the runners
-                        # guard against); pause cleanly instead — same outcome as
-                        # the should_pause check below, just reached via an error.
-                        if coordinator is not None and coordinator.should_pause:
-                            return AgentRunResult(None, False, True, False, None)
                         payload = event.get("payload") or {}
                         category = payload.get("category", "unknown")
                         kind = payload.get("kind")
+                        # An interrupt-caused teardown pauses cleanly with
+                        # interrupt=True so the resume CONTINUES the step (shadowed
+                        # into State.interrupt_pending), NOT classified by the error's
+                        # own category. Two cases reach here:
+                        #   * kind == "interrupted": the runner surfaced the interrupt
+                        #     as an error event rather than the cooperative-steer
+                        #     AwaitingUserInput — and the steer may have ALREADY
+                        #     cleared should_pause, so the should_pause arm alone would
+                        #     misclassify it as a fatal `config` pause (interrupt lost
+                        #     → resume parks instead of continuing).
+                        #   * should_pause set: a pause is already in flight and wins.
+                        #     A (process-group) interrupt kills a provider's CLI child
+                        #     instantly, so the runner can surface a teardown artifact
+                        #     (e.g. a subagent's `network`/no_result_message) a beat
+                        #     before signal_pause's interrupt() sets _cancel; retrying
+                        #     that replays an interrupted transcript (a 400).
+                        interrupting = kind == "interrupted" or (
+                            coordinator is not None and coordinator.should_pause)
+                        if interrupting:
+                            return AgentRunResult(None, False, True, False, None,
+                                                  interrupt=True)
                         retry_after = (payload.get("detail") or {}).get(
                             "retry_after_seconds")
                         decision = error_policy.decide(
@@ -624,7 +652,8 @@ async def drive_invocation(
                         return AgentRunResult(None, True, False, False, None,
                                               ErrorInfo(category, kind))
                     if coordinator is not None and coordinator.should_pause:
-                        return AgentRunResult(None, False, True, False, None)
+                        return AgentRunResult(None, False, True, False, None,
+                                              interrupt=True)
         finally:
             # Close the generator on EVERY exit — the error/retry return, the
             # pause return, SubagentSuspended/AwaitingUserInput — so run()'s
@@ -638,11 +667,14 @@ async def drive_invocation(
     except SubagentSuspended:
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)
-    except AwaitingUserInput:
+    except AwaitingUserInput as exc:
         # A headless/subagent bare-turn-end yield with no human attached.
         # paused=True drives normal pause handling; awaiting_user=True tells the
         # executor to mark the step resumable so the paused step survives reload.
-        return AgentRunResult(None, False, True, False, None, awaiting_user=True)
+        # interrupt=True (cooperative-interrupt steer) shadows into
+        # State.interrupt_pending so a no-message resume continues the step.
+        return AgentRunResult(None, False, True, False, None,
+                              awaiting_user=True, interrupt=exc.interrupt)
 
     if stall["hit"]:
         # B.2: the watchdog tore the agent down. Route through the policy so the

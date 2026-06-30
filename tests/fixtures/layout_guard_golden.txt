@@ -22,6 +22,7 @@ guidance
 held_acquire_step
 held_lane
 id
+interrupt_pending
 loop_counts
 max_reincarnations
 merge_commit

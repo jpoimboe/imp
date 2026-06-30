@@ -539,7 +539,8 @@ class CodexAgentRunner:
                 # bare-turn-end yield directly. Fall back to user_input_fn only
                 # when the queue is empty.
                 reply: str = await _resolve_wait_reply(
-                    invocation.coordinator, invocation.user_input_fn)
+                    invocation.coordinator, invocation.user_input_fn,
+                    invocation.resumed_from_interrupt)
                 user_msg = Message(
                     role="user", content=(TextBlock(text=reply),))
                 elog.append_user_message(agent_id=aid, message=user_msg)
