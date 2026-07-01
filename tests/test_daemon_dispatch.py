@@ -158,7 +158,7 @@ async def test_reply_does_not_subscribe() -> None:
 async def test_subscribe_replays_history_then_confirms() -> None:
     control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
-        {"id": "e1", "type": "notice", "timestamp": "2026-06-25T14:32:05+00:00",
+        {"id": "e1", "type": "agent_output", "timestamp": "2026-06-25T14:32:05+00:00",
          "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
     ]
     responses: queue.Queue = queue.Queue()

@@ -21,12 +21,12 @@ from datetime import datetime
 from typing import Any
 
 # Delivery tiers (spec §2). buzz = input prompts + status transitions (phone buzzes);
-# silent = narrative / notices / step dividers (streams quietly); everything else drops.
+# silent = narrative / script output / step dividers (streams quietly); everything else drops.
 _BUZZ = frozenset({
     "awaiting_user_input", "merge_blocked", "script_blocked", "change_merged",
     "change_abandoned", "workflow_paused", "workflow_resumed", "error",
 })
-_SILENT = frozenset({"llm_response", "agent_output", "notice", "step_started"})
+_SILENT = frozenset({"llm_response", "agent_output", "script_output", "step_started"})
 
 # Human-readable labels for buzz events — phone notifications read as plain English,
 # not imp's internal snake_case types. An unmapped type falls back to its raw name.
@@ -99,7 +99,7 @@ def header_line(event: Mapping[str, Any]) -> str:
 def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
     """Classify an event into a delivery tier: 'buzz' (notify), 'silent' (quiet
     stream), or None (dropped). Buzz = input prompts + status transitions; silent =
-    narrative / notices / step dividers; everything else (tool plumbing) drops. The
+    narrative / script output / step dividers; everything else (tool plumbing) drops. The
     one payload-aware case: a nonterminal interrupt 'error' is dropped to match the
     summary builder — only terminal errors buzz."""
     if event_type == "error":
@@ -179,6 +179,8 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
         return str(payload.get("prompt") or payload.get("text") or "")
     if event_type == "llm_response":
         return _llm_response_text(payload)
+    if event_type == "script_output":
+        return str(payload.get("stdout") or "")
     if event_type == "merge_blocked":
         reason = str(payload.get("reason") or "").strip()
         detail = str(payload.get("detail") or "").strip()

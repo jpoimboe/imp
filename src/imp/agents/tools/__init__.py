@@ -123,7 +123,6 @@ _BUILTIN_MODULES = (
     "create_change",
     "fs",
     "nav",
-    "notice",
     "query_events",
     "rename_change",
     "step_label",

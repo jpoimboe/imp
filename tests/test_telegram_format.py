@@ -199,6 +199,19 @@ def test_header_line_uses_event_time_in_daemon_local_zone(set_tz) -> None:
     assert header_line(event) == "tozi28 · T · 10:32am"
 
 
+def test_script_output_body_surfaces_stdout() -> None:
+    from imp.remote.drivers.telegram import event_body, format_event_message
+
+    assert event_body(
+        "script_output",
+        {"step": "plan-finalized", "stdout": "✓ plan 1/1 · 2 tasks"},
+    ) == "✓ plan 1/1 · 2 tasks"
+    msg = format_event_message(
+        {"type": "script_output", "change": {"id": "abc", "title": "t"},
+         "payload": {"step": "plan-finalized", "stdout": "✓ plan 1/1 · 2 tasks"}})
+    assert msg == "✓ plan 1/1 · 2 tasks"
+
+
 def test_event_labels_humanize_every_buzz_type() -> None:
     assert imp_telegram._EVENT_LABELS == {
         "awaiting_user_input": "needs your input",

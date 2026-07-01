@@ -178,7 +178,7 @@ def parse_agent_file(path: Path) -> AgentDef:
 BASE_CAPS: frozenset[str] = frozenset({
     "read_file", "glob", "grep", "query_events", "bash",
     "edit_file", "write_file", "web_search", "web_fetch",
-    "update_step_label", "emit_notice", "symbol_outline",
+    "update_step_label", "symbol_outline",
 })
 TOP_LEVEL_CAPS: frozenset[str] = frozenset(
     {"rename_change", "create_change", "create_and_enter_worktree"})

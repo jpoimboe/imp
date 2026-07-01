@@ -60,7 +60,7 @@ def _drain(q: queue.Queue) -> list:
 async def test_subscribe_replays_in_order_then_confirms_and_dedups_live() -> None:
     subs = Subscriptions()
     history = [
-        _event("e1", "notice", {"text": "one"}),
+        _event("e1", "agent_output", {"text": "one"}),
         _event("e2", "agent_output", {"text": "two"}),
     ]
     control = _Control(subs, history)
@@ -82,9 +82,9 @@ async def test_subscribe_replays_in_order_then_confirms_and_dedups_live() -> Non
         chat_id=1, submit=lambda _c: None,
         send=lambda text, silent: (sent.append((text, silent)) or 1),
         get_updates=lambda _o: {"result": []}, subscriptions=subs)
-    adapter.on_event(_event("e1", "notice", {"text": "one"}))   # already replayed
+    adapter.on_event(_event("e1", "agent_output", {"text": "one"}))   # already replayed
     assert sent == []
-    adapter.on_event(_event("e9", "notice", {"text": "live"}))  # new → streams
+    adapter.on_event(_event("e9", "agent_output", {"text": "live"}))  # new → streams
     assert len(sent) == 1 and sent[0][1] is True
 
 

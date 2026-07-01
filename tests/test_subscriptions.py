@@ -41,7 +41,7 @@ def test_remove_unknown_change_is_a_noop() -> None:
 
 def test_snapshot_and_add_registers_membership_and_ids_from_events() -> None:
     subs = Subscriptions()
-    events = [{"id": "e1", "type": "notice"}, {"id": "e2", "type": "agent_output"}]
+    events = [{"id": "e1", "type": "agent_output"}, {"id": "e2", "type": "agent_output"}]
     returned = subs.snapshot_and_add("aaa", lambda: events)
     assert returned == events           # returns the snapshot for the caller to format
     assert subs.contains("aaa") is True

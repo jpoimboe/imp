@@ -23,12 +23,10 @@ from imp.engine.feedback import _truncate
 
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
-# (`tool`); emit_notice renders as a verbatim block elsewhere; showing it here too would
-# double-print as a clipped `text=…` in the recap.
+# (`tool`).
 # update_step_label would register as activity in the very status line it exists to
 # keep clean.
-_OMIT: frozenset[str] = frozenset({"load_skill", "tool",
-                                   "emit_notice", "update_step_label"})
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "update_step_label"})
 
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge_and_exit_worktree"})
@@ -1585,18 +1583,6 @@ def _h_step_label_updated(
 
 
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
-
-
-def _h_notice(
-    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
-) -> None:
-    # Do NOT flush the open burst: this fires between the emit_notice tool_call
-    # and its tool_result.
-    self._append(LiteralTextNode(text=str(p.get("text", "")),
-                                 color_role="lifecycle", verbatim=True))
-
-
-NarrativeBuilder._HANDLERS["notice"] = _h_notice
 
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

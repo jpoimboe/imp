@@ -17,7 +17,7 @@ def test_buzz_event_types_notify(event_type: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "event_type", ["llm_response", "agent_output", "notice", "step_started"])
+    "event_type", ["llm_response", "agent_output", "script_output", "step_started"])
 def test_silent_event_types_stream_quietly(event_type: str) -> None:
     assert imp_telegram.curate(event_type, {}) == "silent"
 
