@@ -38,6 +38,7 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
+from imp.cli.render_text import _SCRIPT_DETAIL_TAIL_LINES
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
@@ -62,7 +63,6 @@ from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.state import LockHeld, State, lock_is_live
 from imp.providers.config import parse_default_workflow, validate_workflow_name
-from imp.cli.render_text import _SCRIPT_DETAIL_TAIL_LINES
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.attach import build_session_attach
 

@@ -12,7 +12,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     test_cmd_slow: "..."                  # complete run; once-per-change at integration-verify
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
-    max_parallel_test_runs: 1             # max concurrent verify-gate runs per control root (default 1)
+    max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
 """

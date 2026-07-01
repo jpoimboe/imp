@@ -856,7 +856,9 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
 
 
-def _h_waiting_for_test_lane(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_waiting_for_test_lane(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
     self._flush_burst()
     self._append(LiteralTextNode(text="waiting for a test slot", color_role="lifecycle"))
 

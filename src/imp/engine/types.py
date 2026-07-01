@@ -181,7 +181,7 @@ class Step:
     timeout_seconds: int | None = None
     position_label: bool = False  # label is a position counter, not an activity verb
     label: str | None = None
-    acquire: str | None = None  # "merge-lane" (branch step, base-branch FIFO) or "test-lane" (script step, counting semaphore)
+    acquire: str | None = None  # "merge-lane" (branch FIFO) or "test-lane" (counting semaphore)
     release: str | None = None  # "merge-lane"; runs before step body; agent steps only
     phase_label: str | None = None  # owning phase's label template, stamped at load
     show_label: bool = True     # frame: header + completion breadcrumb (default on)

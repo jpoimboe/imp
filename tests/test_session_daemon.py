@@ -978,22 +978,16 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
 
 
 
-def test_hold_prompt_resume_prompt_for_interrupt(tmp_path: Path) -> None:
+def test_hold_prompt_resume_prompt_for_interrupt() -> None:
     import imp.remote.session.daemon as daemon
-    from tests.conftest import _seed_control
 
-    _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     coord = SimpleNamespace(should_pause=True)
     assert daemon._hold_prompt(RunResult.PAUSED, coord) == daemon._RESUME_PROMPT
 
 
-def test_hold_prompt_none_for_script_blocked(tmp_path: Path) -> None:
+def test_hold_prompt_none_for_script_blocked() -> None:
     import imp.remote.session.daemon as daemon
-    from tests.conftest import _seed_control
 
-    _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     coord = SimpleNamespace(should_pause=False)
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 

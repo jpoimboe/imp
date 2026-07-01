@@ -31,6 +31,7 @@ from imp.agents.runner import (
     Message,
 )
 from imp.agents.skills import overlay_project_skills
+from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
     AgentRunResult,
     build_agent_invocation,
@@ -62,7 +63,6 @@ from imp.engine.sandbox import (
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
-from imp.engine import test_lane as _test_lane
 from imp.engine.types import (
     Action,
     Continue,
