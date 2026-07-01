@@ -100,12 +100,45 @@ def test_emit_script_blocked_notice_is_wordmark_under_dark_theme(monkeypatch, ca
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     try:
         pal.set_theme("dark")
-        main._emit_script_blocked("integrate-rebase", "rebase conflict")
+        main._emit_script_blocked("integrate-rebase", "rebase conflict", "")
         out = capsys.readouterr().out
         assert pal.sgr("wordmark", enabled=True) in out
         assert pal.sgr("yellow", enabled=True) not in out
     finally:
         pal.set_theme("ansi")
+
+
+def test_emit_script_blocked_renders_combined_stderr_then_stdout(capsys) -> None:
+    main._emit_script_blocked("verify", "the-stderr-part", "the-stdout-part")
+    out = capsys.readouterr().out
+    assert "the-stderr-part" in out
+    assert "the-stdout-part" in out
+    assert out.index("the-stderr-part") < out.index("the-stdout-part")
+
+
+def test_emit_script_blocked_bounds_detail_to_tail(capsys) -> None:
+    from imp.cli.render_text import _SCRIPT_DETAIL_TAIL_LINES
+    stdout = "\n".join(f"line-{i}" for i in range(_SCRIPT_DETAIL_TAIL_LINES + 20))
+    main._emit_script_blocked("verify", "", stdout)
+    out = capsys.readouterr().out
+    assert "line-0" not in out
+    assert f"line-{_SCRIPT_DETAIL_TAIL_LINES + 19}" in out
+
+
+def test_handle_terminal_outcome_passes_combined_output(capsys) -> None:
+    events = [
+        {"type": "script_blocked",
+         "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail", "exit": 3}},
+    ]
+    change = _Change(events)
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_paused_summary"):
+        State.load.return_value = _State("paused", step="verify")
+        rc = main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
+    out = capsys.readouterr().out
+    assert "err-detail" in out
+    assert "out-detail" in out
+    assert rc == 1
 
 
 def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
