@@ -598,15 +598,6 @@ def _parse_phase_show_label(praw: dict[str, Any], source: SourceLoc) -> bool:
     return val
 
 
-def _parse_phase_chrome(praw: dict[str, Any], source: SourceLoc) -> str | None:
-    chrome = praw.get("chrome")
-    if chrome is None:
-        return None
-    if chrome != "none":
-        raise LoadError("a phase's `chrome:` only accepts the value `none`", source)
-    return "none"
-
-
 def _parse_phase_label(praw: dict[str, Any], source: SourceLoc) -> str | None:
     label = praw.get("label")
     if label is not None and not isinstance(label, str):
@@ -622,7 +613,6 @@ def _parse_step(
     agents: dict[str, AgentDef],
     var_types: dict[str, ExprType],
     yaml_path: Path,
-    chrome: str | None = None,
     phase_label: str | None = None,
     phase_show_label: bool = True,
 ) -> Step:
@@ -633,6 +623,8 @@ def _parse_step(
     if not raw.get("name") or not isinstance(raw["name"], str):
         raise LoadError("step missing a string 'name'", source)
     name = raw["name"]
+    if "chrome" in raw:
+        raise LoadError("`chrome:` was removed; use show_label", source)
     kind = _infer_kind(raw, source)
     quiet = _parse_bool_flag(raw, "quiet", source)
     step_show_label = _parse_optional_bool_flag(raw, "show_label", source)
@@ -701,7 +693,6 @@ def _parse_step(
             label=label,
             acquire=acquire,
             release=release,
-            chrome=chrome,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
             show_label=show_label,
@@ -716,7 +707,6 @@ def _parse_step(
             timeout_seconds=raw.get("timeout"),
             quiet=quiet,
             label=label,
-            chrome=chrome,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
             show_label=show_label,
@@ -729,7 +719,6 @@ def _parse_step(
             on_max_retries=on_max, max_loops=max_loops, source=source,
             quiet=quiet,
             label=label,
-            chrome=chrome,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
             show_label=show_label,
@@ -743,7 +732,6 @@ def _parse_step(
             label=label,
             acquire=acquire,
             release=release,
-            chrome=chrome,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
             show_label=show_label,
@@ -817,16 +805,17 @@ def load_workflow(
         if not isinstance(praw, dict) or "name" not in praw or "steps" not in praw:
             raise LoadError("each phase needs 'name' and 'steps'", root_source)
         psrc = loc(yaml_path, praw)
+        if "chrome" in praw:
+            raise LoadError("`chrome:` was removed; use show_label at the phase level", psrc)
         pname = str(praw["name"])
         steps_raw = praw["steps"]
         if not isinstance(steps_raw, list):
             raise LoadError(f"phase {pname!r}: 'steps' must be a list", psrc)
-        phase_chrome = _parse_phase_chrome(praw, psrc)
         phase_show_label = _parse_phase_show_label(praw, psrc)
         phase_label = _parse_phase_label(praw, psrc)
         steps = tuple(
             _parse_step(s, pname, workflow_dir, defaults, agents, var_types,
-                        yaml_path, chrome=phase_chrome, phase_label=phase_label,
+                        yaml_path, phase_label=phase_label,
                         phase_show_label=phase_show_label)
             for s in steps_raw
         )

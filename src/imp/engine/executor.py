@@ -548,8 +548,6 @@ def _step_started_payload(
         payload["rotate_phrase"] = True
     if step.kind == "script":
         payload["command"] = step.command
-    if step.chrome is not None:
-        payload["chrome"] = step.chrome
     if step.position_label:
         payload["position_label"] = True
     if step.phase_label is not None:

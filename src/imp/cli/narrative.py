@@ -109,7 +109,6 @@ class PhaseNode:
     name: str
     children: list[Any] = field(default_factory=list)
     closed: bool = False
-    chrome: str | None = None
     label: str | None = None
     show_label: bool = True
     collapsible = False
@@ -133,7 +132,6 @@ class StepNode:
     position_label: bool = False       # step label is a position counter, not a verb
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
-    chrome: str | None = None          # "none" → suppress this step's header
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
@@ -880,7 +878,7 @@ NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
 
-def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
+def _ensure_phase(self: NarrativeBuilder, name: str,
                   phase_label: str | None = None, show_label: bool = True) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it
@@ -896,7 +894,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
         return
     if self._current_phase is not None:
         self._current_phase.closed = True   # let the live cursor pop the drained phase
-    phase = PhaseNode(name=name, chrome=chrome, label=phase_label, show_label=show_label)
+    phase = PhaseNode(name=name, label=phase_label, show_label=show_label)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
@@ -971,7 +969,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.start_ts = event.get("timestamp")
                 existing.agent_output = None
                 existing.command = p.get("command")
-                existing.chrome = p.get("chrome")
                 existing.show_label = bool(p.get("show_label", True))
                 existing.show_output = bool(p.get("show_output", False))
                 existing.phase_label = p.get("phase_label")
@@ -983,7 +980,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
-    _ensure_phase(self, phase, p.get("chrome"), p.get("phase_label"),
+    _ensure_phase(self, phase, p.get("phase_label"),
                   p.get("phase_show_label", True))
     # interactive defaults False — it is re-sourced from the event stream (an
     # awaiting_user_input event marks the step interactive); step_started no
@@ -996,7 +993,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     show_output=bool(p.get("show_output", False)),
                     position_label=bool(p.get("position_label", False)),
                     label=p.get("label"),
-                    chrome=p.get("chrome"),
                     phase_label=p.get("phase_label"),
                     command=p.get("command"),
                     resumed=bool(p.get("resumed", False)),

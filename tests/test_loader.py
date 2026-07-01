@@ -1567,3 +1567,33 @@ def test_phase_show_label_is_stamped_onto_each_step(tmp_path) -> None:
     by = {s.name: s for s in load_workflow(wf).flat_steps()}
     assert by["spec-writer"].phase_show_label is False   # owning phase's value
     assert by["loud"].phase_show_label is True
+
+
+def test_chrome_key_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            chrome: none
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="chrome"):
+        load_workflow(wf)
+
+
+def test_step_level_chrome_key_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                chrome: none
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="chrome"):
+        load_workflow(wf)

@@ -263,10 +263,6 @@ def render_question_block(text: str, width: int, depth: int, color: bool,
     return out or [indent]
 
 
-def chrome_suppressed(node: Any) -> bool:
-    return getattr(node, "chrome", None) == "none"
-
-
 def quiet_step_is_silent(node: nv.StepNode) -> bool:
     """A quiet step stays hidden on the happy path (open, a clean linear continue, or
     a silent routing goto) and surfaces its full block only on a non-linear outcome
@@ -298,11 +294,9 @@ def deferred_leaf(node: nv.StepNode) -> bool:
 
 
 def frame_suppressed(node: Any) -> bool:
-    """The node's frame (header + breadcrumb) is hidden. A legacy chrome node or a
-    show_label:false phase suppresses unconditionally; a show_label:false step
-    suppresses only on a linear outcome — the frame returns on pause/error."""
-    if chrome_suppressed(node):
-        return True
+    """The node's frame (header + breadcrumb) is hidden. A show_label:false phase
+    suppresses unconditionally; a show_label:false step suppresses only on a linear
+    outcome — the frame returns on pause/error (reveal-on-error)."""
     if isinstance(node, nv.PhaseNode):
         return not node.show_label
     if isinstance(node, nv.StepNode):
