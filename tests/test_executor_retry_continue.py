@@ -312,3 +312,112 @@ async def test_resume_goto_clears_retry_continue_pending(
     assert state.step == "review"
     assert state.resume_pending == "review"         # resume-goto target preserved
     assert state.retry_continue_pending is False     # cleared at the resume-Goto branch
+
+
+class _AlwaysStallProvider:
+    name = "fake"
+    model = "m"
+
+    def create_runner(self, _inv: Any) -> _StallNthRunner:
+        return _StallNthRunner(stalled=True)
+
+
+class _FatalRunner:
+    async def run(self, invocation: Any) -> Any:
+        yield {"type": "error", "payload": {
+            "category": "terminated", "kind": "TerminatedError",
+            "message": "agent terminated with an error (cause unknown)"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _FatalProvider:
+    name = "fake"
+    model = "m"
+
+    def create_runner(self, _inv: Any) -> _FatalRunner:
+        return _FatalRunner()
+
+
+@pytest.mark.anyio
+async def test_retry_ceiling_pause_preserves_marker(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
+
+    # Force a FIRST-attempt ceiling (budget 0). The backoff loop sets
+    # retry_continue_pending=True only AFTER the budget check passes, so with a
+    # zero budget that set never runs and the marker is still False when the
+    # retry_ceiling Pause is returned — isolating the Pause handler's disposition
+    # line as the sole cause of the preserved True. Drop that line and this fails.
+    monkeypatch.setattr("imp.engine.executor.budget_for", lambda _category: 0.0)
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.PAUSED
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
+    # The marker was False at ceiling time; the retry_ceiling disposition set it True.
+    assert State.load(change.state_dir).retry_continue_pending is True
+
+
+@pytest.mark.anyio
+async def test_fatal_pause_clears_marker(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    # Seed a stale True (as if a prior backoff had set it).
+    s = State.load(change.state_dir)
+    s.retry_continue_pending = True
+    s.save(change.state_dir)
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _FatalProvider())
+
+    result = await run_change(change)  # no coordinator interrupt
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.resume_pending == state.step        # fatal park keeps the transcript
+    assert state.retry_continue_pending is False      # non-retry park cleared it
+
+
+@pytest.mark.anyio
+async def test_ctrl_c_park_clears_marker_and_sets_interrupt_pending(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    # Seed a stale True; a Ctrl-C park during a transient backoff must clear it.
+    s = State.load(change.state_dir)
+    s.retry_continue_pending = True
+    s.save(change.state_dir)
+
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+
+    class _InterruptingRunner:
+        async def run(self, invocation: Any) -> Any:
+            await coord.signal_pause(reason="ctrl-c")
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: Any) -> _InterruptingRunner:
+            return _InterruptingRunner()
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_change(change, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.interrupt_pending is True            # Ctrl-C park sets the interrupt marker
+    assert state.retry_continue_pending is False       # and clears the transient marker

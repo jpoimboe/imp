@@ -302,6 +302,11 @@ async def run_change(
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         interrupt=coordinator.should_pause or action.interrupt)
+                    # Transient give-up (retry_ceiling / reauth) keeps the tail an
+                    # error-truncation → resume continues; every other park (genuine
+                    # yield, fatal, Ctrl-C) clears it → resume solicits and parks.
+                    state.retry_continue_pending = action.reason in (
+                        "retry_ceiling", "reauth_needed")
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
