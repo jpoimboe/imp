@@ -250,7 +250,7 @@ phases:
     label: "integration phase"
     steps:
       - name: wait-for-head
-        acquire: base
+        acquire: merge-lane
         label: waiting in merge queue
         rules:
           - {else: true, continue: true}

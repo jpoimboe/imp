@@ -237,7 +237,7 @@ def test_finalize_rework_routes_to_plan_writer() -> None:
     rework = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
                             output={"decision": "rework"})
     assert isinstance(rework.action, Goto) and rework.action.target == "plan-writer"
-    assert rework.action.release == "base"
+    assert rework.action.release == "merge-lane"
     assert "review_scope" not in rework.var_mutations
     merge = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
                            output={"decision": "merge"})

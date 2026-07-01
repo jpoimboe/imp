@@ -11,7 +11,7 @@ description: |
 # change-wide code review, reusing agents/plan-code-reviewer.md) -> deferred-sweep
 # (drains the whole change's Deferred list once) -> sweep-verify (fast) ->
 # cleanup-sweep -> converge-verify (slow, on the change's own base). integrate then
-# acquires the base lock, rebases, slow-re-verifies only when the base moved,
+# acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, and ends at the human gate (summarizer -> finalize) so
 # the human blesses the locked, rebased, slow-tested state. cleanup.sh is
 # self-bounding (it derives its own boundary; no review_base argument).
@@ -271,7 +271,7 @@ phases:
     label: "integration phase"
     steps:
       - name: wait-for-head
-        acquire: base
+        acquire: merge-lane
         label: waiting in merge queue
         rules:
           - {else: true, continue: true}
@@ -327,7 +327,7 @@ phases:
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: cleanup-merge, label: "preparing to merge"}
-          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, release: base, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, release: merge-lane, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
       - name: cleanup-merge

@@ -732,7 +732,7 @@ async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
 
 
 def _resolve_lane(value: str, change: Change) -> str:
-    if value == "base":
+    if value == "merge-lane":
         return change.base_branch
     raise RuntimeError(f"unknown lane keyword {value!r}")
 

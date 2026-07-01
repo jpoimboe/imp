@@ -26,7 +26,7 @@ def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
         "assert-stamped", "merge-to-base",
     ]
     by = {s.name: s for s in _phase(wf, "integrate").steps}
-    assert by["wait-for-head"].acquire == "base"
+    assert by["wait-for-head"].acquire == "merge-lane"
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
     assert all(s.name != "integration-resolver" for s in wf.flat_steps())
 
@@ -70,7 +70,7 @@ def test_only_finalize_routes_to_planning_and_releases_the_lane() -> None:
             target = getattr(a, "target", None)
             release = getattr(a, "release", None)
             if step.name == "finalize" and target == "plan-writer":
-                assert release == "base", (step.name, a)
+                assert release == "merge-lane", (step.name, a)
                 continue
             assert target not in planning, (step.name, a)
             assert release is None, (step.name, a)
@@ -181,7 +181,7 @@ def test_finalize_merge_routes_to_cleanup_merge() -> None:
     m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
                        output={"decision": "rework"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.action.release == "base"
+    assert m.action.release == "merge-lane"
     m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
                        output={"decision": "other"})
     assert isinstance(m.action, Pause)

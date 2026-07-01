@@ -372,14 +372,14 @@ def _seed_lane_release_workflow(root: Path) -> Change:
         "  - name: work\n"
         "    steps:\n"
         "      - name: wait-for-head\n"
-        "        acquire: base\n"
+        "        acquire: merge-lane\n"
         "        rules:\n"
         "          - {else: true, continue: true}\n"
         "      - name: worker\n"
         "        file: agents/worker.md\n"
         "        tier: low\n"
         "        rules:\n"
-        "          - {if: {deviation: true}, release: base, goto: done}\n"
+        "          - {if: {deviation: true}, release: merge-lane, goto: done}\n"
         "          - {else: true, continue: true}\n"
         "  - name: finish\n"
         "    steps:\n"
@@ -393,7 +393,7 @@ def _seed_lane_release_workflow(root: Path) -> Change:
 
 @pytest.mark.anyio
 async def test_goto_with_release_releases_held_lane(tmp_path: Path) -> None:
-    """Goto(release="base") in a rule releases the held lane via the executor routing branch."""
+    """Goto(release="merge-lane") in a rule releases the held lane via the executor routing branch."""
     change = _seed_lane_release_workflow(tmp_path)
     events: list = []
     _register_fake({"status": "Success", "deviation": True})

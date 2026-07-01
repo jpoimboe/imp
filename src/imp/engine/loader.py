@@ -563,15 +563,18 @@ def _typecheck_step_exprs(
 # ── Step parsing ──────────────────────────────────────────────────────────────
 
 
-def _parse_lane_attr(raw: dict[str, Any], key: str, source: SourceLoc) -> str | None:
+def _parse_lane_attr(
+    raw: dict[str, Any], key: str, source: SourceLoc,
+    *, allowed: tuple[str, ...] = ("merge-lane",),
+) -> str | None:
     val = raw.get(key)
     if val is None:
         return None
-    if val != "base":
+    if val not in allowed:
         raise LoadError(
-            f"{key}: only the lane keyword 'base' is supported, got {val!r}",
-            source)
-    return "base"
+            f"{key}: unknown lane keyword {val!r} "
+            f"(expected one of {', '.join(allowed)})", source)
+    return val
 
 
 def _parse_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool:
