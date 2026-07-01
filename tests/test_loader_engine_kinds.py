@@ -32,3 +32,36 @@ def test_engine_native_kind_rejects_file_or_command() -> None:
 def test_merge_and_exit_worktree_has_typed_merge_output_env() -> None:
     assert _output_types_for_step("merge_and_exit_worktree", None) == {"merge": "string"}
     assert _output_types_for_step("branch", None) is None
+
+
+def test_script_output_types_merge_declared_fields() -> None:
+    from imp.engine.types import OutputField, OutputSchema
+    schema = OutputSchema(
+        fields=(OutputField(name="task_total", type="int"),), source=_LOC)
+    assert _output_types_for_step("script", None, schema) == {
+        "exit": "int", "stdout": "string", "stderr": "string",
+        "task_total": "int",
+    }
+
+
+def test_script_output_types_excludes_object_typed_field() -> None:
+    from imp.engine.types import OutputField, OutputSchema
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="metadata", type="object"),
+            OutputField(name="task_total", type="int"),
+        ),
+        source=_LOC,
+    )
+    result = _output_types_for_step("script", None, schema)
+    assert result == {
+        "exit": "int", "stdout": "string", "stderr": "string",
+        "task_total": "int",
+    }
+    assert "metadata" not in result
+
+
+def test_script_output_types_default_without_schema() -> None:
+    assert _output_types_for_step("script", None) == {
+        "exit": "int", "stdout": "string", "stderr": "string",
+    }

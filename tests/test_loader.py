@@ -1489,3 +1489,46 @@ def test_output_on_agent_step_is_load_error(tmp_path) -> None:
         """, agents={"spec-writer": _WRITER})
     with pytest.raises(LoadError, match="output:"):
         load_workflow(wf)
+
+
+def test_script_output_field_is_rule_addressable_at_load(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          n: {type: int, default: 0}
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  task_total: {type: int}
+                rules:
+                  - {else: true, set: {n: output.task_total}, goto: done}
+          - name: done
+            steps: []
+        """)
+    load_workflow(wf)  # loads without error: output.task_total typechecks as int against var n:int
+
+
+def test_script_output_unknown_field_reference_fails_load(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          n: {type: int, default: 0}
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  task_total: {type: int}
+                rules:
+                  - {else: true, set: {n: output.bogus}, goto: done}
+          - name: done
+            steps: []
+        """)
+    with pytest.raises(LoadError):
+        load_workflow(wf)

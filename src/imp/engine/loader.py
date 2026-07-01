@@ -233,7 +233,8 @@ _SCRIPT_OUTPUT_TYPES: dict[str, ExprType] = {
 
 
 def _output_types_for_step(
-    step_kind: str, agent: AgentDef | None
+    step_kind: str, agent: AgentDef | None,
+    output_schema: OutputSchema | None = None,
 ) -> dict[str, ExprType] | None:
     """The expr output-env types for one step.
 
@@ -247,7 +248,13 @@ def _output_types_for_step(
             out[f.name] = _SCHEMA_TO_EXPR[f.type]
         return out
     if step_kind == "script":
-        return dict(_SCRIPT_OUTPUT_TYPES)
+        types = dict(_SCRIPT_OUTPUT_TYPES)
+        if output_schema is not None:
+            for f in output_schema.fields:
+                if f.type == "object":
+                    continue
+                types[f.name] = _SCHEMA_TO_EXPR[f.type]
+        return types
     if step_kind == "merge_and_exit_worktree":
         return {"merge": "string"}   # engine produces merge: MERGED|CONFLICT|REFUSED|DIRTY
     return None  # branch / engine-native (no typed output env)
@@ -535,7 +542,7 @@ def _typecheck_step_exprs(
     source: SourceLoc,
 ) -> None:
     agent = agents.get(step.file.stem) if (step.kind == "agent" and step.file) else None
-    output_types = _output_types_for_step(step.kind, agent)
+    output_types = _output_types_for_step(step.kind, agent, step.output_schema)
     env = TypeEnv(vars=var_types, output=output_types)
     try:
         for rule in step.rules:
