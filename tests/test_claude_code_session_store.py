@@ -10,7 +10,6 @@ from claude_agent_sdk.testing import run_session_store_conformance
 
 from imp.providers.claude_code_session_store import (
     ImpSessionStore,
-    evict_session_record_bodies,
     resume_session_id,
     session_key,
     session_project_key,
@@ -574,126 +573,6 @@ def test_reconcile_store_tail_strips_error_then_truncates_surplus() -> None:
 
     assert len(out) == 1
     assert out == store_body[:1]
-
-
-def _asst_use(uid: str, tuid: str, name: str = "read_file") -> dict:
-    return {
-        "parentUuid": None, "uuid": uid, "sessionId": "s", "type": "assistant",
-        "cwd": "/p", "isSidechain": False, "userType": "external",
-        "timestamp": "t",
-        "message": {
-            "id": "msg", "type": "message", "role": "assistant", "model": "m",
-            "content": [{"type": "tool_use", "id": tuid, "name": name, "input": {}}],
-            "stop_reason": "end_turn", "stop_sequence": None,
-            "usage": {"input_tokens": 0, "output_tokens": 0},
-        },
-    }
-
-
-def _user_result(
-    uid: str, parent: str, tuid: str, body: str, *, is_error: bool = False,
-) -> dict:
-    return {
-        "parentUuid": parent, "uuid": uid, "sessionId": "s", "type": "user",
-        "cwd": "/p", "isSidechain": False, "userType": "external",
-        "timestamp": "t",
-        "message": {
-            "role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": tuid,
-                         "content": body, "is_error": is_error}],
-        },
-    }
-
-
-def _result_block(entry: dict, tuid: str) -> dict:
-    return next(
-        b for b in entry["message"]["content"]
-        if b.get("type") == "tool_result" and b["tool_use_id"] == tuid)
-
-
-def test_evict_clears_matched_result_body_to_placeholder() -> None:
-    entries = [
-        _asst_use("a0", "u0"),
-        _user_result("r0", "a0", "u0", "body-0"),
-        _asst_use("a1", "u1"),
-        _user_result("r1", "a1", "u1", "body-1"),
-    ]
-    out = evict_session_record_bodies(entries, frozenset({"u0"}))
-    assert _result_block(out[1], "u0")["content"] == "[old tool result cleared]"
-    assert _result_block(out[3], "u1")["content"] == "body-1"
-
-
-def test_evict_preserves_is_error_and_tool_use_id() -> None:
-    entries = [_user_result("r0", "a0", "u0", "boom", is_error=True)]
-    out = evict_session_record_bodies(entries, frozenset({"u0"}))
-    blk = _result_block(out[0], "u0")
-    assert blk["content"] == "[old tool result cleared]"
-    assert blk["is_error"] is True
-    assert blk["tool_use_id"] == "u0"
-
-
-def test_evict_preserves_uuid_and_parent_uuid_chain() -> None:
-    entries = [_user_result("r0", "a0", "u0", "body-0")]
-    out = evict_session_record_bodies(entries, frozenset({"u0"}))
-    assert out[0]["uuid"] == "r0"
-    assert out[0]["parentUuid"] == "a0"
-    assert out[0]["sessionId"] == "s"
-
-
-def test_evict_leaves_non_matched_result_by_identity() -> None:
-    entries = [_user_result("r1", "a1", "u1", "body-1")]
-    out = evict_session_record_bodies(entries, frozenset({"u0"}))
-    assert out[0] is entries[0]
-
-
-def test_evict_leaves_tool_use_blocks_untouched() -> None:
-    entries = [_asst_use("a0", "u0", name="read_file")]
-    out = evict_session_record_bodies(entries, frozenset({"u0"}))
-    use = out[0]["message"]["content"][0]
-    assert use == {"type": "tool_use", "id": "u0", "name": "read_file", "input": {}}
-
-
-def test_evict_only_swaps_matched_block_in_mixed_message() -> None:
-    mixed = {
-        "parentUuid": "a", "uuid": "r", "sessionId": "s", "type": "user",
-        "cwd": "/p", "isSidechain": False, "userType": "external",
-        "timestamp": "t",
-        "message": {"role": "user", "content": [
-            {"type": "tool_result", "tool_use_id": "ka", "content": "a-body",
-             "is_error": False},
-            {"type": "tool_result", "tool_use_id": "kb", "content": "b-body",
-             "is_error": False},
-        ]},
-    }
-    out = evict_session_record_bodies([mixed], frozenset({"ka"}))
-    bodies = {b["tool_use_id"]: b["content"]
-              for b in out[0]["message"]["content"]}
-    assert bodies == {"ka": "[old tool result cleared]", "kb": "b-body"}
-
-
-def test_evict_empty_set_returns_input_object() -> None:
-    entries = [_user_result("r0", "a0", "u0", "body-0")]
-    assert evict_session_record_bodies(entries, frozenset()) is entries
-
-
-def test_evict_record_without_message_dict_returned_by_identity() -> None:
-    stub = {"type": "ai-title", "title": "x"}
-    out = evict_session_record_bodies([stub], frozenset({"u0"}))
-    assert out[0] is stub
-
-
-def test_evict_does_not_mutate_input_on_match() -> None:
-    entries = [_user_result("r0", "a0", "u0", "body-0")]
-    evict_session_record_bodies(entries, frozenset({"u0"}))
-    assert entries[0]["message"]["content"][0]["content"] == "body-0"
-
-
-def test_evict_preserves_is_error_false_as_bool() -> None:
-    entries = [_user_result("r0", "a0", "u0", "body-0", is_error=False)]
-    out = evict_session_record_bodies(entries, frozenset({"u0"}))
-    blk = _result_block(out[0], "u0")
-    assert blk["content"] == "[old tool result cleared]"
-    assert blk["is_error"] is False
 
 
 def test_store_reconcilable_true_when_body_fits_transcript() -> None:
