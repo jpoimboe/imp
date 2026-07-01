@@ -3236,6 +3236,43 @@ async def test_complete_step_tail_native_resumes_with_store_body(
     assert opts.env.get("ENABLE_TOOL_SEARCH") == "false"
 
 
+async def _seed_drifted_store(inv: AgentInvocation, n_turns: int) -> None:
+    """Seed a session store whose body has MORE conversation turns than the
+    transcript, forcing store_reconcilable(...) False -> the replay fallback."""
+    from imp.providers.claude_code_session_store import session_key, session_store_for
+
+    store = session_store_for(inv.transcript_dir)
+    body = [
+        {"type": "user" if i % 2 == 0 else "assistant", "uuid": f"d{i}",
+         "message": {"role": "user" if i % 2 == 0 else "assistant", "content": "x"}}
+        for i in range(n_turns)
+    ]
+    await store.append(session_key(inv.change_context.project_root, inv.agent_id), body)
+
+
+@pytest.mark.anyio
+async def test_unreconstructable_store_falls_back_to_replay(tmp_path: Path) -> None:
+    """When the store body has drifted ahead of the transcript, the resume can no
+    longer native-resume: it takes the replay disposition (no loaded session)."""
+    inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
+    await _seed_drifted_store(inv, 4)  # 4 body turns > 2 transcript msgs
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    # Replay disposition: no native session handed to claude-p.
+    assert created[0].opts.resume is None
+    assert created[0].opts.session_id is None
+    assert created[0].opts.session_store is None
+
+
 @pytest.mark.anyio
 async def test_balance_on_resume_send_to_llm_tail_native_resumes(
         tmp_path: Path) -> None:

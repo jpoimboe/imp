@@ -109,6 +109,7 @@ from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_store_for,
+    store_reconcilable,
 )
 from imp.providers.history_compaction import is_cold
 from imp.providers.message_eviction import apply_eviction, evicted_result_ids
@@ -1412,6 +1413,7 @@ class ClaudeCodeAgentRunner:
             and classify_resume(existing) in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
                 ResumeState.DANGLING_TOOL_USE)
+            and store_reconcilable(existing, store_body)
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
