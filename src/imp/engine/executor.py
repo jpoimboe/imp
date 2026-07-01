@@ -916,6 +916,12 @@ async def _route_agent(
                    "action": _action_payload(pause), "var_mutations": {}})
             return pause, None, {}
         backoff += 1
+        # Persist the transient-continue intent BEFORE the sleep so a kill/crash
+        # during backoff leaves the "resume should continue this step" marker on
+        # disk. Harmless on every backoff (consulted only at a bare-turn-end
+        # resume entry; any forward progress clears it).
+        state.retry_continue_pending = True
+        state.save(change.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
         # failure. category comes from the plumbed ErrorInfo.
