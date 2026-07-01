@@ -33,7 +33,7 @@ def test_missing_copy_nonempty_transcript_aborts(tmp_path: Path) -> None:
     from imp.agents.transcript import Transcript
     from imp.engine.executor import _resume_system_prompt
     t = Transcript(tmp_path / "transcript.jsonl")
-    t.append(Message(role="user", content=(TextBlock(text="<imp:begin/>"),)))
+    t.append(Message(role="user", content=(TextBlock(text="prior turn"),)))
     with pytest.raises(RuntimeError):
         _resume_system_prompt(InMemoryEventLog(), "step:p/s", tmp_path)
 

@@ -1007,9 +1007,10 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
     assert result is RunResult.COMPLETED
 
     inv = captured["inv"]
-    assert "complete_step" in inv.system_prompt
+    task_msg = inv.initial_messages[0].content[0].text
+    assert "complete_step" in task_msg
     for token in ("status", "Success", "Error", "verdict", "approve", "rework"):
-        assert token in inv.system_prompt, token
+        assert token in task_msg, token
     assert inv.continuation_fn is not None
     from imp.engine.awaiting_user_input import AwaitingUserInput
     # Headless top-level step: the bare turn-end IS the yield, so it parks
@@ -1165,12 +1166,11 @@ def anyio_backend():
 
 
 @pytest.mark.anyio
-async def test_fresh_start_seeds_initial_messages_with_imp_begin_tag(
+async def test_fresh_start_puts_task_in_first_user_message(
     tmp_path: Path,
 ) -> None:
-    """On a fresh agent step (no resume marker, no wrapper_text), the executor
-    seeds the runner with exactly one user message whose sole TextBlock is the
-    literal `<imp:begin/>` engine tag (replacing the legacy `"begin"` opener)."""
+    """On a fresh agent step the executor delivers the task (rendered template +
+    completion contract) as the sole first user message — no `<imp:begin/>` sentinel."""
     from imp.providers import resolve
 
     change, _, _ = _seed_minimal_workflow(tmp_path)
@@ -1204,8 +1204,9 @@ async def test_fresh_start_seeds_initial_messages_with_imp_begin_tag(
     assert len(inv.initial_messages) == 1, inv.initial_messages
     msg = inv.initial_messages[0]
     assert msg.role == "user"
-    assert len(msg.content) == 1
-    assert msg.content[0].text.startswith("<imp:begin/>")
+    text = msg.content[0].text
+    assert "<imp:begin/>" not in text                 # sentinel gone
+    assert "complete_step" in text                    # relocated completion contract
 
 
 def _seed_back_edge_workflow(
@@ -1309,6 +1310,54 @@ async def test_goto_edge_starts_target_fresh(tmp_path: Path) -> None:
     coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
     # both entries fresh: a plain goto never resumes
     assert coder_balances == [False, False]
+
+
+@pytest.mark.anyio
+async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> None:
+    """A goto: edge with a feedback: preamble delivers that feedback as the lead of
+    the fresh target's first user message (the relocated seed), preserving rework
+    feedback for goto-fed agents whose templates do not render run.opening."""
+    change = _seed_back_edge_workflow(
+        tmp_path, verb="goto", feedback="Address these findings:")
+    invs: list[AgentInvocation] = []
+
+    class _Rec:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            invs.append(invocation)
+            _persist_initial(invocation)
+            if invocation.agent_def.name == "reviewer":
+                reviewer_n = len([i for i in invs if i.agent_def.name == "reviewer"])
+                verdict = "rework" if reviewer_n == 1 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "verdict": verdict, "status": "Success"}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Prov:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Rec:
+            return _Rec()
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
+
+    await run_change(change, on_event=lambda _e: None, non_interactive=True)
+
+    coder_invs = [i for i in invs if i.agent_def.name == "coder"]
+    assert len(coder_invs) == 2
+    reworked = coder_invs[1].initial_messages[0].content[0].text
+    assert "Address these findings:" in reworked   # feedback_lead from goto edge
+    assert "complete_step" in reworked
 
 
 @pytest.mark.anyio
@@ -1458,8 +1507,9 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
 ) -> None:
     """On the resume keep-branch the executor must not construct any opener
     message: providers replay the on-disk transcript and never iterate
-    initial_messages here. The first (fresh) coder entry still carries the
-    `<imp:begin/>` seed; the second (resumed) entry carries `()`."""
+    initial_messages here. The first (fresh) coder entry carries one user message
+    (the relocated task, no `<imp:begin/>` sentinel); the second (resumed) entry
+    carries `()`."""
     from imp.providers import resolve
 
     change = _seed_back_edge_workflow(tmp_path, verb="resume")
@@ -1504,11 +1554,14 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2, [i.agent_def.name for i in invs]
 
-    # Fresh entry: one seed message containing <imp:begin/> plus the Change name.
+    # Fresh entry: one user message carrying the relocated task + completion
+    # contract (no <imp:begin/> sentinel).
     assert len(coder_invs[0].initial_messages) == 1
-    assert coder_invs[0].initial_messages[0].content[0].text.startswith("<imp:begin/>")
+    fresh = coder_invs[0].initial_messages[0].content[0].text
+    assert "<imp:begin/>" not in fresh
+    assert "complete_step" in fresh
 
-    # Resume-kept entry: NO seed message at all.
+    # Resume-kept entry: NO seed message at all (transcript replays).
     assert coder_invs[1].initial_messages == ()
 
 
@@ -1816,12 +1869,12 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
         "default-workflow: imp\nfacts:\n  test_command: make check\n"
     )
     change = _make_change(tmp_path)
-    sink: list[str] = []
-    _register_prompt_capturing({"status": "Success"}, sink)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert any("run make check" in p for p in sink)
+    assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
 
 
 def test_change_context_defaults_empty_facts() -> None:
@@ -2525,14 +2578,14 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
     )
     _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
-    sink: list[str] = []
-    _register_prompt_capturing({"status": "Success"}, sink)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
 
     result = await run_change(
         change, on_event=lambda _e: None, autonomous=True,
     )
     assert result is RunResult.COMPLETED
-    assert any("autonomous=True" in p for p in sink)
+    assert any("autonomous=True" in i.initial_messages[0].content[0].text for i in sink)
 
 
 @pytest.mark.anyio
@@ -2562,7 +2615,7 @@ async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
 
     inv = sink[0]
     assert inv.change_context.change_home == ".imp/changes/test-change"
-    assert "home=.imp/changes/test-change" in inv.system_prompt
+    assert "home=.imp/changes/test-change" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
     assert not inv.change_context.change_home.startswith("/")
     assert ".." not in inv.change_context.change_home
