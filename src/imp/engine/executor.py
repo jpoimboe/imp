@@ -318,6 +318,7 @@ async def run_change(
                 nxt = idx + 1
                 if nxt >= len(flat):
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
@@ -326,6 +327,7 @@ async def run_change(
                 )
                 state.resume_pending = None
                 state.interrupt_pending = False
+                state.retry_continue_pending = False
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
                     _release_held_lane(
@@ -333,6 +335,7 @@ async def run_change(
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
@@ -359,9 +362,11 @@ async def run_change(
                     state.step_attempt = 0
                     state.resume_pending = flat[target_idx].name
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
                 else:
                     state.resume_pending = None
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 

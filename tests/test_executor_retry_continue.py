@@ -173,3 +173,142 @@ async def test_backoff_respawn_receives_resume_should_continue(
     # Second drive (respawn after backoff): the union reads
     # retry_continue_pending with NO is_resume gate → True.
     assert provider.seen == [False, True]
+
+
+_A = (
+    "---\nname: a\ntools: [complete_step]\n"
+    "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+)
+_TWO_STEP_WF = (
+    "name: t\ndescription: t\ndefaults: {max_retries: 3, max_loops: 6}\n"
+    "phases:\n  - name: only\n    steps:\n"
+    "      - {name: s1, file: agents/a.md, tier: low}\n"
+    "      - {name: s2, file: agents/a.md, tier: low}\n"
+)
+_REV = (
+    "---\nname: rev\ntools: [complete_step]\n"
+    "output:\n  status: {type: enum, values: [Success, Error]}\n"
+    "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n"
+)
+_RESUME_GOTO_WF = (
+    "name: t\ndescription: t\ndefaults: {max_retries: 3, max_loops: 6}\n"
+    "phases:\n  - name: only\n    steps:\n"
+    "      - name: review\n        file: agents/rev.md\n        tier: low\n"
+    "        rules:\n"
+    "          - {if: {verdict: rework}, resume: review}\n"
+    "          - {else: true, continue: true}\n"
+)
+
+
+class _SuccessRunner:
+    async def run(self, invocation: Any) -> Any:
+        yield {"type": "agent_output",
+               "payload": {"outcome": "ok", "status": "Success"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _SuccessProvider:
+    name = "fake"
+    model = "m"
+
+    def create_runner(self, _inv: Any) -> _SuccessRunner:
+        return _SuccessRunner()
+
+
+class _ReworkRunner:
+    async def run(self, invocation: Any) -> Any:
+        yield {"type": "agent_output",
+               "payload": {"outcome": "ok", "status": "Success",
+                           "verdict": "rework"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _ReworkProvider:
+    name = "fake"
+    model = "m"
+
+    def create_runner(self, _inv: Any) -> _ReworkRunner:
+        return _ReworkRunner()
+
+
+@pytest.mark.anyio
+async def test_completion_clears_retry_continue_pending(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    _prov = _StallThenSucceedProvider(stalls=1)
+    provider_registry(
+        "fake", env_check=lambda: True,
+        factory=lambda _m: _prov)
+
+    async def _no_sleep(_delay: float, _coord: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    result = await run_change(change)
+    assert result is RunResult.COMPLETED
+    # The in-loop set left it True; the terminal Continue must clear it.
+    assert State.load(change.state_dir).retry_continue_pending is False
+
+
+@pytest.mark.anyio
+async def test_forward_advance_clears_retry_continue_pending(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
+    # Seed a stale True; the forward Continue (s1 → s2) must overwrite it.
+    s = State.load(change.state_dir)
+    s.retry_continue_pending = True
+    s.save(change.state_dir)
+
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _SuccessProvider())
+
+    def _on_event(e: dict) -> None:
+        if (e.get("type") == "step_completed"
+                and (e.get("payload") or {}).get("step") == "s1"):
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.step == "s2"                       # navigation applied first
+    assert state.retry_continue_pending is False    # Continue cleared it
+
+
+@pytest.mark.anyio
+async def test_resume_goto_clears_retry_continue_pending(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"rev.md": _REV}, workflow_yaml=_RESUME_GOTO_WF)
+    # Seed a stale True; the resume-Goto branch must overwrite it.
+    s = State.load(change.state_dir)
+    s.retry_continue_pending = True
+    s.save(change.state_dir)
+
+    from imp.cli.signals import InterruptCoordinator
+    coord = InterruptCoordinator()
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _ReworkProvider())
+
+    def _on_event(e: dict) -> None:
+        if (e.get("type") == "step_completed"
+                and (e.get("payload") or {}).get("step") == "review"):
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.step == "review"
+    assert state.resume_pending == "review"         # resume-goto target preserved
+    assert state.retry_continue_pending is False     # cleared at the resume-Goto branch
