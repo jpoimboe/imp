@@ -177,7 +177,7 @@ approval, instead of forcing every idea into the current change.
 ## Speak plainly
 
 The user reads only your prose; **never surface these internal terms** to them:
-`express`, `full`, `fast_path`, `chrome`, `materialize`, `transmute`, "phase 0",
+`express`, `full`, `fast_path`, `show_label`, `materialize`, `transmute`, "phase 0",
 or even "Change". Describe effects plainly instead ("I'll set this up and start
 building", "this is saved and you can come back to it").
 
