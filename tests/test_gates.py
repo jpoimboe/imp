@@ -345,3 +345,195 @@ def test_route_script_renders_command_template(tmp_path) -> None:
 
     anyio.run(main)
     assert (tmp_path / "rendered.txt").read_text().strip() == "abc123"
+
+
+def test_route_script_merges_declared_output_into_rules(tmp_path) -> None:
+    """A script writing its declared field to $IMP_OUTPUT makes that typed value
+    readable in rules alongside exit/stdout/stderr."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.expr import Name
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import OutputField, OutputSchema
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    schema = OutputSchema(
+        fields=(OutputField(name="task_total", type="int"),), source=loc())
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue(), muts=(("n", Name("task_total")),)),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command=r"""echo hi; printf '{"task_total": 5}' > "$IMP_OUTPUT" """,
+        output_schema=schema,
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={"n": 0}, route_label=None)
+        log = InMemoryEventLog()
+        action, _feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Continue)
+        assert state.vars["n"] == 5
+
+    anyio.run(main)
+
+
+def test_route_script_pauses_on_malformed_output(tmp_path) -> None:
+    """A declared output the script fails to satisfy (bad JSON) pauses the step
+    with the validation error as feedback, rather than exposing a partial dict."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import OutputField, OutputSchema
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    schema = OutputSchema(
+        fields=(OutputField(name="task_total", type="int"),), source=loc())
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command=r"""printf 'not json' > "$IMP_OUTPUT"; exit 0""",
+        output_schema=schema,
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Pause)
+        assert feedback is not None
+
+    anyio.run(main)
+
+
+def test_route_script_pauses_on_type_mismatch(tmp_path) -> None:
+    """A declared int field the script emits as a string fails schema validation
+    and pauses with step_completed + script_blocked events."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import OutputField, OutputSchema
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    schema = OutputSchema(
+        fields=(OutputField(name="task_total", type="int"),), source=loc())
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command=r"""printf '{"task_total": "nope"}' > "$IMP_OUTPUT"; exit 0""",
+        output_schema=schema,
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Pause)
+        assert feedback is not None
+        types_seen = [e["type"] for e in log.read()]
+        assert "step_completed" in types_seen
+        assert "script_blocked" in types_seen
+
+    anyio.run(main)
+
+
+def test_route_script_without_output_schema_unchanged(tmp_path) -> None:
+    """A script with no output: schema is byte-for-byte unchanged."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="plain", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo hi",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Continue)
+        assert feedback is None
+
+    anyio.run(main)
+
+
+def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> None:
+    """Temp $IMP_OUTPUT file is deleted even when run_script raises."""
+    import tempfile as _tempfile
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import OutputField, OutputSchema
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    schema = OutputSchema(
+        fields=(OutputField(name="task_total", type="int"),), source=loc())
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo hi",
+        output_schema=schema,
+    )
+    created: list[Path] = []
+    _original_mkstemp = _tempfile.mkstemp
+
+    def tracking_mkstemp(*args, **kwargs):
+        fd, name = _original_mkstemp(*args, **kwargs)
+        created.append(Path(name))
+        return fd, name
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with (
+            mock.patch("imp.engine.executor.run_script", side_effect=RuntimeError("timeout")),
+            mock.patch("tempfile.mkstemp", side_effect=tracking_mkstemp),
+            pytest.raises(RuntimeError, match="timeout"),
+        ):
+            await _route_script(step, change, state, log)
+        assert created, "expected temp file to be created"
+        assert not created[0].exists(), "temp file was not cleaned up after run_script raised"
+
+    anyio.run(main)

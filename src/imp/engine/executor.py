@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import json
 import os
 import shutil
+import tempfile
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from pathlib import Path
@@ -40,11 +42,13 @@ from imp.engine.backoff import (
 from imp.engine.change import Change
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
+from imp.engine.errors import LoadError
 from imp.engine.feedback import (
     format_script_feedback,
     render_output_fields,
 )
 from imp.engine.gates import (
+    RuleMatch,
     evaluate_rules,
     run_script,
 )
@@ -56,11 +60,13 @@ from imp.engine.sandbox import (
     resolve_policy,
     sandbox_available,
 )
+from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
     Continue,
     Goto,
+    OutputSchema,
     Pause,
     Retry,
     Step,
@@ -599,6 +605,28 @@ def _route_branch(
     return _finish(log, step, change, match, state)            # branch goto carries NO feedback
 
 
+class ScriptOutputError(Exception):
+    """A script with a declared output: failed to produce a valid $IMP_OUTPUT."""
+
+
+def _read_script_output(output_path: Path, schema: OutputSchema) -> dict[str, Any]:
+    try:
+        raw = output_path.read_text()
+    except OSError as e:
+        raise ScriptOutputError(f"script did not write $IMP_OUTPUT: {e}") from e
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ScriptOutputError(f"$IMP_OUTPUT is not valid JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise ScriptOutputError("$IMP_OUTPUT must be a JSON object")
+    try:
+        validate_agent_output(data, schema)
+    except LoadError as e:
+        raise ScriptOutputError(str(e)) from e
+    return {f.name: data[f.name] for f in schema.fields if f.name in data}
+
+
 async def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
     *, test_gates: TestGates | None = None,
@@ -621,15 +649,37 @@ async def _route_script(
     # signal receiver, the remote-channel poller), freezing the UI at
     # "running · 0s" until the command returns. Only the blocking wait moves off
     # the loop; the event emits stay on the loop thread (single terminal writer).
-    out = await anyio.to_thread.run_sync(
-        functools.partial(
-            run_script, step, cwd=change.workflow_dir,
-            env_extra=engine_env(project_root=change.project_root,
-                                 change_id=change.id,
-                                 change_title=change.title,
-                                 change_dir=change.change_dir,
-                                 test_gates=test_gates),
-            policy=sandbox_policy, command=command))
+    output_path = None
+    if step.output_schema is not None:
+        fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json")
+        os.close(fd)
+        output_path = Path(tmp)
+    try:
+        out = await anyio.to_thread.run_sync(
+            functools.partial(
+                run_script, step, cwd=change.workflow_dir,
+                env_extra=engine_env(project_root=change.project_root,
+                                     change_id=change.id,
+                                     change_title=change.title,
+                                     change_dir=change.change_dir,
+                                     output_path=output_path,
+                                     test_gates=test_gates),
+                policy=sandbox_policy, command=command))
+        if output_path is not None:
+            assert step.output_schema is not None
+            try:
+                out = {**out, **_read_script_output(output_path, step.output_schema)}
+            except ScriptOutputError as e:
+                _finish(log, step, change,
+                        RuleMatch(action=Pause(reason="script_blocked"),
+                                  rule=None, var_mutations={}), state)
+                _emit(log, "script_blocked", {
+                    "step": step.name, "exit": out["exit"],
+                    "stdout": out["stdout"], "stderr": str(e)})
+                return Pause(reason="script_blocked"), str(e), {}
+    finally:
+        if output_path is not None:
+            output_path.unlink(missing_ok=True)
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, change, match, state)
