@@ -543,7 +543,7 @@ class CodexAgentRunner:
                 # when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn,
-                    invocation.resumed_from_interrupt)
+                    invocation.resume_should_continue)
                 user_msg = Message(
                     role="user", content=(TextBlock(text=reply),))
                 elog.append_user_message(agent_id=aid, message=user_msg)

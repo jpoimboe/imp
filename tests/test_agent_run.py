@@ -1225,7 +1225,7 @@ async def test_drive_invocation_handoff_event_not_logged(tmp_path):
     assert log.calls == []
 
 
-def test_build_agent_invocation_threads_resumed_from_interrupt(
+def test_build_agent_invocation_threads_resume_should_continue(
     tmp_path: Path,
 ) -> None:
     from imp.engine.agent_run import build_agent_invocation
@@ -1239,12 +1239,12 @@ def test_build_agent_invocation_threads_resumed_from_interrupt(
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None,
-        resumed_from_interrupt=True)
+        resume_should_continue=True)
 
-    assert inv.resumed_from_interrupt is True
+    assert inv.resume_should_continue is True
 
 
-def test_build_agent_invocation_resumed_from_interrupt_defaults_false(
+def test_build_agent_invocation_resume_should_continue_defaults_false(
     tmp_path: Path,
 ) -> None:
     from imp.engine.agent_run import build_agent_invocation
@@ -1259,7 +1259,7 @@ def test_build_agent_invocation_resumed_from_interrupt_defaults_false(
         change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
-    assert inv.resumed_from_interrupt is False
+    assert inv.resume_should_continue is False
 
 
 class _OneInterjectCoord:
@@ -1291,7 +1291,7 @@ async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() ->
     coord = _RecordingCoord()  # drains no interjects
 
     async def _ainput(_q):
-        raise AssertionError("must not solicit when resumed_from_interrupt")
+        raise AssertionError("must not solicit when resume_should_continue")
 
     reply = await ar._resolve_wait_reply(coord, _ainput, True)
     assert reply == ar._CONTINUATION_NUDGE

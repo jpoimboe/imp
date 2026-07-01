@@ -364,19 +364,19 @@ _CONTINUATION_NUDGE = (
 async def _resolve_wait_reply(
     coordinator: Any,
     user_input_fn: Callable[[str], str | Awaitable[str]],
-    resumed_from_interrupt: bool = False,
+    resume_should_continue: bool = False,
 ) -> str:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume. Precedence:
     1. pending interject / --message present → drain+join and return it (a human
        spoke; wins).
-    2. else if resumed_from_interrupt → return the continuation nudge so a
-       headless resume continues the step imp interrupted, instead of soliciting.
+    2. else if resume_should_continue → return the continuation nudge so a
+       headless resume continues the step, instead of soliciting.
     3. else → solicit empty via user_input_fn (a genuine yield → park)."""
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
         return joined
-    if resumed_from_interrupt:
+    if resume_should_continue:
         return _CONTINUATION_NUDGE
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
@@ -466,7 +466,7 @@ def build_agent_invocation(
     retry_feedback: str | None = None,
     feedback_lead: str | None = None,
     balance_on_resume: bool = False,
-    resumed_from_interrupt: bool = False,
+    resume_should_continue: bool = False,
     log: Any = None,
     test_gates: TestGates | None = None,
     non_interactive: bool = False,
@@ -548,7 +548,7 @@ def build_agent_invocation(
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
-        resumed_from_interrupt=resumed_from_interrupt,
+        resume_should_continue=resume_should_continue,
         resolved_tiers=resolved_tiers,
         tiers=tiers,
         tier=tier,

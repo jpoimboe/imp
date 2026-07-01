@@ -4,7 +4,7 @@
 A mid-tool interrupt repairs the dangling call with a synthetic tool_result, so
 the resume classifies as SEND_TO_LLM (never AWAITING_USER) and the
 _resolve_wait_reply continuation nudge can't reach it. The providers append the
-same nudge as the trailing user turn when invocation.resumed_from_interrupt is
+same nudge as the trailing user turn when invocation.resume_should_continue is
 set and no human interject already drove continuation.
 """
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _seed_send_to_llm_transcript(inv_dir: Path) -> None:
 
 
 async def _run_anthropic(
-    tmp_path: Path, *, resumed_from_interrupt: bool, queued: list[str] | None,
+    tmp_path: Path, *, resume_should_continue: bool, queued: list[str] | None,
 ) -> list[str]:
     from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
@@ -112,7 +112,7 @@ async def _run_anthropic(
         agent_id="step:p/s",
         event_log=InMemoryEventLog(),
         coordinator=_Coord(queued),
-        resumed_from_interrupt=resumed_from_interrupt,
+        resume_should_continue=resume_should_continue,
     )
 
     events = [e async for e in runner.run(inv)]
@@ -137,7 +137,7 @@ async def test_anthropic_interrupt_resume_appends_continuation_nudge(
     tmp_path: Path,
 ) -> None:
     texts = await _run_anthropic(
-        tmp_path, resumed_from_interrupt=True, queued=None)
+        tmp_path, resume_should_continue=True, queued=None)
     assert texts.count(_CONTINUATION_NUDGE) == 1, texts
 
 
@@ -146,7 +146,7 @@ async def test_anthropic_non_interrupt_resume_omits_nudge(
     tmp_path: Path,
 ) -> None:
     texts = await _run_anthropic(
-        tmp_path, resumed_from_interrupt=False, queued=None)
+        tmp_path, resume_should_continue=False, queued=None)
     assert _CONTINUATION_NUDGE not in texts, texts
 
 
@@ -155,7 +155,7 @@ async def test_anthropic_interject_wins_over_interrupt_nudge(
     tmp_path: Path,
 ) -> None:
     texts = await _run_anthropic(
-        tmp_path, resumed_from_interrupt=True, queued=["human says continue"])
+        tmp_path, resume_should_continue=True, queued=["human says continue"])
     assert "human says continue" in texts, texts
     assert _CONTINUATION_NUDGE not in texts, texts
 
@@ -208,7 +208,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
         agent_id="step:p/s",
         event_log=InMemoryEventLog(),
         coordinator=_Coord(),
-        resumed_from_interrupt=True,
+        resume_should_continue=True,
     )
 
     events = [e async for e in runner.run(inv)]

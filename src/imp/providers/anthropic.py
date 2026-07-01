@@ -579,7 +579,7 @@ class AnthropicAgentRunner:
                 # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn,
-                    invocation.resumed_from_interrupt)
+                    invocation.resume_should_continue)
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
@@ -596,7 +596,7 @@ class AnthropicAgentRunner:
                 # resume continues the step instead of bare-turn-ending on a
                 # clarifying question. A drained human interject already drives
                 # continuation, so it wins (parity with AWAITING_USER).
-                if invocation.resumed_from_interrupt and drained == 0:
+                if invocation.resume_should_continue and drained == 0:
                     deliver_reply_on_resume(
                         messages, transcript, elog, aid,
                         _CONTINUATION_NUDGE)
