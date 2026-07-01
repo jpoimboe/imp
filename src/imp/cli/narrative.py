@@ -1069,6 +1069,7 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     self._open_sub_by_block.clear()
     self._open_sub_by_event.clear()
     self._resuming = True                # open the re-entry window
+    self._warnings_flushed = False       # let the next terminal flush a fresh summary
 
 
 NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused

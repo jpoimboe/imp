@@ -175,3 +175,29 @@ def test_pause_outcome_and_summary_land_at_workflow_root() -> None:
     si = kinds.index("WarningsSummaryNode")
     pi = kinds.index("PauseNode")
     assert si + 1 == pi  # summary directly above the pause outcome, both at root
+
+
+def _resumed(eid: str = "r") -> dict:
+    return {"id": eid, "agent_id": None, "type": "workflow_resumed", "payload": {}}
+
+
+def test_pause_resume_complete_shows_all_warnings_at_completion() -> None:
+    # resuming resets the flush latch so all warnings (pre-pause and post-resume)
+    # appear in the completion summary node, not just pre-pause ones.
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _warn("w1", "before"),
+        _paused(),
+        _resumed(),
+        _warn("w2", "after"),
+        _completed(),
+    ])
+    summaries = _summary_nodes(tree.root)
+    # pause produces one summary node, completion produces a second
+    assert len(summaries) == 2
+    completion_summary = summaries[1]
+    assert completion_summary.total == 2
+    msgs = [msg for msg, _ in completion_summary.lines]
+    assert "before" in msgs
+    assert "after" in msgs
