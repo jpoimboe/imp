@@ -257,3 +257,119 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # path never writes the store (its session_store is None), leaving the 2 seeds.
     entries = await store.load(skey)
     assert entries is not None and len(entries) >= 3, entries
+
+
+def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
+    """A complete_step-tail step resumed with a handback. The system prompt tells
+    the agent the prior work is recorded and the only remaining action is to call
+    complete_step again — no file reads."""
+    agent_def = AgentDef(
+        name="resumer", description="",
+        tools=frozenset({"complete_step", "read_file"}), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    return AgentInvocation(
+        agent_def=agent_def,
+        provider_name="claude_code", model_name=_MODEL,
+        system_prompt=(
+            completion_instruction(agent_def.output_schema)
+            + "\n\nYou are resuming a step you already finished. Your previous "
+            "complete_step was recorded. The feedback below is the only remaining "
+            "instruction. Do NOT call read_file. Acknowledge the feedback in one "
+            "sentence, then call complete_step with status=Success now."
+        ),
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        ),
+        transcript_dir=tmp_path / "step",
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=InMemoryEventLog(),
+    )
+
+
+@pytest.mark.skipif(
+    not opted_in("claude_code"),
+    reason="claude_code not in IMP_LIVE_PROVIDERS",
+)
+@pytest.mark.timeout(240)
+@pytest.mark.anyio
+async def test_complete_step_handback_native_resume(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert shutil.which("claude") is not None, (
+        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
+        "not found on PATH"
+    )
+    _init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
+    inv = _corrective_live_inv(tmp_path)
+    # Production gate/review handback: balance_on_resume + retry_feedback.
+    inv = replace(inv, balance_on_resume=True,
+                  retry_feedback="REVISE: confirm the work is done, then finish.")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    # Transcript ends on a SUCCESSFUL complete_step tool_use (no result).
+    msgs = [
+        Message(role="user", content=(TextBlock(text="Read a.txt, then finish."),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c0", name="complete_step",
+                         input={"status": "Success"}),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    # The store holds only the user turn the batcher flushed; the complete_step
+    # assistant turn is the unflushed tail reconciled before native resume.
+    await store.append(skey, message_to_session_records(
+        msgs[:1], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL, start_index=0))
+
+    # Spy on the first-query stream: the native path streams ONLY the handback
+    # (1 user turn). The success result rides the loaded session, not the delta.
+    streamed: list[list[Message]] = []
+    _orig_stream = claude_code._stream_history
+    monkeypatch.setattr(
+        claude_code, "_stream_history",
+        lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
+
+    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    events = [ev async for ev in runner.run(inv)]
+
+    # Native resume drove a real claude turn to completion (no deadlock, no 400).
+    assert events[-1]["type"] == "agent_output", events[-1]
+    assert not any(e["type"] == "error" for e in events), [
+        e for e in events if e["type"] == "error"]
+    # The handback is the single streamed delta turn (the success result is NOT here).
+    assert len(streamed) == 1, streamed
+    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
+    assert all(isinstance(b, TextBlock) for b in streamed[0][0].content)
+    assert "REVISE: confirm the work is done, then finish." in "".join(
+        b.text for b in streamed[0][0].content if isinstance(b, TextBlock))
+    # Zero re-execution: no read_file was issued on resume.
+    assert _read_file_call_count(inv.event_log) == 0
+    # The store was balanced before load: reconcile + overwrite wrote the
+    # complete_step assistant turn and the synthesized success-result user turn
+    # onto the single seed (the replay fallback never writes the store).
+    entries = await store.load(skey)
+    assert entries is not None and len(entries) >= 3, entries
+    # reconcile + overwrite writes exactly [seed user, complete_step assistant,
+    # synthesized success-result user] before load; the live turn the batcher
+    # flushes afterward appends past it, so target the stable reconciled index 2
+    # (the success-result user turn), not the drifting store tail.
+    reconciled = entries[2]
+    assert reconciled["message"]["role"] == "user"
+    assert any(
+        isinstance(b, dict) and b.get("type") == "tool_result"
+        and b.get("tool_use_id") == "c0" and b.get("is_error") is False
+        for b in reconciled["message"]["content"]), reconciled

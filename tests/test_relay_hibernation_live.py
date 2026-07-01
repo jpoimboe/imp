@@ -163,8 +163,11 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         # below). The steer gate renders INTERRUPT_STEER_HINT on the pty, so the
         # human can redirect or detach. Anchor on that hint, not "paused".
         s.send_signal(signal.SIGINT)
+        # The hint renders within a few seconds idle; the timeout is generous
+        # because under the full -n 4 live gate the render/event loop can be
+        # starved. It still requires the hint to appear — only tolerates lag.
         assert _poll(
-            lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=30.0
+            lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=60.0
         ), "interrupt-steer gate never rendered"
         daemon_pid = int(lock_path.read_text().strip())  # holder PID, read before detach
 
@@ -180,8 +183,8 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
             except PermissionError:
                 return False
 
-        assert _poll(_pid_gone, timeout=30.0), "daemon pid did not exit on detach"
-        assert _poll(lambda: _flock_free(lock_path), timeout=30.0), "flock not released"
+        assert _poll(_pid_gone, timeout=60.0), "daemon pid did not exit on detach"
+        assert _poll(lambda: _flock_free(lock_path), timeout=60.0), "flock not released"
         assert json.loads(state_path.read_text())["status"] == "paused"
     finally:
         s.close()

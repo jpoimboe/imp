@@ -258,6 +258,21 @@ def reconcile_store_tail(
     return kept + tail
 
 
+def store_reconcilable(
+    messages: list[Message], store_entries: list[dict[str, Any]] | None,
+) -> bool:
+    """True iff reconcile_store_tail can faithfully map the store body onto the
+    transcript. reconcile_store_tail assumes the store body's conversation turns
+    are a 1:1 PREFIX of the transcript messages; a body carrying MORE turns than
+    the transcript has drifted (a partial/corrupt transcript), so reconcile
+    cannot represent it as a loadable session and the resume must fall back to
+    stream-json replay. An absent/empty body is always reconcilable — it is
+    rebuilt wholly from the transcript.
+    """
+    kept = strip_trailing_error_turn(store_entries or [])
+    return _store_body_turn_count(kept) <= len(messages)
+
+
 def message_to_session_records(
     messages: list[Message], *, parent_uuid: str | None, session_id: str,
     cwd: str, model: str, start_index: int = 0,

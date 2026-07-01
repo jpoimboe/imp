@@ -13,6 +13,7 @@ from imp.agents.transcript import (
     build_resume_manifest,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
+    synthesize_native_success_on_resume,
 )
 from imp.engine.state import InMemoryEventLog
 
@@ -399,3 +400,55 @@ def test_deliver_reply_on_resume_appends_user_text_message(tmp_path: Path) -> No
 
     # Journaled as a user_message event.
     assert [e["type"] for e in log.read()] == ["user_message"]
+
+
+def test_synthesize_native_success_appends_result_only_no_notes(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="begin"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c0", name="complete_step",
+                         input={"status": "Success"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    elog = InMemoryEventLog()
+
+    injected = synthesize_native_success_on_resume(msgs, t, elog, "step:p/s")
+
+    # Exactly one new trailing user turn carrying a SUCCESS-shaped result.
+    assert injected is msgs[-1] and injected.role == "user"
+    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
+    texts = [b for b in injected.content if isinstance(b, TextBlock)]
+    assert len(results) == 1 and results[0].tool_use_id == "c0"
+    assert results[0].is_error is False
+    assert results[0].content == "previous step output recorded; resuming"
+    # NO durability note and NO feedback — the handback rides the streamed delta.
+    assert texts == []
+    # Persisted to disk and audit-logged exactly once as a user_message.
+    assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
+    assert [e["type"] for e in elog.read()] == ["user_message"]
+
+
+def test_synthesize_native_success_error_flavors_non_complete_step(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [Message(role="assistant", content=(
+        ToolUseBlock(id="b1", name="bash", input={"cmd": "x"}),))]
+    t.append(msgs[0])
+
+    injected = synthesize_native_success_on_resume(msgs, t, InMemoryEventLog(), "x")
+
+    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
+    assert len(results) == 1 and results[0].tool_use_id == "b1"
+    # A genuine non-complete_step interrupt is error-flavored, not "succeeded".
+    assert results[0].is_error is True
+    # No durability note / wrapper feedback on the error-flavored path either.
+    assert [b for b in injected.content if isinstance(b, TextBlock)] == []
+
+
+def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
+    t.append(msgs[0])
+    assert synthesize_native_success_on_resume(
+        msgs, t, InMemoryEventLog(), "x") is None

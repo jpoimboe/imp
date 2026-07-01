@@ -78,12 +78,13 @@ from imp.agents.tools.context import (
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
-    RESUME_MANIFEST_HEADER,
+    RESUME_REDO_NUDGE,
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
+    synthesize_native_success_on_resume,
 )
 from imp.engine.agent_run import (
     _INTERRUPT_CONTINUATION_NUDGE,
@@ -107,6 +108,7 @@ from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_store_for,
+    store_reconcilable,
 )
 from imp.providers.history_compaction import is_cold
 from imp.providers.message_eviction import apply_eviction, evicted_result_ids
@@ -310,11 +312,10 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
     """True when the transcript's last turn is an assistant turn whose tool_use is
     a `complete_step` awaiting its result.
 
-    This is the one resume shape where imp MUST balance the tail itself rather
-    than native-resume: claude-p's own pairing would inject an `is_error` result
-    for the dangling `complete_step`, telling the agent its already-accepted work
-    failed. `balance_success_on_resume` instead synthesizes a SUCCESS result, so
-    these resumes (backward goto / gate handback) stay on the replay path."""
+    This shape native-resumes: imp folds a SUCCESS result into the loaded session
+    via `synthesize_native_success_on_resume` (claude-p's own pairing would inject
+    an `is_error` for the dangling `complete_step`, telling the agent its
+    already-accepted work failed), and the handback rides the streamed delta."""
     last = messages[-1] if messages else None
     if last is None or last.role != "assistant":
         return False
@@ -1395,35 +1396,48 @@ class ClaudeCodeAgentRunner:
         # store before claude-p loads its native session. A genuinely DANGLING
         # tool_use likewise resumes natively (with a store) — claude-p's own pairing
         # injects the is_error placeholder, which is correct for an unfinished call.
-        # Only two cases stay on stream-json replay: a trailing complete_step
-        # (imp must inject a SUCCESS result, not the error one native pairing
-        # would give); and pending retry_feedback (the handback text must be
-        # co-located on the balancing user turn). A no-store resume no longer
-        # downgrades — the store is reconstructed from the transcript. The
-        # `balance_on_resume` flag does NOT by itself force replay — the executor
-        # sets it on every kept resume, so the actual selector is the tail shape.
+        # No resume shape stays on stream-json replay now: a trailing complete_step
+        # is balanced with a SUCCESS result inside the loaded session and the
+        # handback rides the streamed delta, and a no-store resume reconstructs the
+        # store from the transcript.
         store_body = await store.load(skey)
-        # Native resume is vetoed ONLY when imp must shape the tail itself rather
-        # than let claude-p resume its own session: a trailing `complete_step`
-        # (success-override balancing) or pending retry_feedback (gate-handback
-        # text co-located on the balancing turn). `balance_on_resume` alone does
-        # NOT veto — the executor sets it on every kept resume, so using it as the
-        # veto disabled native resume for the very SEND_TO_LLM/DANGLING shapes this
-        # path exists to serve.
-        needs_imp_balance = (
-            _tail_has_complete_step(existing)
-            or bool(invocation.retry_feedback)
-        )
+        # Every well-formed resume takes the native path. A trailing complete_step
+        # is balanced with a SUCCESS tool_result folded INTO the loaded session
+        # (synthesize_native_success_on_resume), so claude-p never auto-pairs an
+        # is_error; the handback (retry_feedback) rides the streamed delta. The
+        # store is reconstructed from the transcript when absent, so neither the
+        # complete_step tail nor retry_feedback forces stream-json replay.
         native_resume = (
             (not is_fresh)
-            and not needs_imp_balance
             and classify_resume(existing) in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
                 ResumeState.DANGLING_TOOL_USE)
+            and store_reconcilable(existing, store_body)
         )
+        if existing and not native_resume:
+            shape = classify_resume(existing)
+            native_eligible = shape in (
+                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
+                ResumeState.DANGLING_TOOL_USE)
+            reason = (
+                "resume shape is not native-eligible"
+                if not native_eligible
+                else "session store unreconstructable from transcript")
+            elog.append(
+                agent_id=aid, type="runner_warning",
+                payload={"message": (
+                    "claude_code resume fell back to stream-json replay "
+                    f"(shape={shape.value}): {reason}; native --resume unavailable."
+                )})
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
+        # Replay's delta base. Bound here (beside resume_base, OUTSIDE `if
+        # existing:`) so a fresh run — which never enters the resume block that
+        # rebinds it — still has the name defined; fresh streams the whole list.
+        # On the replay resume path it is REBOUND below to len(messages) AFTER
+        # tail-balancing, so the balance turn is excluded.
+        replay_stream_base = len(existing)
         # A SEND_TO_LLM tail needs the LLM to RESPOND to a trailing user turn,
         # but claude-p never generates from a loaded --resume session alone — it
         # blocks reading stdin for an input message. Folding that user turn into
@@ -1469,10 +1483,6 @@ class ClaudeCodeAgentRunner:
             tool_calls_used = 0  # per-invocation; never inherit history
             # ids for which repair synthesized placeholders — must not be named succeeded
             dangling_ids: set[str] = set()
-            # The user turn balance_success_on_resume appended (a synthetic
-            # tool_result and/or feedback), or None when it was a no-op. Gates the
-            # manifest below: skip it only when balance already put a turn last.
-            balanced_msg: Message | None = None
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Synthesize a placeholder tool_result so the tail is balanced and
             # emit `tool_result` events so `imp log` shows what the agent sees on
@@ -1483,20 +1493,66 @@ class ClaudeCodeAgentRunner:
             # streams as the delta (claude-p pairs the dangling call in the loaded
             # session and the result kicks the next turn).
             if invocation.balance_on_resume and not native_resume:
-                balanced_msg = balance_success_on_resume(
-                    messages, transcript, elog, aid,
-                    wrapper_text=invocation.retry_feedback)
+                # Balance the tail in the TRANSCRIPT (integrity), but drop the
+                # handback here — it is folded into the composed manifest turn
+                # below. Collect the error-flavored (genuinely interrupted) result
+                # ids so the manifest does not claim them succeeded.
+                balanced = balance_success_on_resume(messages, transcript, elog, aid)
+                if balanced is not None:
+                    dangling_ids.update(
+                        b.tool_use_id for b in balanced.content
+                        if isinstance(b, ToolResultBlock) and b.is_error)
             elif not native_resume:
                 synth = repair_dangling_tool_use_on_resume(messages, transcript)
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
-            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                synth = repair_dangling_tool_use_on_resume(messages, transcript)
-                if synth is not None:
-                    for rb in synth:
-                        elog.append_tool_result(agent_id=aid, block=rb)
+            else:
+                # Native tail-balancing. A trailing complete_step is balanced with
+                # a SUCCESS result folded INTO the loaded session (resume_base
+                # advances over it) so claude-p loads a balanced session and never
+                # auto-pairs an is_error; any other dangling tool_use keeps the
+                # placeholder repair (which streams as the delta and kicks the turn).
+                #
+                # Capture the tail shape BEFORE synthesis: synthesize_*/repair_*
+                # append a user turn to `messages` (which IS `existing`), so a
+                # later _tail_has_complete_step(existing) would see the new user
+                # tail and wrongly return False. The redo-nudge guard below depends
+                # on this captured boolean.
+                tail_is_complete_step = _tail_has_complete_step(existing)
+                if tail_is_complete_step:
+                    injected = synthesize_native_success_on_resume(
+                        messages, transcript, elog, aid)
+                    if injected is not None:
+                        resume_base += 1
+                elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
+                    synth = repair_dangling_tool_use_on_resume(messages, transcript)
+                    if synth is not None:
+                        for rb in synth:
+                            elog.append_tool_result(agent_id=aid, block=rb)
+                # The corrective handback rides the streamed delta, kept out of the
+                # loaded session — the same co-location SEND_TO_LLM uses for its
+                # trailing user turn. A bare backward goto to a completed step has
+                # no handback, so kick the otherwise-empty delta with a redo nudge.
+                # `classify_resume(existing)` in the feedback guard is robust to the
+                # synthesis mutation (post-append it is SEND_TO_LLM, never
+                # AWAITING_USER), but the redo-nudge branch MUST use the captured
+                # `tail_is_complete_step` — re-reading the tail here returns False.
+                if (invocation.retry_feedback
+                        and classify_resume(existing) is not ResumeState.AWAITING_USER):
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, invocation.retry_feedback)
+                elif not invocation.retry_feedback and tail_is_complete_step:
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            # Rebind the replay delta base to AFTER tail-balancing. Replay streams
+            # ONLY what is appended from here on (the composed manifest+handback
+            # turn, plus any AWAITING_USER reply / nudge) — never prior history or
+            # the tail-balancing turn, whose reconstructed tool_results pair prior
+            # tool_uses the delta-only stream omits (an orphaned tool_result 400s).
+            # Harmless on the native arm (which streams messages[resume_base:]).
+            replay_stream_base = len(messages)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE and not native_resume:
                 yield {"type": "error", "payload": {
@@ -1539,29 +1595,25 @@ class ClaudeCodeAgentRunner:
             if resume_state is not ResumeState.AWAITING_USER:
                 drained = drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
-            # ckx9f5: name prior tool calls succeeded so stream-json replay's
-            # placeholder errors don't trigger redo. Build on every replay
-            # (non-native) entry EXCEPT when balance_success_on_resume already
-            # appended a turn (`balanced_msg`) — a manifest after it would either
-            # bury the feedback or stack two user turns. Keyed on balanced_msg,
-            # not balance_on_resume: the executor sets the flag on every resume, so
-            # gating on it skipped the manifest for the whole production fallback.
-            if not native_resume and balanced_msg is None:
-                _last_user = next(
-                    (m for m in reversed(messages) if m.role == "user"), None)
-                _already_manifested = _last_user is not None and any(
-                    isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
-                    for b in _last_user.content
-                )
-                if not _already_manifested:
-                    manifest = build_resume_manifest(
-                        messages, exclude_tool_use_ids=frozenset(dangling_ids))
-                    if manifest is not None:
-                        manifest_msg = Message(
-                            role="user", content=(TextBlock(text=manifest),))
-                        messages.append(manifest_msg)
-                        transcript.append(manifest_msg)
-                        elog.append_user_message(agent_id=aid, message=manifest_msg)
+            # Faithful replay fallback: name every prior tool call SUCCEEDED so the
+            # replayed placeholder errors do not trigger a redo, and FOLD the
+            # handback into the SAME composed user turn (never a separate feedback
+            # turn). Built on every replay entry — the balance path included (the
+            # old balanced_msg gate skipped it for the gate-handback shape).
+            # Genuinely-dangling ids stay excluded so they are not claimed succeeded.
+            if not native_resume:
+                manifest = build_resume_manifest(
+                    messages, exclude_tool_use_ids=frozenset(dangling_ids))
+                blocks: list[TextBlock] = []
+                if manifest is not None:
+                    blocks.append(TextBlock(text=manifest))
+                if invocation.retry_feedback:
+                    blocks.append(TextBlock(text=invocation.retry_feedback))
+                if blocks:
+                    composed = Message(role="user", content=tuple(blocks))
+                    messages.append(composed)
+                    transcript.append(composed)
+                    elog.append_user_message(agent_id=aid, message=composed)
             # A mid-tool Ctrl-C resumes as SEND_TO_LLM/DANGLING (the dangling call
             # was repaired with a synthetic result), never AWAITING_USER, so the
             # _resolve_wait_reply nudge above can't reach it. Append the same
@@ -1574,6 +1626,11 @@ class ClaudeCodeAgentRunner:
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid,
                     _INTERRUPT_CONTINUATION_NUDGE)
+            # A delta-only replay stream must never be empty (a bare goto with no
+            # prior tools and no handback would otherwise stream nothing and hang).
+            if not native_resume and len(messages) == replay_stream_base:
+                deliver_reply_on_resume(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
         else:
             messages = []
             for m in invocation.initial_messages:
@@ -1685,7 +1742,7 @@ class ClaudeCodeAgentRunner:
             # receive_response() terminates after the first ResultMessage).
             next_query: Any = _stream_history(
                 apply_eviction(messages[resume_base:], evicted_ids)
-                if native_resume else messages)
+                if native_resume else messages[replay_stream_base:])
             from imp.engine.reincarnation import handoff_instruction, handoff_path_for
             from imp.providers.catalog import sdk_context_threshold_crossed
             # Tier A proactive-handoff watch state (Mechanism 3).

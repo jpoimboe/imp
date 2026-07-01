@@ -65,6 +65,12 @@ RESUME_MANIFEST_HEADER = (
     "on disk."
 )
 
+RESUME_REDO_NUDGE = (
+    "This step is resuming. Your previous output was recorded and is now "
+    "superseded; re-run the step from the current state and call complete_step "
+    "when the work is done."
+)
+
 _MANIFEST_WRITE_TOOLS = {"write_file", "edit_file"}
 
 
@@ -300,6 +306,47 @@ def balance_success_on_resume(
     if wrapper_text:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
+    messages.append(injected)
+    transcript.append(injected)
+    elog.append_user_message(agent_id=agent_id, message=injected)
+    return injected
+
+
+def synthesize_native_success_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str,
+) -> Message | None:
+    """Balance a trailing complete_step tool_use for NATIVE corrective resume.
+
+    The targeted step's transcript ends with a SUCCESSFUL complete_step tool_use
+    (no tool_result). Synthesize a non-error, success-shaped result and append it
+    as a NEW user turn so the loaded native session is balanced — no dangling
+    tool_use for claude-p to auto-pair with an is_error placeholder. Unlike
+    balance_success_on_resume this adds NO durability note and NO wrapper feedback:
+    the result is genuinely in the faithful loaded session, and the handback rides
+    the streamed delta. Any other trailing tool_use is a real interruption and gets
+    error-flavored content. Returns the appended Message, or None when the tail
+    carries no tool_use to balance.
+    """
+    last = messages[-1] if messages else None
+    tool_uses = (
+        [b for b in last.content if isinstance(b, ToolUseBlock)]
+        if last is not None and last.role == "assistant" else []
+    )
+    result_blocks: list[ToolResultBlock] = []
+    for tu in tool_uses:
+        if tu.name == "complete_step":
+            result_blocks.append(ToolResultBlock(
+                tool_use_id=tu.id,
+                content="previous step output recorded; resuming",
+                is_error=False))
+        else:
+            result_blocks.append(ToolResultBlock(
+                tool_use_id=tu.id,
+                content=_synthetic_tool_result_content(tu.name), is_error=True))
+    if not result_blocks:
+        return None
+    injected = Message(role="user", content=tuple(result_blocks))
     messages.append(injected)
     transcript.append(injected)
     elog.append_user_message(agent_id=agent_id, message=injected)
