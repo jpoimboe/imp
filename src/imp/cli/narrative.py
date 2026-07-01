@@ -1657,6 +1657,7 @@ def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     detail = stderr
     if stdout:
         detail = f"{detail}\n{stdout}" if detail else stdout
+    detail = _truncate(detail)
     self._append(ErrorNode(
         message=f"{step} blocked{suffix}", category="script",
         is_warning=False, detail=detail))

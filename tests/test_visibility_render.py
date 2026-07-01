@@ -98,6 +98,20 @@ def test_frame_suppressed_false_on_pause_outcome() -> None:
     assert frame_suppressed(node) is False
 
 
+def test_script_blocked_reveal_is_length_bounded() -> None:
+    big = "L" + ("x" * 6000) + "R"
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="verify", kind="script", phase="implement",
+           show_label=False),
+        ev("3", "script_blocked", step="verify", exit=1, stdout="", stderr=big),
+        ev("4", "step_completed", step="verify", kind="script",
+           action={"verb": "pause"}, var_mutations={}),
+    ]
+    body = "\n".join(render_tree(nv.build_tree(events), full=False, color=False, width=80))
+    assert "lines truncated" in body     # _truncate head+tail marker present
+
+
 def test_script_output_renders_bullet_message_under_step() -> None:
     events = [
         ev("1", "change_created", change_id=1, title="x"),
