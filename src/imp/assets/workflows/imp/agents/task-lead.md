@@ -255,7 +255,7 @@ unimplemented task, or the re-opened task from injected feedback):
 ## Verify triage — tolerated failures
 
 <!-- SYNCED PAIR (task-lead ↔ deferred-sweep): keep this Verify triage block in lockstep
-with deferred-sweep.md's identical block (and vice-versa). The toleration JUDGMENT is
+with deferred-sweep.md's corresponding block (and vice-versa). The toleration JUDGMENT is
 uniform; only the fix path differs (you fix in task context with a fixup; deferred-sweep
 fixes in sweep context with a plain commit). -->
 
