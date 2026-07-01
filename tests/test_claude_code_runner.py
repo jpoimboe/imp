@@ -2364,6 +2364,65 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    dispatch = Message(role="user", content=(TextBlock(text="DISPATCH"),))
+    transcript_path = inv.transcript_dir / "transcript.jsonl"
+
+    def factory_of(created: list) -> Any:
+        def factory(opts: Any) -> FakeClaudeSDKClient:
+            c = FakeClaudeSDKClient(opts, scripted_messages=[
+                assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+                result(),
+            ])
+            created.append(c)
+            return c
+        return factory
+
+    # Simulate N backoff respawns. Before each, the executor's rollback brings the
+    # transcript back to the dispatch-only tail (reset it here), and the store has
+    # re-accumulated an extra stale copy (as a growing claude-p session would).
+    # Each respawn must truncate the store back and stream exactly one copy.
+    for cycle in range(1, 4):
+        transcript_path.unlink(missing_ok=True)
+        Transcript(transcript_path).append(dispatch)
+
+        stale = message_to_session_records(
+            [dispatch] * cycle, parent_uuid=None, session_id=skey["session_id"],
+            cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0)
+        await store.append(skey, stale)
+
+        # Guard: the store really holds the stale body before the runner empties it.
+        assert await store.load(skey) is not None
+
+        created: list[FakeClaudeSDKClient] = []
+        runner = ClaudeCodeAgentRunner(
+            model_name="claude-sonnet-4-5", client_factory=factory_of(created))
+        [ev async for ev in runner.run(inv)]
+
+        # Fresh-stream disposition (Task 2): no resume= onto the emptied store.
+        assert created[0].opts.resume is None
+        # The store is truncated to the empty message prefix — it never grows.
+        assert await store.load(skey) is None
+        # The streamed delta is exactly one copy of the history each respawn.
+        streamed = created[0].queries[0]
+        assert len(streamed) == 1 and streamed[0]["type"] == "user"
+        # All-TextBlock user turn -> plain string content (see _join_text).
+        assert streamed[0]["message"]["content"] == "DISPATCH"
+
+
+@pytest.mark.anyio
 async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
