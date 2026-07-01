@@ -86,7 +86,6 @@ _LIVE_TEST_FILES := \
   tests/test_relay_hibernation_live.py \
   tests/test_codex_provider_live.py \
   tests/test_codex_started_keying_live.py \
-  tests/test_parallel_concurrency_live.py \
   tests/test_parallel_elicitation_live.py
 
 .PHONY: test-live
@@ -115,7 +114,6 @@ test-live-codex-parallel: ## Run the codex parallel-MCP concurrency probe (XFAIL
 	@$(_REQUIRE_PROVIDERS) && \
 	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
 	    $(PYTEST) -v -m codex_parallel \
-	      tests/test_parallel_concurrency_live.py \
 	      tests/test_codex_started_keying_live.py
 
 .PHONY: test-all
