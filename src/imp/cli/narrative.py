@@ -125,6 +125,8 @@ class StepNode:
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     quiet: bool = False                # the step_started.payload.quiet flag
+    show_label: bool = True            # step frame (header + breadcrumb) shown
+    show_output: bool = False          # surface a script's stdout as a • message
     position_label: bool = False       # step label is a position counter, not a verb
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
@@ -967,6 +969,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.agent_output = None
                 existing.command = p.get("command")
                 existing.chrome = p.get("chrome")
+                existing.show_label = bool(p.get("show_label", True))
+                existing.show_output = bool(p.get("show_output", False))
                 existing.phase_label = p.get("phase_label")
                 existing.route_label = p.get("route_label")
                 existing.rotate_phrase = bool(p.get("rotate_phrase", False))
@@ -984,6 +988,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
                     quiet=bool(p.get("quiet", False)),
+                    show_label=bool(p.get("show_label", True)),
+                    show_output=bool(p.get("show_output", False)),
                     position_label=bool(p.get("position_label", False)),
                     label=p.get("label"),
                     chrome=p.get("chrome"),
