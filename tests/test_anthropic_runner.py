@@ -1057,3 +1057,197 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
     assert yielded[-1]["payload"] == {"text": "the conclusion"}
     # Short-circuited before the loop: no model call happened.
     assert not any(e["type"] == "llm_response" for e in log.read())
+
+
+@pytest.mark.anyio
+async def test_medium_tier_request_carries_adaptive_thinking_and_effort(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), tier="medium")
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert call["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert call["output_config"] == {"effort": "high"}
+
+
+@pytest.mark.anyio
+async def test_high_tier_request_carries_adaptive_thinking_and_effort(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), tier="high")
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert call["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert call["output_config"] == {"effort": "high"}
+
+
+@pytest.mark.anyio
+async def test_low_tier_request_omits_thinking_and_output_config(tmp_path: Path) -> None:
+    import dataclasses
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="haiku",
+                                  client_factory=lambda: fake)
+    inv = dataclasses.replace(_inv(tmp_path), tier="low")
+    async for _ in runner.run(inv):
+        pass
+    call = fake.messages.calls[0]
+    assert "thinking" not in call
+    assert "output_config" not in call
+
+
+@pytest.mark.anyio
+async def test_none_tier_request_omits_thinking_and_output_config(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="sonnet",
+                                  client_factory=lambda: fake)
+    # _inv() leaves tier unset (None); None is treated as low (posture off).
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+    call = fake.messages.calls[0]
+    assert "thinking" not in call
+    assert "output_config" not in call
+
+
+@pytest.mark.anyio
+async def test_request_max_tokens_from_catalog_opus(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+    assert fake.messages.calls[0]["max_tokens"] == 64_000
+
+
+@pytest.mark.anyio
+async def test_request_max_tokens_dated_id_falls_to_default(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    # A dated id misses the alias table and resolves to the 32000 default.
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+    assert fake.messages.calls[0]["max_tokens"] == 32_000
+
+
+@pytest.mark.anyio
+async def test_step_context_audit_records_catalog_max_tokens(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+    sc = next(e for e in log.read() if e["type"] == "step_context")
+    assert sc["payload"]["params"]["max_tokens"] == 64_000
+
+
+@pytest.mark.anyio
+async def test_max_tokens_truncation_emits_event_and_warning(tmp_path: Path) -> None:
+    from dataclasses import replace
+    fake = FakeAsyncAnthropic([response(
+        text("partial answer"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        stop_reason="max_tokens",
+        usage={"input_tokens": 12, "output_tokens": 64000,
+               "output_tokens_details": {"thinking_tokens": 5000}},
+    )])
+    log = InMemoryEventLog()
+    # Use the "opus" alias (catalog max_output_tokens=64000) rather than a dated
+    # id: a dated id misses the ANTHROPIC alias table and falls through to
+    # _DEFAULT's 32000, which coincidentally equals sonnet's ceiling — so the
+    # max_tokens assertion could not distinguish catalog-value-flowed-through from
+    # default-used. 64000 is distinct from the 32000 default, making the field
+    # genuinely falsifiable.
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), tier="high")
+    async for _ in runner.run(inv):
+        pass
+
+    trunc = [e for e in log.read() if e["type"] == "max_tokens_truncated"]
+    assert len(trunc) == 1
+    assert trunc[0]["agent_id"] == "step:p/s"
+    assert trunc[0]["payload"] == {
+        "tier": "high",
+        "model": "opus",
+        "max_tokens": 64000,
+        "output_tokens": 64000,
+        "thinking_tokens": 5000,
+    }
+    warns = [e for e in log.read() if e["type"] == "runner_warning"]
+    assert any("max_tokens" in w["payload"]["message"] for w in warns)
+    assert any("thinking may be incomplete" in w["payload"]["message"] for w in warns)
+
+
+@pytest.mark.anyio
+async def test_max_tokens_truncation_thinking_tokens_none_without_details(tmp_path: Path) -> None:
+    from dataclasses import replace
+    fake = FakeAsyncAnthropic([response(
+        text("partial answer"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        stop_reason="max_tokens",
+        usage={"input_tokens": 12, "output_tokens": 64000},
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="opus",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), tier="high")
+    async for _ in runner.run(inv):
+        pass
+
+    trunc = [e for e in log.read() if e["type"] == "max_tokens_truncated"]
+    assert len(trunc) == 1
+    assert trunc[0]["payload"]["thinking_tokens"] is None
+    assert trunc[0]["payload"]["output_tokens"] == 64000
+    warns = [e for e in log.read() if e["type"] == "runner_warning"]
+    assert len(warns) >= 1
+    assert not any("thinking may be incomplete" in w["payload"]["message"] for w in warns)
+
+
+@pytest.mark.anyio
+async def test_no_truncation_event_on_normal_stop(tmp_path: Path) -> None:
+    from dataclasses import replace
+    fake = FakeAsyncAnthropic([response(
+        text("done"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+        stop_reason="end_turn",
+        usage={"input_tokens": 5, "output_tokens": 10},
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log), tier="high")
+    async for _ in runner.run(inv):
+        pass
+
+    assert not [e for e in log.read() if e["type"] == "max_tokens_truncated"]
+    # A clean end_turn must not raise the cap warning.
+    warns = [e for e in log.read() if e["type"] == "runner_warning"]
+    assert not any("max_tokens" in w["payload"]["message"] for w in warns)

@@ -588,15 +588,15 @@ async def test_on_event_stream_equals_disk(tmp_path: Path) -> None:
 # ── Test 6: parse_message round-trips thinking + signature block order ────────
 
 def test_parse_message_round_trips_thinking_signature_blockorder() -> None:
-    """parse_message preserves tool_use block order and drops thinking blocks
-    from the reconstructed Message (thinking is render-only).
+    """parse_message preserves tool_use block order and PRESERVES the signed
+    thinking block (with its signature) in the reconstructed Message.
 
     FULL implementation: complete as specified.
     """
     from imp.engine.replay import parse_message
 
     raw = {"content": [
-        {"type": "thinking", "thinking": "reasoning"},
+        {"type": "thinking", "thinking": "reasoning", "signature": "sig-9"},
         {"type": "text", "text": "ans"},
         {"type": "tool_use", "id": "t1", "name": "a", "input": {}},
         {"type": "tool_use", "id": "t2", "name": "b", "input": {}},
@@ -610,10 +610,9 @@ def test_parse_message_round_trips_thinking_signature_blockorder() -> None:
         f"tool_use block order not preserved: {names}"
     )
 
-    # Thinking block must NOT appear in the reconstructed Message
-    assert all(getattr(b, "type", "") != "thinking" for b in msg.content), (
-        "thinking block should not appear in reconstructed Message"
-    )
+    # The signed thinking block is PRESERVED, leading the turn, signature intact.
+    from imp.agents.runner import ThinkingBlock
+    assert msg.content[0] == ThinkingBlock(thinking="reasoning", signature="sig-9")
 
     # OpenAI path: simple text-only response (Responses output[] shape).
     oraw = {"output": [{

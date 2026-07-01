@@ -20,6 +20,7 @@ from imp.agents.runner import (
     Diagnostics,
     Message,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -94,7 +95,9 @@ def _drop_trailing_dangling_tool_use(
     )
     if kept == last.content:
         return msgs
-    if not kept:
+    # A turn left with only thinking blocks (no text, no tool_use) is not a
+    # valid resend turn — drop it whole, as for a fully emptied turn.
+    if not any(not isinstance(b, ThinkingBlock) for b in kept):
         return msgs[:-1]
     return [*msgs[:-1], Message(role="assistant", content=kept)]
 

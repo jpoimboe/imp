@@ -199,6 +199,18 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
     assert "Invalid API key" in payload["message"]
 
 
+def test_real_sdk_accepts_thinking_and_output_config() -> None:
+    """Guard: the kwarg-capture tests use a fake that swallows **kwargs. This
+    pins the real anthropic SDK contract the posture depends on."""
+    import inspect
+
+    from anthropic.resources.messages import AsyncMessages
+
+    params = inspect.signature(AsyncMessages.create).parameters
+    assert "thinking" in params
+    assert "output_config" in params
+
+
 def test_real_sdk_accepts_cache_control() -> None:
     """Guard: the kwarg-capture test uses a fake that swallows **kwargs.
     This pins the real anthropic SDK contract our runner depends on."""
@@ -208,6 +220,15 @@ def test_real_sdk_accepts_cache_control() -> None:
 
     params = inspect.signature(AsyncMessages.create).parameters
     assert "cache_control" in params
+
+
+def test_no_hardcoded_8192_max_tokens_in_provider() -> None:
+    """max_tokens is catalog-derived; no flat 8192 literal remains."""
+    import inspect
+
+    import imp.providers.anthropic as anthropic_mod
+
+    assert "8192" not in inspect.getsource(anthropic_mod)
 
 
 @pytest.fixture

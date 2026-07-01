@@ -34,6 +34,7 @@ from imp.agents.runner import (
     Event,
     Message,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -59,6 +60,7 @@ from imp.engine.agent_run import (
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
 from imp.providers.base import Provider
+from imp.providers.catalog import ANTHROPIC, model_info
 from imp.providers.history_compaction import is_cold
 from imp.providers.message_eviction import apply_eviction, evicted_result_ids
 from imp.providers.resolve import spawn_subagent_via_registry
@@ -126,6 +128,20 @@ def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
     raise exc
 
 
+def _anthropic_thinking_posture(tier: str | None) -> dict[str, Any]:
+    """Per-tier thinking/output_config request kwargs, pinned identically across
+    providers. Empty for low/None (thinking off, the prior default); adaptive at
+    effort 'high' for medium/high so both thinking tiers run one fixed posture.
+    `display: "summarized"` keeps thinking text readable for imp's thinking events.
+    """
+    if tier in ("medium", "high"):
+        return {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        }
+    return {}
+
+
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     """Build the per-step tool dict.
 
@@ -178,7 +194,14 @@ def _anthropic_tool_schema(t: Tool) -> dict[str, Any]:
 def _message_to_anthropic(msg: Message) -> dict[str, Any]:
     content: list[dict[str, Any]] = []
     for b in msg.content:
-        if isinstance(b, TextBlock):
+        if isinstance(b, ThinkingBlock):
+            if b.redacted_thinking is not None:
+                content.append({"type": "redacted_thinking",
+                                "data": b.redacted_thinking})
+            else:
+                content.append({"type": "thinking", "thinking": b.thinking,
+                                "signature": b.signature})
+        elif isinstance(b, TextBlock):
             content.append({"type": "text", "text": b.text})
         elif isinstance(b, ToolUseBlock):
             content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
@@ -211,7 +234,11 @@ def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
                             "name": block.name, "input": block.input})
         elif kind == "thinking":
             content.append({"type": "thinking",
-                            "thinking": getattr(block, "thinking", "")})
+                            "thinking": getattr(block, "thinking", ""),
+                            "signature": getattr(block, "signature", "")})
+        elif kind == "redacted_thinking":
+            content.append({"type": "redacted_thinking",
+                            "data": getattr(block, "data", "")})
         else:
             content.append({"type": str(kind)})
     return {
@@ -238,7 +265,9 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
 
 def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
     """raw → assistant Message. Reconstruction-critical; shared with replay.py.
-    Thinking + unknown blocks are dropped (they're not conversation history)."""
+    Thinking blocks (signed + redacted) are PRESERVED as ThinkingBlocks so a
+    tool-use turn carrying thinking replays unchanged; unknown blocks are
+    dropped (they're not conversation history)."""
     content: list[Any] = []
     for block in raw.get("content", []):
         kind = block.get("type")
@@ -247,7 +276,14 @@ def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
         elif kind == "tool_use":
             content.append(ToolUseBlock(id=block["id"], name=block["name"],
                                         input=block.get("input", {})))
-        # thinking + unknown: skipped (see diagnostics)
+        elif kind == "thinking":
+            content.append(ThinkingBlock(
+                thinking=block.get("thinking", ""),
+                signature=block.get("signature", ""),
+            ))
+        elif kind == "redacted_thinking":
+            content.append(ThinkingBlock(redacted_thinking=block.get("data", "")))
+        # other unknown blocks: skipped (see diagnostics)
     return Message(role="assistant", content=tuple(content))
 
 
@@ -259,7 +295,7 @@ def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     thinkings: list[str] = []
     for block in raw.get("content", []):
         kind = block.get("type")
-        if kind in ("text", "tool_use"):
+        if kind in ("text", "tool_use", "redacted_thinking"):
             continue
         if kind in _WEB_BLOCK_TYPES:
             # Surfaced as normalized web events by _emit_anthropic_web_events
@@ -455,6 +491,7 @@ class AnthropicAgentRunner:
         from imp.engine.state import JsonlEventLog
         elog = invocation.event_log or JsonlEventLog(invocation.events_path)
         aid = invocation.agent_id or "step:unnamed"
+        max_output_tokens = model_info(ANTHROPIC, self.model).max_output_tokens
 
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
@@ -578,7 +615,7 @@ class AnthropicAgentRunner:
                 provider=invocation.provider_name, model=self.model,
                 system_prompt=invocation.system_prompt,
                 tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
-                params={"max_tokens": 8192},
+                params={"max_tokens": max_output_tokens},
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
@@ -621,7 +658,7 @@ class AnthropicAgentRunner:
                     _message_to_anthropic(m)
                     for m in apply_eviction(messages, evicted_ids)
                 ],
-                max_tokens=8192,
+                max_tokens=max_output_tokens,
                 cache_control={"type": "ephemeral"},
                 # §4: explicitly PERMIT parallel tool calls per assistant message
                 # so multiple `task` tus can arrive in one turn. Unconditional and
@@ -631,6 +668,7 @@ class AnthropicAgentRunner:
                 # tool_choice must compose disable_parallel_tool_use deliberately.
                 tool_choice={"type": "auto", "disable_parallel_tool_use": False},
             )
+            create_kwargs.update(_anthropic_thinking_posture(invocation.tier))
             if web_headers:
                 create_kwargs["extra_headers"] = web_headers
             # N4 race note: if interrupt() lands AFTER `while not self._cancel`
@@ -681,6 +719,28 @@ class AnthropicAgentRunner:
                 context_tokens=context_tokens_from_usage(usage),
                 request_id=request_id,
                 duration_ms=(time.perf_counter() - _t0) * 1000.0)
+            if raw.get("stop_reason") == "max_tokens":
+                details = usage.get("output_tokens_details") or {}
+                model_name = raw.get("model") or self.model
+                thinking_tokens = details.get("thinking_tokens")
+                elog.append(agent_id=aid, type="max_tokens_truncated", payload={
+                    "tier": invocation.tier,
+                    "model": model_name,
+                    "max_tokens": max_output_tokens,
+                    "output_tokens": usage.get("output_tokens"),
+                    "thinking_tokens": thinking_tokens,
+                })
+                _thinking_note = (
+                    "; thinking may be incomplete" if thinking_tokens is not None else ""
+                )
+                elog.append(agent_id=aid, type="runner_warning", payload={
+                    "message": (
+                        f"Response truncated at the {max_output_tokens}-token "
+                        f"output cap (stop_reason=max_tokens, tier="
+                        f"{invocation.tier}){_thinking_note}. No "
+                        f"retry — raise max_tokens if this recurs."
+                    ),
+                })
             _emit_anthropic_web_events(raw, elog, aid)
             # Post-API sweep + heartbeat (Decision 10): the model-API call is
             # the longest awaitable with no registry access — sweeping here

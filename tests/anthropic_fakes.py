@@ -122,7 +122,18 @@ def response(*blocks: Any, stop_reason: str = "tool_use",
 class FakeThinkingBlock:
     type: str  # "thinking"
     thinking: str
+    signature: str = ""
 
 
-def thinking(text: str) -> FakeThinkingBlock:
-    return FakeThinkingBlock(type="thinking", thinking=text)
+@dataclass
+class FakeRedactedThinkingBlock:
+    type: str  # "redacted_thinking"
+    data: str
+
+
+def thinking(text: str, signature: str = "") -> FakeThinkingBlock:
+    return FakeThinkingBlock(type="thinking", thinking=text, signature=signature)
+
+
+def redacted_thinking(data: str) -> FakeRedactedThinkingBlock:
+    return FakeRedactedThinkingBlock(type="redacted_thinking", data=data)

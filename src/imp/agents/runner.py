@@ -47,7 +47,19 @@ class ToolResultBlock:
         object.__setattr__(self, "is_error", bool(self.is_error))
 
 
-ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
+@dataclass(frozen=True, slots=True)
+class ThinkingBlock:
+    # Anthropic extended-thinking block. Replayed unchanged (with its encrypted
+    # `signature`) so a tool-use turn carrying thinking is accepted on resend.
+    # `redacted_thinking` holds the base64 payload of the rare safety-redacted
+    # variant (wire type "redacted_thinking"); None for an ordinary block.
+    thinking: str = ""
+    signature: str = ""
+    redacted_thinking: str | None = None
+    type: Literal["thinking"] = "thinking"
+
+
+ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +219,9 @@ def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
         return {"type": "text", "text": b.text}
     if isinstance(b, ToolUseBlock):
         return {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+    if isinstance(b, ThinkingBlock):
+        return {"type": "thinking", "thinking": b.thinking,
+                "signature": b.signature, "redacted_thinking": b.redacted_thinking}
     return {
         "type": "tool_result", "tool_use_id": b.tool_use_id,
         "content": b.content, "is_error": b.is_error,
@@ -226,6 +241,12 @@ def message_from_json(data: dict[str, Any]) -> Message:
                 tool_use_id=raw["tool_use_id"],
                 content=raw["content"],
                 is_error=raw.get("is_error", False),
+            ))
+        elif kind == "thinking":
+            blocks.append(ThinkingBlock(
+                thinking=raw.get("thinking", ""),
+                signature=raw.get("signature", ""),
+                redacted_thinking=raw.get("redacted_thinking"),
             ))
         else:
             raise ValueError(f"unknown block type {kind!r}")
