@@ -27,8 +27,10 @@ def try_acquire(control_root: Path, n: int) -> int | None:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return fd
-        except BlockingIOError:
+        except OSError as exc:
             os.close(fd)
+            if not isinstance(exc, BlockingIOError):
+                raise
     return None
 
 
@@ -38,7 +40,11 @@ def acquire_blocking(control_root: Path, n: int) -> int:
     if fd is not None:
         return fd
     fd = _open_slot(control_root, 1)
-    fcntl.flock(fd, fcntl.LOCK_EX)   # blocks until slot-1 frees
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)   # blocks until slot-1 frees
+    except OSError:
+        os.close(fd)
+        raise
     return fd
 
 
