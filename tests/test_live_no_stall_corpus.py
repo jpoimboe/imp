@@ -99,7 +99,7 @@ def test_no_completed_step_is_withheld_from_live_view(path: Path) -> None:
     # and its conclusion must be on screen — withholding it means a stalled cursor.
     non_quiet = {
         e["payload"]["step"] for e in events
-        if e.get("type") == "step_started" and not e["payload"].get("quiet")
+        if e.get("type") == "step_started" and e["payload"].get("show_label", True)
     }
     completed_before_open = {
         e["payload"].get("step") for i, e in enumerate(events)
@@ -151,7 +151,7 @@ def test_dropped_first_step_started_still_renders_later_headers(path: Path) -> N
     last_start_i = starts[-1]
     non_quiet = {
         e["payload"]["step"] for e in skip
-        if e.get("type") == "step_started" and not e["payload"].get("quiet")
+        if e.get("type") == "step_started" and e["payload"].get("show_label", True)
     }
     completed_before_open = {
         e["payload"].get("step") for i, e in enumerate(skip)
