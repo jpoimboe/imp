@@ -348,6 +348,15 @@ async def dispatch_task(
                     raise SubagentSuspended(
                         f"{detail} during subagent backoff (category={category})")
                 backoff += 1
+                # Surface the subagent backoff so a self-healed retry isn't silent.
+                if ctx.event_log is not None:
+                    ctx.event_log.append(
+                        agent_id=sub_inv.agent_id, type="agent_retry",
+                        payload={
+                            "category": category,
+                            "attempt": backoff,
+                            "backoff_seconds": result.delay,
+                        })
                 await _interruptible_sleep(result.delay, ctx.coordinator)
                 cumulative_backoff += result.delay
                 if ctx.coordinator is not None and ctx.coordinator.should_pause:
