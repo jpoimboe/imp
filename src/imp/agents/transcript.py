@@ -35,7 +35,20 @@ from imp.agents.runner import (
 if TYPE_CHECKING:
     from imp.engine.state import EventLog
 
-RESUME_SUPERSEDED_NOTE = "previous step output recorded; superseded by the feedback below"
+# Frames rework feedback carried AS an is_error complete_step tool_result on
+# resume, so the model reads it as a revision request (not a system failure) and
+# re-runs the step. Used by balance_success_on_resume (anthropic/openai and the
+# claude_code replay path) and by repair_dangling_tool_use_on_resume (the
+# claude_code native rework delta, Task 2). Also the model-facing resume
+# recognition cue taught in the plan-writer/spec-finalizer prompt assets, so it
+# is a SINGLE unbroken line (no embedded newlines) for verbatim prompt-embedding
+# and the test_confirm_gate_prompts substring guard; call sites join it to the
+# feedback with `+ "\n\n" +`.
+REWORK_RESULT_FRAME = (
+    "[revision required] Your previous complete_step output was recorded, then "
+    "sent back for revision — this is NOT a system failure. Address the feedback "
+    "below and re-run the step; call complete_step again when the work is done."
+)
 
 RESUME_CONTINUE_NUDGE = (
     "You stopped before calling complete_step. Continue exactly where you left "
@@ -269,10 +282,13 @@ def balance_success_on_resume(
     tool_use (no tool_result). Synthesize a NON-error, success-shaped result for
     it (the repair helper's is_error=True 'interrupted' content would tell the
     agent its own accepted work failed). Any *other* trailing tool_use is a real
-    interruption and gets error-flavored content. When `wrapper_text` is given,
-    it rides on the SAME user message (Anthropic role-alternation). Returns the
-    appended Message, or None when there is no trailing tool_use to balance AND
-    no wrapper to add (caller then falls back to repair / plain resume).
+    interruption and gets error-flavored content. When `wrapper_text` (rework
+    feedback) is given, it becomes the `is_error=True` content of the complete_step
+    result itself -- framed as a revision request -- so the model reads its own
+    completion sent back, rather than a success result plus a separate feedback
+    text block. If there is no complete_step to carry it, the wrapper falls back to
+    a trailing text block so it is never dropped. Returns the appended Message, or
+    None when there is no trailing tool_use to balance AND no wrapper to add.
 
     This is a property of (resume target, previously completed): it fires on the
     default feedback-true backward goto, a branch-fired goto, and the
@@ -285,13 +301,22 @@ def balance_success_on_resume(
         if last is not None and last.role == "assistant" else []
     )
     result_blocks: list[ToolResultBlock] = []
+    feedback_delivered = False
     for tu in tool_uses:
         if tu.name == "complete_step":
-            result_blocks.append(ToolResultBlock(
-                tool_use_id=tu.id,
-                content=RESUME_SUPERSEDED_NOTE
-                        if wrapper_text else "previous step output recorded; resuming",
-                is_error=False))
+            if wrapper_text:
+                # Rework: the feedback IS the complete_step result, is_error-shaped
+                # and framed. No separate feedback text block.
+                result_blocks.append(ToolResultBlock(
+                    tool_use_id=tu.id,
+                    content=REWORK_RESULT_FRAME + "\n\n" + wrapper_text,
+                    is_error=True))
+                feedback_delivered = True
+            else:
+                result_blocks.append(ToolResultBlock(
+                    tool_use_id=tu.id,
+                    content="previous step output recorded; resuming",
+                    is_error=False))
         else:
             result_blocks.append(ToolResultBlock(
                 tool_use_id=tu.id,
@@ -299,11 +324,11 @@ def balance_success_on_resume(
     if not result_blocks and not wrapper_text:
         return None
     blocks: list[TextBlock | ToolResultBlock] = list(result_blocks)
-    # Resume-durability note frames the (possibly error-shaped) results above;
-    # the actionable wrapper feedback, if any, stays last so it reads as the
-    # most recent instruction.
+    # Resume-durability note frames the (possibly error-shaped) results above.
     blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
-    if wrapper_text:
+    # Fallback: with no complete_step to carry it (no trailing tool_use at all),
+    # the wrapper still rides as a trailing text block so feedback is never lost.
+    if wrapper_text and not feedback_delivered:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
     messages.append(injected)

@@ -3,8 +3,8 @@
 Regression for the co-riding-text drop bug (openai.py `_imp_to_responses_input`):
 on a backward goto the executor stashes `format_script_feedback(...)` as
 `State.retry_feedback`, and on the targeted step's resume the OpenAI provider
-injects it via `balance_success_on_resume(..., wrapper_text=retry_feedback)` as a
-TextBlock that CO-RIDES the synthesized complete_step tool_result on one user
+injects it via `balance_success_on_resume(..., wrapper_text=retry_feedback)` as the
+is_error content of the synthesized complete_step tool_result (a function_call_output) on one user
 message. The builder must emit that text as a follow-on user message; before the
 fix it dropped any text sharing a user message with tool_results, so gate-failure
 feedback never reached the model.
@@ -67,6 +67,19 @@ def _user_message_texts(inp: list[dict[str, Any]]) -> list[str]:
             for c in item.get("content", []):
                 if c.get("type") == "input_text":
                     texts.append(c.get("text", ""))
+    return texts
+
+
+def _delivered_texts(inp: list[dict[str, Any]]) -> list[str]:
+    """Every place resume feedback can ride: input_text on a user message AND the
+    output of a function_call_output (post-Part-B the feedback IS the is_error
+    complete_step result)."""
+    texts = _user_message_texts(inp)
+    for item in inp:
+        if item.get("type") == "function_call_output":
+            out = item.get("output", "")
+            if isinstance(out, str):
+                texts.append(out)
     return texts
 
 
@@ -162,7 +175,7 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
     delivered = any(
         _GATE_TOKEN in text
         for inp in captured
-        for text in _user_message_texts(inp)
+        for text in _delivered_texts(inp)
     )
     assert delivered, (
         f"gate feedback token {_GATE_TOKEN!r} never reached the model as a user "

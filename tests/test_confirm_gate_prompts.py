@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.transcript import RESUME_SUPERSEDED_NOTE
+from imp.agents.transcript import REWORK_RESULT_FRAME
 from imp.assets import bundled_workflow_dir
 from imp.engine.feedback import _WRAPPER
 from imp.engine.loader import load_workflow
@@ -67,8 +67,8 @@ def test_spec_writer_recognition_is_preamble_primary() -> None:
     assert "Here's review feedback to address:" in text
     assert ("No blocking issues — integrate these minor improvements; a final "
             "review follows:") in text
-    # The synthesized tool_result note (resume-vs-goto discriminator) is present.
-    assert "previous step output recorded; superseded by the feedback below" in text
+    # The synthesized is_error rework-result frame (resume-vs-goto discriminator) is present.
+    assert REWORK_RESULT_FRAME in text
 
 
 def test_spec_reviewer_briefed_on_decision_markers() -> None:
@@ -112,7 +112,7 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
         "The review found the plan needs revision. Findings:",
         "The integration pass found the plan needs revision. Findings:",
         "Your previous attempt completed but was not accepted",
-        "previous step output recorded; superseded by the feedback below",
+        REWORK_RESULT_FRAME,
     ):
         assert s in text, f"plan-writer taxonomy missing: {s!r}"
 
@@ -158,8 +158,8 @@ def test_engine_sourced_taxonomy_strings_present_in_both_prompts() -> None:
     for path in _WRITER_FILES.values():
         text = path.read_text()
         assert wrapper_prefix in text, f"{path.name}: missing _WRAPPER prefix"
-        assert RESUME_SUPERSEDED_NOTE in text, (
-            f"{path.name}: missing synthesized tool_result note")
+        assert REWORK_RESULT_FRAME in text, (
+            f"{path.name}: missing synthesized rework-result frame")
 
 
 def test_spec_gate_and_confirm_vars_are_gone() -> None:
