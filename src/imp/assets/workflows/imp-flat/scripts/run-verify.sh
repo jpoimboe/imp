@@ -11,13 +11,16 @@
 #          IMP_TEST_CMD_FAST under the slow timeout.
 #
 # Contract:
-#   - resolved command non-empty → run it via `bash -c` under a timeout;
-#     propagate its exit code. On timeout (exit 124) print an explicit diagnosis
-#     to stderr naming THIS tier's *_timeout config key — truncated output
-#     otherwise reads as a hang at whatever check happened to be printing. The
-#     workflow routes exit 124 to a human pause (re-running can't beat the clock),
-#     distinct from a real non-zero failure which bounces back to the upstream
-#     agent.
+#   - resolved command non-empty → run it via `bash -c` under a timeout with its
+#     stdout+stderr merged into one ordered stream; propagate its exit code. The
+#     full merged output is replayed first (retained whole in the event log), then
+#     an actionable summary is printed LAST so the lean display tail lands on it:
+#     on timeout (exit 124) the summary names THIS tier's *_timeout config key to
+#     raise (truncated output otherwise reads as a hang at whatever check happened
+#     to be printing); on a plain non-zero failure it reprints the tail of the run;
+#     on success it is silent. The workflow routes exit 124 to a human pause
+#     (re-running can't beat the clock), distinct from a real non-zero failure
+#     which bounces back to the upstream agent.
 #   - resolved command unset or empty → print an informational message and exit 0
 #     (no gate; project hasn't wired / has opted out of this tier).
 #
@@ -71,14 +74,26 @@ if [[ -n "$tree" && -f "$cache" && "$(cat "$cache")" == "$tree" ]]; then
 fi
 
 rc=0
-# -k 30: SIGKILL stragglers that ignore the TERM.
-timeout -k 30 "$gate_timeout" bash -c "$cmd" || rc=$?
+# Capture the gate's merged (stdout+stderr) output so ordering is deterministic and the
+# actionable summary can print LAST — the lean reveal shows only the final lines, so a
+# buried summary would never be seen. -k 30: SIGKILL stragglers that ignore the TERM.
+out="$(timeout -k 30 "$gate_timeout" bash -c "$cmd" 2>&1)" || rc=$?
+
+if [[ -n "$out" ]]; then
+  printf '%s\n' "$out"   # firehose first: the full merged output, retained in the event log
+fi
+
 if (( rc == 124 )); then
-  echo "imp: $tier test command timed out after ${gate_timeout}s and was killed." >&2
-  echo "imp: the output above is truncated mid-run — verification did not fail" >&2
-  echo "imp: at the last printed line; it ran out of time. Do not hunt for a" >&2
-  echo "imp: hanging test. The command is slower than the gate timeout." >&2
-  echo "imp: raise the ceiling with the '$timeout_key' config key (seconds)." >&2
+  printf '\n'
+  echo "imp: the $tier test command hit its ${gate_timeout}s gate ceiling and was killed;"
+  echo "imp: the output above is truncated at the kill point. This is usually load, or a"
+  echo "imp: suite slower than the ceiling — though a genuinely hung test is possible, and"
+  echo "imp: the retained output above is there to tell those apart. If it is merely slow,"
+  echo "imp: raise the ceiling with the '$timeout_key' config key (seconds)."
+elif (( rc != 0 )); then
+  printf '\n'
+  echo "imp: the $tier gate failed (exit $rc); tail of the run:"
+  printf '%s\n' "$out" | tail -n 15
 fi
 
 if (( rc == 0 )) && [[ -n "$tree" ]]; then
