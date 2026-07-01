@@ -137,3 +137,41 @@ def test_completed_node_lands_at_root_even_with_open_phase() -> None:
     summaries = [c for c in tree.root.children
                  if isinstance(c, nv.WarningsSummaryNode)]
     assert len(summaries) == 1
+
+
+def _paused(eid: str = "z", reason: str = "ctrl-c") -> dict:
+    return {"id": eid, "agent_id": None, "type": "workflow_paused",
+            "payload": {"interrupt_reason": reason}}
+
+
+def test_pause_with_no_reason_appends_no_outcome_and_no_summary() -> None:
+    # The `if reason:` guard wraps both the flush and the PauseNode append, so a
+    # reasonless pause produces neither at root.
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _started("s1"),
+        _warn("w1", "alpha"),
+        {"id": "z", "agent_id": None, "type": "workflow_paused", "payload": {}},
+    ])
+    kinds = [type(c).__name__ for c in tree.root.children]
+    assert "PauseNode" not in kinds
+    assert "WarningsSummaryNode" not in kinds
+
+
+def test_pause_outcome_and_summary_land_at_workflow_root() -> None:
+    # A phase is still open when the pause fires; both the summary and the
+    # PauseNode must land at the root, adjacent, not nested in the open phase.
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _started("s1"),
+        _warn("w1", "alpha"),
+        _paused(),
+    ])
+    kinds = [type(c).__name__ for c in tree.root.children]
+    assert "PauseNode" in kinds
+    assert kinds.count("WarningsSummaryNode") == 1  # surfaces exactly once
+    si = kinds.index("WarningsSummaryNode")
+    pi = kinds.index("PauseNode")
+    assert si + 1 == pi  # summary directly above the pause outcome, both at root

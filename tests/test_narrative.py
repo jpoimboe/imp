@@ -2067,7 +2067,8 @@ def test_step_node_command_populated_on_resume_reentry() -> None:
     b = nv.NarrativeBuilder()
     for e in seed + live:
         b.add(e)
-    step = b.tree.root.children[-1].children[0]
+    phase = next(c for c in b.tree.root.children if isinstance(c, nv.PhaseNode))
+    step = phase.children[0]
     assert isinstance(step, nv.StepNode)
     assert step.command == "make check"
 

@@ -1042,7 +1042,11 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     self._root.status = "paused"
     reason = p.get("interrupt_reason") or p.get("reason")
     if reason:
-        self._append(PauseNode(reason=reason))
+        # A pause is a run-level terminal outcome: append at the WORKFLOW ROOT (not
+        # the still-open phase) so the root-level warnings summary renders
+        # immediately above it.
+        self._flush_warnings_summary()
+        self._root.children.append(PauseNode(reason=reason))
 
 
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
