@@ -3258,8 +3258,12 @@ async def test_unreconstructable_store_falls_back_to_replay(tmp_path: Path) -> N
     await _seed_drifted_store(inv, 4)  # 4 body turns > 2 transcript msgs
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     created: list[FakeClaudeSDKClient] = []
+    captured: dict[str, Any] = {}
 
     def factory(opts: Any) -> FakeClaudeSDKClient:
+        cfg = opts.env.get("CLAUDE_CONFIG_DIR")
+        captured["cfg"] = cfg
+        captured["cfg_exists_during_run"] = bool(cfg) and Path(cfg).is_dir()
         c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
         created.append(c)
         return c
@@ -3271,6 +3275,10 @@ async def test_unreconstructable_store_falls_back_to_replay(tmp_path: Path) -> N
     assert created[0].opts.resume is None
     assert created[0].opts.session_id is None
     assert created[0].opts.session_store is None
+    # Replay path must isolate claude-p in an ephemeral CLAUDE_CONFIG_DIR.
+    assert captured["cfg"], "replay must set CLAUDE_CONFIG_DIR"
+    assert captured["cfg_exists_during_run"], "ephemeral dir must exist during the run"
+    assert not Path(captured["cfg"]).exists(), "config dir must be removed after the run"
 
 
 @pytest.mark.anyio
