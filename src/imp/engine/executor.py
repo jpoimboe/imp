@@ -859,7 +859,7 @@ async def _route_agent(
         # seed_opening (imp new intent) renders via run.opening in templates.
         # wrapper_text (goto/rework feedback) is not rendered by the target's
         # template, so it is delivered as the lead of the relocated user message.
-        run_opening = seed_opening if seed_opening is not None else (wrapper_text or "")
+        run_opening = seed_opening or ""
         feedback_lead = wrapper_text if seed_opening is None else None
         initial: tuple[Message, ...] = ()
     else:  # keep the transcript, balance a trailing complete_step
