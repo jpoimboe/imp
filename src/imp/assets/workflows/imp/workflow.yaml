@@ -32,12 +32,12 @@ defaults:
   max_tool_calls: 10000
 
 phases:
-  # ── front-door: phase 0, a bare conversation (chrome:none). It answers
+  # ── front-door: phase 0, a bare conversation (show_label:false). It answers
   # questions, scouts existing work, or scopes a build; on go-live it sets the
   # ceremony and routes into the pipeline. express skips the spec beat entirely
   # (the new edge); full enters spec-finalizer for adopt-with-light-review.
   - name: front-door
-    chrome: none
+    show_label: false
     steps:
       - name: front-door
         file: agents/front-door.md
@@ -58,7 +58,7 @@ phases:
           - {else: true, continue: true}
 
       - name: spec-verify-commit
-        quiet: true
+        show_label: false
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
@@ -99,7 +99,7 @@ phases:
           - {else: true, continue: true}
 
       - name: plan-verify-commit
-        quiet: true
+        show_label: false
         command: ./scripts/plan-commit-verify.sh
         rules:
           - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial change: skip plan review entirely
@@ -128,10 +128,11 @@ phases:
           - {else: true, goto: plan-finalized}
 
       - name: plan-finalized
-        file: agents/plan-finalized.md
-        tier: medium
         label: "finalizing plan"
-        read_only: ["."]
+        command: ./scripts/plan-finalized.sh {{ vars.plan_index }} {{ vars.plan_total }}
+        show_output: true
+        output:
+          task_total: {type: int}
         rules:
           - {else: true, set: {task_total: output.task_total}, goto: task-lead}
 
@@ -160,7 +161,7 @@ phases:
       # trailer over the self-derived boundary..HEAD. No code review here — the single
       # change-wide review runs once in converge. exit 2 falls into the resolver.
       - name: cleanup-implement
-        quiet: true
+        show_label: false
         command: ./scripts/cleanup.sh
         rules:
           - {if: {exit: 0}, goto: check-next-plan}
@@ -181,7 +182,7 @@ phases:
       #  - more outline plans remain -> the next plan-writer (plan_index++);
       #  - the last outline plan was implemented -> the once-only gap-check (enter converge).
       - name: check-next-plan
-        quiet: true
+        show_label: false
         rules:
           - {if: {coverage_settled: true}, goto: change-review}
           - {if: "var.plan_index < var.plan_total", set: {plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan"}
@@ -235,7 +236,7 @@ phases:
           - {else: true, resume: deferred-sweep, feedback: "The fast verify gate (sweep-verify) failed on your sweep fix commits. Triage fix-vs-tolerate:"}
 
       - name: cleanup-sweep
-        quiet: true
+        show_label: false
         command: ./scripts/cleanup.sh
         rules:
           - {if: {exit: 0}, goto: converge-verify}
@@ -276,7 +277,7 @@ phases:
           - {else: true, continue: true}
 
       - name: integrate-rebase
-        quiet: true
+        show_label: false
         command: ./scripts/integrate-rebase.sh
         rules:
           - {if: {exit: 2}, goto: summarizer}
@@ -330,7 +331,7 @@ phases:
           - {else: true, pause: true}
 
       - name: cleanup-merge
-        quiet: true
+        show_label: false
         command: ./scripts/cleanup.sh
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
@@ -347,7 +348,7 @@ phases:
           - {else: true, goto: cleanup-merge}
 
       - name: assert-stamped
-        quiet: true
+        show_label: false
         command: ./scripts/assert-stamped.sh
         rules:
           - {if: {exit: 0}, continue: true}

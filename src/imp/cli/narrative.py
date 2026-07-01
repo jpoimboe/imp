@@ -19,14 +19,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar
 
+from imp.engine.feedback import _truncate
+
 # Tool names omitted from the burst recap AND the live status basis (§1/§3). They
 # render elsewhere (load_skill → its own `loading skill …` line) or are placeholders
-# (`tool`); emit_notice renders as a verbatim block elsewhere; showing it here too would
-# double-print as a clipped `text=…` in the recap.
+# (`tool`).
 # update_step_label would register as activity in the very status line it exists to
 # keep clean.
-_OMIT: frozenset[str] = frozenset({"load_skill", "tool",
-                                   "emit_notice", "update_step_label"})
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "update_step_label"})
 
 # Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
 CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge_and_exit_worktree"})
@@ -107,8 +107,8 @@ class PhaseNode:
     name: str
     children: list[Any] = field(default_factory=list)
     closed: bool = False
-    chrome: str | None = None
     label: str | None = None
+    show_label: bool = True
     collapsible = False
 
 
@@ -124,11 +124,11 @@ class StepNode:
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
-    quiet: bool = False                # the step_started.payload.quiet flag
+    show_label: bool = True            # step frame (header + breadcrumb) shown
+    show_output: bool = False          # surface a script's stdout as a • message
     position_label: bool = False       # step label is a position counter, not a verb
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
-    chrome: str | None = None          # "none" → suppress this step's header
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
@@ -875,8 +875,8 @@ NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
 
-def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
-                  phase_label: str | None = None) -> None:
+def _ensure_phase(self: NarrativeBuilder, name: str,
+                  phase_label: str | None = None, show_label: bool = True) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it
     to the workflow root, and make it the current scope. There are no
@@ -891,7 +891,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
         return
     if self._current_phase is not None:
         self._current_phase.closed = True   # let the live cursor pop the drained phase
-    phase = PhaseNode(name=name, chrome=chrome, label=phase_label)
+    phase = PhaseNode(name=name, label=phase_label, show_label=show_label)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
@@ -966,7 +966,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.start_ts = event.get("timestamp")
                 existing.agent_output = None
                 existing.command = p.get("command")
-                existing.chrome = p.get("chrome")
+                existing.show_label = bool(p.get("show_label", True))
+                existing.show_output = bool(p.get("show_output", False))
                 existing.phase_label = p.get("phase_label")
                 existing.route_label = p.get("route_label")
                 existing.rotate_phrase = bool(p.get("rotate_phrase", False))
@@ -976,17 +977,18 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
-    _ensure_phase(self, phase, p.get("chrome"), p.get("phase_label"))
+    _ensure_phase(self, phase, p.get("phase_label"),
+                  p.get("phase_show_label", True))
     # interactive defaults False — it is re-sourced from the event stream (an
     # awaiting_user_input event marks the step interactive); step_started no
     # longer carries an interactive key.
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
-                    quiet=bool(p.get("quiet", False)),
+                    show_label=bool(p.get("show_label", True)),
+                    show_output=bool(p.get("show_output", False)),
                     position_label=bool(p.get("position_label", False)),
                     label=p.get("label"),
-                    chrome=p.get("chrome"),
                     phase_label=p.get("phase_label"),
                     command=p.get("command"),
                     resumed=bool(p.get("resumed", False)),
@@ -1583,18 +1585,6 @@ def _h_step_label_updated(
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
 
 
-def _h_notice(
-    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
-) -> None:
-    # Do NOT flush the open burst: this fires between the emit_notice tool_call
-    # and its tool_result.
-    self._append(LiteralTextNode(text=str(p.get("text", "")),
-                                 color_role="lifecycle", verbatim=True))
-
-
-NarrativeBuilder._HANDLERS["notice"] = _h_notice
-
-
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     if p.get("category") == "config" and p.get("kind") == "interrupted":
@@ -1649,6 +1639,7 @@ def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     detail = stderr
     if stdout:
         detail = f"{detail}\n{stdout}" if detail else stdout
+    detail = _truncate(detail)
     self._append(ErrorNode(
         message=f"{step} blocked{suffix}", category="script",
         is_warning=False, detail=detail))
@@ -1666,6 +1657,15 @@ NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
+
+
+def _h_script_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    self._append(LiteralTextNode(text=_truncate(str(p.get("stdout", ""))),
+                                 color_role=None, verbatim=False))
+
+
+NarrativeBuilder._HANDLERS["script_output"] = _h_script_output
 
 
 def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

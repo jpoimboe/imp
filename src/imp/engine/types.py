@@ -179,13 +179,15 @@ class Step:
     command: str | None = None
     cwd: str | None = None
     timeout_seconds: int | None = None
-    quiet: bool = False
     position_label: bool = False  # label is a position counter, not an activity verb
     label: str | None = None
     acquire: str | None = None  # lane keyword "base" → change.base_branch; branch steps only
     release: str | None = None  # runs before step body; agent steps only
-    chrome: str | None = None   # "none" → suppress phase+step headers (bare conversation)
     phase_label: str | None = None  # owning phase's label template, stamped at load
+    show_label: bool = True     # frame: header + completion breadcrumb (default on)
+    show_output: bool = False   # script body: stdout as a • message (scripts only)
+    phase_show_label: bool = True  # owning phase's show_label, stamped at load (like phase_label)
+    output_schema: OutputSchema | None = None  # script-only typed $IMP_OUTPUT contract
 
 
 @dataclass(frozen=True, slots=True)

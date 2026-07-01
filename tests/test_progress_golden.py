@@ -14,10 +14,9 @@ def _stream() -> list[dict]:
            phase_label="planning phase"),
         ev("3", "step_completed", step="plan-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
-        ev("4", "step_started", step="plan-finalized", kind="agent", phase="plan",
-           model="m", provider="anthropic", label="finalizing plan 1/2",
-           phase_label="planning phase"),
-        ev("5", "notice", agent_id="step:plan/plan-finalized", text=NOTICE),
+        ev("4", "step_started", step="plan-finalized", kind="script", phase="plan",
+           label="finalizing plan 1/2", phase_label="planning phase", show_output=True),
+        ev("5", "script_output", step="plan-finalized", stdout=NOTICE),
         ev("6", "step_completed", step="plan-finalized", kind="agent",
            action={"verb": "goto", "target": "task-lead"}, var_mutations={"task_total": 2}),
         ev("7", "step_started", step="task-lead", kind="agent", phase="code",
@@ -73,4 +72,4 @@ def test_golden_task_list_prints_once() -> None:
         b.add(e)
     literals = [c for st in _steps(b.tree.root) for c in st.children
                 if isinstance(c, nv.LiteralTextNode)]
-    assert sum(1 for n in literals if n.text == NOTICE and n.verbatim) == 1
+    assert sum(1 for n in literals if n.text == NOTICE and n.verbatim is False) == 1

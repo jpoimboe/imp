@@ -141,8 +141,9 @@ def test_imp_flat_cleanup_implement_routes_to_code_reviewer() -> None:
 def test_imp_flat_plan_finalized_routes_to_coder() -> None:
     rules = _steps(_flat())["plan-finalized"].rules
     m = evaluate_rules(rules, vars=_FLAT_VARS,
-                       output={"status": "Success", "task_total": 3})
+                       output={"exit": 0, "stdout": "", "stderr": "", "task_total": 3})
     assert isinstance(m.action, Goto) and m.action.target == "coder"
+    assert m.var_mutations["task_total"] == 3
 
 
 def test_imp_flat_review_base_repin_routing() -> None:

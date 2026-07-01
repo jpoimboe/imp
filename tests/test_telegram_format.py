@@ -153,12 +153,12 @@ def test_step_divider_none_when_label_whitespace_only() -> None:
         {"type": "step_started", "payload": {"label": "   "}}) is None
 
 
-def test_step_divider_none_when_quiet() -> None:
+def test_step_divider_none_when_show_label_false() -> None:
     from imp.remote.drivers.telegram import step_divider
 
     assert step_divider(
         {"type": "step_started",
-         "payload": {"label": "internal setup", "quiet": True}}) is None
+         "payload": {"label": "internal setup", "show_label": False}}) is None
 
 
 def test_header_line_renders_id_name_and_event_local_time(set_tz) -> None:
@@ -197,6 +197,19 @@ def test_header_line_uses_event_time_in_daemon_local_zone(set_tz) -> None:
         "timestamp": "2026-06-25T14:32:05+00:00",
     }
     assert header_line(event) == "tozi28 · T · 10:32am"
+
+
+def test_script_output_body_surfaces_stdout() -> None:
+    from imp.remote.drivers.telegram import event_body, format_event_message
+
+    assert event_body(
+        "script_output",
+        {"step": "plan-finalized", "stdout": "✓ plan 1/1 · 2 tasks"},
+    ) == "✓ plan 1/1 · 2 tasks"
+    msg = format_event_message(
+        {"type": "script_output", "change": {"id": "abc", "title": "t"},
+         "payload": {"step": "plan-finalized", "stdout": "✓ plan 1/1 · 2 tasks"}})
+    assert msg == "✓ plan 1/1 · 2 tasks"
 
 
 def test_event_labels_humanize_every_buzz_type() -> None:

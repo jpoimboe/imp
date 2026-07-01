@@ -1317,3 +1317,300 @@ def test_task_lead_step_carries_position_label_flag() -> None:
     # every other step defaults to a plain activity-verb label
     assert steps["plan-writer"].position_label is False
     assert steps["verify"].position_label is False
+
+
+def test_phase_show_label_propagates_and_step_overrides(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            show_label: false
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+              - name: loud
+                file: agents/spec-writer.md
+                show_label: true
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].show_label is False   # inherits the phase default
+    assert by["loud"].show_label is True           # per-step override wins
+
+
+def test_show_label_defaults_true_without_phase_or_step_key(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].show_label is True
+
+
+def test_show_output_true_on_script_parses(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                show_output: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["announce"].show_output is True
+
+
+def test_show_output_on_agent_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                show_output: true
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="show_output"):
+        load_workflow(wf)
+
+
+def test_show_output_false_on_agent_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                show_output: false
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="show_output"):
+        load_workflow(wf)
+
+
+def test_script_output_schema_parses(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  task_total: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    fields = by["announce"].output_schema.fields
+    assert [f.name for f in fields] == ["task_total"]
+    assert fields[0].type == "int"
+
+
+def test_script_output_reserved_field_name_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  exit: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="reserved"):
+        load_workflow(wf)
+
+
+def test_script_output_reserved_stdout_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  stdout: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="reserved"):
+        load_workflow(wf)
+
+
+def test_script_output_reserved_stderr_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  stderr: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="reserved"):
+        load_workflow(wf)
+
+
+def test_script_output_non_mapping_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output: notamapping
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="mapping"):
+        load_workflow(wf)
+
+
+def test_output_on_agent_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                output:
+                  task_total: {type: int}
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="output:"):
+        load_workflow(wf)
+
+
+def test_script_output_field_is_rule_addressable_at_load(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          n: {type: int, default: 0}
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  task_total: {type: int}
+                rules:
+                  - {else: true, set: {n: output.task_total}, goto: done}
+          - name: done
+            steps: []
+        """)
+    load_workflow(wf)  # loads without error: output.task_total typechecks as int against var n:int
+
+
+def test_script_output_unknown_field_reference_fails_load(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          n: {type: int, default: 0}
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  task_total: {type: int}
+                rules:
+                  - {else: true, set: {n: output.bogus}, goto: done}
+          - name: done
+            steps: []
+        """)
+    with pytest.raises(LoadError):
+        load_workflow(wf)
+
+
+def test_phase_show_label_is_stamped_onto_each_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: bare
+            show_label: false
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+          - name: normal
+            steps:
+              - name: loud
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].phase_show_label is False   # owning phase's value
+    assert by["loud"].phase_show_label is True
+
+
+def test_chrome_key_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            chrome: none
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="chrome"):
+        load_workflow(wf)
+
+
+def test_step_level_chrome_key_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                chrome: none
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="chrome"):
+        load_workflow(wf)
+
+
+def test_quiet_key_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: g
+                command: echo hi
+                quiet: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="quiet"):
+        load_workflow(wf)

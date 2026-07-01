@@ -31,9 +31,9 @@ def _event(etype: str, payload: dict) -> dict:
     }
 
 
-def test_silent_notice_renders_header_body_and_footer(set_tz) -> None:
+def test_silent_agent_output_renders_header_body_and_footer(set_tz) -> None:
     set_tz("UTC")
-    assert format_replay_event(_event("notice", {"text": "hello"})) == (
+    assert format_replay_event(_event("agent_output", {"text": "hello"})) == (
         "tozi28 · T · 2:32pm\nhello\n↩ @tozi28")
 
 
@@ -58,9 +58,9 @@ def test_empty_body_silent_returns_none() -> None:
     assert format_replay_event(_event("agent_output", {"text": ""})) is None
 
 
-def test_step_started_with_quiet_returns_none() -> None:
+def test_step_started_with_show_label_false_renders_no_divider() -> None:
     assert format_replay_event(
-        _event("step_started", {"quiet": True, "label": "x"})) is None
+        _event("step_started", {"show_label": False, "label": "x"})) is None
 
 
 def test_step_started_with_empty_label_returns_none() -> None:

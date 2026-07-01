@@ -178,7 +178,7 @@ def parse_agent_file(path: Path) -> AgentDef:
 BASE_CAPS: frozenset[str] = frozenset({
     "read_file", "glob", "grep", "query_events", "bash",
     "edit_file", "write_file", "web_search", "web_fetch",
-    "update_step_label", "emit_notice", "symbol_outline",
+    "update_step_label", "symbol_outline",
 })
 TOP_LEVEL_CAPS: frozenset[str] = frozenset(
     {"rename_change", "create_change", "create_and_enter_worktree"})
@@ -233,7 +233,8 @@ _SCRIPT_OUTPUT_TYPES: dict[str, ExprType] = {
 
 
 def _output_types_for_step(
-    step_kind: str, agent: AgentDef | None
+    step_kind: str, agent: AgentDef | None,
+    output_schema: OutputSchema | None = None,
 ) -> dict[str, ExprType] | None:
     """The expr output-env types for one step.
 
@@ -247,7 +248,13 @@ def _output_types_for_step(
             out[f.name] = _SCHEMA_TO_EXPR[f.type]
         return out
     if step_kind == "script":
-        return dict(_SCRIPT_OUTPUT_TYPES)
+        types = dict(_SCRIPT_OUTPUT_TYPES)
+        if output_schema is not None:
+            for f in output_schema.fields:
+                if f.type == "object":
+                    continue
+                types[f.name] = _SCHEMA_TO_EXPR[f.type]
+        return types
     if step_kind == "merge_and_exit_worktree":
         return {"merge": "string"}   # engine produces merge: MERGED|CONFLICT|REFUSED|DIRTY
     return None  # branch / engine-native (no typed output env)
@@ -535,7 +542,7 @@ def _typecheck_step_exprs(
     source: SourceLoc,
 ) -> None:
     agent = agents.get(step.file.stem) if (step.kind == "agent" and step.file) else None
-    output_types = _output_types_for_step(step.kind, agent)
+    output_types = _output_types_for_step(step.kind, agent, step.output_schema)
     env = TypeEnv(vars=var_types, output=output_types)
     try:
         for rule in step.rules:
@@ -575,13 +582,20 @@ def _parse_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool:
     return val
 
 
-def _parse_phase_chrome(praw: dict[str, Any], source: SourceLoc) -> str | None:
-    chrome = praw.get("chrome")
-    if chrome is None:
+def _parse_optional_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool | None:
+    if key not in raw:
         return None
-    if chrome != "none":
-        raise LoadError("a phase's `chrome:` only accepts the value `none`", source)
-    return "none"
+    val = raw[key]
+    if not isinstance(val, bool):
+        raise LoadError(f"{key!r} must be a boolean, got {type(val).__name__}", source)
+    return val
+
+
+def _parse_phase_show_label(praw: dict[str, Any], source: SourceLoc) -> bool:
+    val = praw.get("show_label", True)
+    if not isinstance(val, bool):
+        raise LoadError("a phase's `show_label:` must be a boolean", source)
+    return val
 
 
 def _parse_phase_label(praw: dict[str, Any], source: SourceLoc) -> str | None:
@@ -599,8 +613,8 @@ def _parse_step(
     agents: dict[str, AgentDef],
     var_types: dict[str, ExprType],
     yaml_path: Path,
-    chrome: str | None = None,
     phase_label: str | None = None,
+    phase_show_label: bool = True,
 ) -> Step:
     fallback = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
@@ -609,8 +623,28 @@ def _parse_step(
     if not raw.get("name") or not isinstance(raw["name"], str):
         raise LoadError("step missing a string 'name'", source)
     name = raw["name"]
+    for retired in ("quiet", "chrome"):
+        if retired in raw:
+            raise LoadError(f"`{retired}:` was removed; use show_label/show_output", source)
     kind = _infer_kind(raw, source)
-    quiet = _parse_bool_flag(raw, "quiet", source)
+    step_show_label = _parse_optional_bool_flag(raw, "show_label", source)
+    show_label = step_show_label if step_show_label is not None else phase_show_label
+    _show_output_raw = _parse_optional_bool_flag(raw, "show_output", source)
+    if _show_output_raw is not None and kind != "script":
+        raise LoadError("show_output: only valid on a script step", source)
+    show_output = _show_output_raw if _show_output_raw is not None else False
+    output_schema = None
+    if "output" in raw:
+        if kind != "script":
+            raise LoadError("output: only valid on a script step", source)
+        if not isinstance(raw["output"], dict):
+            raise LoadError("'output' must be a mapping", source)
+        output_schema = parse_output_schema(raw["output"], loc(yaml_path, raw["output"]))
+        for f in output_schema.fields:
+            if f.name in ("exit", "stdout", "stderr"):
+                raise LoadError(
+                    f"output: field {f.name!r} collides with a reserved script "
+                    "output key (exit/stdout/stderr)", source)
     position_label = _parse_bool_flag(raw, "position_label", source)
     label = raw.get("label")
     if label is not None and not isinstance(label, str):
@@ -654,13 +688,14 @@ def _parse_step(
             read_only=tuple(str(p) for p in (raw.get("read_only") or [])),
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
-            quiet=quiet,
             position_label=position_label,
             label=label,
             acquire=acquire,
             release=release,
-            chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
+            show_label=show_label,
+            show_output=show_output,
         )
     elif kind == "script":
         step = Step(
@@ -669,30 +704,34 @@ def _parse_step(
             command=str(raw["command"]),
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
             timeout_seconds=raw.get("timeout"),
-            quiet=quiet,
             label=label,
-            chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
+            show_label=show_label,
+            show_output=show_output,
+            output_schema=output_schema,
         )
     elif kind in ("merge_and_exit_worktree",):
         step = Step(
             name=name, phase=phase_name, kind=cast(Kind, kind), rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
-            quiet=quiet,
             label=label,
-            chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
+            show_label=show_label,
+            show_output=show_output,
         )
     else:  # branch
         step = Step(
             name=name, phase=phase_name, kind="branch", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
-            quiet=quiet,
             label=label,
             acquire=acquire,
             release=release,
-            chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
+            show_label=show_label,
+            show_output=show_output,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).
@@ -762,15 +801,18 @@ def load_workflow(
         if not isinstance(praw, dict) or "name" not in praw or "steps" not in praw:
             raise LoadError("each phase needs 'name' and 'steps'", root_source)
         psrc = loc(yaml_path, praw)
+        if "chrome" in praw:
+            raise LoadError("`chrome:` was removed; use show_label at the phase level", psrc)
         pname = str(praw["name"])
         steps_raw = praw["steps"]
         if not isinstance(steps_raw, list):
             raise LoadError(f"phase {pname!r}: 'steps' must be a list", psrc)
-        phase_chrome = _parse_phase_chrome(praw, psrc)
+        phase_show_label = _parse_phase_show_label(praw, psrc)
         phase_label = _parse_phase_label(praw, psrc)
         steps = tuple(
             _parse_step(s, pname, workflow_dir, defaults, agents, var_types,
-                        yaml_path, chrome=phase_chrome, phase_label=phase_label)
+                        yaml_path, phase_label=phase_label,
+                        phase_show_label=phase_show_label)
             for s in steps_raw
         )
         phase_objs.append(Phase(name=pname, steps=steps, source=psrc, label=phase_label))
