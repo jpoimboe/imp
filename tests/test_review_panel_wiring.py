@@ -297,6 +297,15 @@ def test_cleanup_sweep_routes_by_exit_code() -> None:
     assert isinstance(m1.action, Pause)
 
 
+def test_autosquash_resolve_sweep_loops_back_to_cleanup() -> None:
+    step = _steps(_wf())["autosquash-resolve-sweep"]
+    assert step.kind == "agent" and step.tier == "high"
+    assert step.file is not None and step.file.name == "autosquash-resolve.md"
+    assert isinstance(step.rules[-1].action, Goto)
+    assert step.rules[-1].action.target == "cleanup-sweep"
+    assert step.max_loops == 6
+
+
 def test_plan_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
     out = _render_reviewer(tmp_path)
     assert "behavioral impact, not file type" in out
