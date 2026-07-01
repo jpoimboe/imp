@@ -348,6 +348,15 @@ async def dispatch_task(
                     raise SubagentSuspended(
                         f"{detail} during subagent backoff (category={category})")
                 backoff += 1
+                # Surface the subagent backoff so a self-healed retry isn't silent.
+                if ctx.event_log is not None:
+                    ctx.event_log.append(
+                        agent_id=sub_inv.agent_id, type="agent_retry",
+                        payload={
+                            "category": category,
+                            "attempt": backoff,
+                            "backoff_seconds": result.delay,
+                        })
                 await _interruptible_sleep(result.delay, ctx.coordinator)
                 cumulative_backoff += result.delay
                 if ctx.coordinator is not None and ctx.coordinator.should_pause:
@@ -367,13 +376,18 @@ async def dispatch_task(
                     < ctx.change_state.max_reincarnations):
                 ctx.change_state.bump_reincarnation(reincarnation_key)
                 stashed = stash_transcript(target_dir)
+                # Note existence is the sole arbiter of handoff success;
+                # a missing note degrades the seed to transcript-only.
+                hp = Path(result.handoff_path)
+                note_exists = hp.exists()
+                reason = ("context threshold crossed" if note_exists
+                          else "handoff failed — recovering from transcript")
                 ctx.event_log.append(
                     agent_id=None, type="reincarnating",
-                    payload={"reason": "context threshold crossed"})
-                hp = Path(result.handoff_path)
+                    payload={"reason": reason})
                 seed = reincarnation_seed(
                     stashed_dir=stashed,
-                    handoff_path=hp if hp.exists() else None)
+                    handoff_path=hp if note_exists else None)
                 _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
                 sub_inv = _build_sub_inv(
                     target_dir,

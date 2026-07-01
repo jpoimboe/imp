@@ -229,12 +229,29 @@ def _store_body_turn_count(entries: list[dict[str, Any]]) -> int:
     )
 
 
+def _truncate_store_body_to_turns(
+    entries: list[dict[str, Any]], turn_limit: int,
+) -> list[dict[str, Any]]:
+    if turn_limit <= 0:
+        return []
+    count = 0
+    for i, e in enumerate(entries):
+        if (isinstance(e, dict) and e.get("type") in ("user", "assistant")
+                and "message" in e):
+            count += 1
+            if count == turn_limit:
+                return entries[:i + 1]
+    return list(entries)
+
+
 def reconcile_store_tail(
     messages: list[Message], store_entries: list[dict[str, Any]], *,
     session_id: str, cwd: str, model: str,
 ) -> list[dict[str, Any]]:
-    """Pure reconcile: strip a trailing synthetic error turn, then append session
-    records for the transcript messages the store is missing.
+    """Pure reconcile: strip a trailing synthetic error turn, TRUNCATE the store
+    body to exactly len(messages) conversation turns (dropping surplus turns left
+    by a rolled-back transcript), then append session records for the transcript
+    messages the store is still missing.
 
     Returns the full desired store entry list (kept body + synthesized tail).
     The turn-count -> message-index mapping assumes the store body's conversation
@@ -247,6 +264,7 @@ def reconcile_store_tail(
     drop the real tail.
     """
     kept = strip_trailing_error_turn(store_entries)
+    kept = _truncate_store_body_to_turns(kept, len(messages))
     body_count = _store_body_turn_count(kept)
     missing = messages[body_count:]
     if not missing:

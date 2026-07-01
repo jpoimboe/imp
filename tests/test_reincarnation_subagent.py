@@ -189,3 +189,83 @@ async def test_subagent_reincarnates_on_handoff_then_is_error_at_cap(
         if e["type"] == "tool_result" and e["payload"].get("error") is True
     ]
     assert is_error, "expected the post-cap subagent failure as an is_error tool_result"
+
+
+@pytest.mark.anyio
+async def test_subagent_missing_handoff_note_logs_recovering_reason(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing handoff note logs the recovering reason and seeds handoff_path=None."""
+    import imp.engine.reincarnation as reinc
+    from imp.providers import resolve
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    resolve.reset_providers_for_tests()
+
+    class _HandoffNoNoteSubRunner:
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            from imp.engine.reincarnation import handoff_path_for
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            hp = handoff_path_for(inv.transcript_dir)
+            # NOTE deliberately NOT written: the handoff "failed".
+            yield {"type": "handoff", "payload": {"handoff_path": str(hp)}}
+
+        async def interrupt(self):
+            ...
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            return _HandoffNoNoteSubRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    seeded_handoff_paths: list = []
+    orig_seed = reinc.reincarnation_seed
+
+    def _recording_seed(*, stashed_dir, handoff_path):
+        seeded_handoff_paths.append(handoff_path)
+        return orig_seed(stashed_dir=stashed_dir, handoff_path=handoff_path)
+
+    monkeypatch.setattr(reinc, "reincarnation_seed", _recording_seed)
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "sub_agent",
+                          {"subagent_name": "coder", "task_description": "edit"})),
+        response(tool_use("c1", "complete_step",
+                          {"status": "Success", "outcome": "done"})),
+    ])
+    runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
+
+    inv = AgentInvocation(
+        agent_def=_agent("lead", tools={"complete_step", "sub_agent"},
+                         subagents=("coder",)),
+        provider_name="fake", model_name="m",          # subagent inherits -> fake
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(title="T", project_root=tmp_path,
+                                     workflow_dir=tmp_path / "wf"),
+        transcript_dir=tmp_path / "step",
+        events_path=tmp_path / "events.jsonl",
+        subagent_defs={"coder": _agent("coder", tools={"complete_step"})},
+        agent_id="step:impl/lead",
+        checkpoint_threshold=0.8,
+        change_state=State(id="c", step="lead", step_attempt=0,
+                           status="running", max_reincarnations=1))
+
+    async for _ in runner.run(inv):
+        pass
+
+    events = [json.loads(line)
+              for line in inv.events_path.read_text().splitlines() if line]
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1
+    assert (reincarnating[0]["payload"]["reason"]
+            == "handoff failed — recovering from transcript")
+    # AC: a missing note degrades the seed to transcript-only.
+    assert seeded_handoff_paths == [None]
