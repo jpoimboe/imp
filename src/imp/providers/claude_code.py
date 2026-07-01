@@ -1303,8 +1303,10 @@ class ClaudeCodeAgentRunner:
         from imp.engine.state import JsonlEventLog
         elog = invocation.event_log or JsonlEventLog(invocation.events_path)
         aid = invocation.agent_id or "step:unnamed"
-        from imp.providers.stderr_sink import StderrSink
-        self._stderr_sink = StderrSink(invocation.transcript_dir / "stderr.log")
+        from imp.providers.stderr_sink import build_stderr_sink
+        self._stderr_sink = build_stderr_sink(
+            invocation.transcript_dir / "stderr.log",
+            elog=elog, aid=aid, source="claude")
 
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
