@@ -319,6 +319,24 @@ def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
     assert "run.non_interactive" not in src
 
 
+def test_renders_run_opening_when_present(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log,
+                        opening="add a dark-mode toggle")
+    assert ctx.run.opening == "add a dark-mode toggle"
+    assert render_prompt(
+        "{% if run.opening %}SEED:{{ run.opening }}{% else %}BARE{% endif %}",
+        ctx) == "SEED:add a dark-mode toggle"
+
+
+def test_run_opening_defaults_empty_and_selects_bare_branch(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    assert ctx.run.opening == ""
+    assert render_prompt(
+        "{% if run.opening %}SEED{% else %}BARE{% endif %}", ctx) == "BARE"
+
+
 def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     src = Path(
         "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
