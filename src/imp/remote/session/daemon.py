@@ -168,11 +168,18 @@ async def serve_change_session(
                 reply = await user_chat_input_fn("")
             except AwaitingUserInput:
                 # Left at the hold loop. A ctrl-d mid-run interrupt detaches here
-                # with the agent mid-step, so resume continues the agent; any other
-                # detach left the user at the resteer prompt, so resume there.
+                # with the agent mid-step: the cancellation unwound past the
+                # executor's Pause handler, so arm resume here exactly as it would
+                # have — native-resume the interrupted step (not re-seed) and take
+                # the continuation nudge on a no-message resume. Any other detach
+                # left the user at the resteer prompt: its markers were already
+                # armed by the executor Pause handler, so record the target only.
                 state = State.load(change.state_dir)
-                state.resume_target = (
-                    "agent" if coordinator.pause_reason == "ctrl-d" else "prompt")
+                if coordinator.pause_reason == "ctrl-d":
+                    state.resume_target = "agent"
+                    state.arm_step_resume(interrupt=True)
+                else:
+                    state.resume_target = "prompt"
                 state.save(change.state_dir)
                 return result
             coordinator.reset()

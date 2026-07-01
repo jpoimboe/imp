@@ -274,6 +274,12 @@ class State:
                 os.unlink(tmp_name)
             raise
 
+    def arm_step_resume(self, *, interrupt: bool) -> None:
+        """Mark the current step resumable; `interrupt` set unconditionally so a
+        non-interrupt park overwrites a stale True."""
+        self.resume_pending = self.step
+        self.interrupt_pending = interrupt
+
     def reincarnation_count(self, key: str) -> int:
         return self.reincarnations.get(key, 0)
 

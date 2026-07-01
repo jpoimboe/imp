@@ -1525,6 +1525,11 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     tmp_path: Path,
 ) -> None:
     change = _make_change(tmp_path, "2026-06-15-dph")
+    st = State.load(change.state_dir)
+    st.step = "code"               # the active step at detach time
+    st.resume_pending = "review"   # already armed by the executor Pause handler
+    st.interrupt_pending = True
+    st.save(change.state_dir)
 
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
@@ -1538,7 +1543,10 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
             change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
     assert result is RunResult.PAUSED
-    assert State.load(change.state_dir).resume_target == "prompt"
+    state = State.load(change.state_dir)
+    assert state.resume_target == "prompt"
+    assert state.resume_pending == "review"   # untouched by the non-ctrl-d branch
+    assert state.interrupt_pending is True     # untouched by the non-ctrl-d branch
 
 
 @pytest.mark.anyio
@@ -1546,6 +1554,9 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     tmp_path: Path,
 ) -> None:
     change = _make_change(tmp_path, "2026-06-15-cda")
+    st = State.load(change.state_dir)
+    st.step = "review"
+    st.save(change.state_dir)
 
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
@@ -1559,7 +1570,10 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
             change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
     assert result is RunResult.PAUSED
-    assert State.load(change.state_dir).resume_target == "agent"
+    state = State.load(change.state_dir)
+    assert state.resume_target == "agent"
+    assert state.resume_pending == "review"   # arm_step_resume(step) → native resume
+    assert state.interrupt_pending is True     # continuation nudge on no-message resume
 
 
 @pytest.mark.anyio

@@ -313,19 +313,8 @@ async def run_change(
             if isinstance(action, Pause):
                 evicted = _evict_if_holding(change, state, log)
                 if not evicted and step.kind == "agent":
-                    # Any agent-step pause (quota, a fatal provider error, OR a
-                    # user interrupt) keeps the current
-                    # step's transcript so resume replays and continues it, not
-                    # re-runs fresh. The replay decision is driven by whether the
-                    # step has a kept transcript, not by how the run stopped.
-                    state.resume_pending = state.step
-                    # Unconditional shadow of the pause cause: overwrites a stale
-                    # True on a non-interrupt park. action.interrupt covers the
-                    # cooperative-interrupt steer (claude_code Ctrl-C), which
-                    # unwinds as an awaiting_user pause with should_pause already
-                    # cleared, so should_pause alone would miss it.
-                    state.interrupt_pending = (
-                        coordinator.should_pause or action.interrupt)
+                    state.arm_step_resume(
+                        interrupt=coordinator.should_pause or action.interrupt)
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
