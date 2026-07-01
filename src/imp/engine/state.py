@@ -155,7 +155,7 @@ class State:
     resume_target: str | None = None  # "agent"|"prompt"; absent/None ⇒ "agent".
     # True iff resume_pending was parked by a Ctrl-C interrupt, not a yield/error.
     interrupt_pending: bool = False
-    # True iff the step's tail is a transient-error truncation; resume continues rather than soliciting.
+    # True iff the step tail is error-truncated; resume continues rather than soliciting.
     retry_continue_pending: bool = False
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None

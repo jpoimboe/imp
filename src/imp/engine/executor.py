@@ -302,7 +302,7 @@ async def run_change(
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         interrupt=coordinator.should_pause or action.interrupt)
-                    # Keep on transient give-up (tail stays error-truncated); clear on every other park.
+                    # Keep on transient give-up; clear on genuine yield or any other park.
                     state.retry_continue_pending = action.reason in (
                         "retry_ceiling", "reauth_needed")
                 reason = action.reason or "interrupt"
