@@ -1407,28 +1407,17 @@ class ClaudeCodeAgentRunner:
         # is_error; the handback (retry_feedback) rides the streamed delta. The
         # store is reconstructed from the transcript when absent, so neither the
         # complete_step tail nor retry_feedback forces stream-json replay.
-        native_resume = (
+        # Shape eligibility for native resume — decided WITHOUT the store. The
+        # store gate (store_reconcilable) folds in only for a PARTIAL native
+        # resume below; a dispatch-only tail collapses resume_base to 0
+        # (fresh_stream) and rebuilds the store from scratch, where the gate is
+        # moot.
+        shape_native_eligible = (
             (not is_fresh)
             and classify_resume(existing) in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
                 ResumeState.DANGLING_TOOL_USE)
-            and store_reconcilable(existing, store_body)
         )
-        if existing and not native_resume:
-            shape = classify_resume(existing)
-            native_eligible = shape in (
-                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
-                ResumeState.DANGLING_TOOL_USE)
-            reason = (
-                "resume shape is not native-eligible"
-                if not native_eligible
-                else "session store unreconstructable from transcript")
-            elog.append(
-                agent_id=aid, type="runner_warning",
-                payload={"message": (
-                    "claude_code resume fell back to stream-json replay "
-                    f"(shape={shape.value}): {reason}; native --resume unavailable."
-                )})
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
@@ -1446,11 +1435,36 @@ class ClaudeCodeAgentRunner:
         # (a deadlock broken only by the inactivity watchdog). Instead, keep the
         # trailing unanswered user turn(s) OUT of the reconciled session and
         # stream them as the delta — they are the message that kicks the turn.
-        if native_resume and classify_resume(existing) is ResumeState.SEND_TO_LLM:
+        if (shape_native_eligible
+                and classify_resume(existing) is ResumeState.SEND_TO_LLM):
             while resume_base > 0 and existing[resume_base - 1].role == "user":
                 resume_base -= 1
-        # Dispatch-only respawn emptied the store; stream fresh instead of resuming nothing.
-        fresh_stream = native_resume and resume_base == 0
+        # Dispatch-only respawn: resume_base collapsed to 0, so the whole (short)
+        # history streams fresh and the store is truncated/rebuilt from scratch —
+        # store_reconcilable is moot (prefix-faithfulness is guaranteed).
+        fresh_stream = shape_native_eligible and resume_base == 0
+        # A PARTIAL native resume (resume_base > 0) loads the store, so a drifted
+        # store (more turns than the transcript) can't be faithfully reconciled
+        # and must fall back to stream-json replay; a fresh_stream rebuild never
+        # needs the gate.
+        native_resume = shape_native_eligible and (
+            fresh_stream or store_reconcilable(existing, store_body)
+        )
+        if existing and not native_resume:
+            shape = classify_resume(existing)
+            native_eligible = shape in (
+                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
+                ResumeState.DANGLING_TOOL_USE)
+            reason = (
+                "resume shape is not native-eligible"
+                if not native_eligible
+                else "session store unreconstructable from transcript")
+            elog.append(
+                agent_id=aid, type="runner_warning",
+                payload={"message": (
+                    "claude_code resume fell back to stream-json replay "
+                    f"(shape={shape.value}): {reason}; native --resume unavailable."
+                )})
         config_dir: Path | None = None
         if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
