@@ -149,7 +149,7 @@ async def test_cold_native_resume_evicts_old_compactable_bodies(
     assert results["u2"]["content"] == "body-2"
     assert results["u3"]["content"] == "body-3"
     assert results["u4"]["content"] == "body-4"
-    assert results["u5"]["content"] == "body-5"
+    assert "u5" not in results  # trailing user turn (u5 result) streams as delta
     # structure preserved on a cleared block
     assert results["u0"]["is_error"] is False
     assert results["u0"]["tool_use_id"] == "u0"
@@ -181,7 +181,7 @@ async def test_warm_native_resume_keeps_full_bodies(tmp_path: Path) -> None:
     assert loaded is not None
     results = _store_results(loaded)
     assert {tuid: b["content"] for tuid, b in results.items()} == {
-        f"u{t}": f"body-{t}" for t in range(6)}
+        f"u{t}": f"body-{t}" for t in range(5)}  # u5 result streams as delta, not stored
 
 
 @pytest.mark.anyio
@@ -199,7 +199,7 @@ async def test_cold_native_resume_keeps_non_compactable_bodies(
     assert loaded is not None
     results = _store_results(loaded)
     assert {tuid: b["content"] for tuid, b in results.items()} == {
-        f"u{t}": f"body-{t}" for t in range(6)}
+        f"u{t}": f"body-{t}" for t in range(5)}  # u5 result streams as delta, not stored
 
 
 @pytest.mark.anyio
@@ -222,4 +222,4 @@ async def test_cold_native_resume_mixed_selectivity(tmp_path: Path) -> None:
     assert results["u2"]["content"] == "body-2"    # keep window
     assert results["u3"]["content"] == "body-3"
     assert results["u4"]["content"] == "body-4"
-    assert results["u5"]["content"] == "body-5"
+    assert "u5" not in results  # trailing user turn (u5 result) streams as delta

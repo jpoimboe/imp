@@ -512,6 +512,70 @@ def test_reconcile_store_tail_is_idempotent_when_complete() -> None:
     assert len(out) == 3
 
 
+def test_reconcile_store_tail_truncates_surplus_turns() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    # The store has accumulated ALL 3 turns, but the rolled-back message prefix
+    # holds only the first 2 — reconcile must drop the surplus 3rd turn.
+    store_body = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+
+    out = reconcile_store_tail(
+        messages[:2], store_body, session_id="sid", cwd="/p", model="m")
+
+    assert len(out) == 2
+    assert out == store_body[:2]
+
+
+def test_reconcile_store_tail_empty_messages_returns_empty() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+
+    # A dispatch-only tail rewinds resume_base to 0, so the message prefix is
+    # empty: the reconciled store must be empty too (store.overwrite unlinks it).
+    out = reconcile_store_tail(
+        [], store_body, session_id="sid", cwd="/p", model="m")
+
+    assert out == []
+
+
+def test_reconcile_store_tail_strips_error_then_truncates_surplus() -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages, parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    err = message_to_session_records(
+        [Message(role="assistant", content=(
+            TextBlock(text="You've hit your session limit (America/Los_Angeles)"),))],
+        parent_uuid=store_body[-1]["uuid"], session_id="sid", cwd="/p",
+        model="m", start_index=3)
+    store_with_error = store_body + err
+
+    out = reconcile_store_tail(
+        messages[:1], store_with_error, session_id="sid", cwd="/p", model="m")
+
+    assert len(out) == 1
+    assert out == store_body[:1]
+
+
 def _asst_use(uid: str, tuid: str, name: str = "read_file") -> dict:
     return {
         "parentUuid": None, "uuid": uid, "sessionId": "s", "type": "assistant",
