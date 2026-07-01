@@ -302,9 +302,7 @@ async def run_change(
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         interrupt=coordinator.should_pause or action.interrupt)
-                    # Transient give-up (retry_ceiling / reauth) keeps the tail an
-                    # error-truncation → resume continues; every other park (genuine
-                    # yield, fatal, Ctrl-C) clears it → resume solicits and parks.
+                    # Keep on transient give-up (tail stays error-truncated); clear on every other park.
                     state.retry_continue_pending = action.reason in (
                         "retry_ceiling", "reauth_needed")
                 reason = action.reason or "interrupt"
@@ -926,10 +924,7 @@ async def _route_agent(
                    "action": _action_payload(pause), "var_mutations": {}})
             return pause, None, {}
         backoff += 1
-        # Persist the transient-continue intent BEFORE the sleep so a kill/crash
-        # during backoff leaves the "resume should continue this step" marker on
-        # disk. Harmless on every backoff (consulted only at a bare-turn-end
-        # resume entry; any forward progress clears it).
+        # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
         state.retry_continue_pending = True
         state.save(change.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
