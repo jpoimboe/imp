@@ -261,7 +261,7 @@ fixes in sweep context with a plain commit). -->
 
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
 failure output. Reason over the OPAQUE failure text against the diff
-(`review_base..HEAD`) — you never re-run a single test; this is pure judgment.
+(`cur_base_head..HEAD`) — you never re-run a single test; this is pure judgment.
 
 Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the

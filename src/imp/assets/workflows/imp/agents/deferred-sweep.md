@@ -182,7 +182,7 @@ drains the Deferred Followups list as described above and does NOT perform triag
 do NOT re-drain the Deferred Followups list, just adjudicate the failures.
 
 On a triage entry, reason over the OPAQUE failure text against the diff
-(`review_base..HEAD`) — pure judgment, you never re-run a single test.
+(`cur_base_head..HEAD`) — pure judgment, you never re-run a single test.
 
 Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the

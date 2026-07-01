@@ -340,7 +340,7 @@ def test_task_lead_documents_verify_triage() -> None:
     assert "— needs-decision:" in text          # born in needs-decision state (em dash)
     assert "verify_tolerated" in text                # the signal it emits
     assert "attributable" in low                     # the single attributability judgment
-    assert "review_base..HEAD" in text               # judged against the diff
+    assert "cur_base_head..HEAD" in text             # judged against the diff
     # The two-category taxonomy is gone — no tags, no "green at baseline", no union set.
     assert "[baseline]" not in text
     assert "[flaky]" not in text
@@ -463,7 +463,7 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "sweep_tolerated: false" in text
     # The single attributability judgment, against the diff.
     assert "attributable" in low
-    assert "review_base..HEAD" in text
+    assert "cur_base_head..HEAD" in text
     # The two-category taxonomy is gone.
     assert "[baseline]" not in text
     assert "[flaky]" not in text
