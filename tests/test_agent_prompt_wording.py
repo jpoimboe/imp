@@ -105,28 +105,19 @@ def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
 def test_plan_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
     body = _agent_prompt("plan-code-reviewer")
     assert "..HEAD" not in body
-    assert body.count("..imp/{{ change.id }}") == 2
+    assert body.count("..imp/{{ change.id }}") == 1
 
 
-def test_plan_code_reviewer_renders_change_branch_diff_both_cadences(tmp_path) -> None:
+def test_plan_code_reviewer_renders_change_diff(tmp_path) -> None:
     body = _agent_prompt("plan-code-reviewer")
     log = JsonlEventLog(tmp_path / "events.jsonl")
-
-    whole = render_prompt(body, build_context(
+    out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", cur_base_head="BASE",
-        vars={"review_scope": "change", "review_base": "RB"}),
+        vars={"fast_path": False}),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "git diff BASE..imp/abc" in whole
-    assert "..HEAD" not in whole
-
-    batch = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", cur_base_head="BASE",
-        vars={"review_scope": "plan", "review_base": "RB"}),
-        workflow_dir=bundled_workflow_dir("imp"))
-    assert "git diff RB..imp/abc" in batch
-    assert "..HEAD" not in batch
+    assert "git diff BASE..imp/abc" in out
+    assert "..HEAD" not in out
 
 
 def test_plan_writer_carries_illegal_states_steer() -> None:

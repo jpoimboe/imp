@@ -189,9 +189,7 @@ def test_check_next_plan_routes_settled_batch_to_change_review() -> None:
 def test_plan_code_reviewer_reads_review_scope_not_integration_pass() -> None:
     text = (AGENTS / "plan-code-reviewer.md").read_text()
     assert "integration_pass" not in text
-    assert "review_scope" in text
     assert "panel_done" not in text                 # the re-verify dial is gone
-    assert "review_base" in text                     # per-batch diff base is pinned
 
 
 def test_reconciler_is_a_rebase_conflict_resolver() -> None:
@@ -225,20 +223,6 @@ def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
     assert "vars.review_base" not in out and "abc123" not in out
     assert "task(subagent_name=" not in out         # reviews directly, dispatches nothing
 
-
-def test_per_batch_reviews_review_base_range(tmp_path) -> None:
-    out = _render_reviewer(tmp_path, review_scope="plan")
-    assert "abc123..imp/chg" in out                 # diff range pins review_base
-    assert "spec-compliance-slice" not in out       # single reviewer, no panel
-    assert "task(subagent_name=" not in out
-
-
-def test_per_batch_empty_review_base_falls_back_to_fork(tmp_path) -> None:
-    # review-base-init is gone: the first per-batch review runs with review_base == "",
-    # which must resolve to the recorded fork point, not a broken empty-LHS range.
-    out = _render_reviewer(tmp_path, review_scope="plan", review_base="",
-                           cur_base_head="forkSHA")
-    assert "forkSHA..imp/chg" in out
 
 
 def test_plan_writer_recognizes_rework_preambles() -> None:

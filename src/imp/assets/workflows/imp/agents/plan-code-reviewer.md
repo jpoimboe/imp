@@ -28,14 +28,9 @@ exclusively. Your job is code correctness within the diff under review.
 Resolve the diff range from the review cadence — a computed range, never
 reconstructed from `progress.md`:
 
-{% if vars.get('review_scope') == 'change' %}
 **End-of-change pass (whole-change, cross-plan).** Review the whole change:
 `git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the change's recorded fork point. This is
 the one full review of the run.
-{% else %}
-**Per-batch pass.** Review this batch's work: `git diff {{ vars.get('review_base') or change.cur_base_head }}..imp/{{ change.id }}`
-— do not widen it to the whole change.
-{% endif %}
 
 The work is already committed, so a bare `git diff` shows nothing — always diff the
 range above.
