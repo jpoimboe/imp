@@ -2888,7 +2888,9 @@ async def test_cooperative_interrupt_steer_continues_no_pause(
     assert not any(e.get("payload", {}).get("kind") == "interrupted"
                    for e in events if e["type"] == "error")
     assert holder["c"].disconnected is False
-    assert holder["c"].interrupt_calls == 1
+    # Two interrupts: the cooperative steer (#1), then Part A's completion-interrupt
+    # preempting the steered turn that emits complete_step (#2).
+    assert holder["c"].interrupt_calls == 2
     assert coord.should_pause is False
     assert holder["c"].queries[-1] == "go check the other file instead"
 

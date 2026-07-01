@@ -201,7 +201,7 @@ async def test_handoff_reported_even_when_note_missing_and_error(
 
 
 @pytest.mark.anyio
-async def test_below_threshold_does_not_interrupt_or_signal_handoff(
+async def test_below_threshold_completing_turn_interrupts_and_completes(
         tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
@@ -228,14 +228,18 @@ async def test_below_threshold_does_not_interrupt_or_signal_handoff(
 
     assert not [e for e in events if e["type"] == "handoff"]
     assert any(e["type"] == "agent_output" for e in events)
-    assert holder["client"].interrupts == 0
+    # Part A: a completing turn is interrupted regardless of the context
+    # threshold — the completion-interrupt, not a handoff.
+    assert holder["client"].interrupts == 1
 
 
 @pytest.mark.anyio
 async def test_completing_turn_above_threshold_completes_not_handoff(
         tmp_path: Path) -> None:
     """Completion wins: a turn that calls complete_step is never preempted into
-    a handoff, even when live context is at/above the threshold. Drives the
+    a handoff, even when live context is at/above the threshold. Under Part A it
+    IS preempted — via the completion-interrupt — so it completes, not hands off.
+    Drives the
     PRODUCTION tool name `mcp__imp__complete_step` (the SDK namespaces imp's
     tools); a watch guard comparing the bare name would miss it and wrongly
     interrupt+handoff a completing turn. Requires both the watch guard and the
@@ -265,4 +269,5 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
 
     assert not [e for e in events if e["type"] == "handoff"]
     assert any(e["type"] == "agent_output" for e in events)
-    assert holder["client"].interrupts == 0
+    # Part A: the completing turn is interrupted (completion path), not a handoff.
+    assert holder["client"].interrupts == 1
