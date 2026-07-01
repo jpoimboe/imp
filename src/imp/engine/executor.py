@@ -682,6 +682,8 @@ async def _route_script(
     finally:
         if output_path is not None:
             output_path.unlink(missing_ok=True)
+    if step.show_output and out["exit"] == 0:
+        _emit(log, "script_output", {"step": step.name, "stdout": out["stdout"]})
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, change, match, state)

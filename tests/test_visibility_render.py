@@ -96,3 +96,21 @@ def test_frame_suppressed_false_on_pause_outcome() -> None:
     node = nv.StepNode(name="s", kind="script", show_label=False, show_output=True)
     node.outcome = nv.OutcomeLine(action={"verb": "pause"})
     assert frame_suppressed(node) is False
+
+
+def test_script_output_renders_bullet_message_under_step() -> None:
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="announce", kind="script", phase="plan",
+           show_output=True, label="finalizing"),
+        ev("3", "script_output", step="announce", stdout="plan 2/3 · 4 tasks"),
+        ev("4", "step_completed", step="announce", kind="script",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    tree = nv.build_tree(events)
+    lits = [c for ph in tree.root.children if isinstance(ph, nv.PhaseNode)
+            for st in ph.children if isinstance(st, nv.StepNode)
+            for c in st.children if isinstance(c, nv.LiteralTextNode)]
+    assert any("plan 2/3 · 4 tasks" in n.text and n.verbatim is False for n in lits)
+    body = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "plan 2/3 · 4 tasks" in body

@@ -537,3 +537,61 @@ def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> Non
         assert not created[0].exists(), "temp file was not cleaned up after run_script raised"
 
     anyio.run(main)
+
+
+def test_route_script_emits_script_output_on_show_output_success(tmp_path) -> None:
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change")
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command='printf "hi there"', show_output=True)
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, _, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Continue)
+        outs = [e for e in log.read() if e["type"] == "script_output"]
+        assert len(outs) == 1
+        assert "hi there" in outs[0]["payload"]["stdout"]
+
+    anyio.run(main)
+
+
+def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change")
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo boom; exit 1", show_output=True)
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, _, _ = await _route_script(step, change, state, log)
+        assert isinstance(action, Continue)
+        assert not any(e["type"] == "script_output" for e in log.read())
+
+    anyio.run(main)
