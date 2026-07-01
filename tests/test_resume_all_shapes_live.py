@@ -336,7 +336,7 @@ async def test_complete_step_handback_native_resume(
         cwd=str(tmp_path), model=_MODEL, start_index=0))
 
     # Spy on the first-query stream: the native path streams ONLY the handback
-    # (1 user turn). The success result rides the loaded session, not the delta.
+    # (1 user turn) — the is_error feedback result that pairs the dangling call.
     streamed: list[list[Message]] = []
     _orig_stream = claude_code._stream_history
     monkeypatch.setattr(
@@ -350,26 +350,27 @@ async def test_complete_step_handback_native_resume(
     assert events[-1]["type"] == "agent_output", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
-    # The handback is the single streamed delta turn (the success result is NOT here).
+    # The handback is the single streamed delta turn — the is_error complete_step
+    # result whose content IS the feedback (the dangling call is left in the loaded
+    # session and this result pairs it).
     assert len(streamed) == 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert all(isinstance(b, TextBlock) for b in streamed[0][0].content)
-    assert "REVISE: confirm the work is done, then finish." in "".join(
-        b.text for b in streamed[0][0].content if isinstance(b, TextBlock))
+    results = [b for b in streamed[0][0].content if isinstance(b, ToolResultBlock)]
+    assert len(results) == 1 and results[0].tool_use_id == "c0"
+    assert results[0].is_error is True
+    assert "REVISE: confirm the work is done, then finish." in results[0].content
     # Zero re-execution: no read_file was issued on resume.
     assert _read_file_call_count(inv.event_log) == 0
-    # The store was balanced before load: reconcile + overwrite wrote the
-    # complete_step assistant turn and the synthesized success-result user turn
-    # onto the single seed (the replay fallback never writes the store).
+    # On a rework resume NO success result is folded: the complete_step is left
+    # dangling in the loaded session and the is_error feedback result streams as
+    # the delta and pairs it. reconcile + overwrite writes [seed user, dangling
+    # complete_step assistant] before load; the live turn the batcher flushes
+    # afterward appends past it, so target the stable reconciled index 1.
     entries = await store.load(skey)
-    assert entries is not None and len(entries) >= 3, entries
-    # reconcile + overwrite writes exactly [seed user, complete_step assistant,
-    # synthesized success-result user] before load; the live turn the batcher
-    # flushes afterward appends past it, so target the stable reconciled index 2
-    # (the success-result user turn), not the drifting store tail.
-    reconciled = entries[2]
-    assert reconciled["message"]["role"] == "user"
+    assert entries is not None and len(entries) >= 2, entries
+    reconciled = entries[1]
+    assert reconciled["message"]["role"] == "assistant"
     assert any(
-        isinstance(b, dict) and b.get("type") == "tool_result"
-        and b.get("tool_use_id") == "c0" and b.get("is_error") is False
+        isinstance(b, dict) and b.get("type") == "tool_use"
+        and b.get("id") == "c0" and b.get("name") == "complete_step"
         for b in reconciled["message"]["content"]), reconciled

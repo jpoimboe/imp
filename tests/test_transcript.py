@@ -486,3 +486,28 @@ def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path
     t.append(msgs[0])
     assert synthesize_native_success_on_resume(
         msgs, t, InMemoryEventLog(), "x") is None
+
+
+def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c0", name="complete_step", input={"status": "Success"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    synth = repair_dangling_tool_use_on_resume(
+        msgs, t, feedback="REVISE: rewrite plan.md")
+    assert synth is not None and len(synth) == 1
+    rb = synth[0]
+    assert rb.tool_use_id == "c0"
+    # The dangling complete_step is paired with an is_error result whose content
+    # IS the framed feedback (not the synthetic "interrupted" filler).
+    assert rb.is_error is True
+    assert rb.content == REWORK_RESULT_FRAME + "\n\n" + "REVISE: rewrite plan.md"
+    # Appended as a trailing user turn (repair shape) with the durability note.
+    assert msgs[-1].role == "user"
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in msgs[-1].content)
+    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM

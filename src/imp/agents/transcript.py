@@ -185,6 +185,7 @@ def _synthetic_tool_result_content(tool_name: str) -> str:
 
 def repair_dangling_tool_use_on_resume(
     messages: list[Message], transcript: Transcript,
+    feedback: str | None = None,
 ) -> tuple[ToolResultBlock, ...] | None:
     """Restore the tool_use ↔ tool_result invariant before resuming.
 
@@ -208,6 +209,13 @@ def repair_dangling_tool_use_on_resume(
     empty, so `is not None` is still the 'transcript was already balanced' signal.
     The Message is mutated in place in `messages` and `transcript`; callers iterate
     the returned tuple to emit one tool_result event per synthesized block.
+
+    When `feedback` is given (the claude_code native rework delta), the shape-1
+    dangling `complete_step` block's is_error result carries the framed feedback
+    (`REWORK_RESULT_FRAME + "\\n\\n" + feedback`) instead of the synthetic
+    "interrupted" filler, so `claude-p` pairs the dangling call against the
+    model's own revision instruction. Rework tails are always shape-1 (a dangling
+    `complete_step` assistant turn), so shape-2 ignores `feedback`.
     """
     if not messages:
         return None
@@ -222,7 +230,9 @@ def repair_dangling_tool_use_on_resume(
         result_blocks = tuple(
             ToolResultBlock(
                 tool_use_id=tu.id,
-                content=_synthetic_tool_result_content(tu.name),
+                content=(REWORK_RESULT_FRAME + "\n\n" + feedback
+                         if feedback is not None and tu.name == "complete_step"
+                         else _synthetic_tool_result_content(tu.name)),
                 is_error=True,
             )
             for tu in tool_uses
