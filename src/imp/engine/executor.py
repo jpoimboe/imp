@@ -554,6 +554,8 @@ def _step_started_payload(
         payload["position_label"] = True
     if step.phase_label is not None:
         payload["phase_label"] = render_label(step.phase_label, change, log, state)
+    if not step.phase_show_label:
+        payload["phase_show_label"] = False
     # Consume-on-read: transfer route_label from the prior step's _finish, then clear it.
     if state.route_label is not None:
         payload["route_label"] = state.route_label

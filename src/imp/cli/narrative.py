@@ -111,6 +111,7 @@ class PhaseNode:
     closed: bool = False
     chrome: str | None = None
     label: str | None = None
+    show_label: bool = True
     collapsible = False
 
 
@@ -880,7 +881,7 @@ NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
 
 def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
-                  phase_label: str | None = None) -> None:
+                  phase_label: str | None = None, show_label: bool = True) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it
     to the workflow root, and make it the current scope. There are no
@@ -895,7 +896,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str, chrome: str | None = None,
         return
     if self._current_phase is not None:
         self._current_phase.closed = True   # let the live cursor pop the drained phase
-    phase = PhaseNode(name=name, chrome=chrome, label=phase_label)
+    phase = PhaseNode(name=name, chrome=chrome, label=phase_label, show_label=show_label)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
@@ -982,7 +983,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
-    _ensure_phase(self, phase, p.get("chrome"), p.get("phase_label"))
+    _ensure_phase(self, phase, p.get("chrome"), p.get("phase_label"),
+                  p.get("phase_show_label", True))
     # interactive defaults False — it is re-sourced from the event stream (an
     # awaiting_user_input event marks the step interactive); step_started no
     # longer carries an interactive key.

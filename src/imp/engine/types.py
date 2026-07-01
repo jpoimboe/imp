@@ -188,6 +188,7 @@ class Step:
     phase_label: str | None = None  # owning phase's label template, stamped at load
     show_label: bool = True     # frame: header + completion breadcrumb (default on)
     show_output: bool = False   # script body: stdout as a • message (scripts only)
+    phase_show_label: bool = True  # owning phase's show_label, stamped at load (like phase_label)
     output_schema: OutputSchema | None = None  # script-only typed $IMP_OUTPUT contract
 
 

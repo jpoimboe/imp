@@ -128,3 +128,21 @@ def test_script_output_renders_bullet_message_under_step() -> None:
     assert any("plan 2/3 · 4 tasks" in n.text and n.verbatim is False for n in lits)
     body = "\n".join(render_tree(tree, full=False, color=False, width=80))
     assert "plan 2/3 · 4 tasks" in body
+
+
+def test_phase_show_label_false_suppresses_phase_header() -> None:
+    body = _body([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="front-door", kind="agent",
+           phase="front-door", model="m", provider="anthropic",
+           label="chatting", phase_label="front-door phase",
+           show_label=False, phase_show_label=False),
+        ev("3", "llm_response", agent_id="step:front-door/front-door",
+           provider="anthropic", model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "hello there"}]}),
+        ev("4", "step_completed", step="front-door", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    out = "\n".join(body)
+    assert "hello there" in out                 # conversation body survives
+    assert "front-door phase" not in out        # phase header suppressed

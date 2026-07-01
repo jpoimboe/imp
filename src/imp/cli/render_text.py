@@ -298,11 +298,13 @@ def deferred_leaf(node: nv.StepNode) -> bool:
 
 
 def frame_suppressed(node: Any) -> bool:
-    """The node's frame (header + breadcrumb) is hidden. A PhaseNode or a legacy
-    chrome step suppresses unconditionally; a show_label:false step suppresses only
-    on a linear outcome — the frame returns on pause/error (reveal-on-error)."""
+    """The node's frame (header + breadcrumb) is hidden. A legacy chrome node or a
+    show_label:false phase suppresses unconditionally; a show_label:false step
+    suppresses only on a linear outcome — the frame returns on pause/error."""
     if chrome_suppressed(node):
         return True
+    if isinstance(node, nv.PhaseNode):
+        return not node.show_label
     if isinstance(node, nv.StepNode):
         return step_hidden(node) and quiet_step_is_silent(node)
     return False
@@ -535,7 +537,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # The phase start line is surrounded by blank lines: the blank ABOVE comes
         # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
         # priming the children walk so the first step gets a lead-in blank.
-        suppress = chrome_suppressed(node)
+        suppress = frame_suppressed(node)
         if not suppress:
             yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth, full=full,

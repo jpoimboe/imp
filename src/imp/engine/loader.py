@@ -703,6 +703,7 @@ def _parse_step(
             release=release,
             chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
         )
@@ -717,6 +718,7 @@ def _parse_step(
             label=label,
             chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
             output_schema=output_schema,
@@ -729,6 +731,7 @@ def _parse_step(
             label=label,
             chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
         )
@@ -742,6 +745,7 @@ def _parse_step(
             release=release,
             chrome=chrome,
             phase_label=phase_label,
+            phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
         )

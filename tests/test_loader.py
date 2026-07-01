@@ -1547,3 +1547,23 @@ def test_script_output_unknown_field_reference_fails_load(tmp_path) -> None:
         """)
     with pytest.raises(LoadError):
         load_workflow(wf)
+
+
+def test_phase_show_label_is_stamped_onto_each_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: bare
+            show_label: false
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+          - name: normal
+            steps:
+              - name: loud
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].phase_show_label is False   # owning phase's value
+    assert by["loud"].phase_show_label is True
