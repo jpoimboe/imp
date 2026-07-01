@@ -2311,6 +2311,59 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    # Dispatch-only tail: the whole transcript is a single trailing user turn (the
+    # rolled-back dispatch). classify_resume -> SEND_TO_LLM; the rewind collapses
+    # resume_base to 0.
+    dispatch = Message(role="user", content=(TextBlock(text="DISPATCH"),))
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(dispatch)
+
+    # The store has ACCUMULATED from prior respawns: two stale copies of the
+    # dispatch. The truncating reconcile must empty it (no session to resume).
+    await store.append(skey, message_to_session_records(
+        [dispatch, dispatch], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0))
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    opts = created[0].opts
+    # Fresh-stream disposition: no resume= handed to claude-p (unlike the native
+    # elif branch, which sets resume=resume_session_id(aid)).
+    assert opts.resume is None
+    # The truncating reconcile emptied the accumulated store — nothing to resume.
+    assert await store.load(skey) is None
+    # The full history streams ONCE as the fresh delta (one copy of the dispatch).
+    streamed = created[0].queries[0]
+    assert len(streamed) == 1 and streamed[0]["type"] == "user"
+    # An all-TextBlock user turn serializes content to a PLAIN STRING via
+    # _join_text (claude_code.py:864-866), not a list of blocks.
+    assert streamed[0]["message"]["content"] == "DISPATCH"
+
+
+@pytest.mark.anyio
 async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript

@@ -1449,8 +1449,10 @@ class ClaudeCodeAgentRunner:
         if native_resume and classify_resume(existing) is ResumeState.SEND_TO_LLM:
             while resume_base > 0 and existing[resume_base - 1].role == "user":
                 resume_base -= 1
+        # Dispatch-only respawn emptied the store; stream fresh instead of resuming nothing.
+        fresh_stream = native_resume and resume_base == 0
         config_dir: Path | None = None
-        if is_fresh:
+        if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
             self._config_dir = config_dir
             opt_store, opt_session_id, opt_resume = (
