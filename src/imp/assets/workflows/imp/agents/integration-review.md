@@ -54,6 +54,34 @@ In `bash`:
   reconciliation that over-reaches (does more than reconcile the replay) or that
   silently drops or distorts the change's intended behavior is a blocking finding.
 
+## Triage entry — adjudicating an `integration-verify` failure
+
+You are resumed in **two** distinct modes, told apart by the injected feedback:
+- **Review a resolution** (a clean `integration-verify` passed, or the reconciler acted on your
+  prior findings) — do the semantic-integration review above.
+- **Adjudicate a failure** — the injected feedback is *"Integration tests failed on the merged
+  tree. Adjudicate fix-vs-tolerate:"*. The slow `integration-verify` gate failed and routed the
+  OPAQUE failure text to you; you **adjudicate fix-vs-tolerate**, you do NOT re-run the suite (a
+  re-run tells you nothing new — you cannot have changed the tree). Reason over the failure text
+  against the base-side incoming diff:
+  - **worth fixing** — a genuine silent break against the base-side incoming diff → set
+    `blocking: true` and name the break in `findings`. The reconciler is resumed by that
+    **finding** and fixes it forward; it is driven by your finding, never raw test output.
+  - **not ours / not worth it** — the base regressed its own test, or a flake → record a
+    toleration and let it ride to `finalize`. Record it as a normal `## Deferred Followups`
+    entry in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if
+    absent), born directly in `— needs-decision:` state with source `integration-verify`. The
+    EXACT shape:
+
+    `- [ ] DEFERRED integration-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+
+    Then return `blocking: false` and `has_minor_findings: false` so the workflow falls through
+    to `summarizer` — the toleration surfaces to the human at the `finalize` gate. A toleration
+    is **visibility, not reproduction**: it changes nothing about the merge.
+
+Only an `integration-verify` `124` timeout pauses unconditionally (that routing is the
+workflow's, not yours).
+
 ## Severity
 
 Classify each finding against the canonical severity rubric:
@@ -69,7 +97,8 @@ absorbs every fix:
   unfaithful or over-reaching reconciliation — the reconciler must fix it before merge.
 - `has_minor_findings: true` when there are Minor findings and no blocking ones — the
   reconciler integrates them too.
-- both false (Nit-only or clean) — the integration is sound and proceeds to merge.
+- both false (Nit-only, clean, or a triaged "not ours" toleration) — the integration proceeds
+  to `summarizer` and on to merge.
 
 This step is non-soliciting — end with `complete_step` directly, without prompting a
 human. Do NOT make code changes and do NOT commit.
