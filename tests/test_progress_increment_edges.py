@@ -7,8 +7,7 @@ from imp.engine.types import Goto
 
 _BASE = {
     "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False, "review_scope": "plan",
-    "review_base": "",
+    "plan_minors_integrated": False,
     "coverage_settled": False, "plan_index": 3, "plan_total": 3, "task_total": 0,
 }
 
@@ -18,21 +17,24 @@ def _steps():
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_per_batch_settle_advances_plan_index() -> None:
-    rules = _steps()["review-base-repin"].rules
-    m = evaluate_rules(rules, vars={**_BASE, "review_scope": "plan", "plan_total": 4},
-                       output={"exit": 0, "stdout": "cafef00d", "stderr": ""})
+def test_check_next_plan_advances_plan_index() -> None:
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    step = next(s for s in wf.flat_steps() if s.name == "check-next-plan")
+    m = evaluate_rules(step.rules,
+                       vars={**_BASE, "coverage_settled": False, "plan_index": 1, "plan_total": 3},
+                       output={})
+    assert m.var_mutations["plan_index"] == 2
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.var_mutations["plan_index"] == 4
-    assert m.var_mutations["review_base"] == "cafef00d"
 
 
-def test_end_of_change_settle_does_not_advance_plan_index() -> None:
-    rules = _steps()["review-base-repin"].rules
-    m = evaluate_rules(rules, vars={**_BASE, "review_scope": "change"},
-                       output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+def test_settled_batch_does_not_advance_plan_index() -> None:
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    step = next(s for s in wf.flat_steps() if s.name == "check-next-plan")
+    m = evaluate_rules(step.rules,
+                       vars={**_BASE, "coverage_settled": True, "plan_index": 2, "plan_total": 2},
+                       output={})
     assert "plan_index" not in m.var_mutations
+    assert isinstance(m.action, Goto) and m.action.target == "change-review"
 
 
 def test_finalize_rework_bumps_both_counters_together() -> None:
@@ -52,9 +54,8 @@ def test_finalize_merge_leaves_counters_alone() -> None:
                        output={"status": "Success", "decision": "merge", "comments": "",
                                "built": "", "verify_status": "", "open_items": "",
                                "next_steps": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
-    assert "plan_index" not in m.var_mutations
-    assert "plan_total" not in m.var_mutations
+    assert isinstance(m.action, Goto) and m.action.target == "cleanup-merge"
+    assert m.var_mutations == {}
 
 
 def test_resume_reworks_do_not_touch_plan_index() -> None:

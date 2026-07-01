@@ -18,8 +18,6 @@ def _steps(wf):
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False,
-    "review_scope": "plan",
-    "review_base": "",
     "coverage_settled": False,
     "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
@@ -93,16 +91,18 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-finalizer
     # phase jumps clear (plain goto): task_gap -> coder (target task-lead),
     # cross-phase plain goto (resume is False)
-    assert by["plan-code-reviewer"].rules[0].action.target == "task-lead"
-    assert by["plan-code-reviewer"].rules[0].action.resume is False
-    # else: approve -> continue (deferred-sweep); plan_gap route is removed
-    assert isinstance(by["plan-code-reviewer"].rules[-1].action, Continue)
+    assert by["change-review"].rules[0].action.target == "task-lead"
+    assert by["change-review"].rules[0].action.resume is False
+    # else: approve -> goto deferred-sweep (forward)
+    assert isinstance(by["change-review"].rules[-1].action, Goto)
+    assert by["change-review"].rules[-1].action.target == "deferred-sweep"
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "integrate"
     assert [s.name for s in wf.phases[-1].steps] == [
         "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
+        "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base"]
     assert by["merge-to-base"].kind == "merge_and_exit_worktree"
@@ -113,7 +113,7 @@ def test_review_step_has_no_differ_from():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["plan-code-reviewer"].differ_from is None
+    assert by["change-review"].differ_from is None
 
 
 def test_review_step_declares_high_tier():
@@ -121,7 +121,7 @@ def test_review_step_declares_high_tier():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["plan-code-reviewer"].tier == "high"
+    assert by["change-review"].tier == "high"
 
 
 def test_gap_check_declares_high_tier() -> None:
@@ -262,16 +262,16 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_finalize_tails_the_implement_phase() -> None:
+def test_finalize_tails_the_integrate_phase():
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    impl = next(p for p in wf.phases if p.name == "implement")
-    names = [s.name for s in impl.steps]
+    integ = next(p for p in wf.phases if p.name == "integrate")
+    names = [s.name for s in integ.steps]
     assert "stamp-trailers" not in names
-    assert names[-1] == "finalize"
-    assert names[-2] == "summarizer"
-    assert names[-3] == "gap-check"
-    assert names[-4] == "review-base-repin"
+    assert names.index("summarizer") + 1 == names.index("finalize")
+    impl = next(p for p in wf.phases if p.name == "implement")
+    assert "finalize" not in [s.name for s in impl.steps]
+    assert "summarizer" not in [s.name for s in impl.steps]
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -412,16 +412,12 @@ def test_plan_writer_does_not_declare_wait_for_user() -> None:
     assert "wait_for_user" not in wf.agents["plan-writer"].tools
 
 
-def test_review_cadence_vars_declared() -> None:
+def test_review_cadence_vars_declared():
     from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    d = wf.vars.defaults()
-    assert d["review_scope"] == "plan"
-    assert d["review_base"] == ""
-    assert "tasks_since_review" not in d   # removed: review is per-plan, no counter
-    assert "review_batch_size" not in d
-    assert "panel_done" not in d            # removed: review-panel keys on review_scope only
-    assert "multi_plan" not in d            # removed: gap-check owns coverage
+    d = load_workflow(bundled_workflow_dir("imp")).vars.defaults()
+    for gone in ("review_scope", "review_base", "tasks_since_review",
+                 "review_batch_size", "panel_done", "multi_plan"):
+        assert gone not in d, gone
 
 
 def test_integration_fork_var_declared_default_empty() -> None:
@@ -541,6 +537,7 @@ def test_coverage_settled_var_declared_and_change_panel_done_absent() -> None:
     d = wf.vars.defaults()
     assert d["coverage_settled"] is False
     assert "change_panel_done" not in d
+    assert "converge_verify_tolerated" not in d
     body = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     assert "change_panel_done" not in body
 
@@ -555,32 +552,31 @@ def test_gap_check_first_coverage_complete_multi_plan_runs_panel_and_latches() -
         rules, vars={**_BASE_VARS, "plan_total": 2},
         output={"status": "Success", "more_plans": False, "rationale": "done",
                 "plan_total": 2})
-    assert isinstance(m.action, Goto) and m.action.target == "plan-code-reviewer"
-    assert m.var_mutations["review_scope"] == "change"
+    assert isinstance(m.action, Goto) and m.action.target == "change-review"
     assert m.var_mutations["coverage_settled"] is True
+    assert "review_scope" not in m.var_mutations
 
 
-def test_review_base_repin_corrective_batch_routes_to_summarizer() -> None:
+def test_check_next_plan_settled_routes_to_change_review():
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["review-base-repin"].rules
-    # A per-plan settle AFTER coverage latched means coverage is complete: route to
-    # summarizer (which then routes to finalize), NOT plan-writer or gap-check.
+    step = _steps(wf)["check-next-plan"]
+    assert step.kind == "branch"
     m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "review_scope": "plan", "coverage_settled": True},
-        output={"exit": 0, "stdout": "abc123", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+        step.rules,
+        vars={**_BASE_VARS, "coverage_settled": True, "plan_index": 1, "plan_total": 3},
+        output={})
+    assert isinstance(m.action, Goto) and m.action.target == "change-review"
 
 
-def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
+def test_check_next_plan_mid_change_advances_to_plan_writer():
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["review-base-repin"].rules
-    # More outline plans remain (plan_index < plan_total): loop back to plan-writer.
+    step = _steps(wf)["check-next-plan"]
     m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "review_scope": "plan", "plan_index": 1,
-                     "plan_total": 3, "coverage_settled": False},
-        output={"exit": 0, "stdout": "abc123", "stderr": ""})
+        step.rules,
+        vars={**_BASE_VARS, "coverage_settled": False, "plan_index": 1, "plan_total": 3},
+        output={})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
     assert m.var_mutations["plan_index"] == 2
 
@@ -588,7 +584,9 @@ def test_review_base_repin_mid_change_batch_returns_to_plan_writer() -> None:
 def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    assert "sweep_tolerated" in wf.agents["deferred-sweep"].output_schema.field_names()
+    fields = wf.agents["deferred-sweep"].output_schema.field_names()
+    assert "sweep_tolerated" in fields
+    assert "converge_verify_tolerated" in fields
 
 
 def test_deferred_sweep_tolerated_routes_to_cleanup() -> None:
@@ -597,10 +595,9 @@ def test_deferred_sweep_tolerated_routes_to_cleanup() -> None:
     rules = _steps(wf)["deferred-sweep"].rules
     # All sweep failures tolerated: deferred-sweep made NO fix and routes straight to
     # cleanup-sweep, skipping the sweep-verify gate; it carries no var.
-    m = evaluate_rules(
-        rules, vars=_BASE_VARS,
-        output={"status": "Success", "sweep_tolerated": True, "summary": "tolerated"},
-    )
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"status": "Success", "sweep_tolerated": True,
+                               "converge_verify_tolerated": False})
     assert isinstance(m.action, Goto)
     assert m.action.target == "cleanup-sweep" and m.action.resume is False
     assert m.var_mutations == {}
@@ -611,12 +608,22 @@ def test_deferred_sweep_normal_return_continues_without_carry() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["deferred-sweep"].rules
     # A normal sweep entry (no toleration) continues to sweep-verify and sets no carry.
-    m = evaluate_rules(
-        rules, vars=_BASE_VARS,
-        output={"status": "Success", "sweep_tolerated": False, "summary": "drained"},
-    )
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"status": "Success", "sweep_tolerated": False,
+                               "converge_verify_tolerated": False})
     assert isinstance(m.action, Continue)
     assert "sweep_tolerated_carry" not in m.var_mutations
+
+
+def test_deferred_sweep_slow_tolerated_routes_to_wait_for_head():
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    step = _steps(wf)["deferred-sweep"]
+    m = evaluate_rules(step.rules, vars=_BASE_VARS,
+                       output={"status": "Success", "sweep_tolerated": False,
+                               "converge_verify_tolerated": True})
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "wait-for-head"
 
 
 def test_sweep_verify_has_max_loops_5() -> None:
@@ -702,15 +709,6 @@ def test_finalize_merge_gate_is_recommendation_anchored() -> None:
     assert "within normal noise" in body
 
 
-def test_review_base_repin_command_cds_into_project_root() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    cmd = _steps(wf)["review-base-repin"].command
-    # Script gates run with cwd = the control-root workflow dir, so the command MUST
-    # cd into the worktree before reading HEAD, else it resolves the base-branch tip.
-    assert cmd == 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
-
-
 def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.assets import bundled_workflow_dir
@@ -733,7 +731,7 @@ def test_review_steps_read_only_tightening():
     assert steps["spec-reviewer"].read_only == (".",)
     assert steps["plan-reviewer"].read_only == (".",)
     # Reviewers that run tests in-tree stay loose (cannot be confined).
-    assert steps["plan-code-reviewer"].read_only == ()
+    assert steps["change-review"].read_only == ()
     assert steps["integration-reviewer"].read_only == ()
 
 
@@ -780,12 +778,12 @@ def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
     assert wf.count("goto: spec-finalizer") == 1   # only front-door's forward entry
 
 
-def test_summarizer_step_between_repin_and_finalize() -> None:
+def test_summarizer_immediately_precedes_finalize():
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    impl = next(p for p in wf.phases if p.name == "implement")
-    names = [s.name for s in impl.steps]
-    assert names[-3:] == ["gap-check", "summarizer", "finalize"]
+    integ = next(p for p in wf.phases if p.name == "integrate")
+    names = [s.name for s in integ.steps]
+    assert names[names.index("summarizer") + 1] == "finalize"
 
 
 def test_summarizer_declares_medium_tier() -> None:
@@ -808,16 +806,6 @@ def test_summarizer_output_schema_is_status_only() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert set(wf.agents["summarizer"].output_schema.field_names()) == {"status"}
-
-
-def test_review_base_repin_change_scope_routes_to_summarizer() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["review-base-repin"].rules
-    m = evaluate_rules(
-        rules, vars={**_BASE_VARS, "review_scope": "change"},
-        output={"exit": 0, "stdout": "abc123", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
 
 
 def test_finalize_drops_built_field() -> None:
@@ -918,10 +906,12 @@ def test_plan_cycle_check_gone_gap_check_present_and_reachable() -> None:
     assert not (agents_dir / "plan-cycle-check.md").exists()
     assert (agents_dir / "gap-check.md").exists()
     assert "gap-check" in by and by["gap-check"].tier == "high"
-    # gap-check is reachable: review-base-repin routes to it on the last outline plan.
-    rules = by["review-base-repin"].rules
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "plan_index": 1, "plan_total": 1},
-                       output={"exit": 0, "stdout": "abc", "stderr": ""})
+    # gap-check is reachable: check-next-plan routes to it on the last outline plan.
+    step = _steps(wf)["check-next-plan"]
+    m = evaluate_rules(
+        step.rules,
+        vars={**_BASE_VARS, "coverage_settled": False, "plan_index": 1, "plan_total": 1},
+        output={})
     assert isinstance(m.action, Goto) and m.action.target == "gap-check"
 
 
@@ -935,22 +925,22 @@ def test_gap_check_routing_and_latch() -> None:
                                  "plan_total": 3, "rationale": "x"})
     assert isinstance(gap.action, Goto) and gap.action.target == "plan-writer"
     assert gap.var_mutations["plan_index"] == 3
-    assert gap.var_mutations["review_scope"] == "plan"
     assert "coverage_settled" not in gap.var_mutations
-    # Clean + multi-plan -> latch coverage_settled + change-wide plan-code-reviewer.
+    assert "review_scope" not in gap.var_mutations
+    # Clean + multi-plan -> latch coverage_settled + change-wide change-review.
     multi = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 2},
                            output={"status": "Success", "more_plans": False,
                                    "plan_total": 2, "rationale": "done"})
-    assert isinstance(multi.action, Goto) and multi.action.target == "plan-code-reviewer"
+    assert isinstance(multi.action, Goto) and multi.action.target == "change-review"
     assert multi.var_mutations["coverage_settled"] is True
-    assert multi.var_mutations["review_scope"] == "change"
+    assert "review_scope" not in multi.var_mutations
     # Clean + single-plan -> change-wide review fires too (plan_total gate dropped).
     single = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                             output={"status": "Success", "more_plans": False,
                                     "plan_total": 1, "rationale": "done"})
-    assert isinstance(single.action, Goto) and single.action.target == "plan-code-reviewer"
+    assert isinstance(single.action, Goto) and single.action.target == "change-review"
     assert single.var_mutations["coverage_settled"] is True
-    assert single.var_mutations["review_scope"] == "change"
+    assert "review_scope" not in single.var_mutations
 
 
 def test_gap_check_agent_is_end_of_change_backstop() -> None:
@@ -1006,6 +996,7 @@ def test_imp_gate_steps_pass_tier_arg() -> None:
     steps = _steps(load_workflow(bundled_workflow_dir("imp")))
     assert steps["verify"].command == "./scripts/run-verify.sh fast"
     assert steps["sweep-verify"].command == "./scripts/run-verify.sh fast"
+    assert steps["converge-verify"].command == "./scripts/run-verify.sh slow"
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
 
 

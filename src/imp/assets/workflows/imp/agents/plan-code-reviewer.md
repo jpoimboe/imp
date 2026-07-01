@@ -28,12 +28,12 @@ exclusively. Your job is code correctness within the diff under review.
 Resolve the diff range from the review cadence — a computed range, never
 reconstructed from `progress.md`:
 
-{% if vars.review_scope == 'change' %}
+{% if vars.get('review_scope') == 'change' %}
 **End-of-change pass (whole-change, cross-plan).** Review the whole change:
 `git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the change's recorded fork point. This is
 the one full review of the run.
 {% else %}
-**Per-batch pass.** Review this batch's work: `git diff {{ vars.review_base or change.cur_base_head }}..imp/{{ change.id }}`
+**Per-batch pass.** Review this batch's work: `git diff {{ vars.get('review_base') or change.cur_base_head }}..imp/{{ change.id }}`
 — do not widen it to the whole change.
 {% endif %}
 
@@ -151,7 +151,7 @@ fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.m
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
 
-`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: {% if vars.review_scope == 'change' %}change{% else %}plan{% endif %}]`
+`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: {% if vars.get('review_scope') == 'change' %}change{% else %}plan{% endif %}]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
 re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.

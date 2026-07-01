@@ -6,6 +6,7 @@ subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   sweep_tolerated: {type: bool}
+  converge_verify_tolerated: {type: bool}
   summary: {type: string}
 ---
 
@@ -222,6 +223,8 @@ in the budget. It escalates to a human; it is not a transient to retry.
 
 Always return `sweep_tolerated`: it is `true` only on the all-tolerated triage outcome
 above, and `false` on every list-drain entry and every real-regression fix.
+
+Always return `converge_verify_tolerated` too: it is `false` on every path here (its `true` case — a tolerated slow-gate failure that escapes forward — is wired in a later change); return it `false` everywhere in this agent for now.
 
 If there is no `## Deferred Followups` section, or it has no parsable items, that is
 a normal, common outcome — there is simply nothing to drain. Make no commits and

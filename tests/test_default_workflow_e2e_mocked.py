@@ -44,7 +44,8 @@ def _canned_anthropic(**overrides):
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "verify_tolerated": False,
-        "stuck": False, "sweep_tolerated": False, "summary": "ok",
+        "stuck": False, "sweep_tolerated": False,
+        "converge_verify_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
         "built": "stub", "verify_status": "ok",
@@ -86,7 +87,8 @@ def _openai_step_aware(**kwargs):
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "verify_tolerated": False,
-        "stuck": False, "sweep_tolerated": False, "summary": "ok",
+        "stuck": False, "sweep_tolerated": False,
+        "converge_verify_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
         "built": "stub", "verify_status": "ok",
@@ -325,7 +327,8 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "complexity": "standard",
                     "plan_path": "stub-plan.md", "plan_number": 1,
                     "done": True, "verify_tolerated": False,
-                    "stuck": False, "sweep_tolerated": False, "summary": "ok",
+                    "stuck": False, "sweep_tolerated": False,
+                    "converge_verify_tolerated": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
                     "blocking": False, "has_minor_findings": False,
                     "built": "stub", "verify_status": "ok",
@@ -467,15 +470,15 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     assert "plan-writer" in started, started
     assert "plan-finalized" in started, started
     assert "task-lead" in started, started
-    assert "plan-code-reviewer" in started, started
+    assert "change-review" in started, started
     assert "deferred-sweep" in started, started
     assert "sweep-verify" in started, started
     assert "gap-check" in started, started
     assert "summarizer" in started, started
-    # Single plan: the forward plan skips review, gap-check runs exactly once and fires
-    # the change-wide pass, so plan-code-reviewer runs exactly once (the change-wide pass).
+    # Single plan: gap-check runs exactly once in converge and fires the change-wide
+    # review, so change-review runs exactly once (the change-wide pass).
     assert started.count("gap-check") == 1, started
-    assert started.count("plan-code-reviewer") == 1, started
+    assert started.count("change-review") == 1, started
 
 
 @pytest.mark.anyio
@@ -529,8 +532,9 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
 @pytest.mark.anyio
 async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None:
     """A clean rebase (the stubbed integrate-rebase.sh exits 0): the reconciler is
-    SKIPPED; the merge tail is finalize → wait-for-head → integrate-rebase →
-    integration-verify → integration-reviewer → merge-to-base."""
+    SKIPPED; the integrate tail is wait-for-head → integrate-rebase →
+    integration-verify → integration-reviewer → summarizer → finalize →
+    merge-to-base."""
     change = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
@@ -545,15 +549,16 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("finalize", "wait-for-head", "integrate-rebase",
-                 "integration-reviewer", "integration-verify", "merge-to-base"):
+    for name in ("wait-for-head", "integrate-rebase", "integration-verify",
+                 "integration-reviewer", "summarizer", "finalize", "merge-to-base"):
         assert name in steps, f"{name} did not run"
     assert "reconciler" not in steps, "clean rebase must not call the reconciler"
-    assert (steps.index("finalize")
-            < steps.index("wait-for-head")
+    assert (steps.index("wait-for-head")
             < steps.index("integrate-rebase")
             < steps.index("integration-verify")
             < steps.index("integration-reviewer")
+            < steps.index("summarizer")
+            < steps.index("finalize")
             < steps.index("merge-to-base"))
 
 

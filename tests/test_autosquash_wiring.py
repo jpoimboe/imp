@@ -28,28 +28,18 @@ def test_autosquash_step_is_gone() -> None:
 
 
 def test_cleanup_implement_routes_by_exit_code() -> None:
+    from imp.engine.gates import evaluate_rules
     step = _steps(_wf())["cleanup-implement"]
     assert step.kind == "script"
-    assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
-    from imp.engine.gates import evaluate_rules
-    r = step.rules
-    # forward plan (coverage not yet latched): exit 0 SKIPS the reviewer -> deferred-sweep
-    fwd = evaluate_rules(r, vars={"coverage_settled": False},
-                         output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(fwd.action, Goto) and fwd.action.target == "deferred-sweep"
-    # post-settlement corrective (coverage latched): exit 0 -> immediate per-plan review
-    corr = evaluate_rules(r, vars={"coverage_settled": True},
-                          output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(corr.action, Goto) and corr.action.target == "plan-code-reviewer"
-    m2 = evaluate_rules(r, vars={"coverage_settled": False},
-                        output={"exit": 2, "stdout": "", "stderr": ""})
-    assert isinstance(m2.action, Continue)            # fall through into the resolver
-    m3 = evaluate_rules(r, vars={"coverage_settled": False},
-                        output={"exit": 3, "stdout": "", "stderr": ""})
+    assert step.command == "./scripts/cleanup.sh"
+    fwd = evaluate_rules(step.rules, vars={}, output={"exit": 0})
+    assert isinstance(fwd.action, Goto) and fwd.action.target == "check-next-plan"
+    m2 = evaluate_rules(step.rules, vars={}, output={"exit": 2})
+    assert isinstance(m2.action, Continue)
+    m3 = evaluate_rules(step.rules, vars={}, output={"exit": 3})
     assert isinstance(m3.action, Goto) and m3.action.target == "task-lead"
     assert m3.action.resume is True
-    m1 = evaluate_rules(r, vars={"coverage_settled": False},
-                        output={"exit": 1, "stdout": "", "stderr": ""})
+    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
     assert isinstance(m1.action, Pause)
 
 
@@ -62,7 +52,7 @@ def test_autosquash_resolve_implement_loops_back_to_cleanup() -> None:
     assert step.max_loops == 6
 
 
-def test_cleanup_implement_precedes_its_resolver_and_reviewer() -> None:
+def test_cleanup_implement_precedes_its_resolver_and_check_next_plan() -> None:
     names = [s.name for s in _wf().flat_steps()]
     assert names.index("cleanup-implement") < names.index("autosquash-resolve-implement")
-    assert names.index("autosquash-resolve-implement") < names.index("plan-code-reviewer")
+    assert names.index("autosquash-resolve-implement") < names.index("check-next-plan")
