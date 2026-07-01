@@ -150,6 +150,7 @@ phases:
 
       - name: verify
         command: ./scripts/run-verify.sh fast
+        acquire: test-lane
         label: running tests
         max_loops: 5
         rules:
@@ -228,6 +229,7 @@ phases:
 
       - name: sweep-verify
         command: ./scripts/run-verify.sh fast
+        acquire: test-lane
         label: running tests
         max_loops: 5
         rules:
@@ -258,6 +260,7 @@ phases:
       # -> wait-for-head (forward escape; this gate never re-runs).
       - name: converge-verify
         command: ./scripts/run-verify.sh slow
+        acquire: test-lane
         label: running tests
         max_loops: 5
         rules:
@@ -295,6 +298,7 @@ phases:
 
       - name: integration-verify
         command: ./scripts/run-verify.sh slow
+        acquire: test-lane
         label: running tests
         max_loops: 5
         rules:

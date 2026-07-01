@@ -1680,3 +1680,17 @@ def test_release_test_lane_rejected(tmp_path) -> None:
         """)
     with pytest.raises((LoadError, LoadErrors), match="lane keyword"):
         load_workflow(wf)
+
+
+def test_verify_gates_acquire_test_lane() -> None:
+    from imp.assets import bundled_workflow_dir
+
+    imp = {s.name: s for ph in load_workflow(bundled_workflow_dir("imp")).phases
+           for s in ph.steps}
+    for gate in ("verify", "sweep-verify", "converge-verify", "integration-verify"):
+        assert imp[gate].acquire == "test-lane", gate
+
+    flat = {s.name: s for ph in load_workflow(bundled_workflow_dir("imp-flat")).phases
+            for s in ph.steps}
+    for gate in ("verify", "integration-verify"):
+        assert flat[gate].acquire == "test-lane", gate
