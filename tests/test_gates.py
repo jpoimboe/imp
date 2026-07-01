@@ -79,6 +79,15 @@ def _script_step(command: str, timeout_seconds: int | None = None) -> "Step":
     )
 
 
+def test_step_visibility_and_output_defaults() -> None:
+    """New Step fields default to the additive, no-op values (frame on, body off,
+    no typed output channel) so every existing step keeps its current behavior."""
+    step = _script_step("echo hi")
+    assert step.show_label is True
+    assert step.show_output is False
+    assert step.output_schema is None
+
+
 def test_run_script_bare_when_no_policy(tmp_path) -> None:
     from imp.engine.gates import run_script
     step = _script_step("echo hi")

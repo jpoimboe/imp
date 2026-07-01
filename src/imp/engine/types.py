@@ -186,6 +186,9 @@ class Step:
     release: str | None = None  # runs before step body; agent steps only
     chrome: str | None = None   # "none" → suppress phase+step headers (bare conversation)
     phase_label: str | None = None  # owning phase's label template, stamped at load
+    show_label: bool = True     # frame: header + completion breadcrumb (default on)
+    show_output: bool = False   # script body: stdout as a • message (scripts only)
+    output_schema: OutputSchema | None = None  # script-only typed $IMP_OUTPUT contract
 
 
 @dataclass(frozen=True, slots=True)
