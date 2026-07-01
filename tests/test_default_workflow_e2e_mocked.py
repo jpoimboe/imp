@@ -724,7 +724,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     # TARGET (`review complete · goto(integrate-rebase)`) — and a loud agent
     # step showing its own routing breadcrumb is intended; humanize-routing is a
     # plumbing rule.
-    quiet = {s.name for s in load_workflow(change.workflow_dir).flat_steps() if s.quiet}
+    quiet = {s.name for s in load_workflow(change.workflow_dir).flat_steps() if not s.show_label}
     assert quiet, "expected the default workflow to mark plumbing steps quiet"
     for name in sorted(quiet):
         assert not any(ln.strip() == name for ln in body), (

@@ -19,7 +19,7 @@ def test_plumbing_steps_are_quiet() -> None:
     wf = load_workflow(Path("src/imp/assets/workflows/imp"))
     by_name = {s.name: s for s in wf.flat_steps()}
     for name in _QUIET:
-        assert by_name[name].quiet is True, name
+        assert by_name[name].show_label is False, name
 
 
 def test_substantive_steps_stay_loud() -> None:
@@ -33,4 +33,4 @@ def test_substantive_steps_stay_loud() -> None:
                  "reconciler", "integration-reviewer",
                  "finalize", "merge-to-base",
                  "wait-for-head"):
-        assert by_name[name].quiet is False, name
+        assert by_name[name].show_label is True, name

@@ -23,13 +23,13 @@ def _steps(wf):
     return {s.name: s for s in wf.flat_steps()}
 
 
-def test_front_door_is_first_phase_with_chrome_none() -> None:
+def test_front_door_is_first_phase_with_show_label_false() -> None:
     wf = _wf()
     assert wf.phases[0].name == "front-door"
     step = wf.phases[0].steps[0]
     assert step.name == "front-door"
     assert step.kind == "agent"
-    assert step.chrome == "none"          # bare-conversation render (Part 1 mechanism)
+    assert step.show_label is False           # inherits the phase's show_label:false default
     assert step.label == "<imp>"
 
 
