@@ -1,7 +1,7 @@
 ---
 name: plan-code-reviewer
 label: reviewing code (full plan diff)
-description: Reviews the change's diff (a per-batch range, or the whole change) against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
+description: Reviews the change's whole diff against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap]}

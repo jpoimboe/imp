@@ -30,3 +30,11 @@ def test_finalize_pause_route_drops_human_availability_reasoning() -> None:
     assert "and none is available" not in body
     assert 'decision="pause"' in body
     assert "non-converging verify-triage" in body
+
+
+def test_finalize_enumerates_all_four_toleration_sources() -> None:
+    body = (WF / "agents" / "finalize.md").read_text()
+    assert "converge-verify" in body and "integration-verify" in body
+    # Both enumeration spots (the audit-field read and the merge-gate walk) name the new gates.
+    assert body.count("converge-verify") >= 2
+    assert body.count("integration-verify") >= 2

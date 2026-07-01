@@ -155,3 +155,18 @@ def test_no_workflow_prompt_invokes_artifact_commit() -> None:
                 f"{wf_name}/{name} still instructs imp artifact-commit"
             assert "journal-wip" not in body, \
                 f"{wf_name}/{name} still names the journal-wip ref"
+
+
+def test_gap_check_change_review_is_unconditional() -> None:
+    body = _agent_prompt("gap-check")
+    assert "if the change spanned more than one plan" not in body
+    assert "once-only change-wide review." in body
+
+
+def test_plan_code_reviewer_description_is_whole_diff() -> None:
+    from imp.engine.loader import parse_agent_file
+    desc = parse_agent_file(
+        pathlib.Path("src/imp/assets/workflows/imp/agents/plan-code-reviewer.md").resolve()
+    ).description
+    assert "per-batch" not in desc
+    assert "whole diff" in desc
