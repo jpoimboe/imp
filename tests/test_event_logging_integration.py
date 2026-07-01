@@ -245,7 +245,7 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
     # The parent and child share the same FakeAsyncAnthropic queue.
     # Consumption order:
     #   1. parent → tool_use task
-    #   2. subagent → complete_step with verdict=approve
+    #   2. subagent → bare text turn (final message; no complete_step for subagents)
     #   3. parent → complete_step (after task returns)
     shared_fake = FakeAsyncAnthropic([
         # parent turn 1: dispatch a task
@@ -253,9 +253,8 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
             "subagent_name": "reviewer",
             "task_description": "please review",
         })),
-        # subagent turn 1: complete the subagent step
-        response(tool_use("rc", "complete_step",
-                           {"status": "Success", "verdict": "approve"})),
+        # subagent turn 1: bare text turn is the subagent's terminal deliverable
+        response(text("Reviewed — approved."), stop_reason="end_turn"),
         # parent turn 2: finalize after task returns
         response(tool_use("pc", "complete_step",
                            {"status": "Success", "note": "done"})),

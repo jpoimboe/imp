@@ -30,6 +30,9 @@ class _Inv:
         self.agent_def = _AgentDef(tools)
         self.tiers: tuple[str, ...] = ()
         self.provider_name = provider
+        # Top-level agent: `_build_tools` gates `complete_step` on
+        # `subagent_depth == 0` (subagents terminate on a bare final message).
+        self.subagent_depth = 0
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
