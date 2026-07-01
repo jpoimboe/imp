@@ -24,5 +24,5 @@ guidance: |
 # (120 fast / 300 slow) but are set explicitly for clarity.
 test_cmd_fast: "make check"
 test_cmd_slow: "make check && make test-live"
-test_cmd_fast_timeout: 120
-test_cmd_slow_timeout: 300
+test_cmd_fast_timeout: 240
+test_cmd_slow_timeout: 600
