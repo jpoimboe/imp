@@ -58,15 +58,10 @@ def test_show_label_false_agent_shows_prose_without_step_header() -> None:
 # --- predicate unit tests ---
 
 def test_default_step_not_hidden_not_deferred() -> None:
-    node = nv.StepNode(name="s", kind="script", show_label=True, quiet=False)
+    node = nv.StepNode(name="s", kind="script", show_label=True)
     assert step_hidden(node) is False
     assert deferred_leaf(node) is False
 
-
-def test_legacy_quiet_flag_counts_as_deferred_leaf() -> None:
-    # quiet=True with show_label=True and no show_output: same semantics as old `node.quiet`
-    node = nv.StepNode(name="s", kind="script", show_label=True, quiet=True, show_output=False)
-    assert deferred_leaf(node) is True
 
 
 def test_show_label_false_script_no_output_is_deferred_leaf() -> None:

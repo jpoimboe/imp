@@ -1597,3 +1597,20 @@ def test_step_level_chrome_key_is_load_error(tmp_path) -> None:
         """, agents={"spec-writer": _WRITER})
     with pytest.raises(LoadError, match="chrome"):
         load_workflow(wf)
+
+
+def test_quiet_key_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: g
+                command: echo hi
+                quiet: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="quiet"):
+        load_workflow(wf)

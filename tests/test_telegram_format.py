@@ -153,12 +153,12 @@ def test_step_divider_none_when_label_whitespace_only() -> None:
         {"type": "step_started", "payload": {"label": "   "}}) is None
 
 
-def test_step_divider_none_when_quiet() -> None:
+def test_step_divider_none_when_show_label_false() -> None:
     from imp.remote.drivers.telegram import step_divider
 
     assert step_divider(
         {"type": "step_started",
-         "payload": {"label": "internal setup", "quiet": True}}) is None
+         "payload": {"label": "internal setup", "show_label": False}}) is None
 
 
 def test_header_line_renders_id_name_and_event_local_time(set_tz) -> None:

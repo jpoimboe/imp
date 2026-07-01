@@ -133,13 +133,13 @@ def test_consecutive_prompt_less_awaits_reuse_last_narration() -> None:
 
 def _step_started(
     change_id: str, *, phase: str | None = None, label: str = "scoping",
-    quiet: bool = False,
+    show_label: bool = True,
 ) -> dict:
     payload: dict = {"label": label}
     if phase is not None:
         payload["phase_label"] = phase
-    if quiet:
-        payload["quiet"] = True
+    if not show_label:
+        payload["show_label"] = False
     return {"id": "st1", "type": "step_started", "timestamp": TS,
             "change": {"id": change_id, "title": "t"}, "payload": payload}
 
@@ -157,10 +157,10 @@ def test_step_started_divider_dropped_when_unsubscribed() -> None:
     assert sent == []
 
 
-def test_quiet_step_started_renders_no_divider() -> None:
+def test_show_label_false_step_started_renders_no_divider() -> None:
     sent: list = []
     _adapter(sent, subscriptions=_subs("k3f9qa")).on_event(
-        _step_started("k3f9qa", quiet=True))
+        _step_started("k3f9qa", show_label=False))
     assert sent == []
 
 

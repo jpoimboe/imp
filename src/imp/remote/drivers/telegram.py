@@ -71,9 +71,12 @@ def format_time_of_day(iso: str) -> str:
 
 
 def step_divider(event: Mapping[str, Any]) -> str | None:
-    """Header-less divider for a step_started event; None when quiet or label empty."""
+    """Header-less divider for a step_started event.
+
+    None when the frame is hidden or the label is empty.
+    """
     payload = event.get("payload") or {}
-    if payload.get("quiet"):
+    if not payload.get("show_label", True):
         return None
     label = str(payload.get("label") or "").strip()
     if not label:

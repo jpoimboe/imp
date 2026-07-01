@@ -275,10 +275,8 @@ def quiet_step_is_silent(node: nv.StepNode) -> bool:
 
 
 def step_hidden(node: nv.StepNode) -> bool:
-    """The step's frame is opted out. Transitional: honors the legacy `quiet`
-    flag alongside the new `show_label`; plan 3 drops the `or node.quiet` arm once
-    the workflows migrate and the field is removed."""
-    return (not node.show_label) or node.quiet
+    """The step's frame (header + breadcrumb) is opted out."""
+    return not node.show_label
 
 
 def step_no_body(node: nv.StepNode) -> bool:

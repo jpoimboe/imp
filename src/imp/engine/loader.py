@@ -623,10 +623,10 @@ def _parse_step(
     if not raw.get("name") or not isinstance(raw["name"], str):
         raise LoadError("step missing a string 'name'", source)
     name = raw["name"]
-    if "chrome" in raw:
-        raise LoadError("`chrome:` was removed; use show_label", source)
+    for retired in ("quiet", "chrome"):
+        if retired in raw:
+            raise LoadError(f"`{retired}:` was removed; use show_label/show_output", source)
     kind = _infer_kind(raw, source)
-    quiet = _parse_bool_flag(raw, "quiet", source)
     step_show_label = _parse_optional_bool_flag(raw, "show_label", source)
     show_label = step_show_label if step_show_label is not None else phase_show_label
     _show_output_raw = _parse_optional_bool_flag(raw, "show_output", source)
@@ -688,7 +688,6 @@ def _parse_step(
             read_only=tuple(str(p) for p in (raw.get("read_only") or [])),
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
-            quiet=quiet,
             position_label=position_label,
             label=label,
             acquire=acquire,
@@ -705,7 +704,6 @@ def _parse_step(
             command=str(raw["command"]),
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
             timeout_seconds=raw.get("timeout"),
-            quiet=quiet,
             label=label,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
@@ -717,7 +715,6 @@ def _parse_step(
         step = Step(
             name=name, phase=phase_name, kind=cast(Kind, kind), rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
-            quiet=quiet,
             label=label,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
@@ -728,7 +725,6 @@ def _parse_step(
         step = Step(
             name=name, phase=phase_name, kind="branch", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
-            quiet=quiet,
             label=label,
             acquire=acquire,
             release=release,

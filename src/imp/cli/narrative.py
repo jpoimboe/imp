@@ -126,7 +126,6 @@ class StepNode:
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
-    quiet: bool = False                # the step_started.payload.quiet flag
     show_label: bool = True            # step frame (header + breadcrumb) shown
     show_output: bool = False          # surface a script's stdout as a • message
     position_label: bool = False       # step label is a position counter, not a verb
@@ -988,7 +987,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"),
-                    quiet=bool(p.get("quiet", False)),
                     show_label=bool(p.get("show_label", True)),
                     show_output=bool(p.get("show_output", False)),
                     position_label=bool(p.get("position_label", False)),

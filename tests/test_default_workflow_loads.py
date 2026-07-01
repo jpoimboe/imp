@@ -134,7 +134,7 @@ def test_no_agent_prompt_uses_artifacts_namespace() -> None:
         assert "{{ artifacts" not in body, md.name
 
 
-def test_every_nonquiet_step_has_its_label() -> None:
+def test_every_shown_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {

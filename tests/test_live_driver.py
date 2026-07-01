@@ -916,7 +916,7 @@ def test_quiet_continue_is_silent_live_and_matches_log() -> None:
         ev("4", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
         ev("5", "step_started", step="spec-verify-commit", kind="script",
-           phase="spec", quiet=True),
+           phase="spec", show_label=False),
         ev("6", "step_completed", step="spec-verify-commit", kind="script",
            action={"verb": "continue"}, var_mutations={}),
     ]
@@ -932,7 +932,7 @@ def test_quiet_forward_goto_renders_nothing_matches_log() -> None:
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="fast-path-spec-gate", kind="branch",
-           phase="spec", quiet=True),
+           phase="spec", show_label=False),
         ev("3", "step_completed", step="fast-path-spec-gate", kind="branch",
            action={"verb": "goto", "target": "plan-writer", "resume": False},
            var_mutations={}),
@@ -956,7 +956,7 @@ def test_is_final_closed_quiet_goto_step_is_emitted() -> None:
     # A closed quiet step (here a backward rework goto resume=True) is FINAL
     # immediately — the live cursor must not block on it.
     drv, _ = _driver()
-    node = nv.StepNode(name="spec-verify-commit", kind="script", quiet=True)
+    node = nv.StepNode(name="spec-verify-commit", kind="script", show_label=False)
     node.closed = True
     node.outcome = nv.OutcomeLine(
         action={"verb": "goto", "target": "spec-writer", "resume": True})
@@ -972,7 +972,7 @@ def test_quiet_pause_surfaces_live_and_matches_log() -> None:
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="merge-to-base", kind="script",
-           phase="merge", quiet=True),
+           phase="merge", show_label=False),
         ev("3", "error", message="merge conflict in foo.py"),
         ev("4", "step_completed", step="merge-to-base", kind="script",
            action={"verb": "pause"}, var_mutations={}),
@@ -1380,7 +1380,7 @@ def test_status_spine_label_activity_elapsed() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="autosquash", kind="script", phase="implement",
-           quiet=True),
+           show_label=False),
     ]:
         q.add(e)
     qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False, width=80)
