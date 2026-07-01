@@ -201,9 +201,17 @@ def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
-    # Opening behavior must branch on the opening message: the unseeded branch
-    # keys on the begin token; a plain-prose open carries the verbatim intent.
-    assert "<imp:begin/>" in out
+    # Rendered with no opening -> the unseeded (bare-open) branch, no <imp:begin/>.
+    assert "<imp:begin/>" not in out
+    assert "Open by asking" in out
+    # Rendered WITH an opening -> the seeded branch carries the verbatim intent.
+    seeded = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance="",
+        opening="wire up telemetry"),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "wire up telemetry" in seeded
+    assert "Open by asking" not in seeded
 
 
 def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
@@ -214,7 +222,17 @@ def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}, guidance=""),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "verbatim opening intent" in out
+    # Unseeded render -> the bare-open branch, not the seeded "verbatim opening
+    # intent" wording (which now lives only in the {% if run.opening %} branch).
+    assert "verbatim opening intent" not in out
+    assert "Open by asking" in out
+    seeded = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", project_facts={}, guidance="",
+        opening="wire up telemetry"),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "verbatim opening intent" in seeded    # seeded branch carries the wording
+    assert "wire up telemetry" in seeded          # ...and the verbatim intent
     # No spec is inlined into the prompt; the user names a spec file front-door reads.
     assert "imp new <draft>" not in out
     assert "imp new <file>" not in out

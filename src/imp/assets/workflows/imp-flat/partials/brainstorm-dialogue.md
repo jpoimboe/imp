@@ -1,41 +1,49 @@
-How you open depends on your **opening message**:
+How you open depends on whether you were handed an opening request:
 
-- **Opening intent in hand** — the opening message is plain prose (anything that
-  is not `<imp:begin/>`). The user ran `imp new "<message>"`, so the message
-  **is** their verbatim opening intent — the opening question is already answered.
-  Do **not** re-ask "what do you want to
-  build?". Explore the codebase, then proceed with **normal brainstorm
+{% if run.opening %}
+- **Opening intent in hand.** The user ran `imp new "<message>"`, so this is
+  their verbatim opening intent:
+
+  > {{ run.opening }}
+
+  The opening question is already answered — do **not** re-ask "what do you want
+  to build?". Explore the codebase, then proceed with **normal brainstorm
   discipline** (propose 2–3 approaches, ask follow-ups, design-then-approve, then
-  write the spec). A one-line intent is not a draft, so this is full brainstorming.
-  When the message **names a spec file** that exists in the tree (e.g. "implement
-  docs/specs/foo.md"), do **not** re-brainstorm it from scratch — read the file
-  and run the staleness/verify pass per front-door's **Reading a referenced spec
-  file** section, which decides whether to proceed or to surface concerns and
-  yield.
-- **Unseeded** — the opening message is `<imp:begin/>`. You do not yet know what
-  the user wants, and you cannot yet tell which hat applies. Open by asking, in
-  your turn text, an inviting question about what they'd like to do — answer a
-  question about imp, take stock of existing work, or scope a change — then
-  end your turn to yield. Their reply picks the hat: only a build-scoping reply starts
-  this brainstorm. Do **not** force a build-only question, and do **not** treat
-  the open as a no-read freeze — once their reply selects the concierge or scout
-  hat, read imp's docs or the change store freely to answer it.
+  write the spec). A one-line intent is not a draft, so this is full
+  brainstorming. When the intent **names a spec file** that exists in the tree
+  (e.g. "implement docs/specs/foo.md"), do **not** re-brainstorm it from scratch
+  — read the file and run the staleness/verify pass per front-door's **Reading a
+  referenced spec file** section, which decides whether to proceed or to surface
+  concerns and yield.
+{% else %}
+- **Unseeded.** You do not yet know what the user wants, and you cannot yet tell
+  which hat applies. Open by asking, in your turn text, an inviting question
+  about what they'd like to do — answer a question about imp, take stock of
+  existing work, or scope a change — then end your turn to yield. Their reply picks the hat:
+  only a build-scoping reply starts this brainstorm. Do **not** force a
+  build-only question, and do **not** treat the open as a no-read freeze — once
+  their reply selects the concierge or scout hat, read imp's docs or the change
+  store freely to answer it.
+{% endif %}
 
 ## Brainstorm Discipline
 
-**Open by asking on a bare open.** When your opening message is `<imp:begin/>`,
-your first action is to ask — in your turn text — an inviting question about what
-they'd like to do (answer a question about imp, take stock of existing work, or
-scope a change), then end your turn to yield — do not narrate loading or finding
-tools (e.g. "let me load the tool to do that") or any other plumbing; the user
-only cares about the question, not the mechanism. The bare turn-end carries your
-prose to the human, so the question must live in your prose itself. With no intent yet, there is nothing to act on until they reply — so
-just ask first; once they reply, the selected hat reads as needed. Ask the
-question directly. When the opening message is plain prose (anything other than
-`<imp:begin/>`), the opening question is skipped — you have the user's verbatim
-intent in hand; explore the codebase (reading and verifying a named spec file per
-front-door's **Reading a referenced spec file** section when the message names
-one) and proceed directly into brainstorming.
+{% if run.opening %}
+**Explore, then brainstorm.** You have the user's verbatim intent in hand
+(above), so the opening question is skipped — explore the codebase (reading and
+verifying a named spec file per front-door's **Reading a referenced spec file**
+section when the intent names one) and proceed directly into brainstorming.
+{% else %}
+**Open by asking on a bare open.** Your first action is to ask — in your turn
+text — an inviting question about what they'd like to do (answer a question about
+imp, take stock of existing work, or scope a change), then end your turn to yield
+— do not narrate loading or finding tools (e.g. "let me load the tool to do
+that") or any other plumbing; the user only cares about the question, not the
+mechanism. The bare turn-end carries your prose to the human, so the question
+must live in your prose itself. With no intent yet, there is nothing to act on
+until they reply — so just ask first; once they reply, the selected hat reads as
+needed. Ask the question directly.
+{% endif %}
 
 **If the user hands you context instead of intent.** Sometimes the opening reply
 is a pasted log, a design-doc path, an error, or other material rather than a

@@ -169,7 +169,7 @@ def test_front_door_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None
 
 def test_front_door_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
     # Regression guard: the moved unseeded-open prose must NOT force a build-only
-    # question or a no-file-read freeze on the bare <imp:begin/> open.
+    # question or a no-file-read freeze on the bare (unseeded) open.
     body = _wf().agents["front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
