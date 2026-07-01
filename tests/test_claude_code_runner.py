@@ -3975,3 +3975,27 @@ async def test_replay_fallback_empty_delta_kicked_with_redo_nudge(tmp_path: Path
 
     assert created[0].opts.resume is None  # replay disposition
     assert _user_text_blob(created[0].queries[0]).strip() == RESUME_REDO_NUDGE
+
+
+@pytest.mark.anyio
+async def test_replay_fallback_emits_runner_warning(tmp_path: Path) -> None:
+    """On fallback entry a runner_warning names the resume shape and why native was
+    unavailable; it is durable in the event log."""
+    log = InMemoryEventLog()
+    inv = _seed_write_then_complete_resume(
+        tmp_path, retry_feedback="REVISE: rewrite plan.md", log=log)
+    await _seed_drifted_store(inv, 8)
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    warnings = [e["payload"]["message"] for e in log.read()
+                if e["type"] == "runner_warning"]
+    assert warnings, "expected a runner_warning on fallback entry"
+    assert any(
+        "replay" in m and "unreconstructable" in m and "dangling_tool_use" in m
+        for m in warnings), warnings

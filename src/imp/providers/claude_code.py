@@ -1414,6 +1414,14 @@ class ClaudeCodeAgentRunner:
                 ResumeState.DANGLING_TOOL_USE)
             and store_reconcilable(existing, store_body)
         )
+        if existing and not native_resume:
+            elog.append(
+                agent_id=aid, type="runner_warning",
+                payload={"message": (
+                    "claude_code resume fell back to stream-json replay "
+                    f"(shape={classify_resume(existing).value}): session store "
+                    "unreconstructable from transcript; native --resume unavailable."
+                )})
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
