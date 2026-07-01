@@ -388,7 +388,7 @@ class LiveDriver:
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
-        if isinstance(node, nv.MergedNode):
+        if isinstance(node, (nv.MergedNode, nv.CompletedNode)):
             # suppressed in live path — main.py _emit_completed owns the friendly line
             return
         if rt.spaces_before(node):

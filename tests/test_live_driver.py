@@ -2023,3 +2023,15 @@ def test_compose_position_bar_forwards_checkpoint_threshold() -> None:
                                 prompt_tokens=164000, color=True, width=200,
                                 checkpoint_threshold=0.8)
     assert "\x1b[31m" in line                    # warn forwarded through to the bar
+
+
+def test_completed_node_suppressed_in_live_leaf() -> None:
+    drv, out = _driver()
+    drv._emit_leaf(nv.CompletedNode(change_id="abc123"), 0)
+    assert out.getvalue() == ""  # main.py _emit_completed owns the live line
+
+
+def test_merged_node_still_suppressed_in_live_leaf() -> None:
+    drv, out = _driver()
+    drv._emit_leaf(nv.MergedNode(change_id="abc123", base="master"), 0)
+    assert out.getvalue() == ""
