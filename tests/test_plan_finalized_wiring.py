@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from imp.assets import bundled_workflow_dir
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
@@ -70,8 +72,9 @@ def test_plan_finalized_agent_prompt_is_gone() -> None:
     assert not (bundled_workflow_dir("imp-flat") / "agents" / "plan-finalized.md").exists()
 
 
-def test_plan_finalized_script_counts_highest_plan_and_writes_output(tmp_path) -> None:
-    script = Path("src/imp/assets/workflows/imp/scripts/plan-finalized.sh").resolve()
+@pytest.mark.parametrize("workflow", ["imp", "imp-flat"])
+def test_plan_finalized_script_counts_highest_plan_and_writes_output(tmp_path, workflow) -> None:
+    script = Path(f"src/imp/assets/workflows/{workflow}/scripts/plan-finalized.sh").resolve()
     plans = tmp_path / "artifacts" / "plans"
     plans.mkdir(parents=True)
     (plans / "abc-plan-1.md").write_text("# P\n## Task 1: Alpha\nbody\n")
