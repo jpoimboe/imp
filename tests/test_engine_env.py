@@ -206,3 +206,19 @@ def test_overlay_strips_all_inherited_test_cmd_vars_when_unset() -> None:
     for v in ("IMP_TEST_CMD_FAST", "IMP_TEST_CMD_SLOW",
               "IMP_TEST_CMD_FAST_TIMEOUT", "IMP_TEST_CMD_SLOW_TIMEOUT"):
         assert v not in env
+
+
+def test_engine_env_injects_output_path_when_given() -> None:
+    env = engine_env(project_root=Path("/wt"), change_id="c", change_title="t",
+                     output_path=Path("/tmp/imp-output-abc.json"))
+    assert env["IMP_OUTPUT"] == "/tmp/imp-output-abc.json"
+
+
+def test_engine_env_omits_output_path_when_absent() -> None:
+    env = engine_env(project_root=Path("/wt"), change_id="c", change_title="t")
+    assert "IMP_OUTPUT" not in env
+
+
+def test_output_path_var_is_engine_managed() -> None:
+    from imp.engine.env import ENGINE_ENV_VARS
+    assert "IMP_OUTPUT" in ENGINE_ENV_VARS

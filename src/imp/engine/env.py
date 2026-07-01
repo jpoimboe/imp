@@ -52,6 +52,7 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_CHANGE_ID",
     "IMP_CHANGE_TITLE",
     "IMP_CHANGE_DIR",
+    "IMP_OUTPUT",
     "IMP_TEST_CMD_FAST",
     "IMP_TEST_CMD_SLOW",
     "IMP_TEST_CMD_FAST_TIMEOUT",
@@ -93,6 +94,7 @@ def overlay_engine_env(
 def engine_env(
     *, project_root: Path, change_id: str, change_title: str,
     change_dir: Path | None = None,
+    output_path: Path | None = None,
     test_gates: TestGates | None = None,
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
@@ -106,6 +108,9 @@ def engine_env(
                             injected only when change_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/change/
                             so the state directory survives worktree relocation.
+        IMP_OUTPUT        — path to the JSON file where a script writes its declared
+                            typed output: fields; injected only when output_path is
+                            provided (i.e. when an output: schema is in play).
         IMP_TEST_CMD_FAST / IMP_TEST_CMD_SLOW — tiered gate commands (cheap fast
                             gate vs. complete slow gate). Each injected only when
                             its TestGates field is truthy; a falsy value => absent.
@@ -131,6 +136,8 @@ def engine_env(
     }
     if change_dir is not None:
         env["IMP_CHANGE_DIR"] = str(change_dir)
+    if output_path is not None:
+        env["IMP_OUTPUT"] = str(output_path)
     if test_gates is not None:
         if test_gates.fast:
             env["IMP_TEST_CMD_FAST"] = test_gates.fast
