@@ -108,3 +108,37 @@ async def test_build_options_registers_stderr_callback(tmp_path: Path) -> None:
     assert opts.stderr == runner._stderr_sink.feed
     opts.stderr("probe\n")
     assert runner._stderr_sink.tail() == "probe\n"
+
+
+class _StderrWarnThenDie:
+    """Fake SDK client: write a startup Warning to stderr, then fail on connect
+    (the ProcessError path). The finally closes the sink, triggering the bridge."""
+
+    def __init__(self, opts: Any) -> None:
+        self._opts = opts
+
+    async def __aenter__(self) -> _StderrWarnThenDie:
+        self._opts.stderr(
+            "claude: Warning: Custom betas are only available for API key users. "
+            "Ignoring provided betas.\n")
+        raise RuntimeError("Command failed with exit code 1")
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        return False
+
+
+@pytest.mark.anyio
+async def test_claude_bridges_stderr_warning_into_runner_warning(tmp_path: Path) -> None:
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: _StderrWarnThenDie(opts),
+    )
+    inv = _inv(tmp_path)  # event_log is an InMemoryEventLog on the invocation
+
+    _events = [ev async for ev in runner.run(inv)]
+
+    warns = [e for e in inv.event_log.read() if e["type"] == "runner_warning"]
+    assert len(warns) == 1
+    assert warns[0]["payload"]["message"] == (
+        "claude stderr: Warning: Custom betas are only available for API key "
+        "users. Ignoring provided betas.")

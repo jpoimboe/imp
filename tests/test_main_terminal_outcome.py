@@ -145,3 +145,50 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     main._emit_paused_summary(change)
     out = capsys.readouterr().out
     assert "(interrupt)" in out
+
+
+def test_emit_completed_appends_warning_count_suffix(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), "all done", merged=False, warnings=2)
+    out = capsys.readouterr().out
+    assert "Change 2026-06-12-run-x: all done  (2 warnings)" in out
+
+
+def test_emit_completed_warning_suffix_singular(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), "all done", merged=False, warnings=1)
+    out = capsys.readouterr().out
+    assert "(1 warning)" in out
+    assert "warnings" not in out
+
+
+def test_emit_completed_no_suffix_when_zero_warnings(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), "all done", merged=False, warnings=0)
+    out = capsys.readouterr().out
+    assert "all done" in out
+    assert "warning" not in out
+
+
+def test_emit_completed_appends_warning_suffix_on_merged_line(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), "all done", merged=True, warnings=2)
+    out = capsys.readouterr().out
+    assert "Change 2026-06-12-run-x: all done  (2 warnings)" in out
+
+
+def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> None:
+    events = [
+        {"type": "runner_warning", "payload": {"message": "a"}},
+        {"type": "runner_warning", "payload": {"message": "a"}},
+        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
+    ]
+    change = _Change(events)
+    change.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
+    captured: dict = {}
+    monkeypatch.setattr(
+        main, "_emit_completed",
+        lambda ch, value, *, merged, warnings: captured.update(warnings=warnings))
+    rc = main._handle_terminal_outcome(change, RunResult.COMPLETED, coord=None)
+    assert rc == 0
+    assert captured["warnings"] == 2

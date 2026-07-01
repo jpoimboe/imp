@@ -320,7 +320,7 @@ def spaces_before(node: Any) -> bool:
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
         or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode,
-                             nv.MergedNode))
+                             nv.MergedNode, nv.WarningsSummaryNode, nv.CompletedNode))
     )
 
 
@@ -728,6 +728,23 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                             depth, color, *dim, gutters=gutters)
             if r.get("warning"):
                 yield _line(f"    ⚠ {r['warning']}", depth, color, *dim, gutters=gutters)
+        return
+
+    if isinstance(node, nv.WarningsSummaryNode):
+        mark = "⚠ " if color else ""
+        noun = "warning" if node.total == 1 else "warnings"
+        yield _line(f"{mark}{node.total} {noun} this run", depth, color,
+                    *pal.NODE_COLORS["warning"], gutters=gutters)
+        for message, count in node.lines:
+            suffix = f"  (×{count})" if count > 1 else ""
+            yield _line(f"  • {_caret_escape(message)}{suffix}", depth, color,
+                        *pal.NODE_COLORS["warning"], gutters=gutters)
+        return
+
+    if isinstance(node, nv.CompletedNode):
+        mark = "✓ " if color else ""
+        yield _line(f"{mark}Completed {node.change_id}.", depth, color,
+                    *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.MergedNode):

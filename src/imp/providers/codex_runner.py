@@ -315,8 +315,10 @@ class CodexAgentRunner:
         # so the MCP server is ALWAYS shut down and any provisioned CODEX_HOME
         # is ALWAYS torn down — even if the ping, provision, or seed_auth step
         # raises (Task 31: close the provision/seed teardown leak window).
-        from imp.providers.stderr_sink import StderrSink, current_stderr_sink
-        self._stderr_sink = StderrSink(invocation.transcript_dir / "stderr.log")
+        from imp.providers.stderr_sink import build_stderr_sink, current_stderr_sink
+        self._stderr_sink = build_stderr_sink(
+            invocation.transcript_dir / "stderr.log",
+            elog=elog, aid=aid, source="codex")
         _stderr_token = current_stderr_sink.set(self._stderr_sink)
         codex_home: Path | None = None
         impty_handle: ServerHandle | None = None

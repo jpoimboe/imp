@@ -223,17 +223,21 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 # decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
 # redirected output stays plain and script-parseable. Shared by `new`/`resume`.
 
-def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
+def _emit_completed(change: Change, value: str, *, merged: bool, warnings: int = 0) -> None:
     """Run finished cleanly — ✓ on the headline."""
     color = should_use_color(sys.stdout)
     mark = "✓ " if color else ""
+    suffix = ""
+    if warnings:
+        noun = "warning" if warnings == 1 else "warnings"
+        suffix = f"  ({warnings} {noun})"
     if merged:
         print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
-        print(ansi(f"Change {change.id}: {value}",
+        print(ansi(f"Change {change.id}: {value}{suffix}",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
     else:
-        print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
+        print(ansi(f"{mark}Change {change.id}: {value}{suffix}", "green", enabled=color))
 
 
 def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
@@ -383,7 +387,10 @@ def _handle_terminal_outcome(
     if result is RunResult.COMPLETED:
         # Worktree gone = the merge gate was exercised.
         wt_path = change.control_root / ".imp" / "worktrees" / change.id
-        _emit_completed(change, result.value, merged=not wt_path.exists())
+        warnings = sum(1 for ev in change.event_log().read()
+                       if ev.get("type") == "runner_warning")
+        _emit_completed(change, result.value, merged=not wt_path.exists(),
+                        warnings=warnings)
         return 0
     # PAUSED — surface merge_blocked or script-step remediation.
     final_state = State.load(change.state_dir)

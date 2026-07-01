@@ -949,6 +949,8 @@ def test_structural_repr_covers_new_node_types() -> None:
     assert nv.structural_repr(bc) == {
         "t": "BreadcrumbLine", "step_name": "s", "elapsed_s": 1.0,
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
+    completed = nv.CompletedNode(change_id="abc123")
+    assert nv.structural_repr(completed) == {"t": "CompletedNode", "change_id": "abc123"}
 
 
 def test_current_activity_collapses_multiline_bash_command() -> None:
@@ -2065,7 +2067,8 @@ def test_step_node_command_populated_on_resume_reentry() -> None:
     b = nv.NarrativeBuilder()
     for e in seed + live:
         b.add(e)
-    step = b.tree.root.children[-1].children[0]
+    phase = next(c for c in b.tree.root.children if isinstance(c, nv.PhaseNode))
+    step = phase.children[0]
     assert isinstance(step, nv.StepNode)
     assert step.command == "make check"
 

@@ -23,4 +23,7 @@ warning: dropped block
 
 phase_exhausted  phase=implement
 
+1 warning this run
+  • dropped block
+
 paused (ctrl-c)
