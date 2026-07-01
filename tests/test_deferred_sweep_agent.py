@@ -84,3 +84,22 @@ def test_deferred_sweep_calibration_clauses() -> None:
     assert "dismissable" in fixed_block
     # The spec-prohibited numeric fence must not appear (definitional framing only).
     assert "four-test" not in fixed_block
+
+
+def test_deferred_sweep_triage_is_dual_source() -> None:
+    body = SWEEP.read_text()
+    low = body.lower()
+    # Detects BOTH gates from the injected resume feedback substrings.
+    assert "(sweep-verify)" in body and "(converge-verify)" in body
+    # Labels the toleration <source> to match the resuming gate.
+    assert "DEFERRED <source>:" in body
+    # The convergence check greps BOTH sources.
+    assert "DEFERRED sweep-verify:" in body and "DEFERRED converge-verify:" in body
+    # Slow-gate toleration emits the forward-escape flag; fast-gate emits sweep_tolerated.
+    assert "converge_verify_tolerated: true" in low
+    assert "sweep_tolerated: true" in low
+    # The forward escape routes to wait-for-head; the flags are mutually exclusive.
+    assert "wait-for-head" in low
+    assert "mutually exclusive" in low
+    # The Part-2 single-source placeholder ("wired in a later change") is gone.
+    assert "wired in a later change" not in low

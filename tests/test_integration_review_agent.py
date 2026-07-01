@@ -21,3 +21,18 @@ def test_integration_review_md_is_non_soliciting_and_uses_rubric() -> None:
     assert "base-side incoming diff" in body
     assert '{% include "partials/severity.md" %}' in body
     assert "breakage" not in body.lower()
+
+
+def test_integration_review_adjudicates_verify_failure_triage() -> None:
+    body = (WF / "agents" / "integration-review.md").read_text()
+    low = body.lower()
+    # A triage entry: resumed by the integration-verify gate to adjudicate a failure.
+    assert "integration-verify" in body
+    assert "adjudicate" in low and "fix-vs-tolerate" in low
+    # Worth fixing -> a blocking finding the reconciler fixes forward (driven by the finding).
+    assert "never raw test output" in low
+    # Not ours -> a needs-decision toleration recorded in deferred.md, source integration-verify.
+    assert "DEFERRED integration-verify:" in body
+    assert "needs-decision" in low
+    # The tolerated case returns both flags false and falls through to summarizer.
+    assert "summarizer" in low

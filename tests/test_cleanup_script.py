@@ -1,4 +1,4 @@
-"""cleanup.sh — the unified clean-tree -> fold -> stamp gate over (arg or fork)..HEAD.
+"""cleanup.sh — the unified clean-tree -> fold -> stamp gate over a self-derived boundary..HEAD.
 
 Exit contract:
   0 -> clean tree, fixups folded, Change: <id> stamped (or already-clean no-op)
@@ -6,8 +6,8 @@ Exit contract:
   3 -> dirty working tree (uncommitted changes), OR a surviving fixup directive bounced
   1 -> hard failure / surviving-directive bounce cap exhausted
 
-The lower bound is the first positional argument (the workflow passes
-`{{ vars.review_base }}`); an empty argument falls back to change.json cur_base_head.
+The lower bound is self-derived (the parent of the lowest unstamped-or-directive commit
+above change.json cur_base_head); any positional argument is ignored.
 """
 from __future__ import annotations
 
@@ -142,29 +142,30 @@ def test_dirty_tree_exits_3(tmp_path: Path) -> None:
 
 
 def test_out_of_range_fixup_bounces_exit_3(tmp_path: Path) -> None:
-    """A fixup! whose target is at or below the lower bound stays unfolded; cleanup
-    now BOUNCES it back to the committing agent (exit 3) with a prescriptive
-    diagnostic naming the offending commit, its target, and the forward-fix remedy."""
+    """A fixup! whose target is a stamped commit below the self-derived boundary
+    stays unfolded; cleanup BOUNCES it back to the committing agent (exit 3) with a
+    prescriptive diagnostic naming the offending commit, its target, and the
+    forward-fix remedy."""
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("below\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", "below the bound")
-    target = _git(pr, "rev-parse", "HEAD").stdout.strip()    # the eventual lower bound
+    _git(pr, "commit", "-m", f"below the bound\n\nChange: {ID}")   # stamped -> below the boundary
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "h.txt").write_text("in range\n")
     _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", "in range")
+    _git(pr, "commit", "-m", "in range")                          # unstamped -> sets the boundary
     (pr / "g.txt").write_text("below (fixed)\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", f"--fixup={target}")                  # target is AT the bound
+    _git(pr, "commit", f"--fixup={target}")  # targets the below-boundary commit
 
-    res = _run(pr, lower=target)
+    res = _run(pr)
     assert res.returncode == 3, res.stderr
     low = res.stderr.lower()
     assert "fixup! below the bound" in res.stderr            # names the offending commit
-    assert "below the change fork" in low                    # names the out-of-range cause
+    assert "cleaned boundary" in low                         # names the out-of-range cause
     assert "forward commit" in low                           # prescribes the remedy
 
 
@@ -189,32 +190,32 @@ def test_unmatched_directive_reports_typo(tmp_path: Path) -> None:
     assert "no commit" in low
 
 
-def test_explicit_lower_bounds_the_range(tmp_path: Path) -> None:
-    """cleanup never touches a commit at or below the lower bound: a commit below it
-    keeps no trailer; an in-range commit is stamped."""
+def test_self_derived_boundary_bounds_the_range(tmp_path: Path) -> None:
+    """cleanup derives its own lower bound (the stamped/unstamped boundary) and never
+    touches a commit at or below it: a stamped commit below the boundary keeps its SHA
+    and trailer; the unstamped commit above it is stamped."""
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "below.txt").write_text("below\n")
     _git(pr, "add", "below.txt")
-    _git(pr, "commit", "-m", "below the bound")
-    bound = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    _git(pr, "commit", "-m", f"below the bound\n\nChange: {ID}")   # stamped -> the boundary
+    boundary = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "above.txt").write_text("above\n")
     _git(pr, "add", "above.txt")
-    _git(pr, "commit", "-m", "above the bound")
+    _git(pr, "commit", "-m", "above the bound")                   # unstamped
     above = _git(pr, "rev-parse", "HEAD").stdout.strip()
 
-    res = _run(pr, lower=bound)
+    res = _run(pr)
     assert res.returncode == 0, res.stderr
-    assert _trailer(pr, bound) == ""                         # below: untouched
-    assert _trailer(pr, "HEAD") == ID                        # above: stamped
-    # The below-bound commit's SHA is unchanged (not rebased).
-    assert _git(pr, "rev-parse", "HEAD~1").stdout.strip() == bound
-    assert above != _git(pr, "rev-parse", "HEAD").stdout.strip()  # above was re-stamped
+    assert _trailer(pr, boundary) == ID                          # below: its pre-existing trailer
+    assert _trailer(pr, "HEAD") == ID                            # above: stamped
+    assert _git(pr, "rev-parse", "HEAD~1").stdout.strip() == boundary  # below: SHA unchanged
+    assert above != _git(pr, "rev-parse", "HEAD").stdout.strip()       # above was re-stamped
 
 
-def test_empty_arg_falls_back_to_fork(tmp_path: Path) -> None:
+def test_no_arg_self_derives_to_fork(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
@@ -228,7 +229,7 @@ def test_empty_arg_falls_back_to_fork(tmp_path: Path) -> None:
     _git(pr, "add", "g.txt")
     _git(pr, "commit", f"--fixup={target}")
 
-    res = _run(pr, lower="")                                 # empty -> fork fallback
+    res = _run(pr, lower="")  # arg ignored; unstamped first commit -> boundary self-derives to fork
     assert res.returncode == 0, res.stderr
     assert not any(s.startswith("fixup!") for s in _subjects(pr, fork))
     assert _trailer(pr, "HEAD") == ID
@@ -389,16 +390,16 @@ def test_directive_bounce_increments_counter(tmp_path: Path) -> None:
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("below\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", "below the bound")
+    _git(pr, "commit", "-m", f"below the bound\n\nChange: {ID}")   # stamped -> below the boundary
     target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "h.txt").write_text("in range\n")
     _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", "in range")
+    _git(pr, "commit", "-m", "in range")                          # unstamped -> sets the boundary
     (pr / "g.txt").write_text("below (fixed)\n")
     _git(pr, "add", "g.txt")
     _git(pr, "commit", f"--fixup={target}")
 
-    res = _run(pr, lower=target)
+    res = _run(pr)
     assert res.returncode == 3, res.stderr
     assert (_state(pr) / "directive-bounce-attempts").read_text().strip() == "1"
 
@@ -412,7 +413,7 @@ def test_directive_bounce_cap_exhausted_pauses(tmp_path: Path) -> None:
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("below\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", "below the bound")
+    _git(pr, "commit", "-m", f"below the bound\n\nChange: {ID}")
     target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "h.txt").write_text("in range\n")
     _git(pr, "add", "h.txt")
@@ -424,7 +425,7 @@ def test_directive_bounce_cap_exhausted_pauses(tmp_path: Path) -> None:
     state.mkdir(parents=True, exist_ok=True)
     (state / "directive-bounce-attempts").write_text("2")
 
-    res = _run(pr, lower=target)
+    res = _run(pr)
     assert res.returncode == 1, res.stderr
     assert "could not clear" in res.stderr.lower()
     assert not (state / "directive-bounce-attempts").exists()
@@ -453,14 +454,14 @@ def test_clean_run_resets_bounce_counter(tmp_path: Path) -> None:
 
 
 def test_squash_directive_bounces_exit_3(tmp_path: Path) -> None:
-    """A squash! whose target is at or below the lower bound bounces (exit 3) like fixup!."""
+    """A squash! whose target is below the self-derived boundary bounces (exit 3) like fixup!."""
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("below\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", "below the bound")
+    _git(pr, "commit", "-m", f"below the bound\n\nChange: {ID}")
     target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "h.txt").write_text("in range\n")
     _git(pr, "add", "h.txt")
@@ -469,11 +470,11 @@ def test_squash_directive_bounces_exit_3(tmp_path: Path) -> None:
     _git(pr, "add", "g.txt")
     _git(pr, "commit", f"--squash={target}")
 
-    res = _run(pr, lower=target)
+    res = _run(pr)
     assert res.returncode == 3, res.stderr
     low = res.stderr.lower()
     assert "squash! below the bound" in res.stderr
-    assert "below the change fork" in low
+    assert "cleaned boundary" in low
     assert "forward commit" in low
 
 
@@ -506,7 +507,7 @@ def test_directive_bounce_second_bounce_still_exits_3(tmp_path: Path) -> None:
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("below\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", "below the bound")
+    _git(pr, "commit", "-m", f"below the bound\n\nChange: {ID}")
     target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "h.txt").write_text("in range\n")
     _git(pr, "add", "h.txt")
@@ -518,7 +519,7 @@ def test_directive_bounce_second_bounce_still_exits_3(tmp_path: Path) -> None:
     state.mkdir(parents=True, exist_ok=True)
     (state / "directive-bounce-attempts").write_text("1")
 
-    res = _run(pr, lower=target)
+    res = _run(pr)
     assert res.returncode == 3, res.stderr
     assert (_state(pr) / "directive-bounce-attempts").read_text().strip() == "2"
 
@@ -540,3 +541,26 @@ def test_dirty_tree_exit_3_leaves_bounce_counter_untouched(tmp_path: Path) -> No
     res = _run(pr)
     assert res.returncode == 3, res.stderr
     assert (_state(pr) / "directive-bounce-attempts").read_text().strip() == "1"
+
+
+def test_ignores_passed_arg(tmp_path: Path) -> None:
+    """cleanup ignores any positional argument (the vestigial review_base) and always
+    self-derives the boundary: a bound that the old arg-honoring script would have
+    honored (leaving the first commit unstamped) is ignored -> BOTH commits get stamped."""
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    fork = _git(pr, "rev-parse", "main").stdout.strip()
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "a.txt").write_text("a\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", "-m", "feat a")        # unstamped
+    a = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "b.txt").write_text("b\n")
+    _git(pr, "add", "b.txt")
+    _git(pr, "commit", "-m", "feat b")        # unstamped
+
+    res = _run(pr, lower=a)                    # old behavior would honor `a` and leave it unstamped
+    assert res.returncode == 0, res.stderr
+    for h in _git(pr, "rev-list", f"{fork}..HEAD").stdout.split():
+        assert _trailer(pr, h) == ID, f"{h} not stamped"

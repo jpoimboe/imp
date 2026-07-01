@@ -6,6 +6,7 @@ subagents: [coder, code-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   sweep_tolerated: {type: bool}
+  converge_verify_tolerated: {type: bool}
   summary: {type: string}
 ---
 
@@ -45,7 +46,7 @@ parse already skips them. Leave them untouched.
 A `- [ ] DEFERRED ` line that already carries a `— needs-decision: <why>` marker is a
 **pre-classified human decision** — authored directly by `spec-finalizer`/`plan-writer`
 for a concern only a human can settle, recorded by a prior sweep pass, or born as a
-**toleration** at the `verify` / `sweep-verify` gate (source `verify` / `sweep-verify`).
+**toleration** at the `verify` / `sweep-verify` / `converge-verify` / `integration-verify` gate (source `verify` / `sweep-verify` / `converge-verify` / `integration-verify`).
 Recognize the `— needs-decision:` marker and **leave the line exactly as-is**: do not
 re-evaluate it on the risk gate, do not fix it, and **never dismiss it**. It is a
 human-decision item, not a followup to maybe fix; it must survive verbatim to the
@@ -167,70 +168,90 @@ re-raises a dismissed item.
 Do **not** mark the run degraded — improvement and polish are not correctness
 (consistent with the existing nit-only-fixup rule).
 
-## Verify triage — tolerated failures
+## Verify triage — tolerated failures (dual-source: fast `sweep-verify` + slow `converge-verify`)
 
-<!-- SYNCED PAIR (task-lead ↔ deferred-sweep): keep this Verify triage block in lockstep
-with task-lead.md's identical block (and vice-versa). The toleration JUDGMENT is uniform;
-only the fix path differs (task-lead fixes in task context with a fixup; you fix in sweep
-context with a plain commit). -->
+<!-- SYNCED PAIR (task-lead ↔ deferred-sweep): keep the toleration JUDGMENT in this block in
+lockstep with task-lead.md's corresponding block (and vice-versa). The judgment is uniform; the
+SOURCE differs — task-lead is single-source (`verify`), you are dual-source (`sweep-verify`
+fast + `converge-verify` slow) — and the fix path differs (task-lead fixes in task context
+with a fixup; you fix in sweep context with a plain commit). -->
 
 **Feedback-gated, like the list drain above.** A **fresh** entry (no injected feedback)
 drains the Deferred Followups list as described above and does NOT perform triage — return
-`sweep_tolerated: false`. Only a **resumed** entry that began with injected feedback — the
-`sweep-verify` gate `resume`d you with the verify failure output — performs **triage only**:
-do NOT re-drain the Deferred Followups list, just adjudicate the failures.
+`sweep_tolerated: false` and `converge_verify_tolerated: false`. Only a **resumed** entry that
+began with injected feedback performs **triage only**: do NOT re-drain the Deferred Followups
+list, just adjudicate the failures.
+
+**Detect which gate resumed you — this selects the source label and the output flag.** Two
+verify gates resume you, and the injected feedback names which:
+- the **fast** gate — feedback containing `(sweep-verify)` — is source **`sweep-verify`**; a
+  toleration emits `sweep_tolerated: true` (the workflow then folds via `cleanup-sweep`, and
+  the slow `converge-verify` gate still runs afterward).
+- the **slow** gate — feedback containing `(converge-verify)` — is source **`converge-verify`**;
+  a toleration emits `converge_verify_tolerated: true`, which routes **forward to
+  `wait-for-head`** (the slow gate never re-runs — the forward escape).
+
+Call the resolved label `<source>` below (`sweep-verify` OR `converge-verify`). The two output
+flags are **mutually exclusive**: a toleration sets exactly one of them true and the other
+false; every non-toleration return sets both false.
 
 On a triage entry, reason over the OPAQUE failure text against the diff
-(`review_base..HEAD`) — pure judgment, you never re-run a single test.
+(`cur_base_head..HEAD`) — pure judgment, you never re-run a single test.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
-originating gate as its `<source>` — here `sweep-verify`, never an agent. The EXACT
-shape:
+`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the resuming
+gate as its `<source>` (`sweep-verify` for the fast gate, `converge-verify` for the slow gate),
+never an agent. The EXACT shape:
 
-`- [ ] DEFERRED sweep-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED <source>: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
 
-The `sweep-verify` source is the discriminator the convergence check greps for.
+The `<source>` label is the discriminator the convergence check greps for.
 
-- **Every current failure is already recorded as a `DEFERRED sweep-verify:` line in
-  `## Deferred Followups`, or is plainly not attributable to the diff** → append any
-  not-yet-recorded such failure as a line in the shape above (create the
-  `## Deferred Followups` heading if absent), make NO commit, and return
-  `sweep_tolerated: true`. Run the convergence check by grepping `## Deferred
-  Followups` for `DEFERRED sweep-verify:` lines and matching each line's embedded
-  failure signature against the current failure output. The workflow forward-advances
-  past `sweep-verify` instead of re-looping. A toleration born `— needs-decision:` is
-  inert to the list drain via the pass-through rule above. A toleration is
-  **visibility, not reproduction**: it changes nothing about the merge — `finalize`
-  surfaces it to a human before merge (`sweep-verify` runs before `finalize`).
-- **A failure attributable to the diff** → fix it via the coder and return
-  `sweep_tolerated: false` (the loop re-runs `sweep-verify`). Tell the coder to make
-  a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
-  `git commit --fixup=HEAD`: a sweep fix resolves its own deferred item and lands as its
-  own commit in the batch (which `cleanup-sweep` then stamps), not an amendment to the
-  last task's commit. This matches the "Commit granularity" discipline above.
+- **Every current failure is already recorded as a `DEFERRED sweep-verify:` OR `DEFERRED
+  converge-verify:` line in `## Deferred Followups`, or is plainly not attributable to the
+  diff** → append any not-yet-recorded such failure as a `DEFERRED <source>:` line in the
+  shape above (create the `## Deferred Followups` heading if absent), make NO commit, and
+  return the toleration flag for the resuming gate — `sweep_tolerated: true` on `sweep-verify`,
+  `converge_verify_tolerated: true` on `converge-verify` (the other flag false). Run the
+  convergence check by grepping `## Deferred Followups` for **both** `DEFERRED sweep-verify:`
+  and `DEFERRED converge-verify:` lines and matching each line's embedded failure signature
+  against the current failure output. The workflow forward-advances past the gate instead of
+  re-looping — `sweep-verify` advances to `cleanup-sweep`; `converge-verify` escapes forward to
+  `wait-for-head` and never re-runs. A toleration born `— needs-decision:` is inert to the list
+  drain via the pass-through rule above. A toleration is **visibility, not reproduction**: it
+  changes nothing about the merge — `finalize` surfaces it to a human before merge.
+- **A failure attributable to the diff** → fix it via the coder and return **both**
+  `sweep_tolerated: false` and `converge_verify_tolerated: false` (the loop re-runs the fast
+  `sweep-verify` → `cleanup-sweep` → slow `converge-verify`, confirming the fix on both gates).
+  Tell the coder to make a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
+  `git commit --fixup=HEAD`: a sweep fix resolves its own deferred item and lands as its own
+  commit in the batch (which `cleanup-sweep` then stamps), not an amendment to the last task's
+  commit. This matches the "Commit granularity" discipline above.
 
-Emit `sweep_tolerated: true` ONLY on the all-tolerated case above. On EVERY
-other return — a fresh list-drain entry, a real-regression fix — emit `sweep_tolerated:
-false`.
+Emit a toleration flag (`sweep_tolerated: true` XOR `converge_verify_tolerated: true`) ONLY on
+the all-tolerated case above, matched to the resuming gate. On EVERY other return — a fresh
+list-drain entry, a real-regression fix — emit **both** flags false.
 
-A **`max_loops` pause at `sweep-verify`** (the gate is capped at 5 fix laps) means the
-triage is **non-converging** — an unrecognized flake or a hard regression you could not fix
-in the budget. It escalates to a human; it is not a transient to retry.
+A **`max_loops` pause at `sweep-verify` or `converge-verify`** (each gate is capped at 5 fix
+laps) means the triage is **non-converging** — an unrecognized flake or a hard regression you
+could not fix in the budget. It escalates to a human; it is not a transient to retry.
 
 ## Finish
 
-Always return `sweep_tolerated`: it is `true` only on the all-tolerated triage outcome
-above, and `false` on every list-drain entry and every real-regression fix.
+Always return **both** toleration flags. `sweep_tolerated` is `true` only on an all-tolerated
+**fast** (`sweep-verify`) triage outcome; `converge_verify_tolerated` is `true` only on an
+all-tolerated **slow** (`converge-verify`) triage outcome. They are mutually exclusive, and
+both are `false` on every list-drain entry and every real-regression fix.
 
 If there is no `## Deferred Followups` section, or it has no parsable items, that is
 a normal, common outcome — there is simply nothing to drain. Make no commits and
-call `complete_step` with `status: Success`, `sweep_tolerated: false`, and a `summary`
-saying the list was empty.
+call `complete_step` with `status: Success`, `sweep_tolerated: false`,
+`converge_verify_tolerated: false`, and a `summary` saying the list was empty.
 
 When the list is drained (every parsable item has a disposition recorded; malformed
 lines left untouched), call `complete_step` with `status: Success`, `sweep_tolerated: false`,
-and a `summary` naming how many were fixed / needs-decision / dismissed. When a subagent's
+`converge_verify_tolerated: false`, and a `summary` naming how many were fixed / needs-decision /
+dismissed. When a subagent's
 final message reports
 `NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
 `sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you

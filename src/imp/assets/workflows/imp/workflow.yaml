@@ -1,30 +1,30 @@
 name: feature
 description: |
-  front-door -> spec -> (plan -> implement*)* -> integrate
-
+  front-door -> spec -> (plan -> implement)* -> converge -> integrate
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
-# reviewer judging the coder's work), not by vendor. Code review fires ONCE at change
-# end: forward outline plans SKIP `plan-code-reviewer` (their clean cleanup-implement
-# routes straight to deferred-sweep); the single `plan-code-reviewer` step reviews the
-# whole change once at change end (review_scope=change, cur_base_head..HEAD) for every
-# change, plus a post-settlement corrective over its own diff (review_base..HEAD,
-# reached via the coverage_settled seam on cleanup-implement). deferred-sweep is paired
-# with each review; verify and plan-reviewer stay per-plan. The spec's ## Plan outline
-# drives the plan loop and seeds plan_total; gap-check is the sole end-of-change
-# coverage backstop and latches coverage_settled on success.
+# reviewer judging the coder's work), not by vendor. The per-plan implement loop
+# carries NO code review and NO sweep: each plan's tasks are implemented and
+# fast-verified, then check-next-plan either starts the next outline plan or
+# (last plan done) enters converge. converge runs ONCE per change: gap-check (the
+# sole coverage backstop; latches coverage_settled) -> change-review (the single
+# change-wide code review, reusing agents/plan-code-reviewer.md) -> deferred-sweep
+# (drains the whole change's Deferred list once) -> sweep-verify (fast) ->
+# cleanup-sweep -> converge-verify (slow, on the change's own base). integrate then
+# acquires the base lock, rebases, slow-re-verifies only when the base moved,
+# reviews the integration, and ends at the human gate (summarizer -> finalize) so
+# the human blesses the locked, rebased, slow-tested state. cleanup.sh is
+# self-bounding (it derives its own boundary; no review_base argument).
 
 vars:
   fast_path:              {type: bool, default: false}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
-  review_scope:           {type: string, default: plan}  # plan | change — per-plan vs end-of-change review
-  review_base:            {type: string, default: ""}    # SHA defining the review diff range (review_base..HEAD)
-  coverage_settled:       {type: bool, default: false}   # latched once gap-check is clean; gates the once-only end-of-change gap-check AND the change-wide review; a later rework re-entry is reviewed per-plan, not re-paneled
-  integration_fork:       {type: string, default: ""}    # pre-rebase fork SHA P, captured from integrate-rebase.sh stdout on the clean/conflict paths
-  plan_index:             {type: int, default: 1}         # current plan number, rendered in plan/task step labels
-  plan_total:             {type: int, default: 1}         # total plans for the run; seeded from the spec's ## Plan outline (via plan-writer's plan-1 echo). >= plan_index. gap-check bumps it only when authoring a corrective.
-  task_total:             {type: int, default: 0}         # tasks in the current plan, set by plan-finalized
+  coverage_settled:       {type: bool, default: false}
+  integration_fork:       {type: string, default: ""}
+  plan_index:             {type: int, default: 1}
+  plan_total:             {type: int, default: 1}
+  task_total:             {type: int, default: 0}
 
 defaults:
   max_retries: 3
@@ -156,20 +156,17 @@ phases:
           - {if: {exit: 124}, pause: true}
           - {else: true, resume: task-lead}
 
-      # cleanup folds this batch's fixup chain into one commit per task AND stamps the
-      # Change: trailer over (review_base or fork)..HEAD, BEFORE any review reads the
-      # diff. exit 0: a corrective (coverage_settled latched) goes to plan-code-reviewer
-      # for immediate review; a forward plan skips it straight to deferred-sweep. exit 2
-      # falls through into the resolver.
+      # Fold this plan's fixup chains into one commit per task and stamp the Change:
+      # trailer over the self-derived boundary..HEAD. No code review here — the single
+      # change-wide review runs once in converge. exit 2 falls into the resolver.
       - name: cleanup-implement
         quiet: true
-        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        command: ./scripts/cleanup.sh
         rules:
-          - {if: {exit: 0, coverage_settled: true}, goto: plan-code-reviewer}  # corrective -> immediate review
-          - {if: {exit: 0}, goto: deferred-sweep}                              # forward plan -> skip code review
-          - {if: {exit: 2}, continue: true}             # resolvable fold conflict -> resolver
-          - {if: {exit: 3}, resume: task-lead}          # dirty tree: the agent left work
-          - {else: true, pause: true}                   # hard failure / out-of-range fixup
+          - {if: {exit: 0}, goto: check-next-plan}
+          - {if: {exit: 2}, continue: true}
+          - {if: {exit: 3}, resume: task-lead}
+          - {else: true, pause: true}
 
       - name: autosquash-resolve-implement
         file: agents/autosquash-resolve.md
@@ -179,26 +176,52 @@ phases:
         rules:
           - {else: true, goto: cleanup-implement}
 
-      # The review step IS the plan-code-reviewer (no coordinator/panel). Forward plans
-      # skip it; it runs for a post-settlement corrective over its own diff
-      # (review_base..HEAD) and for the change-wide pass at change end
-      # (review_scope==change, cur_base_head..HEAD). It routes — verdict is approve |
-      # task_gap only (coverage is gap-check's call, never the reviewer's).
-      - name: plan-code-reviewer
+      # Routing-only branch. After a plan's tasks settle:
+      #  - a converge/finalize rework (coverage_settled latched) -> change-review (re-review, never re-gap-check);
+      #  - more outline plans remain -> the next plan-writer (plan_index++);
+      #  - the last outline plan was implemented -> the once-only gap-check (enter converge).
+      - name: check-next-plan
+        quiet: true
+        rules:
+          - {if: {coverage_settled: true}, goto: change-review}
+          - {if: "var.plan_index < var.plan_total", set: {plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan"}
+          - {else: true, goto: gap-check}
+
+  # ── converge: runs ONCE per change (change-local, NO lock). The coverage backstop,
+  # the single change-wide code review, the once-per-change deferred sweep, and the
+  # slow verify on the change's own base.
+  - name: converge
+    label: "convergence phase"
+    steps:
+      # End-of-change coverage backstop — runs ONCE. Gap found -> author a corrective via
+      # plan-writer (latch stays false). Clean -> latch coverage_settled and run the
+      # change-wide review.
+      - name: gap-check
+        file: agents/gap-check.md
+        tier: high
+        label: checking plan coverage
+        rules:
+          - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
+          - {else: true, set: {coverage_settled: true}, goto: change-review}
+
+      # The single change-wide code review (cur_base_head..HEAD), reusing plan-code-reviewer.md.
+      # approve -> deferred-sweep; task_gap -> task-lead rework.
+      - name: change-review
         file: agents/plan-code-reviewer.md
         tier: high
-        label: batch code review
+        label: reviewing change
         max_loops: 6
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The plan-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
-          - {else: true, continue: true}
+          - {else: true, goto: deferred-sweep}
 
       - name: deferred-sweep
         file: agents/deferred-sweep.md
         tier: medium
         label: sweeping deferred tasks
         rules:
+          - {if: {converge_verify_tolerated: true}, goto: wait-for-head}
           - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
           - {else: true, continue: true}
 
@@ -209,15 +232,13 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: deferred-sweep}
+          - {else: true, resume: deferred-sweep, feedback: "The fast verify gate (sweep-verify) failed on your sweep fix commits. Triage fix-vs-tolerate:"}
 
-      # Fold + stamp this batch's sweep commits over the same (review_base or fork)..HEAD
-      # range before the diff base advances. Mirrors cleanup-implement.
       - name: cleanup-sweep
         quiet: true
-        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        command: ./scripts/cleanup.sh
         rules:
-          - {if: {exit: 0}, goto: review-base-repin}
+          - {if: {exit: 0}, goto: converge-verify}
           - {if: {exit: 2}, continue: true}
           - {if: {exit: 3}, resume: deferred-sweep}
           - {else: true, pause: true}
@@ -230,55 +251,21 @@ phases:
         rules:
           - {else: true, goto: cleanup-sweep}
 
-      # After a plan's review + sweep settle, advance the diff base to HEAD and route:
-      #  - the change-wide pass just ran (review_scope==change) -> summarizer;
-      #  - a post-settlement corrective (coverage_settled already latched) -> summarizer,
-      #    reviewed per-plan over its own diff, never re-gap-checked or re-paneled;
-      #  - more outline plans remain (plan_index < plan_total) -> the next plan-writer;
-      #  - the last outline plan was implemented -> the once-only end-of-change gap-check.
-      - name: review-base-repin
-        quiet: true
-        command: 'cd "$IMP_PROJECT_ROOT" && git rev-parse HEAD'
+      # Slow tests on the change's own base (off-lock). Clean -> enter integrate. A failure
+      # resumes deferred-sweep in slow-gate triage: a fix loops back through sweep-verify ->
+      # cleanup-sweep -> converge-verify; a "not ours" toleration emits converge_verify_tolerated
+      # -> wait-for-head (forward escape; this gate never re-runs).
+      - name: converge-verify
+        command: ./scripts/run-verify.sh slow
+        label: running tests
+        max_loops: 5
         rules:
-          - {if: {exit: 0, review_scope: change}, set: {review_base: output.stdout}, goto: summarizer}
-          - {if: {exit: 0, coverage_settled: true}, set: {review_base: output.stdout}, goto: summarizer}
-          - {if: "output.exit == 0 and var.plan_index < var.plan_total", set: {review_base: output.stdout, plan_index: "var.plan_index + 1"}, goto: plan-writer}
-          - {if: {exit: 0}, set: {review_base: output.stdout}, goto: gap-check}
-          - {else: true, pause: true}
+          - {if: {exit: 0}, goto: wait-for-head}
+          - {if: {exit: 124}, pause: true}
+          - {else: true, resume: deferred-sweep, feedback: "The slow verify gate (converge-verify) failed. Triage fix-vs-tolerate:"}
 
-      # End-of-change coverage backstop — runs ONCE (the outline drives the plan loop, not
-      # gap-check). Gap found -> author a corrective via plan-writer (fixpoint loop, latch
-      # stays false). Clean -> latch coverage_settled and run the change-wide review
-      # (review_scope=change) on clean coverage for every change (single- or multi-plan).
-      - name: gap-check
-        file: agents/gap-check.md
-        tier: high
-        label: checking plan coverage
-        rules:
-          - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1", review_scope: "'plan'"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
-          - {else: true, set: {coverage_settled: true, review_scope: "'change'"}, goto: plan-code-reviewer}
-
-      - name: summarizer
-        file: agents/summarizer.md
-        tier: medium
-        label: summarizing change
-        # Writes the intent-level summary artifact, then hands off unconditionally —
-        # including on status: Error (it may have erred without committing). A missing
-        # summary is not fatal: finalize falls back to its audit fields.
-        rules:
-          - {else: true, goto: finalize}
-
-      - name: finalize
-        file: agents/finalize.md
-        tier: high
-        label: finalizing
-        max_loops: 20
-        rules:
-          - {if: {decision: merge},  goto: wait-for-head, label: "preparing to merge"}
-          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1", review_scope: "'plan'"}, goto: plan-writer, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
-          - {else: true, pause: true}
-
-  # ── integrate: the FIFO merge queue. Only the head touches the base. ───────
+  # ── integrate: the FIFO merge queue (base lock from wait-for-head). Rebase, slow
+  # re-verify only when the base moved, review the integration, then the human gate.
   - name: integrate
     label: "integration phase"
     steps:
@@ -292,9 +279,9 @@ phases:
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
-          - {if: {exit: 2}, goto: cleanup-merge}                                   # base unmoved: route through cleanup so a reconciler commit from a prior merge pass gets stamped; idempotent no-op when already stamped
-          - {if: {exit: 0}, set: {review_base: "''", integration_fork: output.stdout}, goto: integration-verify}    # clean replant: clear pin, capture fork, skip reconciler
-          - {if: {exit: 6}, set: {review_base: "''", integration_fork: output.stdout}, continue: true}              # conflicts: clear pin, capture fork, run reconciler (next)
+          - {if: {exit: 2}, goto: summarizer}
+          - {if: {exit: 0}, set: {integration_fork: output.stdout}, goto: integration-verify}
+          - {if: {exit: 6}, set: {integration_fork: output.stdout}, continue: true}
           - {else: true, pause: true}
 
       - name: reconciler
@@ -312,7 +299,7 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: reconciler}
+          - {else: true, goto: integration-reviewer, feedback: "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"}
 
       - name: integration-reviewer
         file: agents/integration-review.md
@@ -320,18 +307,31 @@ phases:
         label: reviewing merge conflicts
         max_loops: 6
         rules:
-          - {if: {blocking: true}, resume: reconciler,
-             label: "addressing integration review feedback",
-             feedback: "Here's review feedback to address:"}
-          - {if: {has_minor_findings: true}, resume: reconciler,
-             label: "integrating minor improvements",
-             feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          - {if: {blocking: true}, resume: reconciler, label: "addressing integration review feedback", feedback: "Here's review feedback to address:"}
+          - {if: {has_minor_findings: true}, resume: reconciler, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           - {if: {status: Error}, pause: true}
-          - {else: true, goto: cleanup-merge}
+          - {else: true, goto: summarizer}
+
+      - name: summarizer
+        file: agents/summarizer.md
+        tier: medium
+        label: summarizing change
+        rules:
+          - {else: true, goto: finalize}
+
+      - name: finalize
+        file: agents/finalize.md
+        tier: high
+        label: finalizing
+        max_loops: 20
+        rules:
+          - {if: {decision: merge},  goto: cleanup-merge, label: "preparing to merge"}
+          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, release: base, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {else: true, pause: true}
 
       - name: cleanup-merge
         quiet: true
-        command: './scripts/cleanup.sh "{{ vars.review_base }}"'
+        command: ./scripts/cleanup.sh
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
           - {if: {exit: 2}, continue: true}

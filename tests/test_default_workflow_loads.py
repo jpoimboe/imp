@@ -19,7 +19,9 @@ def _wf():
 def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
     assert wf.name == "feature"
-    assert [p.name for p in wf.phases] == ["front-door", "spec", "plan", "implement", "integrate"]
+    assert [p.name for p in wf.phases] == [
+        "front-door", "spec", "plan", "implement", "converge", "integrate"
+    ]
 
 
 def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
@@ -36,7 +38,7 @@ def test_supercycle_back_edges_present() -> None:
     steps = {s.name: s for p in _wf().phases for s in p.steps}
     # The outline drives the plan loop; gap-check is the end-of-change backstop.
     assert "gap-check" in steps
-    assert "plan-code-reviewer" in steps
+    assert "change-review" in steps
     assert "deferred-sweep" in steps
     assert "task-lead" in steps and "finalize" in steps
 
@@ -99,7 +101,7 @@ def test_finalize_is_high_tier_and_routes_merge_rework_pause() -> None:
     out = {"status": "Success", "decision": "merge", "comments": "",
            "built": "", "verify_status": "", "open_items": "", "next_steps": ""}
     m = evaluate_rules(step.rules, vars=base, output=out)
-    assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
+    assert isinstance(m.action, Goto) and m.action.target == "cleanup-merge"
     m2 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "rework"})
     assert isinstance(m2.action, Goto) and m2.action.target == "plan-writer"
     m3 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "pause"})
@@ -147,9 +149,10 @@ def test_every_nonquiet_step_has_its_label() -> None:
         "autosquash-resolve-implement": "resolving task fixups",
         "autosquash-resolve-merge": "resolving merge fixups",
         "gap-check": "checking plan coverage",
-        "plan-code-reviewer": "batch code review",
+        "change-review": "reviewing change",
         "deferred-sweep": "sweeping deferred tasks",
         "sweep-verify": "running tests",
+        "converge-verify": "running tests",
         "autosquash-resolve-sweep": "resolving sweep fixups",
         "summarizer": "summarizing change",
         "finalize": "finalizing",
@@ -163,7 +166,7 @@ def test_every_nonquiet_step_has_its_label() -> None:
         assert by[name].label == label, name
     # Quiet plumbing steps stay label-free.
     for name in ("spec-verify-commit", "plan-verify-commit",
-                 "cleanup-implement", "cleanup-sweep", "cleanup-merge", "review-base-repin",
+                 "cleanup-implement", "cleanup-sweep", "cleanup-merge", "check-next-plan",
                  "assert-stamped", "integrate-rebase"):
         assert by[name].label is None, name
 
@@ -179,7 +182,7 @@ def test_route_labels_assigned() -> None:
     assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # plan-code-reviewer task_gap -> task-lead
-    assert by["plan-code-reviewer"].rules[0].label == "addressing code review feedback"
+    assert by["change-review"].rules[0].label == "addressing code review feedback"
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"
@@ -195,4 +198,5 @@ def test_phase_labels_assigned() -> None:
     assert by["implement"].label == (
         "implementation phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"
     )
+    assert by["converge"].label == "convergence phase"
     assert by["integrate"].label == "integration phase"

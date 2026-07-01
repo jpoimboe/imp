@@ -255,13 +255,13 @@ unimplemented task, or the re-opened task from injected feedback):
 ## Verify triage — tolerated failures
 
 <!-- SYNCED PAIR (task-lead ↔ deferred-sweep): keep this Verify triage block in lockstep
-with deferred-sweep.md's identical block (and vice-versa). The toleration JUDGMENT is
+with deferred-sweep.md's corresponding block (and vice-versa). The toleration JUDGMENT is
 uniform; only the fix path differs (you fix in task context with a fixup; deferred-sweep
 fixes in sweep context with a plain commit). -->
 
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
 failure output. Reason over the OPAQUE failure text against the diff
-(`review_base..HEAD`) — you never re-run a single test; this is pure judgment.
+(`cur_base_head..HEAD`) — you never re-run a single test; this is pure judgment.
 
 Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the

@@ -3,21 +3,25 @@
 # production->consumption boundary (after task-lead, after deferred-sweep, after
 # reconciler). It enforces the invariant that no commit reaches a consumer
 # (reviewer, stamp, merge) without a clean tree, folded fixups, and a stamped
-# `Change: <id>` trailer, all over the SAME range (arg or fork)..HEAD.
+# `Change: <id>` trailer, all over the SAME self-derived boundary..HEAD range.
 #
-# The lower bound is $1 (the workflow passes `{{ vars.review_base }}`); an empty
-# argument falls back to `fork` (= change.json cur_base_head). Operating over
-# (arg or fork)..HEAD for BOTH the fold and the stamp gives a structural invariant:
-# cleanup never rewrites a commit at or below the lower bound, so the review pin is
-# stable by construction and per-batch stamping is safe.
+# The lower bound is SELF-DERIVED: the parent of the lowest commit above the change
+# fork that is unstamped or carries a surviving fixup!/squash!/amend! subject (when
+# every such commit is already stamped and directive-free, the bound is the fork).
+# Stamping is monotonic, so the stamped+directive-free commits form a contiguous
+# prefix above the fork and this boundary is well-defined. Operating over
+# boundary..HEAD for BOTH the fold and the stamp gives a structural invariant:
+# cleanup never rewrites a commit at or below the boundary, so reviewed history is
+# stable by construction and per-batch stamping touches only the unstamped tail. Any
+# positional argument is ignored (the legacy review_base arg is vestigial).
 #
-# DELIBERATE SEMANTICS: a `fixup!` whose target is at or below the lower bound is
+# DELIBERATE SEMANTICS: a `fixup!` whose target is at or below the cleaned boundary is
 # out of range, so autosquash cannot reorder it; it stays unfolded and the post-fold
 # directive check trips. Cleanup BOUNCES the surviving directive back to the site's
 # committing agent (exit 3) with a prescriptive diagnostic instead of pausing for a
 # human; the agent fixes forward — converting the misfiled directive into a standalone
 # commit or replacing it with a new forward commit. Cleanup never silently rewrites a
-# commit at or below the lower bound, so the review pin stays stable and reviewed
+# commit at or below the cleaned boundary, so already-stamped reviewed
 # history is never clawed back.
 # After 2 consecutive bounces with the directive still surviving, cleanup falls back
 # to exit 1 so a human steps in; any clean run (exit 0) resets the bounce counter.
@@ -33,12 +37,26 @@ ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
 STATE="$CHANGE_DIR/state"
 MAX_BOUNCES=2
 
-# Lower bound: the review_base SHA passed as $1, else the recorded fork point.
-LOWER="${1:-}"
-if [ -z "$LOWER" ]; then
-  LOWER=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
-fi
-[ -n "$LOWER" ] || { echo "empty lower bound (no arg and no cur_base_head)" >&2; exit 1; }
+# Self-derived lower bound: scan the commits above the change fork oldest->newest
+# and stop at the first that is unstamped or carries a fixup!/squash!/amend! subject;
+# the boundary is that commit's parent. Stamping is monotonic, so the skipped prefix
+# is exactly the already-stamped, directive-free history. When no such commit exists
+# (every commit above the fork is stamped and directive-free), the bound is the fork.
+# Any positional argument is ignored.
+FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
+[ -n "$FORK" ] || { echo "empty fork (no cur_base_head)" >&2; exit 1; }
+LOWER="$FORK"
+while read -r _sha; do
+  case "$(git log -1 --format='%s' "$_sha")" in
+    fixup!*|squash!*|amend!*) ;;
+    *)
+      [ "$(git log -1 --format='%(trailers:key=Change,valueonly)' "$_sha")" = "$ID" ] \
+        && continue
+      ;;
+  esac
+  LOWER=$(git rev-parse "$_sha^")
+  break
+done < <(git rev-list --reverse --no-merges "$FORK..HEAD")
 
 # grep -q in a pipeline with pipefail is unreliable (SIGPIPE makes git log fail even
 # on a match); read subjects via a here-string with no pipe partner.
@@ -58,7 +76,7 @@ _all_stamped() {
 
 # Per surviving fixup!/squash!/amend! directive in range, emit a prescriptive line
 # naming the offending commit, its target, and the forward-fix remedy. A target at or
-# below LOWER is out of range (base or already-reviewed history); an unmatched target
+# below LOWER is out of range (base or already-stamped history); an unmatched target
 # is a likely typo in the --fixup argument.
 _diagnose_surviving_directives() {
   local lower_short sha subj short target_subj target_sha target_short
@@ -79,7 +97,7 @@ _diagnose_surviving_directives() {
       <<< "$(git log --format='%H%x09%s')")
     if [ -n "$target_sha" ] && git merge-base --is-ancestor "$target_sha" "$LOWER"; then
       target_short=$(git rev-parse --short "$target_sha")
-      echo "  - '$subj' ($short) targets '$target_subj' ($target_short), at or below the change fork $lower_short (base or already-reviewed history). Drop the 'fixup! ' prefix to land it as its own commit, or move the fix into a new forward commit." >&2
+      echo "  - '$subj' ($short) targets '$target_subj' ($target_short), at or below the cleaned boundary $lower_short (base or already-stamped history). Drop the 'fixup! ' prefix to land it as its own commit, or move the fix into a new forward commit." >&2
     else
       echo "  - '$subj' ($short) matches no commit in the change — likely a typo in the --fixup target. Reword it into a standalone commit, or replace it with a new forward commit." >&2
     fi

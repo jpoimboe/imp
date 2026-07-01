@@ -21,6 +21,7 @@ def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
     assert names == [
         "wait-for-head", "integrate-rebase", "reconciler",
         "integration-verify", "integration-reviewer",
+        "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
     ]
@@ -30,21 +31,21 @@ def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
     assert all(s.name != "integration-resolver" for s in wf.flat_steps())
 
 
-def test_integrate_rebase_routing_into_cleanup_gate() -> None:
+def test_integrate_rebase_routing_into_summarizer_and_gate() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integrate-rebase")
-    m = evaluate_rules(rules, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto) and m.action.target == "cleanup-merge"
-    assert m.var_mutations == {}  # exit 2 routes to cleanup, no SHA churn
-    m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA", "stderr": ""})
+    m = evaluate_rules(rules, vars={}, output={"exit": 2, "stdout": ""})
+    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+    assert m.var_mutations == {}
+    m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA"})
     assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
-    assert m.var_mutations.get("review_base") == ""
+    assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
-    m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA", "stderr": ""})
+    m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA"})
     assert isinstance(m.action, Continue)
-    assert m.var_mutations.get("review_base") == ""
+    assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
-    m = evaluate_rules(rules, vars={}, output={"exit": 5, "stdout": "", "stderr": ""})
+    m = evaluate_rules(rules, vars={}, output={"exit": 5, "stdout": ""})
     assert isinstance(m.action, Pause)
 
 
@@ -59,18 +60,23 @@ def test_reconciler_stuck_pauses_and_else_continues() -> None:
     assert isinstance(m.action, Continue)
 
 
-def test_merge_phase_never_routes_to_planning_or_releases_the_lane() -> None:
+def test_only_finalize_routes_to_planning_and_releases_the_lane() -> None:
     wf = load_workflow(WF)
     planning = {s.name for p in wf.phases if p.name in ("spec", "plan", "implement")
                 for s in p.steps}
     for step in _phase(wf, "integrate").steps:
         for rule in step.rules:
             a = rule.action
-            assert getattr(a, "target", None) not in planning, (step.name, a)
-            assert getattr(a, "release", None) is None, (step.name, a)
+            target = getattr(a, "target", None)
+            release = getattr(a, "release", None)
+            if step.name == "finalize" and target == "plan-writer":
+                assert release == "base", (step.name, a)
+                continue
+            assert target not in planning, (step.name, a)
+            assert release is None, (step.name, a)
 
 
-def test_integration_verify_routes_failure_to_reconciler() -> None:
+def test_integration_verify_routes_failure_to_integration_reviewer() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-verify")
     m = evaluate_rules(rules, vars={}, output={"exit": 0})
@@ -78,8 +84,7 @@ def test_integration_verify_routes_failure_to_reconciler() -> None:
     m = evaluate_rules(rules, vars={}, output={"exit": 124})
     assert isinstance(m.action, Pause)
     m = evaluate_rules(rules, vars={}, output={"exit": 1})
-    assert isinstance(m.action, Goto) and m.action.target == "reconciler"
-    assert m.action.resume is True
+    assert isinstance(m.action, Goto) and m.action.target == "integration-reviewer"
     assert m.action.release is None
 
 
@@ -97,7 +102,8 @@ def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     assert m.action.resume is True
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": False, "has_minor_findings": False})
-    assert isinstance(m.action, Goto) and m.action.target == "cleanup-merge"
+    # both False -> clean, proceed to the human gate
+    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
     m = evaluate_rules(rules, vars={},
                        output={"status": "Error", "findings": "",
                                "blocking": False, "has_minor_findings": False})
@@ -108,7 +114,7 @@ def test_cleanup_merge_routes_by_exit_code() -> None:
     wf = load_workflow(WF)
     step = next(s for s in wf.flat_steps() if s.name == "cleanup-merge")
     assert step.kind == "script"
-    assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
+    assert step.command == "./scripts/cleanup.sh"
     r = step.rules
     m0 = evaluate_rules(r, vars={}, output={"exit": 0})
     assert isinstance(m0.action, Goto) and m0.action.target == "assert-stamped"
@@ -166,15 +172,16 @@ def test_merge_to_base_recovery_rules_and_cap() -> None:
     assert isinstance(m.action, Pause)
 
 
-def test_finalize_merge_routes_to_wait_for_head() -> None:
+def test_finalize_merge_routes_to_cleanup_merge() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "finalize")
-    base = {"status": "Success", "comments": "", "built": "", "verify_status": "",
-            "open_items": "", "next_steps": ""}
-    m = evaluate_rules(rules, vars={}, output={**base, "decision": "merge"})
-    assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
     m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
-                       output={**base, "decision": "rework"})
+                       output={"decision": "merge"})
+    assert isinstance(m.action, Goto) and m.action.target == "cleanup-merge"
+    m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
+                       output={"decision": "rework"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    m = evaluate_rules(rules, vars={}, output={**base, "decision": "other"})
+    assert m.action.release == "base"
+    m = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
+                       output={"decision": "other"})
     assert isinstance(m.action, Pause)

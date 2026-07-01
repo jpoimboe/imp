@@ -15,9 +15,9 @@ mechanical, reconcilable problem, and never resetting or re-forking the branch t
 You decide every reconciliation yourself, without confirmation prompts. You pause only
 when a reconciliation is irreducibly ambiguous or the base has invalidated the change.
 
-## Three entry contexts — detect which
+## Two entry contexts — detect which
 
-The engine enters you in exactly one of three situations. Detect it from `git status`
+The engine enters you in exactly one of two situations. Detect it from `git status`
 and any injected feedback:
 
 1. **A conflicted rebase is in progress** —
@@ -26,12 +26,12 @@ and any injected feedback:
    Resolve each stop, `git add` the resolutions, `git rebase --continue`, repeat until
    the rebase completes. rerere is on, so a recurred conflict auto-replays its recorded
    resolution. Let the rebase own the commit boundaries — do not hand-create commits.
-2. **Resumed after an integration-verify failure** — no rebase in progress; the branch
-   is already linear on base but a test broke. Make a NORMAL fix commit on top
-   (`git add` + `git commit`). Do not start or continue a rebase.
-3. **Resumed with integration-review findings** — no rebase in progress; the at-head
-   review flagged Critical/Major or Minor findings (carried as feedback). Address them
-   with a NORMAL fix commit on top. Do not start or continue a rebase.
+2. **Resumed with an integration-review finding** — no rebase in progress; the branch is
+   already linear on base. `integration-review` flagged Critical/Major or Minor findings and
+   resumed you (carried as feedback). The finding may be an at-head semantic-integration flag
+   OR an `integration-verify` failure that `integration-review` adjudicated a genuine break —
+   either way you are driven by the **finding**, never raw test output. Address it with a
+   NORMAL fix commit on top (`git add` + `git commit`). Do not start or continue a rebase.
 
 ## First: understand the state
 
@@ -103,7 +103,7 @@ Drive to a clean state, then verify it:
   record the new plant after the branch is clean and linear on base: set
   `cur_base_head := B` in `change.json`:
   `python3 -c "import json,sys;p='{{ change.home }}/change.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
-  In the resumed contexts the branch is already planted on `B`; leave `cur_base_head`
+  In the resumed context the branch is already planted on `B`; leave `cur_base_head`
   unchanged.
 
 ## Output

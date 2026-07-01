@@ -340,7 +340,7 @@ def test_task_lead_documents_verify_triage() -> None:
     assert "— needs-decision:" in text          # born in needs-decision state (em dash)
     assert "verify_tolerated" in text                # the signal it emits
     assert "attributable" in low                     # the single attributability judgment
-    assert "review_base..HEAD" in text               # judged against the diff
+    assert "cur_base_head..HEAD" in text             # judged against the diff
     # The two-category taxonomy is gone — no tags, no "green at baseline", no union set.
     assert "[baseline]" not in text
     assert "[flaky]" not in text
@@ -354,10 +354,7 @@ def test_task_lead_documents_verify_triage() -> None:
 
 def test_code_reviewer_resolves_diff_range_per_cadence() -> None:
     low = CODE_REVIEWER.read_text().lower()
-    # The reviewer resolves its own range from the review cadence, not from a
-    # coordinator dispatch: per-batch over review_base, end-of-change over cur_base_head.
-    assert "review_scope" in low
-    assert "review_base" in low                 # per-batch range
+    # The reviewer always does the end-of-change pass over cur_base_head.
     assert "cur_base_head" in low               # end-of-change range from recorded fork
     assert "git merge-base" not in low
     assert "pure advisor" not in low            # it routes now
@@ -463,7 +460,7 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "sweep_tolerated: false" in text
     # The single attributability judgment, against the diff.
     assert "attributable" in low
-    assert "review_base..HEAD" in text
+    assert "cur_base_head..HEAD" in text
     # The two-category taxonomy is gone.
     assert "[baseline]" not in text
     assert "[flaky]" not in text

@@ -28,7 +28,7 @@ next, per the outline. Decide and emit `more_plans`:
   clean (the fixpoint loop).
 - `more_plans: false` — the implemented plans cover the spec; coverage is complete. The
   engine **latches** coverage-settled (you never run again this change), then runs the
-  once-only change-wide review if the change spanned more than one plan.
+  once-only change-wide review.
 
 You are the **sole completeness guard**. The `plan-code-reviewer` judges only code
 correctness within its diff and can never route back for coverage — so be decisive and

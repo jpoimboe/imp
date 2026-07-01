@@ -1,7 +1,7 @@
 ---
 name: plan-code-reviewer
 label: reviewing code (full plan diff)
-description: Reviews the change's diff (a per-batch range, or the whole change) against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
+description: Reviews the change's whole diff against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap]}
@@ -28,14 +28,9 @@ exclusively. Your job is code correctness within the diff under review.
 Resolve the diff range from the review cadence — a computed range, never
 reconstructed from `progress.md`:
 
-{% if vars.review_scope == 'change' %}
 **End-of-change pass (whole-change, cross-plan).** Review the whole change:
 `git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the change's recorded fork point. This is
 the one full review of the run.
-{% else %}
-**Per-batch pass.** Review this batch's work: `git diff {{ vars.review_base or change.cur_base_head }}..imp/{{ change.id }}`
-— do not widen it to the whole change.
-{% endif %}
 
 The work is already committed, so a bare `git diff` shows nothing — always diff the
 range above.
@@ -151,7 +146,7 @@ fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.m
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
 
-`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: {% if vars.review_scope == 'change' %}change{% else %}plan{% endif %}]`
+`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: change]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
 re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.

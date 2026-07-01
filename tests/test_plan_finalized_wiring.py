@@ -11,8 +11,7 @@ AGENTS = Path("src/imp/assets/workflows/imp/agents")
 
 _BASE = {
     "fast_path": False, "spec_minors_integrated": False,
-    "plan_minors_integrated": False, "review_scope": "plan",
-    "review_base": "",
+    "plan_minors_integrated": False,
     "coverage_settled": False, "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
@@ -56,8 +55,8 @@ def test_task_loop_and_rework_bypass_plan_finalized() -> None:
                           output={"status": "Success", "done": True,
                                   "verify_tolerated": False, "summary": "x"})
     assert isinstance(loop.action, Continue)
-    # plan-code-reviewer's task_gap rework re-enters task-lead directly, not plan-finalized.
-    gap = evaluate_rules(steps["plan-code-reviewer"].rules, vars=_BASE,
+    # change-review's task_gap rework re-enters task-lead directly, not plan-finalized.
+    gap = evaluate_rules(steps["change-review"].rules, vars=_BASE,
                          output={"status": "Success", "verdict": "task_gap", "findings": "x"})
     assert gap.action.target == "task-lead"
 

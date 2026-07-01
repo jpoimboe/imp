@@ -95,9 +95,7 @@ These are **post-settlement** reworks: plan N has already been fully implemented
 the **author-N+1** row. **Author a new focused corrective plan `…-plan-(N+1).md`**
 addressing **only** the finding, reusing the supercycle author-N+1 path. **Never
 revise the settled plan N in place** — its tasks are committed and `task-lead` skips
-them, and their diff is outside the corrective `review_base..HEAD` review scope, so
-editing the settled plan text is cosmetic at best and a lie about what shipped at
-worst.
+them; editing the settled plan text is cosmetic at best and a lie about what shipped at worst.
 
 You still **decide the corrective's depth** yourself from the findings/`comments`:
 
@@ -109,7 +107,7 @@ You still **decide the corrective's depth** yourself from the findings/`comments
 Write `…-plan-(N+1).md`, then the corrective flows
 through `plan-reviewer` → `task-lead` exactly like a first-time plan (a trivial
 corrective takes `fast_path` and skips `plan-reviewer`). Code review of the corrective
-is scoped to its own `review_base..HEAD` diff; the settled work is neither re-planned
+is included in the change-wide review at converge; the settled work is neither re-planned
 nor re-reviewed.
 
 **Consume the lifecycle handle.** When this `N+1` covers an open `NEEDS-REPLAN

@@ -20,6 +20,15 @@ def test_reconciler_body_is_human_free_and_defines_contexts() -> None:
     assert "stuck: true" in body                 # escalate criterion
     assert "stuck: false" in body                # reconcile criterion
     assert "conflicted rebase" in body.lower()   # entry context 1
-    assert "integration-verify" in body          # entry context 2
-    assert "integration-review" in body          # entry context 3
+    assert "integration-verify" in body          # both in merged context 2
+    assert "integration-review" in body          # both in merged context 2
     assert "integration-notes.md" not in body    # no bespoke integration artifact
+
+
+def test_reconciler_is_finding_driven_not_raw_test_output() -> None:
+    body = (WF / "agents" / "reconciler.md").read_text()
+    low = body.lower()
+    # Collapsed to two entry contexts: an integration-verify failure arrives only as a finding.
+    assert "two entry contexts" in low
+    assert "three entry contexts" not in low
+    assert "never raw test output" in low

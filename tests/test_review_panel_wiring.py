@@ -1,14 +1,7 @@
-"""Change-end-only code-review cadence: cleanup-implement / autosquash-resolve-implement
-run INSIDE the per-plan implement loop, but a forward outline plan's clean
-cleanup-implement SKIPS `plan-code-reviewer` (routing to deferred-sweep); the single
-`plan-code-reviewer` step reviews only a post-settlement corrective's own diff
-(review_base..HEAD, reached via the coverage_settled seam) and the whole change once at
-change end (review_scope=change, merge-base..HEAD). The outline drives the plan loop;
-gap-check is the once-per-change coverage backstop and now fires the change-wide review
-for every change. verify (per-plan green gate) and plan-reviewer (per-plan doc review)
-are unchanged. deferred-sweep + sweep-verify + review-base-repin trail each review batch;
-review-base-repin, gap-check and finalize tail the implement phase (no separate review
-phase)."""
+"""The per-plan implement loop carries no code review or sweep; the single
+change-wide code review (`change-review`, reusing plan-code-reviewer.md) runs once
+in the converge phase after gap-check latches coverage, paired with the
+once-per-change deferred sweep."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,7 +15,7 @@ from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
-from imp.engine.types import Continue, Goto
+from imp.engine.types import Continue, Goto, Pause
 
 AGENTS = Path("src/imp/assets/workflows/imp/agents")
 _TIERS = frozenset({"low", "medium", "high"})
@@ -31,8 +24,6 @@ _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False,
     "coverage_settled": False,
-    "review_scope": "plan",
-    "review_base": "",
     "plan_index": 1, "plan_total": 0, "task_total": 0,
 }
 
@@ -46,27 +37,26 @@ def _steps(wf):
 
 
 def test_implement_phase_is_the_per_batch_loop() -> None:
-    impl = next(p for p in _wf().phases if p.name == "implement")
+    wf = _wf()
+    impl = next(p for p in wf.phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
-        "task-lead", "verify",
-        "cleanup-implement", "autosquash-resolve-implement",
-        "plan-code-reviewer", "deferred-sweep", "sweep-verify",
-        "cleanup-sweep", "autosquash-resolve-sweep", "review-base-repin",
-        "gap-check", "summarizer", "finalize",
+        "task-lead", "verify", "cleanup-implement",
+        "autosquash-resolve-implement", "check-next-plan",
     ]
 
 
-def test_no_separate_review_phase_stamp_and_finalize_tail_code() -> None:
+def test_review_sweep_and_finalize_left_the_implement_loop() -> None:
     wf = _wf()
-    assert not any(p.name == "review" for p in wf.phases)
-    impl = next(p for p in wf.phases if p.name == "implement")
-    assert [s.name for s in impl.steps][-3:] == [
-        "gap-check", "summarizer", "finalize"]
-    names = {s.name for s in wf.flat_steps()}
-    for gone in ("integration-gate", "integration-pass", "integration-sweep",
-                 "integration-sweep-verify", "stamp-sweep-trailers",
-                 "repin-after-rebase", "base-fresh-check"):
-        assert gone not in names, gone
+    impl_names = [s.name for s in next(p for p in wf.phases if p.name == "implement").steps]
+    assert impl_names[-1] == "check-next-plan"
+    for gone in ("change-review", "plan-code-reviewer", "gap-check",
+                 "deferred-sweep", "sweep-verify", "summarizer", "finalize"):
+        assert gone not in impl_names, gone
+    conv_names = [s.name for s in next(p for p in wf.phases if p.name == "converge").steps]
+    assert conv_names == [
+        "gap-check", "change-review", "deferred-sweep", "sweep-verify",
+        "cleanup-sweep", "autosquash-resolve-sweep", "converge-verify",
+    ]
 
 
 def test_standalone_panel_gate_and_recheck_are_gone() -> None:
@@ -75,30 +65,27 @@ def test_standalone_panel_gate_and_recheck_are_gone() -> None:
 
 
 def test_review_step_uses_code_reviewer_at_high_tier() -> None:
-    review = _steps(_wf())["plan-code-reviewer"]
-    assert review.kind == "agent" and review.tier == "high"
-    assert review.file.name == "plan-code-reviewer.md"
-    assert review.differ_from is None
+    wf = _wf()
+    step = _steps(wf)["change-review"]
+    assert step.tier == "high"
+    assert step.file is not None and step.file.name == "plan-code-reviewer.md"
 
 
 def test_review_step_routes_two_way_no_plan_gap() -> None:
-    rules = _steps(_wf())["plan-code-reviewer"].rules
-    m_task = evaluate_rules(rules, vars=_BASE_VARS,
-                            output={"status": "Success", "verdict": "task_gap", "findings": "x"})
-    assert isinstance(m_task.action, Goto) and m_task.action.target == "task-lead"
-    assert m_task.action.resume is False
-    assert m_task.action.feedback
-    assert "panel_done" not in m_task.var_mutations
-    m_ok = evaluate_rules(rules, vars=_BASE_VARS,
-                          output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)
-    assert m_ok.var_mutations == {}
+    wf = _wf()
+    rules = _steps(wf)["change-review"].rules
+    gap = evaluate_rules(rules, vars=_BASE_VARS,
+                         output={"status": "Success", "verdict": "task_gap"})
+    assert isinstance(gap.action, Goto) and gap.action.target == "task-lead"
+    ok = evaluate_rules(rules, vars=_BASE_VARS,
+                        output={"status": "Success", "verdict": "approve"})
+    assert isinstance(ok.action, Goto) and ok.action.target == "deferred-sweep"
 
 
 def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["plan-code-reviewer"].output_schema
-    rules = _steps(wf)["plan-code-reviewer"].rules
+    rules = _steps(wf)["change-review"].rules
     for verdict in ("approve", "task_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)
@@ -168,48 +155,41 @@ def test_gap_check_routes_coverage_at_change_end() -> None:
                             output={"status": "Success", "more_plans": True,
                                     "rationale": "x", "plan_total": 3})
     assert isinstance(m_more.action, Goto) and m_more.action.target == "plan-writer"
-    assert m_more.var_mutations["review_scope"] == "plan"
     assert m_more.var_mutations["plan_total"] == 3
     assert m_more.var_mutations["plan_index"] == 3
-    # Coverage complete + multi-plan -> change-wide panel, latched.
+    # Coverage complete + multi-plan -> change-wide review, latched.
     m_multi = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 2},
                              output={"status": "Success", "more_plans": False,
                                      "rationale": "x", "plan_total": 2})
-    assert isinstance(m_multi.action, Goto) and m_multi.action.target == "plan-code-reviewer"
-    assert m_multi.var_mutations["review_scope"] == "change"
+    assert isinstance(m_multi.action, Goto) and m_multi.action.target == "change-review"
+    assert "review_scope" not in m_multi.var_mutations
     assert m_multi.var_mutations["coverage_settled"] is True
     # Coverage complete + single-plan -> change-wide review fires too (plan_total gate dropped).
     m_one = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                            output={"status": "Success", "more_plans": False,
                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_one.action, Goto) and m_one.action.target == "plan-code-reviewer"
-    assert m_one.var_mutations["review_scope"] == "change"
+    assert isinstance(m_one.action, Goto) and m_one.action.target == "change-review"
+    assert "review_scope" not in m_one.var_mutations
     assert m_one.var_mutations["coverage_settled"] is True
 
 
-def test_forward_plan_skips_code_review_corrective_keeps_it() -> None:
-    rules = _steps(_wf())["cleanup-implement"].rules
-    # forward outline plan: clean fold skips plan-code-reviewer entirely
-    fwd = evaluate_rules(rules, vars={**_BASE_VARS, "coverage_settled": False},
-                         output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(fwd.action, Goto) and fwd.action.target == "deferred-sweep"
-    # post-settlement corrective: clean fold goes straight to the reviewer over its own diff
-    corr = evaluate_rules(rules, vars={**_BASE_VARS, "coverage_settled": True},
-                          output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(corr.action, Goto) and corr.action.target == "plan-code-reviewer"
-    # verify (per-plan green gate) and plan-reviewer (per-plan doc review) are unchanged.
-    impl = next(p for p in _wf().phases if p.name == "implement")
-    assert "verify" in [s.name for s in impl.steps]
-    plan = next(p for p in _wf().phases if p.name == "plan")
-    assert "plan-reviewer" in [s.name for s in plan.steps]
+def test_check_next_plan_routes_settled_batch_to_change_review() -> None:
+    wf = _wf()
+    ci = evaluate_rules(_steps(wf)["cleanup-implement"].rules, vars={}, output={"exit": 0})
+    assert isinstance(ci.action, Goto) and ci.action.target == "check-next-plan"
+    cnp = _steps(wf)["check-next-plan"].rules
+    corrective = evaluate_rules(cnp, vars={**_BASE_VARS, "coverage_settled": True,
+                                           "plan_index": 1, "plan_total": 1}, output={})
+    assert isinstance(corrective.action, Goto) and corrective.action.target == "change-review"
+    fresh = evaluate_rules(cnp, vars={**_BASE_VARS, "coverage_settled": False,
+                                      "plan_index": 1, "plan_total": 1}, output={})
+    assert isinstance(fresh.action, Goto) and fresh.action.target == "gap-check"
 
 
 def test_plan_code_reviewer_reads_review_scope_not_integration_pass() -> None:
     text = (AGENTS / "plan-code-reviewer.md").read_text()
     assert "integration_pass" not in text
-    assert "review_scope" in text
     assert "panel_done" not in text                 # the re-verify dial is gone
-    assert "review_base" in text                     # per-batch diff base is pinned
 
 
 def test_reconciler_is_a_rebase_conflict_resolver() -> None:
@@ -224,77 +204,44 @@ def test_reconciler_is_a_rebase_conflict_resolver() -> None:
     assert "cur_base_head" in text
 
 
-def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123",
-                     cur_base_head: str = "forkSHA") -> str:
+def _render_reviewer(tmp_path, *, cur_base_head: str = "forkSHA") -> str:
     wf = _wf()
     body = wf.agents["plan-code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
                         change_id="chg",
-                        vars={"review_scope": review_scope, "review_base": review_base,
-                              "fast_path": False})
+                        vars={"fast_path": False})
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 
 
 def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
-    out = _render_reviewer(tmp_path, review_scope="change")
+    out = _render_reviewer(tmp_path)
     assert "forkSHA..imp/chg" in out                 # whole-change diff from recorded fork
     assert "git merge-base" not in out
     assert "vars.review_base" not in out and "abc123" not in out
     assert "task(subagent_name=" not in out         # reviews directly, dispatches nothing
 
 
-def test_per_batch_reviews_review_base_range(tmp_path) -> None:
-    out = _render_reviewer(tmp_path, review_scope="plan")
-    assert "abc123..imp/chg" in out                 # diff range pins review_base
-    assert "spec-compliance-slice" not in out       # single reviewer, no panel
-    assert "task(subagent_name=" not in out
-
-
-def test_per_batch_empty_review_base_falls_back_to_fork(tmp_path) -> None:
-    # review-base-init is gone: the first per-batch review runs with review_base == "",
-    # which must resolve to the recorded fork point, not a broken empty-LHS range.
-    out = _render_reviewer(tmp_path, review_scope="plan", review_base="",
-                           cur_base_head="forkSHA")
-    assert "forkSHA..imp/chg" in out
-
-
-def test_review_base_repin_routes_by_scope() -> None:
-    rules = _steps(_wf())["review-base-repin"].rules
-    m_change = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "change"},
-                              output={"exit": 0, "stdout": "deadbeef", "stderr": ""})
-    assert isinstance(m_change.action, Goto) and m_change.action.target == "summarizer"
-    assert m_change.var_mutations["review_base"] == "deadbeef"
-    assert "tasks_since_review" not in m_change.var_mutations
-    m_batch = evaluate_rules(rules, vars={**_BASE_VARS, "review_scope": "plan",
-                                          "plan_index": 1, "plan_total": 3},
-                             output={"exit": 0, "stdout": "cafef00d", "stderr": ""})
-    assert isinstance(m_batch.action, Goto) and m_batch.action.target == "plan-writer"
-    assert m_batch.var_mutations["review_base"] == "cafef00d"
-    assert m_batch.var_mutations["plan_index"] == 2
-    assert "tasks_since_review" not in m_batch.var_mutations
-
 
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
+    assert by["change-review"].rules[0].action.feedback
+    assert by["finalize"].rules[1].action.feedback
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
-    review_fb = by["plan-code-reviewer"].rules[0].action.feedback  # task_gap -> task-lead
-    assert finalize_fb and review_fb
     text = (AGENTS / "plan-writer.md").read_text()
     assert finalize_fb in text
 
 
 def test_finalize_rework_routes_to_plan_writer() -> None:
     rules = _steps(_wf())["finalize"].rules
-    base = {"status": "Success", "built": "", "verify_status": "",
-            "open_items": "", "next_steps": "", "comments": ""}
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={**base, "decision": "rework", "comments": "fix X"})
-    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.var_mutations["review_scope"] == "plan"
-    m_merge = evaluate_rules(rules, vars=_BASE_VARS,
-                             output={**base, "decision": "merge"})
-    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "wait-for-head"
+    rework = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
+                            output={"decision": "rework"})
+    assert isinstance(rework.action, Goto) and rework.action.target == "plan-writer"
+    assert rework.action.release == "base"
+    assert "review_scope" not in rework.var_mutations
+    merge = evaluate_rules(rules, vars={"plan_index": 1, "plan_total": 1},
+                           output={"decision": "merge"})
+    assert isinstance(merge.action, Goto) and merge.action.target == "cleanup-merge"
 
 
 def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
@@ -316,7 +263,7 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
 
 def test_rework_path_loop_budgets_unchanged() -> None:
     steps = _steps(_wf())
-    assert steps["plan-code-reviewer"].max_loops == 6
+    assert steps["change-review"].max_loops == 6
     assert steps["finalize"].max_loops == 20
 
 
@@ -335,30 +282,32 @@ def test_plan_code_reviewer_is_not_a_pure_advisor() -> None:
 
 
 def test_cleanup_sweep_routes_by_exit_code() -> None:
-    from imp.engine.gates import evaluate_rules
-    from imp.engine.types import Continue, Goto, Pause
-    step = _steps(_wf())["cleanup-sweep"]
+    wf = _wf()
+    step = _steps(wf)["cleanup-sweep"]
     assert step.kind == "script"
-    assert step.command == './scripts/cleanup.sh "{{ vars.review_base }}"'
-    r = step.rules
-    m0 = evaluate_rules(r, vars={}, output={"exit": 0, "stdout": "", "stderr": ""})
-    assert isinstance(m0.action, Goto) and m0.action.target == "review-base-repin"
-    m2 = evaluate_rules(r, vars={}, output={"exit": 2, "stdout": "", "stderr": ""})
+    assert step.command == "./scripts/cleanup.sh"
+    m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
+    assert isinstance(m0.action, Goto) and m0.action.target == "converge-verify"
+    m2 = evaluate_rules(step.rules, vars={}, output={"exit": 2})
     assert isinstance(m2.action, Continue)
-    m3 = evaluate_rules(r, vars={}, output={"exit": 3, "stdout": "", "stderr": ""})
+    m3 = evaluate_rules(step.rules, vars={}, output={"exit": 3})
     assert isinstance(m3.action, Goto) and m3.action.target == "deferred-sweep"
     assert m3.action.resume is True
-    m1 = evaluate_rules(r, vars={}, output={"exit": 1, "stdout": "", "stderr": ""})
+    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
     assert isinstance(m1.action, Pause)
-    resolver = _steps(_wf())["autosquash-resolve-sweep"]
-    assert resolver.kind == "agent" and resolver.tier == "high"
-    assert resolver.file.name == "autosquash-resolve.md"
-    assert resolver.rules[-1].action.target == "cleanup-sweep"
-    assert resolver.max_loops == 6
+
+
+def test_autosquash_resolve_sweep_loops_back_to_cleanup() -> None:
+    step = _steps(_wf())["autosquash-resolve-sweep"]
+    assert step.kind == "agent" and step.tier == "high"
+    assert step.file is not None and step.file.name == "autosquash-resolve.md"
+    assert isinstance(step.rules[-1].action, Goto)
+    assert step.rules[-1].action.target == "cleanup-sweep"
+    assert step.max_loops == 6
 
 
 def test_plan_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
-    out = _render_reviewer(tmp_path, review_scope="plan")
+    out = _render_reviewer(tmp_path)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
         assert term in out
