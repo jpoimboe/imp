@@ -1382,3 +1382,110 @@ def test_show_output_on_agent_step_is_load_error(tmp_path) -> None:
         """, agents={"spec-writer": _WRITER})
     with pytest.raises(LoadError, match="show_output"):
         load_workflow(wf)
+
+
+def test_script_output_schema_parses(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  task_total: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    fields = by["announce"].output_schema.fields
+    assert [f.name for f in fields] == ["task_total"]
+    assert fields[0].type == "int"
+
+
+def test_script_output_reserved_field_name_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  exit: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="reserved"):
+        load_workflow(wf)
+
+
+def test_script_output_reserved_stdout_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  stdout: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="reserved"):
+        load_workflow(wf)
+
+
+def test_script_output_reserved_stderr_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output:
+                  stderr: {type: int}
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="reserved"):
+        load_workflow(wf)
+
+
+def test_script_output_non_mapping_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: announce
+                command: echo hi
+                output: notamapping
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="mapping"):
+        load_workflow(wf)
+
+
+def test_output_on_agent_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                output:
+                  task_total: {type: int}
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="output:"):
+        load_workflow(wf)

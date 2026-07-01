@@ -633,6 +633,18 @@ def _parse_step(
     show_output = _parse_bool_flag(raw, "show_output", source)
     if show_output and kind != "script":
         raise LoadError("show_output: only valid on a script step", source)
+    output_schema = None
+    if "output" in raw:
+        if kind != "script":
+            raise LoadError("output: only valid on a script step", source)
+        if not isinstance(raw["output"], dict):
+            raise LoadError("'output' must be a mapping", source)
+        output_schema = parse_output_schema(raw["output"], loc(yaml_path, raw["output"]))
+        for f in output_schema.fields:
+            if f.name in ("exit", "stdout", "stderr"):
+                raise LoadError(
+                    f"output: field {f.name!r} collides with a reserved script "
+                    "output key (exit/stdout/stderr)", source)
     position_label = _parse_bool_flag(raw, "position_label", source)
     label = raw.get("label")
     if label is not None and not isinstance(label, str):
@@ -699,6 +711,7 @@ def _parse_step(
             phase_label=phase_label,
             show_label=show_label,
             show_output=show_output,
+            output_schema=output_schema,
         )
     elif kind in ("merge_and_exit_worktree",):
         step = Step(
