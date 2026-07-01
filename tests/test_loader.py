@@ -1384,6 +1384,21 @@ def test_show_output_on_agent_step_is_load_error(tmp_path) -> None:
         load_workflow(wf)
 
 
+def test_show_output_false_on_agent_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                show_output: false
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="show_output"):
+        load_workflow(wf)
+
+
 def test_script_output_schema_parses(tmp_path) -> None:
     wf = _write(tmp_path, """\
         name: t

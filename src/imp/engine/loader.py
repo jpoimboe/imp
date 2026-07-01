@@ -637,9 +637,10 @@ def _parse_step(
     quiet = _parse_bool_flag(raw, "quiet", source)
     step_show_label = _parse_optional_bool_flag(raw, "show_label", source)
     show_label = step_show_label if step_show_label is not None else phase_show_label
-    show_output = _parse_bool_flag(raw, "show_output", source)
-    if show_output and kind != "script":
+    _show_output_raw = _parse_optional_bool_flag(raw, "show_output", source)
+    if _show_output_raw is not None and kind != "script":
         raise LoadError("show_output: only valid on a script step", source)
+    show_output = _show_output_raw if _show_output_raw is not None else False
     output_schema = None
     if "output" in raw:
         if kind != "script":
