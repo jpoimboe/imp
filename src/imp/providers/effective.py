@@ -100,6 +100,7 @@ def _to_config(
         test_cmd_slow=merged.get("test_cmd_slow"),
         test_cmd_fast_timeout=merged.get("test_cmd_fast_timeout"),
         test_cmd_slow_timeout=merged.get("test_cmd_slow_timeout"),
+        max_parallel_test_runs=merged.get("max_parallel_test_runs", 1),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
         sandbox=merged.get("sandbox", {}),

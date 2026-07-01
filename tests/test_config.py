@@ -4,6 +4,7 @@ import pytest
 
 from imp.engine.errors import LoadError
 from imp.providers.config import Config, parse_config_layer
+from imp.providers.effective import _to_config
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -205,3 +206,29 @@ def test_test_cmd_slow_not_string_raises(tmp_path: Path) -> None:
 def test_test_cmd_slow_empty_string_preserved(tmp_path: Path) -> None:
     layer = _layer(tmp_path, "test_cmd_slow: \"\"\n" + _OK_BODY)
     assert layer["test_cmd_slow"] == ""
+
+
+def test_parses_max_parallel_test_runs(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, "max_parallel_test_runs: 4\n" + _OK_BODY)
+    assert layer["max_parallel_test_runs"] == 4
+
+
+def test_max_parallel_test_runs_absent_omitted(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, _OK_BODY)
+    assert "max_parallel_test_runs" not in layer
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "\"1\"", "1.5", "true"])
+def test_max_parallel_test_runs_invalid_raises(tmp_path: Path, bad: str) -> None:
+    # Zero/negative, strings, floats, and bool (an int subclass) are all rejected.
+    with pytest.raises(LoadError, match="max_parallel_test_runs"):
+        _layer(tmp_path, f"max_parallel_test_runs: {bad}\n" + _OK_BODY)
+
+
+def test_config_default_max_parallel_test_runs_is_one() -> None:
+    assert Config().max_parallel_test_runs == 1
+
+
+def test_to_config_reads_and_defaults_max_parallel_test_runs() -> None:
+    assert _to_config({"max_parallel_test_runs": 5}, {}, "").max_parallel_test_runs == 5
+    assert _to_config({}, {}, "").max_parallel_test_runs == 1

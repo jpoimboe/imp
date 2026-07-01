@@ -38,6 +38,7 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
+from imp.cli.render_text import _SCRIPT_DETAIL_TAIL_LINES
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
@@ -351,12 +352,17 @@ def _emit_merge_blocked(
     print(ansi(f"{mark}{msg}", "wordmark", enabled=color))
 
 
-def _emit_script_blocked(step: str, stderr: str) -> None:
-    """A script step paused (e.g. integrate-rebase exit 3/4/5).
-    Print its stderr so the recovery text reaches the user."""
+def _emit_script_blocked(step: str, stderr: str, stdout: str) -> None:
+    detail = stderr.strip()
+    out_part = stdout.strip()
+    if out_part:
+        detail = f"{detail}\n{out_part}" if detail else out_part
+    lines = detail.splitlines()
+    if len(lines) > _SCRIPT_DETAIL_TAIL_LINES:
+        detail = "\n".join(lines[-_SCRIPT_DETAIL_TAIL_LINES:])
     color = should_use_color(sys.stdout)
     mark = "⚠ " if color else ""
-    print(ansi(f"{mark}{step} paused:\n{stderr.strip()}", "wordmark", enabled=color))
+    print(ansi(f"{mark}{step} paused:\n{detail}", "wordmark", enabled=color))
 
 
 def _last_script_blocked(
@@ -410,9 +416,11 @@ def _handle_terminal_outcome(
         matched = _last_script_blocked(
             list(change.event_log().read()), final_state.step)
         if matched is not None:
+            payload = matched.get("payload") or {}
             _emit_script_blocked(
                 final_state.step,
-                (matched.get("payload") or {}).get("stderr", ""),
+                payload.get("stderr", ""),
+                payload.get("stdout", ""),
             )
     _emit_paused_summary(change)
     return 1

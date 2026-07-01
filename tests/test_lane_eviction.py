@@ -50,7 +50,7 @@ def _write_serialize_workflow(root: Path, touch_cmd: str) -> None:
         "  - name: serialize\n"
         "    steps:\n"
         "      - name: lane\n"
-        "        acquire: base\n"
+        "        acquire: merge-lane\n"
         "        rules:\n"
         "          - {else: true, continue: true}\n"
         "      - name: touch-base\n"

@@ -31,6 +31,7 @@ from imp.agents.runner import (
     Message,
 )
 from imp.agents.skills import overlay_project_skills
+from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
     AgentRunResult,
     build_agent_invocation,
@@ -295,7 +296,8 @@ async def run_change(
                 seed_opening=seed_for_step,
                 project_facts=state.project_facts or {},
                 guidance=state.guidance or "",
-                wait_for_turn_fn=wait_for_turn_fn)
+                wait_for_turn_fn=wait_for_turn_fn,
+                max_parallel_test_runs=config.max_parallel_test_runs)
             if seed_for_step is not None:
                 pending_seed = None
 
@@ -501,6 +503,7 @@ async def _dispatch_step(
     project_facts: dict[str, str] | None = None,
     guidance: str = "",
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
+    max_parallel_test_runs: int = 1,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -512,7 +515,7 @@ async def _dispatch_step(
 
     if step.release is not None:
         _release_lane(step, change, state, log)
-    if step.acquire is not None:
+    if step.acquire is not None and step.acquire != "test-lane":
         return await _route_acquire(step, change, state, log, wait_for_turn_fn)
 
     sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, change.project_root)
@@ -524,7 +527,8 @@ async def _dispatch_step(
     if step.kind == "script":
         return await _route_script(step, change, state, log,
                                    test_gates=test_gates,
-                                   sandbox_policy=sandbox_policy)
+                                   sandbox_policy=sandbox_policy,
+                                   max_parallel_test_runs=max_parallel_test_runs)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -632,6 +636,7 @@ async def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
     *, test_gates: TestGates | None = None,
     sandbox_policy: Any = None,
+    max_parallel_test_runs: int = 1,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step, state, change)
     command = step.command
@@ -655,7 +660,16 @@ async def _route_script(
         fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json")
         os.close(fd)
         output_path = Path(tmp)
+    slot_fd: int | None = None
     try:
+        if step.acquire == "test-lane":
+            slot_fd = _test_lane.try_acquire(change.control_root, max_parallel_test_runs)
+            if slot_fd is None:
+                _emit(log, "waiting_for_test_lane", {"step": step.name})
+                slot_fd = await anyio.to_thread.run_sync(
+                    functools.partial(_test_lane.acquire_blocking,
+                                      change.control_root, max_parallel_test_runs))
+                _emit(log, "test_lane_acquired", {"step": step.name})
         out = await anyio.to_thread.run_sync(
             functools.partial(
                 run_script, step, cwd=change.workflow_dir,
@@ -681,6 +695,8 @@ async def _route_script(
     finally:
         if output_path is not None:
             output_path.unlink(missing_ok=True)
+        if slot_fd is not None:
+            _test_lane.release(slot_fd)
     if step.show_output and out["exit"] == 0:
         _emit(log, "script_output", {"step": step.name, "stdout": out["stdout"]})
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
@@ -732,7 +748,7 @@ async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
 
 
 def _resolve_lane(value: str, change: Change) -> str:
-    if value == "base":
+    if value == "merge-lane":
         return change.base_branch
     raise RuntimeError(f"unknown lane keyword {value!r}")
 

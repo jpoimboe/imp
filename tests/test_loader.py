@@ -1204,20 +1204,20 @@ def test_acquire_release_attributes_parse(tmp_path) -> None:
           - name: p
             steps:
               - name: lane
-                acquire: base
+                acquire: merge-lane
                 rules:
                   - {else: true, continue: true}
               - name: resolver
                 file: agents/stub.md
-                release: base
+                release: merge-lane
         """, agents={"stub": _STUB_AGENT})
     workflow = load_workflow(wf)
     steps = {s.name: s for s in workflow.flat_steps()}
     assert steps["lane"].kind == "branch"      # rules-only -> inferred branch
-    assert steps["lane"].acquire == "base"
+    assert steps["lane"].acquire == "merge-lane"
     assert steps["lane"].release is None
     assert steps["resolver"].kind == "agent"
-    assert steps["resolver"].release == "base"
+    assert steps["resolver"].release == "merge-lane"
     assert steps["resolver"].acquire is None
 
 
@@ -1245,7 +1245,7 @@ def test_acquire_rejects_non_branch_kind(tmp_path) -> None:
           - name: p
             steps:
               - name: touch
-                acquire: base
+                acquire: merge-lane
                 command: "true"
                 rules:
                   - {else: true, continue: true}
@@ -1262,7 +1262,7 @@ def test_release_rejects_non_agent_kind(tmp_path) -> None:
           - name: p
             steps:
               - name: lane
-                release: base
+                release: merge-lane
                 rules:
                   - {else: true, continue: true}
         """)
@@ -1271,7 +1271,7 @@ def test_release_rejects_non_agent_kind(tmp_path) -> None:
 
 
 def test_rule_release_parsed_and_non_goto_rejected(tmp_path: Path) -> None:
-    """A rule-level `release: base` attaches to its Goto; `release` on a
+    """A rule-level `release: merge-lane` attaches to its Goto; `release` on a
     non-routing verb (continue) raises."""
     wf = _write(tmp_path, """\
         name: t
@@ -1284,11 +1284,11 @@ def test_rule_release_parsed_and_non_goto_rejected(tmp_path: Path) -> None:
               - name: gate
                 file: agents/spec-reviewer.md
                 rules:
-                  - {if: {verdict: rework}, release: base, goto: w, feedback: "Findings:"}
+                  - {if: {verdict: rework}, release: merge-lane, goto: w, feedback: "Findings:"}
                   - {else: true, continue: true}
         """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
     act = {s.name: s for s in load_workflow(wf).flat_steps()}["gate"].rules[0].action
-    assert isinstance(act, Goto) and act.release == "base"
+    assert isinstance(act, Goto) and act.release == "merge-lane"
 
     bad = _write(tmp_path / "bad", """\
         name: t
@@ -1301,7 +1301,7 @@ def test_rule_release_parsed_and_non_goto_rejected(tmp_path: Path) -> None:
               - name: gate
                 file: agents/spec-reviewer.md
                 rules:
-                  - {if: {verdict: rework}, release: base, continue: true}
+                  - {if: {verdict: rework}, release: merge-lane, continue: true}
                   - {else: true, continue: true}
         """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
     with pytest.raises((LoadError, LoadErrors)):
@@ -1614,3 +1614,83 @@ def test_quiet_key_is_load_error(tmp_path) -> None:
         """)
     with pytest.raises(LoadError, match="quiet"):
         load_workflow(wf)
+
+
+def test_acquire_test_lane_parses_on_script_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: gate
+                command: "true"
+                acquire: test-lane
+                rules:
+                  - {if: {exit: 0}, continue: true}
+                  - {else: true, pause: true}
+        """)
+    steps = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert steps["gate"].kind == "script"
+    assert steps["gate"].acquire == "test-lane"
+
+
+def test_acquire_test_lane_rejected_on_branch_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                acquire: test-lane
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="test-lane only valid on a script step"):
+        load_workflow(wf)
+
+
+def test_acquire_test_lane_rejected_on_agent_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                file: agents/spec-writer.md
+                acquire: test-lane
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises((LoadError, LoadErrors), match="test-lane only valid on a script step"):
+        load_workflow(wf)
+
+
+def test_release_test_lane_rejected(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                release: test-lane
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="lane keyword"):
+        load_workflow(wf)
+
+
+def test_verify_gates_acquire_test_lane() -> None:
+    from imp.assets import bundled_workflow_dir
+
+    imp = {s.name: s for ph in load_workflow(bundled_workflow_dir("imp")).phases
+           for s in ph.steps}
+    for gate in ("verify", "sweep-verify", "converge-verify", "integration-verify"):
+        assert imp[gate].acquire == "test-lane", gate
+
+    flat = {s.name: s for ph in load_workflow(bundled_workflow_dir("imp-flat")).phases
+            for s in ph.steps}
+    for gate in ("verify", "integration-verify"):
+        assert flat[gate].acquire == "test-lane", gate

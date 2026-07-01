@@ -82,8 +82,9 @@ def test_run_verify_timeout_exits_124_with_per_tier_diagnosis(
         "IMP_PROJECT_ROOT": str(project), cmd_var: "sleep 5",
         timeout_var: "1", "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 124, proc.stderr
-    assert "timed out after 1s" in proc.stderr
-    assert key in proc.stderr
+    assert key in proc.stdout
+    assert "gate ceiling" in proc.stdout
+    assert key not in proc.stderr
 
 
 def test_run_verify_no_command_passes(tmp_path: Path) -> None:
@@ -157,7 +158,7 @@ def test_run_verify_slow_timeout_default_when_unset(tmp_path: Path) -> None:
         "IMP_CHANGE_DIR": str(project / ".imp" / "change")},
         env_remove=("IMP_TEST_CMD_SLOW_TIMEOUT",))
     assert proc.returncode == 0, proc.stderr
-    assert "timed out" not in proc.stderr
+    assert "gate ceiling" not in proc.stdout
 
 
 def test_fast_and_slow_skip_caches_are_independent(tmp_path: Path) -> None:
@@ -281,6 +282,63 @@ def test_run_verify_no_tier_arg_errors(tmp_path: Path) -> None:
         "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
     assert proc.returncode != 0
     assert "usage" in proc.stderr
+
+
+def test_run_verify_merges_gate_stderr_into_stdout(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_TEST_CMD_FAST": "echo to-out; echo to-err >&2; exit 1",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+    assert proc.returncode != 0
+    assert "to-out" in proc.stdout
+    assert "to-err" in proc.stdout          # gate stderr merged onto stdout
+    assert "to-err" not in proc.stderr
+
+
+def test_run_verify_failure_tail_is_last_on_stdout(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_TEST_CMD_FAST": "echo the-failure-line; exit 1",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+    assert proc.returncode == 1
+    assert "the-failure-line" in proc.stdout
+    assert "gate failed (exit 1)" in proc.stdout
+    # the tail content is reprinted AFTER the summary header, so the lean reveal lands on it
+    assert proc.stdout.index("gate failed (exit 1)") < proc.stdout.rindex("the-failure-line")
+
+
+def test_run_verify_timeout_guidance_is_last_line_block_on_stdout(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_TEST_CMD_FAST": "echo early-output; sleep 5",
+        "IMP_TEST_CMD_FAST_TIMEOUT": "1",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+    assert proc.returncode == 124
+    assert "early-output" in proc.stdout
+    assert "test_cmd_fast_timeout" in proc.stdout
+    assert "gate ceiling" in proc.stdout
+    assert any("test_cmd_fast_timeout" in ln for ln in proc.stdout.splitlines()[-6:])
+    assert proc.stdout.index("early-output") < proc.stdout.index("test_cmd_fast_timeout")
+    assert "test_cmd_fast_timeout" not in proc.stderr
+
+
+def test_run_verify_success_summary_is_silent(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project),
+        "IMP_TEST_CMD_FAST": "echo ran-ok; true",
+        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+    assert proc.returncode == 0
+    assert "ran-ok" in proc.stdout
+    assert "gate ceiling" not in proc.stdout
+    assert "gate failed" not in proc.stdout
 
 
 def test_imp_and_imp_flat_run_verify_identical() -> None:
