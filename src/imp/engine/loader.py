@@ -657,11 +657,16 @@ def _parse_step(
         if agent_def is not None:
             label = agent_def.label
 
-    acquire = _parse_lane_attr(raw, "acquire", source)
+    acquire = _parse_lane_attr(raw, "acquire", source,
+                               allowed=("merge-lane", "test-lane"))
     release = _parse_lane_attr(raw, "release", source)
-    if acquire is not None and kind != "branch":
+    if acquire == "merge-lane" and kind != "branch":
         raise LoadError(
             f"acquire: only valid on a rules-only branch step, not a {kind} step",
+            source)
+    if acquire == "test-lane" and kind != "script":
+        raise LoadError(
+            f"acquire: test-lane only valid on a script step, not a {kind} step",
             source)
     if release is not None and kind != "agent":
         raise LoadError(
@@ -708,6 +713,7 @@ def _parse_step(
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
             timeout_seconds=raw.get("timeout"),
             label=label,
+            acquire=acquire,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
             show_label=show_label,

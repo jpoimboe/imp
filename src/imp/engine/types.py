@@ -55,7 +55,7 @@ class Goto(Action):
                                  # appends the prior step's structured output. None
                                  # => forwards nothing on this edge (§6).
     resume: bool = False         # set by the `resume:` verb; continues the transcript
-    release: str | None = None   # lane keyword "base" => pop the held lane on this route
+    release: str | None = None   # lane keyword "merge-lane" => pop the held lane on this route
 
 
 # ── Mutations & rules ─────────────────────────────────────────────────────────
@@ -181,8 +181,8 @@ class Step:
     timeout_seconds: int | None = None
     position_label: bool = False  # label is a position counter, not an activity verb
     label: str | None = None
-    acquire: str | None = None  # lane keyword "base" → change.base_branch; branch steps only
-    release: str | None = None  # runs before step body; agent steps only
+    acquire: str | None = None  # "merge-lane" (branch step, base-branch FIFO) or "test-lane" (script step, counting semaphore)
+    release: str | None = None  # "merge-lane"; runs before step body; agent steps only
     phase_label: str | None = None  # owning phase's label template, stamped at load
     show_label: bool = True     # frame: header + completion breadcrumb (default on)
     show_output: bool = False   # script body: stdout as a • message (scripts only)

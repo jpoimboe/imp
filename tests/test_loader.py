@@ -1614,3 +1614,69 @@ def test_quiet_key_is_load_error(tmp_path) -> None:
         """)
     with pytest.raises(LoadError, match="quiet"):
         load_workflow(wf)
+
+
+def test_acquire_test_lane_parses_on_script_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: gate
+                command: "true"
+                acquire: test-lane
+                rules:
+                  - {if: {exit: 0}, continue: true}
+                  - {else: true, pause: true}
+        """)
+    steps = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert steps["gate"].kind == "script"
+    assert steps["gate"].acquire == "test-lane"
+
+
+def test_acquire_test_lane_rejected_on_branch_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                acquire: test-lane
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="test-lane only valid on a script step"):
+        load_workflow(wf)
+
+
+def test_acquire_test_lane_rejected_on_agent_step(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                file: agents/spec-writer.md
+                acquire: test-lane
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises((LoadError, LoadErrors), match="test-lane only valid on a script step"):
+        load_workflow(wf)
+
+
+def test_release_test_lane_rejected(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: lane
+                release: test-lane
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="lane keyword"):
+        load_workflow(wf)
