@@ -2035,3 +2035,46 @@ def test_merged_node_still_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
     drv._emit_leaf(nv.MergedNode(change_id="abc123", base="master"), 0)
     assert out.getvalue() == ""
+
+
+def test_show_label_false_script_silent_live_and_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "step_started", step="cleanup", kind="script", phase="spec",
+           show_label=False),
+        ev("6", "step_completed", step="cleanup", kind="script",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert not any("cleanup" in ln for ln in _body(out))
+    assert _body(out) == _render_body(events)   # live == imp log, line for line
+
+
+def test_show_label_false_script_reveals_frame_on_pause_live_and_matches_log() -> None:
+    # Live/log parity for the non-linear-outcome path: a show_label=False step that
+    # PAUSES must surface its full block in the live stream exactly as `imp log`
+    # renders it — not get silently suppressed like the deferred-leaf continue path.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="merge-guard", kind="script", phase="merge",
+           show_label=False),
+        ev("3", "error", message="boom in bar.py"),
+        ev("4", "step_completed", step="merge-guard", kind="script",
+           action={"verb": "pause"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("merge-guard" in ln for ln in body)   # frame revealed on pause
+    assert body == _render_body(events)              # live == imp log, line for line

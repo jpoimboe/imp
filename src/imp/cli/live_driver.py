@@ -146,11 +146,11 @@ class _Cursor:
 
 
 def _is_container(node: Any) -> bool:
-    # A quiet StepNode is NOT a streamed container: it has no narrative children
-    # and renders as a single deferred leaf (its routing arrow, or nothing),
-    # mirroring render_text's quiet branch so live == imp log.
+    # A deferred-leaf StepNode is NOT a streamed container: it has no narrative
+    # children and renders as a single deferred leaf (its routing arrow, or
+    # nothing), mirroring render_text's deferred_leaf branch so live == imp log.
     if isinstance(node, nv.StepNode):
-        return not node.quiet
+        return not rt.deferred_leaf(node)
     return isinstance(node, nv.PhaseNode)
 
 
@@ -274,7 +274,7 @@ class LiveDriver:
                     if (isinstance(cur.container, nv.PhaseNode)
                           and _container_closed(cur.container)
                           and nv.phase_elapsed(cur.container) is not None
-                          and not rt.chrome_suppressed(cur.container)):
+                          and not rt.frame_suppressed(cur.container)):
                         # The phase-complete line is surrounded by blanks: arm
                         # prev_prose for the blank ABOVE, and pass prose=True so the
                         # next phase header gets the blank BELOW (matching the batch
@@ -302,7 +302,7 @@ class LiveDriver:
                 # under the header instead of burying it — must match
                 # render_text._render. (aligned indent)
                 gutters = self._gutters()
-                suppress = rt.chrome_suppressed(child)
+                suppress = rt.frame_suppressed(child)
                 if not suppress and rt.spaces_before(child):
                     self._prev_prose = True
                 if not suppress:
@@ -320,7 +320,7 @@ class LiveDriver:
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:
                 if not (isinstance(child, nv.BreadcrumbLine)
-                        and rt.chrome_suppressed(cur.container)):
+                        and rt.frame_suppressed(cur.container)):
                     self._emit_leaf(child, cur.depth, gutters=self._gutters())
 
     def _snapshot_node_ids(self) -> set[int]:
@@ -356,7 +356,7 @@ class LiveDriver:
             # with no step ever started, finish()'s force-walk bypasses _is_final
             # and emits it at root, preserving the no-step rendering.
             return False
-        if isinstance(node, nv.StepNode) and node.quiet:
+        if isinstance(node, nv.StepNode) and rt.deferred_leaf(node):
             return node.closed
         if isinstance(node, nv.SubagentFold):
             # A subagent is a LEAF (Part D): final once it stops running, so the
@@ -517,7 +517,7 @@ class LiveDriver:
         if position is None or position == self._last_header_position:
             return
         top = self._builder._step_stack[-1]
-        if top.quiet or rt.chrome_suppressed(top):
+        if rt.frame_suppressed(top):
             return
         self._prev_prose = True
         self._print_lines(
