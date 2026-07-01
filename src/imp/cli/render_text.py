@@ -278,6 +278,36 @@ def quiet_step_is_silent(node: nv.StepNode) -> bool:
     return verb in (None, "continue", "goto")
 
 
+def step_hidden(node: nv.StepNode) -> bool:
+    """The step's frame is opted out. Transitional: honors the legacy `quiet`
+    flag alongside the new `show_label`; plan 3 drops the `or node.quiet` arm once
+    the workflows migrate and the field is removed."""
+    return (not node.show_label) or node.quiet
+
+
+def step_no_body(node: nv.StepNode) -> bool:
+    """The step has no visible body on the happy path: a non-agent step (agents
+    always render prose) that is not surfacing its stdout via show_output."""
+    return node.kind != "agent" and not node.show_output
+
+
+def deferred_leaf(node: nv.StepNode) -> bool:
+    """A hidden-frame, no-body step renders as a single deferred leaf: silent on a
+    linear outcome, its frame revealed only on a non-linear one."""
+    return step_hidden(node) and step_no_body(node)
+
+
+def frame_suppressed(node: Any) -> bool:
+    """The node's frame (header + breadcrumb) is hidden. A PhaseNode or a legacy
+    chrome step suppresses unconditionally; a show_label:false step suppresses only
+    on a linear outcome — the frame returns on pause/error (reveal-on-error)."""
+    if chrome_suppressed(node):
+        return True
+    if isinstance(node, nv.StepNode):
+        return step_hidden(node) and quiet_step_is_silent(node)
+    return False
+
+
 def is_prose_leaf(node: Any) -> bool:
     """True for the agent-speech blocks (rendered LLM prose / surfaced free-text
     output fields). Consecutive prose blocks get one blank line between them so
@@ -519,16 +549,16 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.StepNode):
-        if node.quiet and quiet_step_is_silent(node):
+        if deferred_leaf(node) and quiet_step_is_silent(node):
             return
-        # A quiet step that yielded to a non-linear outcome (a pause/error) falls
+        # A suppressed-frame step that yielded to a non-linear outcome (a pause/error) falls
         # through here and renders its full block, just like a loud step.
         # A step's content flows at the step's OWN indent (no +1): the header is a
         # label and its prose/breadcrumb align directly beneath it, rather than
         # indenting a further level and burying the agent's words. Phases no longer
         # indent their steps either — the transcript is flat at column 0; subagent
         # folds add their own level + gutter internally. (design: aligned indent)
-        suppress = chrome_suppressed(node)
+        suppress = frame_suppressed(node)
         if not suppress:
             yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
