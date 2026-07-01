@@ -33,6 +33,7 @@ resolved_steps
 resolved_tiers
 resume_pending
 resume_target
+retry_continue_pending
 retry_feedback
 route_label
 status
