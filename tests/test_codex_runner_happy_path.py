@@ -372,3 +372,51 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
     finally:
         if ctx_seen is not None:
             await _cleanup(ctx_seen)
+
+
+@pytest.mark.anyio
+async def test_codex_bridges_stderr_warning_into_runner_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real _run_loop builds its sink via build_stderr_sink and closes it in
+    the finally. Wrapping the factory to feed a Warning line proves codex wires the
+    bridge with source="codex" and that close() emits the runner_warning."""
+    import imp.providers.stderr_sink as ss
+
+    _seed_git_and_auth(tmp_path)
+    canonical = tmp_path / "auth.json"
+    elog = InMemoryEventLog()
+
+    real_build = ss.build_stderr_sink
+
+    def _wrap(path: object, **kw: object) -> object:
+        sink = real_build(path, **kw)  # type: ignore[arg-type]
+        sink.feed("codex: Warning: nested config drift detected\n")
+        return sink
+
+    # _run_loop does a function-local `from imp.providers.stderr_sink import
+    # build_stderr_sink`, which resolves the module attribute at call time.
+    monkeypatch.setattr(ss, "build_stderr_sink", _wrap)
+
+    scripted = [[
+        thread_started("thr-1"),
+        agent_message("ok, calling complete_step"),
+        mcp_call(
+            name="complete_step", args={"answer": "42"},
+            result="step complete", item_id="cs-1",
+        ),
+        turn_completed(input_tokens=100, output_tokens=50),
+    ]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
+    )
+    runner._canonical_auth_override = canonical
+    inv = _build_invocation(tmp_path, event_log=elog)
+
+    _events = [e async for e in runner.run(inv)]
+
+    warns = [e for e in elog.read() if e["type"] == "runner_warning"]
+    assert any(
+        e["payload"]["message"] == "codex stderr: Warning: nested config drift detected"
+        for e in warns), warns
