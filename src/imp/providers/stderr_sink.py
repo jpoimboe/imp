@@ -10,17 +10,43 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 _FILE_CAP_BYTES = 1_048_576          # 1 MiB ceiling on stderr.log
 _TAIL_BYTES = 2_048                  # ~2 KiB folded into the error-event detail
 _TRUNCATION_MARKER = b"\n[stderr truncated]\n"
 
+# Extensible signature keyword set, matched case-insensitively. A stderr span is
+# a run of text beginning at one of these keywords.
+_WARNING_SIGNATURES = ("Warning:", "Error:")
+_SIGNATURE_RE = re.compile(
+    "|".join(re.escape(sig) for sig in _WARNING_SIGNATURES), re.IGNORECASE)
+
+
+def _extract_warning_spans(text: str) -> list[str]:
+    # Within each line, a span runs from a signature keyword to the next signature
+    # keyword or the line end. Splitting per line first excludes unrelated trailing
+    # output; the inner keyword split handles claude's concatenated, newline-less
+    # warnings (…betas.Warning: Custom…), which sit on a single line.
+    spans: list[str] = []
+    for line in text.splitlines():
+        starts = [m.start() for m in _SIGNATURE_RE.finditer(line)]
+        for i, start in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else len(line)
+            spans.append(line[start:end])
+    return spans
+
 
 class StderrSink:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *,
+                 on_warning: Callable[[str], None] | None = None,
+                 source: str = "") -> None:
         self._path = path
+        self._on_warning = on_warning
+        self._source = source
         self._fh: IO[bytes] | None = None
         self._open_failed = False
         self._bytes_written = 0
@@ -72,11 +98,49 @@ class StderrSink:
         return self._tail.decode("utf-8", errors="replace")
 
     def close(self) -> None:
+        already = self._closed
         self._closed = True  # a later feed() updates the tail but won't reopen
         if self._fh is not None:
             with contextlib.suppress(OSError):
-                self._fh.close()
+                self._fh.close()  # flush to disk before the scan re-reads it
             self._fh = None
+        if not already:
+            self._emit_warnings()
+
+    def _captured_text(self) -> str:
+        # Re-read the FULL captured stream: warnings are emitted at startup and sit
+        # at the front, so the ~2 KiB in-memory tail would miss them. Fall back to
+        # that tail only if the file read fails.
+        try:
+            raw = self._path.read_bytes()[:_FILE_CAP_BYTES]
+        except OSError:
+            return self.tail() or ""
+        return raw.decode("utf-8", errors="replace")
+
+    def _emit_warnings(self) -> None:
+        if self._on_warning is None:
+            return
+        text = self._captured_text()
+        if not text:
+            return
+        seen: set[str] = set()
+        for span in _extract_warning_spans(text):
+            normalized = " ".join(span.split())  # collapse whitespace, strip
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)  # within-step dedup
+            label = f"{self._source} stderr: " if self._source else ""
+            self._on_warning(f"{label}{normalized}")
+
+
+def build_stderr_sink(
+    path: Path, *, elog: Any, aid: str, source: str,
+) -> StderrSink:
+    """Wire close()-time Warning/Error span extraction into elog as runner_warning events."""
+    def _on_warning(message: str) -> None:
+        elog.append(agent_id=aid, type="runner_warning",
+                    payload={"message": message})
+    return StderrSink(path, on_warning=_on_warning, source=source)
 
 
 # Active sink for the codex streaming tee. The codex SDK subprocess spawn is
