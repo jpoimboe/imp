@@ -103,7 +103,7 @@ def test_repo_project_yaml_uses_tiered_test_cmds(
     eff = load_effective_config(project_root=repo_root, control_root=None)
     assert eff.config.test_cmd_fast == "make check"
     assert eff.config.test_cmd_slow == "make check && make test-live"
-    assert eff.config.test_cmd_fast_timeout == 120
-    assert eff.config.test_cmd_slow_timeout == 300
+    assert eff.config.test_cmd_fast_timeout == 240
+    assert eff.config.test_cmd_slow_timeout == 600
     raw = (repo_root / "imp" / "project.yaml").read_text()
     assert "verify_command" not in raw and "verify_timeout" not in raw
