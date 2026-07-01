@@ -8,7 +8,7 @@ import pytest
 
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
-from tests.test_executor import _make_change, _register_prompt_capturing
+from tests.test_executor import _make_change, _register_invocation_capturing
 
 
 @pytest.fixture
@@ -47,8 +47,8 @@ async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: 
         tmp_path,
         facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\nguidance: live note\n",
     )
-    sink: list[str] = []
-    _register_prompt_capturing({"status": "Success"}, sink)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
@@ -56,7 +56,8 @@ async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: 
     state = State.load(change.state_dir)
     assert state.project_facts == {"greeting": "hi"}
     assert state.guidance == "live note"
-    assert "hello hi :: live note" in sink[0]
+    body = sink[0].initial_messages[0].content[0].text
+    assert "hello hi :: live note" in body
 
 
 @pytest.mark.anyio
@@ -72,11 +73,12 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
     state.guidance = "FROZEN-GUIDANCE"
     state.save(change.state_dir)
 
-    sink: list[str] = []
-    _register_prompt_capturing({"status": "Success"}, sink)
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
     await run_change(change, on_event=lambda _e: None)
 
-    assert "hello FROZEN :: FROZEN-GUIDANCE" in sink[0]
-    assert "hello hi :: live" not in sink[0]
+    body = sink[0].initial_messages[0].content[0].text
+    assert "hello FROZEN :: FROZEN-GUIDANCE" in body
+    assert "hello hi :: live" not in body
     # The guard never overwrites an already-frozen value.
     assert State.load(change.state_dir).project_facts == {"greeting": "FROZEN"}

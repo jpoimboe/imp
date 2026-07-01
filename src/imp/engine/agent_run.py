@@ -70,22 +70,6 @@ so use **relative paths** there too (`cat src/foo.py`, `cd src && ...`). When yo
 need an absolute path on disk, use `$IMP_PROJECT_ROOT` (the real root path)."""
 
 
-# Injected into the system prompt of EVERY agent (top-level or subagent),
-# unconditional on tool set. Documents the `<imp:begin/>` opener as an
-# engine-emitted signal — the executor seeds the first user-role message
-# with this literal tag (see executor._route_agent) rather than a fake
-# user "begin" prompt. Without this note the model sees an unfamiliar token
-# and has to infer intent; with it, the contract is documented where the
-# model reads.
-_ENGINE_SEED_NOTE = """\
-## Session start: `<imp:begin/>`
-
-Your first user-role message in this conversation is the literal token
-`<imp:begin/>`. It is emitted by the engine to open the turn — it is not
-a message a human user typed. Treat it as a signal to begin the work
-described in the rest of this system prompt; do not reply to it as if a
-user had addressed you, and do not quote it back."""
-
 # Cribbed into the shared system prompt (non-resume only) so BOTH providers see
 # one identical date anchor — without it a model defaults to its training-cutoff
 # date and mis-handles relative->absolute dates, recency, and "latest version"
@@ -480,6 +464,7 @@ def build_agent_invocation(
     tier: str | None = None,
     subagent_depth: int = 0,
     retry_feedback: str | None = None,
+    feedback_lead: str | None = None,
     balance_on_resume: bool = False,
     resumed_from_interrupt: bool = False,
     log: Any = None,
@@ -490,11 +475,12 @@ def build_agent_invocation(
     inject_outcome_field: bool = False,
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
-    that drifted between the two creation paths. A top-level agent gets
-    `completion_instruction(schema)` appended to its system prompt and a
-    continuation_fn (the completion handler — attended yields inline, headless
-    top-level yields/parks). A subagent (subagent_depth > 0) instead gets
-    SUBAGENT_DELIVERABLE_NOTE: it has no complete_step tool, and its final
+    that drifted between the two creation paths. A top-level agent's system
+    prompt is role-only (core header plus optional bash note); its rendered body
+    and `completion_instruction(schema)` go into the first user message, and it
+    gets a continuation_fn (the completion handler — attended yields inline,
+    headless top-level yields/parks). A subagent (subagent_depth > 0) instead
+    gets SUBAGENT_DELIVERABLE_NOTE: it has no complete_step tool, and its final
     message is its deliverable.
 
     The caller renders the prompt with its own PromptContext and resolves its
@@ -504,15 +490,12 @@ def build_agent_invocation(
     if inject_outcome_field:
         agent_def = with_outcome_field(agent_def)
     is_subagent = subagent_depth > 0
-    # A subagent has no schema-bound completion: it gets the deliverable note
-    # instead of the complete_step instruction (and Part 3 drops its schema, so
-    # completion_instruction must NOT be called for it).
     instruction = "" if is_subagent else completion_instruction(
         agent_def.output_schema)
+    messages = initial_messages
     if system_prompt_override is not None:
-        # Resume-replay (Part B): the override IS the previously-assembled,
-        # stored step_context.system_prompt — use it verbatim, never re-append
-        # the bash/seed/instruction notes (that would double them).
+        # Resume-replay: the override IS the stored role-only system prompt; the
+        # first user message replays from its logged user_message event.
         system_prompt = system_prompt_override
     else:
         persona = rendered_persona.strip("\n")
@@ -520,14 +503,24 @@ def build_agent_invocation(
             base = f"{_CORE_HEAD}\n\n{persona}\n\n{_CORE_TAIL}"
         else:
             base = f"{_CORE_HEAD}\n\n{_CORE_TAIL}"
-        body = f"{base}\n\n{rendered_system_prompt}"
-        if "bash" in agent_def.tools:
-            body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
-        body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
-        body = f"{body}\n\n{_CURRENT_DATE_NOTE.format(date=date.today().isoformat())}"
-        body = reflow_markdown(body)
-        tail = SUBAGENT_DELIVERABLE_NOTE if is_subagent else instruction
-        system_prompt = f"{body}\n\n{tail}"
+        date_note = _CURRENT_DATE_NOTE.format(date=date.today().isoformat())
+        if is_subagent:
+            body = f"{base}\n\n{rendered_system_prompt}"
+            if "bash" in agent_def.tools:
+                body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+            body = f"{body}\n\n{date_note}"
+            body = reflow_markdown(body)
+            system_prompt = f"{body}\n\n{SUBAGENT_DELIVERABLE_NOTE}"
+        else:
+            header = base
+            if "bash" in agent_def.tools:
+                header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+            header = f"{header}\n\n{date_note}"
+            system_prompt = reflow_markdown(header)
+            task = f"{reflow_markdown(rendered_system_prompt)}\n\n{instruction}"
+            if feedback_lead:
+                task = f"{feedback_lead}\n\n{task}"
+            messages = (Message(role="user", content=(TextBlock(text=task),)),)
     continuation_fn = build_continuation_fn(
         user_input_fn=user_chat_input_fn,
         coordinator=coordinator,
@@ -540,7 +533,7 @@ def build_agent_invocation(
         provider_name=provider_name,
         model_name=model_name,
         system_prompt=system_prompt,
-        initial_messages=initial_messages,
+        initial_messages=messages,
         change_context=change_context,
         transcript_dir=transcript_dir,
         events_path=events_path,

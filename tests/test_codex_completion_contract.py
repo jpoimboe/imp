@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -202,6 +202,75 @@ async def test_interactive_nudge_recovers_with_complete_step_on_second_turn(
     assert fake.thread is not None
     assert any("please call complete_step now" in str(p)
                for (p, _opt) in fake.thread.run_calls)
+
+
+def _inv_with_task(
+    tmp_path: Path,
+    *,
+    task_text: str,
+    balance_on_resume: bool = False,
+    subagent_depth: int = 0,
+) -> AgentInvocation:
+    """A codex invocation whose task rides in the first user message."""
+    return AgentInvocation(
+        agent_def=_agent_def(),
+        provider_name="codex",
+        model_name="gpt-5.5",
+        system_prompt="ROLE_HEADER_SENTINEL",
+        initial_messages=(
+            Message(role="user", content=(TextBlock(text=task_text),)),),
+        change_context=ChangeContext(
+            title="t", project_root=tmp_path,
+            workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx",
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:t",
+        balance_on_resume=balance_on_resume,
+        subagent_depth=subagent_depth,
+    )
+
+
+def test_build_prompt_folds_first_user_message_on_fresh_entry(
+    tmp_path: Path,
+) -> None:
+    # Fresh entry: the task must be folded after the role header and tool policy.
+    task = (
+        "RENDER_BODY_SENTINEL_9f3a\n\n"
+        "To finish this step you MUST call the `complete_step` tool with: "
+        "`status` (ok|bad)."
+    )
+    inv = _inv_with_task(tmp_path, task_text=task)
+    built = CodexAgentRunner._build_prompt(None, inv)
+    assert built.startswith("ROLE_HEADER_SENTINEL")   # role header first
+    assert "tool_search" in built                     # tool policy retained
+    assert "RENDER_BODY_SENTINEL_9f3a" in built       # rendered body folded in
+    assert "complete_step" in built                   # completion contract folded in
+    # Fold is appended after the policy, not before it.
+    assert built.index("tool_search") < built.index("RENDER_BODY_SENTINEL_9f3a")
+
+
+def test_build_prompt_omits_first_user_message_on_resume(
+    tmp_path: Path,
+) -> None:
+    # On resume the task must NOT be re-folded (the rollout already carries it).
+    task = "RENDER_BODY_SENTINEL_9f3a\n\nresume must not re-deliver this"
+    inv = _inv_with_task(tmp_path, task_text=task, balance_on_resume=True)
+    built = CodexAgentRunner._build_prompt(None, inv)
+    assert built.startswith("ROLE_HEADER_SENTINEL")   # role header + policy still built
+    assert "tool_search" in built
+    assert "RENDER_BODY_SENTINEL_9f3a" not in built    # task NOT re-folded on resume
+
+
+def test_build_prompt_folds_subagent_task_with_deliverable_policy(
+    tmp_path: Path,
+) -> None:
+    # A subagent task is folded the same way, with the deliverable-note policy branch.
+    inv = _inv_with_task(
+        tmp_path, task_text="SUBAGENT_BODY_SENTINEL", subagent_depth=1)
+    built = CodexAgentRunner._build_prompt(None, inv)
+    assert "SUBAGENT_BODY_SENTINEL" in built           # subagent task folded in
+    assert "your entire deliverable" in built          # deliverable-note branch
+    assert "complete_step" not in built                # completion line absent for subagents
 
 
 

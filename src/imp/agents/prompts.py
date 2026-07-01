@@ -87,6 +87,7 @@ class _ChangeNamespace:
 @dataclass(frozen=True, slots=True)
 class _RunNamespace:
     autonomous: bool = False
+    opening: str = ""
 
 
 class _ProjectNamespace:
@@ -130,7 +131,7 @@ def build_context(
     cur_base_head: str = "", orig_base_head: str = "",
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None, guidance: str = "",
-    autonomous: bool = False,
+    autonomous: bool = False, opening: str = "",
 ) -> PromptContext:
     facts = {**(project_facts or {}), "guidance": guidance}
     return PromptContext(
@@ -140,7 +141,7 @@ def build_context(
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),
-        run=_RunNamespace(autonomous=autonomous),
+        run=_RunNamespace(autonomous=autonomous, opening=opening),
     )
 
 

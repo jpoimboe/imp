@@ -23,8 +23,10 @@ def test_spec_design_principles_carries_judgment_lens_only() -> None:
 
 def test_brainstorm_dialogue_carries_conduct_only() -> None:
     text = (PARTIALS / "brainstorm-dialogue.md").read_text()
-    # opening-message taxonomy
-    assert "<imp:begin/>" in text
+    # opening-message taxonomy is now a direct run.opening conditional, not a
+    # token-inspection of the literal <imp:begin/> opener.
+    assert "<imp:begin/>" not in text
+    assert "{% if run.opening %}" in text
     assert "names a spec file" in text
     # one question at a time — relocated into the shared live-gate partial
     assert "One question at a time" not in text
@@ -97,3 +99,40 @@ def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
     assert "within normal noise" not in text
     # No superpowers attribution line.
     assert "superpowers" not in text.lower()
+
+
+def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.engine.state import InMemoryEventLog
+    src = (PARTIALS / "brainstorm-dialogue.md").read_text()
+    wf = PARTIALS.parent  # workflow_dir so {% include %} resolves
+
+    seeded = render_prompt(src, build_context(
+        change_title="t", event_log=InMemoryEventLog(),
+        opening="add a dark-mode toggle"), workflow_dir=wf)
+    assert "add a dark-mode toggle" in seeded          # intent rendered inline
+    assert "Open by asking" not in seeded              # not the bare-open branch
+
+    unseeded = render_prompt(src, build_context(
+        change_title="t", event_log=InMemoryEventLog()), workflow_dir=wf)
+    assert "add a dark-mode toggle" not in unseeded
+    assert "Open by asking" in unseeded                # bare-open elicit branch
+
+
+def test_brainstorm_dialogue_imp_flat_renders_seeded_vs_unseeded_branch() -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.engine.state import InMemoryEventLog
+    flat = Path("src/imp/assets/workflows/imp-flat/partials")
+    src = (flat / "brainstorm-dialogue.md").read_text()
+    wf = flat.parent  # workflow_dir so {% include %} resolves
+
+    seeded = render_prompt(src, build_context(
+        change_title="t", event_log=InMemoryEventLog(),
+        opening="add a dark-mode toggle"), workflow_dir=wf)
+    assert "add a dark-mode toggle" in seeded          # intent rendered inline
+    assert "Open by asking" not in seeded              # not the bare-open branch
+
+    unseeded = render_prompt(src, build_context(
+        change_title="t", event_log=InMemoryEventLog()), workflow_dir=wf)
+    assert "add a dark-mode toggle" not in unseeded
+    assert "Open by asking" in unseeded                # bare-open elicit branch

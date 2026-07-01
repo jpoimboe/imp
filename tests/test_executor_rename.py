@@ -82,6 +82,7 @@ def _seed_two_step_control(root: Path) -> None:
                 f"name: {stem}\ntools: [complete_step]\n"
                 "output:\n  status: {type: enum, values: [Success, Error]}"
             ),
+            body="{% if run.opening %}OPENING:{{ run.opening }}{% endif %} do it",
         )
     (src / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
@@ -137,35 +138,6 @@ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> 
     assert os.getcwd() == cwd_before
 
 
-def test_seed_messages_named_carries_the_name(tmp_path: Path) -> None:
-    from imp.engine.executor import _seed_messages
-    from tests.conftest import _seed_control
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Add OAuth",
-                       change_id="eee555", base_branch="main")
-    msgs = _seed_messages(ch, None)
-    assert len(msgs) == 1
-    blocks = msgs[0].content
-    assert len(blocks) == 1                       # single block, separator inside
-    text = blocks[0].text
-    assert text.startswith("<imp:begin/>")
-    assert "eee555" in text
-    assert "add-oauth" not in text               # no slug prefix — bare id only
-    assert "\n\n" in text                         # token and name line kept apart
-
-
-def test_seed_messages_unnamed_has_no_name_block(tmp_path: Path) -> None:
-    from imp.engine.executor import _seed_messages
-    from tests.conftest import _seed_control
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="",
-                       change_id="fff666", base_branch="main")
-    msgs = _seed_messages(ch, None)
-    assert len(msgs) == 1
-    blocks = msgs[0].content
-    assert len(blocks) == 1
-    assert blocks[0].text == "<imp:begin/>"       # exactly the begin token, nothing else
-
 
 class _RecordingRunner:
     """Fake runner: records the invocation's opening (initial_messages) keyed by
@@ -208,13 +180,17 @@ async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -
         seed_opening="Implement this spec X", non_interactive=True)
 
     assert result is RunResult.COMPLETED
-    assert sink["step:p/s1"][0].content[0].text == "Implement this spec X"
-    assert sink["step:p/s2"][0].content[0].text == "<imp:begin/>"
+    s1 = sink["step:p/s1"][0].content[0].text
+    s2 = sink["step:p/s2"][0].content[0].text
+    assert "OPENING:Implement this spec X" in s1     # intent rendered on step 1
+    assert "OPENING:" not in s2                       # one-shot: not on step 2
+    assert "<imp:begin/>" not in s1 and "<imp:begin/>" not in s2
+    assert "complete_step" in s1                      # completion contract rides along
     assert not any(e["type"] == "awaiting_user_input" for e in events)
 
 
 @pytest.mark.anyio
-async def test_run_change_none_seed_opening_uses_begin_token(
+async def test_run_change_none_seed_opening_has_empty_opening(
     tmp_path: Path, provider_registry
 ) -> None:
     sink: dict[str, Any] = {}
@@ -228,7 +204,10 @@ async def test_run_change_none_seed_opening_uses_begin_token(
         ch, on_event=lambda _e: None, seed_opening=None, non_interactive=True)
 
     assert result is RunResult.COMPLETED
-    assert sink["step:p/s1"][0].content[0].text == "<imp:begin/>"
+    s1 = sink["step:p/s1"][0].content[0].text
+    assert "OPENING:" not in s1                       # run.opening empty -> bare
+    assert "<imp:begin/>" not in s1
+    assert "complete_step" in s1
 
 
 @pytest.mark.anyio
@@ -252,7 +231,7 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
     s1_dir = ch.change_dir / "steps" / "p" / "s1"
     s1_dir.mkdir(parents=True, exist_ok=True)
     Transcript(s1_dir / "transcript.jsonl").append(
-        Message(role="user", content=(TextBlock(text="<imp:begin/>"),)))
+        Message(role="user", content=(TextBlock(text="prior turn"),)))
     ch.event_log().append_step_context(
         agent_id="step:p/s1", provider="anthropic", model="m",
         system_prompt="sys", tools_schema=[], params={}, max_tool_calls=None)
@@ -265,7 +244,7 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
     assert result is RunResult.COMPLETED
     # On a resumed step the executor passes initial_messages=() — no seed injected
     assert sink["step:p/s1"] == ()
-    assert sink["step:p/s2"][0].content[0].text == "Implement this spec SHOULD NOT APPEAR"
+    assert "Implement this spec SHOULD NOT APPEAR" in sink["step:p/s2"][0].content[0].text
 
 
 @pytest.fixture

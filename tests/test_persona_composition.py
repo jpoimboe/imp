@@ -42,10 +42,13 @@ def test_empty_persona_composes_head_then_tail_with_nothing_between(tmp_path):
 
 
 def test_persona_injected_between_head_and_tail(tmp_path):
-    # AC#4: rendered persona lands between head and tail, before the step body.
-    sp = _build(tmp_path, rendered_persona="PERSONA TEXT").system_prompt
+    # AC#4: rendered persona lands between head and tail in the role-only system
+    # prompt; the step body now rides the first user message, after the persona.
+    inv = _build(tmp_path, rendered_persona="PERSONA TEXT")
+    sp = inv.system_prompt
     assert sp.startswith(reflow_markdown(f"{_CORE_HEAD}\n\nPERSONA TEXT\n\n{_CORE_TAIL}"))
-    assert sp.index("PERSONA TEXT") < sp.index("STEP BODY")
+    assert "STEP BODY" not in sp
+    assert "STEP BODY" in inv.initial_messages[0].content[0].text
 
 
 def test_persona_renders_change_and_vars_namespaces(tmp_path):

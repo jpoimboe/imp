@@ -916,7 +916,16 @@ class CodexAgentRunner:
                 "- Finish the task by calling the `mcp__imp__complete_step` tool\n"
                 "  with the structured answer.\n"
             )
-        return invocation.system_prompt + "\n\n" + policy
+        prompt = invocation.system_prompt + "\n\n" + policy
+        # Codex takes a string and never reads initial_messages: fold the task
+        # in on fresh entry only (resumes already carry it).
+        if not invocation.balance_on_resume and invocation.initial_messages:
+            first = invocation.initial_messages[0]
+            body = "\n\n".join(
+                b.text for b in first.content if isinstance(b, TextBlock))
+            if body:
+                prompt = f"{prompt}\n\n{body}"
+        return prompt
 
     async def interrupt(self) -> None:
         """Cancel the run — four effects:

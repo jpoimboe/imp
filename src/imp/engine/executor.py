@@ -27,7 +27,6 @@ from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
     ChangeContext,
     Message,
-    TextBlock,
 )
 from imp.agents.skills import overlay_project_skills
 from imp.engine.agent_run import (
@@ -141,18 +140,6 @@ def _resume_replays_transcript(transcript_dir: Any) -> bool:
     from imp.agents.transcript import Transcript
     return Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty()
 
-
-def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
-    """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
-    plus a name line when the Change is named — so a named Change conveys its
-    id through the immutable conversation record, never the cached prefix.
-    Unnamed Changes get the begin token alone (no leaked provisional name). One
-    TextBlock with a blank-line separator, so every provider's text join keeps
-    the token and the name line apart on the wire."""
-    opening = wrapper_text or "<imp:begin/>"
-    text = (f"{opening}\n\nThis Change is named `{change.id}`."
-            if change.title.strip() else opening)
-    return (Message(role="user", content=(TextBlock(text=text),)),)
 
 
 def _liveness_on_event(coordinator: Any, on_event: EventCallback) -> EventCallback:
@@ -862,13 +849,19 @@ async def _route_agent(
     keep = is_resume and _resume_replays_transcript(transcript_dir)
     # Plain lifecycle bit: True only on an empty-transcript process-resume (restart from scratch).
     restarted = is_resume and not keep
+    run_opening = ""
+    feedback_lead: str | None = None
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
         retry_wrapper: str | None = None
-        opening = seed_opening if seed_opening is not None else wrapper_text
-        initial: tuple[Message, ...] = _seed_messages(change, opening)
+        # seed_opening (imp new intent) renders via run.opening in templates.
+        # wrapper_text (goto/rework feedback) is not rendered by the target's
+        # template, so it is delivered as the lead of the relocated user message.
+        run_opening = seed_opening or ""
+        feedback_lead = wrapper_text if seed_opening is None else None
+        initial: tuple[Message, ...] = ()
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True
@@ -900,7 +893,8 @@ async def _route_agent(
             test_gates=test_gates, non_interactive=non_interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
-            project_facts=project_facts, guidance=guidance)
+            project_facts=project_facts, guidance=guidance,
+            opening=run_opening, feedback_lead=feedback_lead)
         if result.delay is None:
             break
         # Per-category wall-clock budget: pause cleanly when cumulative
@@ -1086,6 +1080,8 @@ async def _run_agent_invocation(
     sandbox_policy: Any = None,
     project_facts: dict[str, str] | None = None,
     guidance: str = "",
+    opening: str = "",
+    feedback_lead: str | None = None,
 ) -> AgentRunResult:
     """Run one top-level agent step to a terminal AgentRunResult.
 
@@ -1118,7 +1114,7 @@ async def _run_agent_invocation(
             orig_base_head=change.orig_base_head,
             event_log=log, vars=state.vars,
             project_facts=project_facts, guidance=guidance,
-            autonomous=autonomous,
+            autonomous=autonomous, opening=opening,
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,
@@ -1183,6 +1179,7 @@ async def _run_agent_invocation(
         tier=tier,
         subagent_depth=0,
         retry_feedback=retry_feedback,
+        feedback_lead=feedback_lead,
         balance_on_resume=balance_on_resume,
         resumed_from_interrupt=is_resume and state.interrupt_pending,
         log=log,
