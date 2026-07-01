@@ -177,9 +177,13 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "imp"
     dst = tmp_path / "imp" / "workflows" / "imp"
     shutil.copytree(src, dst)
-    # Replace script gates with always-pass stubs.
+    # Replace script gates with always-pass stubs. plan-finalized declares an
+    # output: schema, so its stub must write $IMP_OUTPUT or the engine hard-pauses.
     for shell in (dst / "scripts").glob("*.sh"):
-        shell.write_text("#!/bin/sh\nexit 0\n")
+        if shell.name == "plan-finalized.sh":
+            shell.write_text('#!/bin/sh\nprintf \'{"task_total": 1}\' > "$IMP_OUTPUT"\nexit 0\n')
+        else:
+            shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)
 
     # config: a single role for every tier used by the workflow. run_change reads
