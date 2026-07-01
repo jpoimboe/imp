@@ -133,3 +133,43 @@ async def test_backoff_persists_retry_continue_pending_before_sleep(
     assert provider.drives == 2               # one stall + one success
     # The marker was set AND persisted to disk BEFORE the backoff sleep ran.
     assert seen_on_disk == [True]
+
+
+class _RecordingProvider:
+    """Records invocation.resume_should_continue at each drive; stalls the first
+    `stalls` drives, then succeeds."""
+
+    name = "fake"
+    model = "m"
+
+    def __init__(self, stalls: int) -> None:
+        self.stalls = stalls
+        self.drives = 0
+        self.seen: list[bool] = []
+
+    def create_runner(self, inv: Any) -> _StallNthRunner:
+        self.seen.append(inv.resume_should_continue)
+        self.drives += 1
+        return _StallNthRunner(self.drives <= self.stalls)
+
+
+@pytest.mark.anyio
+async def test_backoff_respawn_receives_resume_should_continue(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(
+        tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    provider = _RecordingProvider(stalls=1)
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
+
+    async def _no_sleep(_delay: float, _coord: Any) -> None:
+        return None
+
+    monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
+
+    result = await run_change(change)
+    assert result is RunResult.COMPLETED
+    # First drive: fresh state, marker False → resume_should_continue False.
+    # Second drive (respawn after backoff): the union reads
+    # retry_continue_pending with NO is_resume gate → True.
+    assert provider.seen == [False, True]

@@ -1187,7 +1187,9 @@ async def _run_agent_invocation(
         retry_feedback=retry_feedback,
         feedback_lead=feedback_lead,
         balance_on_resume=balance_on_resume,
-        resume_should_continue=is_resume and state.interrupt_pending,
+        resume_should_continue=(
+            (is_resume and state.interrupt_pending)
+            or state.retry_continue_pending),
         log=log,
         test_gates=test_gates,
         non_interactive=non_interactive,
