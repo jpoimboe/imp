@@ -6,7 +6,7 @@ import anyio
 import pytest
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import ChangeContext, Message, TextBlock
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
@@ -75,10 +75,13 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         change_state=None, first_event_parent_id="tc-1",
         resolved_tiers=None, coordinator=None, subagent_depth=0)
 
-    # System prompt = base persona + rendered body + the completion instruction (top-level).
+    # System prompt is role-only; completion instruction rides in the user turn.
     assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
-    assert "RENDERED BODY" in inv.system_prompt
-    assert "complete_step" in inv.system_prompt
+    assert "RENDERED BODY" not in inv.system_prompt
+    assert "complete_step" not in inv.system_prompt
+    task = inv.initial_messages[0].content[0].text
+    assert "RENDERED BODY" in task
+    assert "complete_step" in task
     # Continuation fn is wired for top-level steps.
     assert inv.continuation_fn is not None
     # Ceiling resolved (omission #3 closed).
@@ -93,9 +96,9 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
 def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
     tmp_path: Path,
 ) -> None:
-    # An agent holding `bash` gets the relative-paths note appended to its
-    # body (between the rendered body and the completion contract), so every
-    # bash-capable agent learns the rule without each prompt re-pasting it.
+    # An agent holding `bash` gets the relative-paths note in its role-only
+    # system prompt (not between the rendered body and the completion contract),
+    # so every bash-capable agent learns the rule without each prompt re-pasting it.
     from imp.engine.agent_run import _CORE_HEAD, build_agent_invocation
 
     inv = build_agent_invocation(
@@ -111,12 +114,12 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         resolved_tiers=None, coordinator=None)
 
     assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
-    assert "RENDERED BODY" in inv.system_prompt
-    assert "IMP_PROJECT_ROOT" in inv.system_prompt
+    assert "RENDERED BODY" not in inv.system_prompt      # body moved to user turn
+    assert "IMP_PROJECT_ROOT" in inv.system_prompt       # bash note stays in system
     assert "relative to the project root" in inv.system_prompt
-    # The note precedes the completion contract.
-    assert inv.system_prompt.index("IMP_PROJECT_ROOT") < inv.system_prompt.index(
-        "complete_step")
+    task = inv.initial_messages[0].content[0].text
+    assert "RENDERED BODY" in task
+    assert "complete_step" in task
 
 
 def test_build_agent_invocation_omits_bash_paths_note_without_bash(
@@ -627,10 +630,10 @@ def _build_inv(tmp_path: Path, **kw):
     )
 
 
-def test_build_agent_invocation_prepends_base_persona(tmp_path: Path) -> None:
-    # The fresh-assembly branch puts the always-on base persona FIRST, then the
-    # rendered agent role, then bash note (iff bash), then the engine-seed note,
-    # then the completion instruction — in that exact order.
+def test_build_agent_invocation_splits_role_header_and_user_task(tmp_path: Path) -> None:
+    # Top-level: system prompt is role-only (no rendered body, no seed note, no
+    # completion contract); the rendered body + completion contract move into a
+    # single first user message.
     from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 
     inv = build_agent_invocation(
@@ -647,10 +650,18 @@ def test_build_agent_invocation_prepends_base_persona(tmp_path: Path) -> None:
 
     sp = inv.system_prompt
     assert sp.startswith(reflow_markdown(_CORE_HEAD))
-    assert sp.index(reflow_markdown(_CORE_TAIL)) < sp.index("RENDERED BODY")
-    assert sp.index("RENDERED BODY") < sp.index("IMP_PROJECT_ROOT")
-    assert sp.index("IMP_PROJECT_ROOT") < sp.index("<imp:begin/>")
-    assert sp.index("<imp:begin/>") < sp.index("complete_step")
+    assert reflow_markdown(_CORE_TAIL) in sp
+    assert "IMP_PROJECT_ROOT" in sp                      # bash note stays in system
+    assert "RENDERED BODY" not in sp                     # body left the system prompt
+    assert "<imp:begin/>" not in sp                      # sentinel note deleted
+    assert "complete_step" not in sp                     # completion contract left too
+
+    assert len(inv.initial_messages) == 1
+    user = inv.initial_messages[0]
+    assert user.role == "user"
+    text = user.content[0].text
+    assert "RENDERED BODY" in text
+    assert text.index("RENDERED BODY") < text.index("complete_step")
 
 
 def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
@@ -689,12 +700,49 @@ def test_build_agent_invocation_omits_current_date_line_on_resume_override(
     assert "Today's date is" not in inv.system_prompt
 
 
-def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
+def test_build_invocation_no_override_assembles_role_header(tmp_path: Path) -> None:
     from imp.engine.agent_run import _CORE_HEAD
     inv = _build_inv(tmp_path)
     assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
-    assert "BODY" in inv.system_prompt
-    assert "Session start: `<imp:begin/>`" in inv.system_prompt   # seed note appended
+    assert "BODY" not in inv.system_prompt                # body moved to the user turn
+    assert "Session start" not in inv.system_prompt       # seed note deleted
+    assert "BODY" in inv.initial_messages[0].content[0].text
+
+
+def test_build_invocation_subagent_keeps_body_in_system(tmp_path: Path) -> None:
+    from imp.engine.agent_run import SUBAGENT_DELIVERABLE_NOTE, build_agent_invocation
+    task = (Message(role="user", content=(TextBlock(text="SUBAGENT TASK"),)),)
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=task, change_context=_cc(tmp_path),
+        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="sub:x", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None, subagent_depth=1)
+    assert "RENDERED BODY" in inv.system_prompt
+    assert SUBAGENT_DELIVERABLE_NOTE in inv.system_prompt
+    assert "complete_step" not in inv.system_prompt
+    assert inv.initial_messages == task
+
+
+def test_build_invocation_prepends_feedback_lead_to_user_task(tmp_path: Path) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), change_context=_cc(tmp_path),
+        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        feedback_lead="Here's the feedback to address: fix X")
+    text = inv.initial_messages[0].content[0].text
+    assert text.startswith("Here's the feedback to address: fix X")
+    assert text.index("Here's the feedback") < text.index("RENDERED BODY")
+    assert text.index("RENDERED BODY") < text.index("complete_step")
 
 
 @pytest.mark.anyio
@@ -727,57 +775,6 @@ async def test_drive_invocation_stalls_mid_stream(
     assert result.error is not None and result.error.kind == "stalled"
     assert interrupted["called"] is True
 
-
-def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
-    tmp_path: Path,
-) -> None:
-    """Every agent's system prompt carries the `<imp:begin/>` engine-seed note,
-    regardless of whether it has the `bash` tool. The note sits between any
-    body addenda and the completion contract."""
-    from imp.engine.agent_run import _CORE_HEAD, build_agent_invocation
-
-    # Without bash: still gets the engine-seed note.
-    inv = build_agent_invocation(
-        agent_def=_agent(),  # tools = {complete_step} — no bash
-        provider_name="anthropic", model_name="m",
-        rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
-        user_chat_input_fn=None,
-        transcript_dir=tmp_path / "td",
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
-        max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
-
-    assert "<imp:begin/>" in inv.system_prompt
-    # The note explains the tag is engine-emitted, not user input.
-    assert "engine" in inv.system_prompt.lower()
-    # Order: base persona first, rendered body present, engine-seed note before completion contract.
-    assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
-    assert "RENDERED BODY" in inv.system_prompt
-    assert inv.system_prompt.index("<imp:begin/>") < inv.system_prompt.index(
-        "complete_step")
-
-    # With bash too: both notes appear; bash note precedes engine-seed note,
-    # which in turn precedes the completion instruction.
-    inv2 = build_agent_invocation(
-        agent_def=_agent(tools={"complete_step", "bash"}),
-        provider_name="anthropic", model_name="m",
-        rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
-        user_chat_input_fn=None,
-        transcript_dir=tmp_path / "td",
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
-        max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
-
-    assert "IMP_PROJECT_ROOT" in inv2.system_prompt
-    assert "<imp:begin/>" in inv2.system_prompt
-    assert inv2.system_prompt.index("IMP_PROJECT_ROOT") < inv2.system_prompt.index(
-        "<imp:begin/>")
-    assert inv2.system_prompt.index("<imp:begin/>") < inv2.system_prompt.index(
-        "complete_step")
 
 
 @pytest.mark.anyio

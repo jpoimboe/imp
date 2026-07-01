@@ -57,17 +57,39 @@ def _canned_anthropic(**overrides):
     return response(tool_use("c0", "complete_step", fields), stop_reason="tool_use")
 
 
-# Unique text that appears only in integration-review's rendered system prompt
-# (the opening line of the agent body, also in the completion instruction).
+# Unique text that appears in integration-review's rendered body + completion
+# instruction, now carried in the first user message (relocated agent body).
 _IR_SIG = "HEAD of the merge queue"
+
+
+def _prompt_carries_ir(**kwargs) -> bool:
+    """True when integration-review's signature is in the call's prompt. Top-level
+    agents now carry the rendered body in the first user turn (anthropic `messages`
+    / responses `input`), not the system prompt / instructions — check both."""
+    if _IR_SIG in kwargs.get("system", "") or _IR_SIG in kwargs.get("instructions", ""):
+        return True
+    for msg in kwargs.get("messages", []):
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            if _IR_SIG in content:
+                return True
+        else:
+            for block in content:
+                if isinstance(block, dict) and _IR_SIG in block.get("text", ""):
+                    return True
+    for item in kwargs.get("input", []):
+        if isinstance(item, dict):
+            for block in item.get("content", []):
+                if isinstance(block, dict) and _IR_SIG in block.get("text", ""):
+                    return True
+    return False
 
 
 def _anthropic_step_aware(**kwargs):
     """Callable default for FakeAsyncAnthropic: returns integration-review-
     appropriate canned response (verdict: ok) when the system prompt signals
     that step; falls back to the standard response otherwise."""
-    system = kwargs.get("system", "")
-    if _IR_SIG in system:
+    if _prompt_carries_ir(**kwargs):
         return _canned_anthropic(verdict="ok")
     return _canned_anthropic()
 
@@ -75,8 +97,7 @@ def _anthropic_step_aware(**kwargs):
 def _openai_step_aware(**kwargs):
     """Callable default for FakeResponsesClient: same step-awareness as
     _anthropic_step_aware but for the OpenAI responses API (instructions=)."""
-    instructions = kwargs.get("instructions", "")
-    verdict = "ok" if _IR_SIG in instructions else "approve"
+    verdict = "ok" if _prompt_carries_ir(**kwargs) else "approve"
     fields = {
         "outcome": "ok",
         "status": "Success",
@@ -371,8 +392,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
     # review is also clean, and because the flag is set it terminates and advances
     # to the next phase -- dropping its own minors rather than looping forever.
     def _default_with_minors(**kwargs):
-        system = kwargs.get("system", "")
-        if _IR_SIG in system:
+        if _prompt_carries_ir(**kwargs):
             return _canned_anthropic(verdict="ok")
         return _canned_anthropic(has_minor_findings=True)
 
@@ -439,8 +459,7 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     # to summarizer. So plan-code-reviewer still runs exactly once -- now the change-wide
     # pass, not a per-plan pass.
     def _default_trivial(**kwargs):
-        system = kwargs.get("system", "")
-        if _IR_SIG in system:
+        if _prompt_carries_ir(**kwargs):
             return _canned_anthropic(verdict="ok")
         return _canned_anthropic(ceremony="express")
 
