@@ -87,7 +87,7 @@ from imp.agents.transcript import (
     synthesize_native_success_on_resume,
 )
 from imp.engine.agent_run import (
-    _INTERRUPT_CONTINUATION_NUDGE,
+    _CONTINUATION_NUDGE,
     INTERRUPT_STEER_HINT,
     _resolve_wait_reply,
     build_inline_solicit,
@@ -1581,7 +1581,7 @@ class ClaudeCodeAgentRunner:
                 # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn,
-                    invocation.resumed_from_interrupt)
+                    invocation.resume_should_continue)
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
@@ -1622,10 +1622,10 @@ class ClaudeCodeAgentRunner:
             # a clarifying question. A drained human interject already drives
             # continuation, so it wins (parity with AWAITING_USER).
             if (resume_state is not ResumeState.AWAITING_USER
-                    and invocation.resumed_from_interrupt and drained == 0):
+                    and invocation.resume_should_continue and drained == 0):
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid,
-                    _INTERRUPT_CONTINUATION_NUDGE)
+                    _CONTINUATION_NUDGE)
             # A delta-only replay stream must never be empty (a bare goto with no
             # prior tools and no handback would otherwise stream nothing and hang).
             if not native_resume and len(messages) == replay_stream_base:

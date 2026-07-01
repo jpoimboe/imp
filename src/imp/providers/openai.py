@@ -53,7 +53,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
-    _INTERRUPT_CONTINUATION_NUDGE,
+    _CONTINUATION_NUDGE,
     _resolve_wait_reply,
     deliver_interject,
     drain_all_interjects_at_resume,
@@ -572,7 +572,7 @@ class OpenAIAgentRunner:
                 # to user_input_fn only when the queue is empty.
                 reply: str = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn,
-                    invocation.resumed_from_interrupt)
+                    invocation.resume_should_continue)
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
@@ -589,10 +589,10 @@ class OpenAIAgentRunner:
                 # resume continues the step instead of bare-turn-ending on a
                 # clarifying question. A drained human interject already drives
                 # continuation, so it wins (parity with AWAITING_USER).
-                if invocation.resumed_from_interrupt and drained == 0:
+                if invocation.resume_should_continue and drained == 0:
                     deliver_reply_on_resume(
                         messages, transcript, elog, aid,
-                        _INTERRUPT_CONTINUATION_NUDGE)
+                        _CONTINUATION_NUDGE)
         else:
             messages = []
             for m in invocation.initial_messages:

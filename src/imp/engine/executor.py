@@ -302,6 +302,9 @@ async def run_change(
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         interrupt=coordinator.should_pause or action.interrupt)
+                    # Keep on transient give-up; clear on genuine yield or any other park.
+                    state.retry_continue_pending = action.reason in (
+                        "retry_ceiling", "reauth_needed")
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
@@ -318,6 +321,7 @@ async def run_change(
                 nxt = idx + 1
                 if nxt >= len(flat):
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
@@ -326,6 +330,7 @@ async def run_change(
                 )
                 state.resume_pending = None
                 state.interrupt_pending = False
+                state.retry_continue_pending = False
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
                     _release_held_lane(
@@ -333,6 +338,7 @@ async def run_change(
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
                     return _complete_or_park(change, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
@@ -359,9 +365,11 @@ async def run_change(
                     state.step_attempt = 0
                     state.resume_pending = flat[target_idx].name
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
                 else:
                     state.resume_pending = None
                     state.interrupt_pending = False
+                    state.retry_continue_pending = False
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
@@ -916,6 +924,9 @@ async def _route_agent(
                    "action": _action_payload(pause), "var_mutations": {}})
             return pause, None, {}
         backoff += 1
+        # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
+        state.retry_continue_pending = True
+        state.save(change.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
         # failure. category comes from the plumbed ErrorInfo.
@@ -1181,7 +1192,9 @@ async def _run_agent_invocation(
         retry_feedback=retry_feedback,
         feedback_lead=feedback_lead,
         balance_on_resume=balance_on_resume,
-        resumed_from_interrupt=is_resume and state.interrupt_pending,
+        resume_should_continue=(
+            (is_resume and state.interrupt_pending)
+            or state.retry_continue_pending),
         log=log,
         test_gates=test_gates,
         non_interactive=non_interactive,
