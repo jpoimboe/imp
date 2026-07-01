@@ -354,10 +354,10 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-_INTERRUPT_CONTINUATION_NUDGE = (
-    "Your previous turn was interrupted before you finished this step. "
-    "Continue from where you left off and call `complete_step` when the step "
-    "is done."
+_CONTINUATION_NUDGE = (
+    "Your previous turn ended before this step was finished. "
+    "Continue from where you left off and call `complete_step` when the "
+    "step is done."
 )
 
 
@@ -377,7 +377,7 @@ async def _resolve_wait_reply(
     if joined is not None:
         return joined
     if resumed_from_interrupt:
-        return _INTERRUPT_CONTINUATION_NUDGE
+        return _CONTINUATION_NUDGE
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
         # Resume-side blocked solicit (all four providers route here): freeze the

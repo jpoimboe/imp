@@ -1294,7 +1294,7 @@ async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() ->
         raise AssertionError("must not solicit when resumed_from_interrupt")
 
     reply = await ar._resolve_wait_reply(coord, _ainput, True)
-    assert reply == ar._INTERRUPT_CONTINUATION_NUDGE
+    assert reply == ar._CONTINUATION_NUDGE
     assert reply != ""
     assert "complete_step" in reply
     assert coord.events == []  # never entered the solicit watchdog bracket

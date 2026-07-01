@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from imp.engine.agent_run import _INTERRUPT_CONTINUATION_NUDGE
+from imp.engine.agent_run import _CONTINUATION_NUDGE
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ async def test_anthropic_interrupt_resume_appends_continuation_nudge(
 ) -> None:
     texts = await _run_anthropic(
         tmp_path, resumed_from_interrupt=True, queued=None)
-    assert texts.count(_INTERRUPT_CONTINUATION_NUDGE) == 1, texts
+    assert texts.count(_CONTINUATION_NUDGE) == 1, texts
 
 
 @pytest.mark.anyio
@@ -147,7 +147,7 @@ async def test_anthropic_non_interrupt_resume_omits_nudge(
 ) -> None:
     texts = await _run_anthropic(
         tmp_path, resumed_from_interrupt=False, queued=None)
-    assert _INTERRUPT_CONTINUATION_NUDGE not in texts, texts
+    assert _CONTINUATION_NUDGE not in texts, texts
 
 
 @pytest.mark.anyio
@@ -157,7 +157,7 @@ async def test_anthropic_interject_wins_over_interrupt_nudge(
     texts = await _run_anthropic(
         tmp_path, resumed_from_interrupt=True, queued=["human says continue"])
     assert "human says continue" in texts, texts
-    assert _INTERRUPT_CONTINUATION_NUDGE not in texts, texts
+    assert _CONTINUATION_NUDGE not in texts, texts
 
 
 @pytest.mark.anyio
@@ -235,4 +235,4 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
             all_texts.extend(_texts_in_query(q))
         elif isinstance(q, str):
             all_texts.append(q)
-    assert all_texts.count(_INTERRUPT_CONTINUATION_NUDGE) == 1, all_texts
+    assert all_texts.count(_CONTINUATION_NUDGE) == 1, all_texts

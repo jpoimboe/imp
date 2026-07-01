@@ -87,7 +87,7 @@ from imp.agents.transcript import (
     synthesize_native_success_on_resume,
 )
 from imp.engine.agent_run import (
-    _INTERRUPT_CONTINUATION_NUDGE,
+    _CONTINUATION_NUDGE,
     INTERRUPT_STEER_HINT,
     _resolve_wait_reply,
     build_inline_solicit,
@@ -1625,7 +1625,7 @@ class ClaudeCodeAgentRunner:
                     and invocation.resumed_from_interrupt and drained == 0):
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid,
-                    _INTERRUPT_CONTINUATION_NUDGE)
+                    _CONTINUATION_NUDGE)
             # A delta-only replay stream must never be empty (a bare goto with no
             # prior tools and no handback would otherwise stream nothing and hang).
             if not native_resume and len(messages) == replay_stream_base:

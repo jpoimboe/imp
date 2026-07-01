@@ -51,7 +51,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
-    _INTERRUPT_CONTINUATION_NUDGE,
+    _CONTINUATION_NUDGE,
     _resolve_wait_reply,
     deliver_interject,
     drain_all_interjects_at_resume,
@@ -599,7 +599,7 @@ class AnthropicAgentRunner:
                 if invocation.resumed_from_interrupt and drained == 0:
                     deliver_reply_on_resume(
                         messages, transcript, elog, aid,
-                        _INTERRUPT_CONTINUATION_NUDGE)
+                        _CONTINUATION_NUDGE)
         else:
             messages = []
             for m in invocation.initial_messages:
