@@ -574,7 +574,7 @@ def _parse_lane_attr(
         raise LoadError(
             f"{key}: unknown lane keyword {val!r} "
             f"(expected one of {', '.join(allowed)})", source)
-    return val
+    return cast(str, val)
 
 
 def _parse_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool:
