@@ -2666,3 +2666,40 @@ def test_max_tokens_truncated_event_renders_no_fallback_node() -> None:
     ))
     step = _only_step(tree)
     assert not [c for c in step.children if isinstance(c, nv.FallbackLine)]
+
+
+def _all_literals(node):
+    out = []
+    if isinstance(node, nv.LiteralTextNode):
+        out.append(node)
+    for child in getattr(node, "children", []):
+        out.extend(_all_literals(child))
+    return out
+
+
+def test_waiting_for_test_lane_renders_lifecycle_line() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("1", "step_started", step="verify", kind="script", phase="build"))
+    b.add(_ev("2", "waiting_for_test_lane", step="verify"))
+    lits = _all_literals(b.tree.root)
+    assert any(n.text == "waiting for a test slot" and n.color_role == "lifecycle"
+               for n in lits)
+
+
+def test_test_lane_acquired_emits_no_visible_line() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("1", "step_started", step="verify", kind="script", phase="build"))
+    before = len(_all_literals(b.tree.root))
+    b.add(_ev("2", "test_lane_acquired", step="verify"))
+    assert len(_all_literals(b.tree.root)) == before   # silent resolution
+
+    def _walk(node):
+        yield node
+        for c in getattr(node, "children", []):
+            yield from _walk(c)
+
+    fbs = [n for n in _walk(b.tree.root)
+           if isinstance(n, nv.FallbackLine) and n.event_type == "test_lane_acquired"]
+    assert fbs == []

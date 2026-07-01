@@ -856,6 +856,14 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
 
 
+def _h_waiting_for_test_lane(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    self._append(LiteralTextNode(text="waiting for a test slot", color_role="lifecycle"))
+
+
+NarrativeBuilder._HANDLERS["waiting_for_test_lane"] = _h_waiting_for_test_lane
+
+
 def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     reason = p.get("reason")
@@ -873,6 +881,7 @@ def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, An
 NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
+NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_lane_event
 
 
 def _ensure_phase(self: NarrativeBuilder, name: str,
