@@ -204,20 +204,18 @@ def test_reconciler_is_a_rebase_conflict_resolver() -> None:
     assert "cur_base_head" in text
 
 
-def _render_reviewer(tmp_path, *, review_scope: str, review_base: str = "abc123",
-                     cur_base_head: str = "forkSHA") -> str:
+def _render_reviewer(tmp_path, *, cur_base_head: str = "forkSHA") -> str:
     wf = _wf()
     body = wf.agents["plan-code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
                         change_id="chg",
-                        vars={"review_scope": review_scope, "review_base": review_base,
-                              "fast_path": False})
+                        vars={"fast_path": False})
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 
 
 def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
-    out = _render_reviewer(tmp_path, review_scope="change")
+    out = _render_reviewer(tmp_path)
     assert "forkSHA..imp/chg" in out                 # whole-change diff from recorded fork
     assert "git merge-base" not in out
     assert "vars.review_base" not in out and "abc123" not in out
@@ -300,7 +298,7 @@ def test_cleanup_sweep_routes_by_exit_code() -> None:
 
 
 def test_plan_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
-    out = _render_reviewer(tmp_path, review_scope="plan")
+    out = _render_reviewer(tmp_path)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
         assert term in out

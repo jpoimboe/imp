@@ -146,7 +146,7 @@ fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.m
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
 
-`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: {% if vars.get('review_scope') == 'change' %}change{% else %}plan{% endif %}]`
+`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: change]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
 re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.
