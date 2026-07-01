@@ -42,6 +42,23 @@ def test_resume_reentry_restarted_updates_show_label_and_show_output() -> None:
     assert st.show_output is True
 
 
+def test_payload_carries_show_label_and_show_output() -> None:
+    import types
+    from pathlib import Path
+
+    from imp.engine.executor import _step_started_payload
+    from imp.engine.types import Continue, SourceLoc, Step
+
+    step = Step(
+        name="announce", phase="plan", kind="script", rules=(),
+        on_max_retries=Continue(), max_loops=1,
+        source=SourceLoc(file=Path("workflow.yaml"), line=1),
+        command="./x.sh", show_label=False, show_output=True)
+    p = _step_started_payload(step, types.SimpleNamespace(route_label=None))
+    assert p["show_label"] is False
+    assert p["show_output"] is True
+
+
 def test_show_label_defaults_true_and_show_output_defaults_false() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),

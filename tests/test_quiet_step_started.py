@@ -18,8 +18,9 @@ def _step(*, quiet: bool) -> Step:
 def test_payload_carries_step_kind_phase_and_quiet() -> None:
     p = _step_started_payload(_step(quiet=True), types.SimpleNamespace(route_label=None))
     assert p == {"step": "spec-verify-commit", "kind": "script",
-                 "phase": "spec", "quiet": True, "label": None,
-                 "command": "./x.sh"}
+                 "phase": "spec", "quiet": True,
+                 "show_label": True, "show_output": False,
+                 "label": None, "command": "./x.sh"}
 
 
 def test_payload_quiet_false_for_a_loud_step() -> None:

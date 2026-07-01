@@ -541,6 +541,8 @@ def _step_started_payload(
 ) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "quiet": step.quiet,
+               "show_label": step.show_label,
+               "show_output": step.show_output,
                "label": render_label(step.label, change, log, state)}
     if step.label == STATUS_PHRASE_LABEL:
         payload["rotate_phrase"] = True
