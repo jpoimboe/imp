@@ -3985,4 +3985,53 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
     assert created == []
 
 
+@pytest.mark.anyio
+async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_message(
+    tmp_path: Path,
+) -> None:
+    """claude_code retry-continue on a bare turn-end: no awaiting_user_input, no
+    user_message; the nudge is an internal engine_continuation event."""
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
+    inv = replace(inv, balance_on_resume=True, resume_should_continue=True)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
+
+    scripted = [
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    def _must_not_solicit(_prompt):
+        raise AssertionError("retry-continue must not solicit the human")
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=_must_not_solicit)
+
+    events = [ev async for ev in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+
+    types = [e["type"] for e in log.read()]
+    assert "awaiting_user_input" not in types
+    assert "user_message" not in types
+    assert "engine_continuation" in types
+    cont = next(e for e in log.read() if e["type"] == "engine_continuation")
+    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    loaded = t.load()
+    assert loaded[2].role == "user"
+    assert loaded[2].content[0].text == _CONTINUATION_NUDGE
 

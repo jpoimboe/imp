@@ -1254,3 +1254,105 @@ async def test_no_truncation_event_on_normal_stop(tmp_path: Path) -> None:
     # A clean end_turn must not raise the cap warning.
     warns = [e for e in log.read() if e["type"] == "runner_warning"]
     assert not any("max_tokens" in w["payload"]["message"] for w in warns)
+
+
+@pytest.mark.anyio
+async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_message(
+    tmp_path: Path,
+) -> None:
+    """Retry-continue on a bare turn-end (resume_should_continue=True, empty
+    interject queue): no awaiting_user_input, no user_message; the nudge is
+    delivered as an internal engine_continuation event and drives the next turn."""
+    from dataclasses import replace
+
+    from imp.agents.transcript import Transcript
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success"}),
+                 stop_reason="tool_use"),
+    ])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake)
+
+    def _must_not_solicit(_prompt):
+        raise AssertionError("retry-continue must not solicit the human")
+    runner._user_input_fn = _must_not_solicit
+
+    async for _ in runner.run(
+        replace(inv, event_log=log, balance_on_resume=True,
+                resume_should_continue=True)
+    ):
+        pass
+
+    types = [e["type"] for e in log.read()]
+    assert "awaiting_user_input" not in types      # Defect A: no phantom prompt
+    assert "user_message" not in types             # Defect B: not a human turn
+    assert "engine_continuation" in types
+    cont = next(e for e in log.read() if e["type"] == "engine_continuation")
+    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    # The nudge drives the LLM as the transcript's trailing user turn.
+    loaded = t.load()
+    assert loaded[2].role == "user"
+    assert loaded[2].content[0].text == _CONTINUATION_NUDGE
+
+
+@pytest.mark.anyio
+async def test_send_to_llm_retry_continue_delivers_nudge_via_engine_continuation(
+    tmp_path: Path,
+) -> None:
+    """SEND_TO_LLM retry-continue (a balanced transcript ending on a user
+    tool_result): the nudge is delivered via deliver_engine_continuation, so it
+    is an internal engine_continuation event, not a user_message."""
+    from dataclasses import replace
+
+    from imp.agents.transcript import Transcript
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant",
+                     content=(ToolUseBlock(id="r1", name="read_file",
+                                           input={"path": "x"}),)))
+    t.append(Message(role="user",
+                     content=(ToolResultBlock(tool_use_id="r1", content="data",
+                                              is_error=False),)))
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success"}),
+                 stop_reason="tool_use"),
+    ])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake)
+
+    async for _ in runner.run(
+        replace(inv, event_log=log, balance_on_resume=True,
+                resume_should_continue=True)
+    ):
+        pass
+
+    types = [e["type"] for e in log.read()]
+    assert "engine_continuation" in types
+    assert "user_message" not in types
+    cont = next(e for e in log.read() if e["type"] == "engine_continuation")
+    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    # Nudge sits at the STABLE leading index [3] (go[0], assistant read_file[1],
+    # user tool_result[2], user nudge[3]); the assistant complete_step turn is
+    # appended AFTER it, so the trailing message is not the nudge.
+    loaded = t.load()
+    assert loaded[3].role == "user"
+    assert loaded[3].content[0].text == _CONTINUATION_NUDGE

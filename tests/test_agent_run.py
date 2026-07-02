@@ -898,30 +898,38 @@ class _RecordingCoord:
 @pytest.mark.anyio
 async def test_resolve_wait_reply_brackets_await_with_begin_end() -> None:
     import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()
+    log = InMemoryEventLog()
 
     async def _ainput(_q):
         assert coord.active is True   # watchdog frozen DURING the await
         return "resumed reply"
 
-    result = await ar._resolve_wait_reply(coord, _ainput)
-    assert result == "resumed reply"
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, elog=log, agent_id="step:p/s")
+    assert (reply, source) == ("resumed reply", "solicited")
     assert coord.events == ["begin", "end"]
     assert coord.active is False
+    # Genuine solicit emits the gate exactly once.
+    assert [e["type"] for e in log.read()].count("awaiting_user_input") == 1
 
 
 @pytest.mark.anyio
 async def test_resolve_wait_reply_restores_watchdog_on_exception() -> None:
     import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()
+    log = InMemoryEventLog()
 
     async def _ainput(_q):
         raise RuntimeError("prompt torn down")
 
     with pytest.raises(RuntimeError):
-        await ar._resolve_wait_reply(coord, _ainput)
+        await ar._resolve_wait_reply(coord, _ainput, elog=log, agent_id="step:p/s")
     assert coord.events == ["begin", "end"]   # finally restored it on the exception
     assert coord.active is False
+    assert [e["type"] for e in log.read()].count("awaiting_user_input") == 1
 
 
 @pytest.mark.anyio
@@ -1276,41 +1284,56 @@ class _OneInterjectCoord:
 @pytest.mark.anyio
 async def test_resolve_wait_reply_interject_wins_over_interrupt_flag() -> None:
     import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
+    log = InMemoryEventLog()
 
     async def _ainput(_q):
         raise AssertionError("must not solicit when an interject is queued")
 
-    reply = await ar._resolve_wait_reply(
-        _OneInterjectCoord("human says go"), _ainput, True)
-    assert reply == "human says go"
+    reply, source = await ar._resolve_wait_reply(
+        _OneInterjectCoord("human says go"), _ainput, True,
+        elog=log, agent_id="step:p/s")
+    assert (reply, source) == ("human says go", "interject")
+    # An interject is a human turn, not a solicit: no gate emit.
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
 
 
 @pytest.mark.anyio
 async def test_resolve_wait_reply_interrupt_flag_returns_continuation_nudge() -> None:
     import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()  # drains no interjects
+    log = InMemoryEventLog()
 
     async def _ainput(_q):
         raise AssertionError("must not solicit when resume_should_continue")
 
-    reply = await ar._resolve_wait_reply(coord, _ainput, True)
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, True, elog=log, agent_id="step:p/s")
     assert reply == ar._CONTINUATION_NUDGE
-    assert reply != ""
+    assert source == "nudge"
     assert "complete_step" in reply
     assert coord.events == []  # never entered the solicit watchdog bracket
+    # Retry-continue self-continues: no phantom prompt to the client.
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
 
 
 @pytest.mark.anyio
 async def test_resolve_wait_reply_no_flag_solicits_empty() -> None:
     import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
     coord = _RecordingCoord()
+    log = InMemoryEventLog()
     seen = {}
 
     async def _ainput(q):
         seen["prompt"] = q
         return ""
 
-    reply = await ar._resolve_wait_reply(coord, _ainput, False)
-    assert reply == ""
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, False, elog=log, agent_id="step:p/s")
+    assert (reply, source) == ("", "solicited")
     assert seen["prompt"] == ""        # solicited with the empty prompt
     assert coord.events == ["begin", "end"]  # the solicit watchdog bracket ran
+    # The gate emit fires exactly once, right before soliciting.
+    assert [e["type"] for e in log.read()].count("awaiting_user_input") == 1

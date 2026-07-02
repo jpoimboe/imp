@@ -82,6 +82,7 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
+    deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
     synthesize_native_success_on_resume,
@@ -1607,18 +1608,20 @@ class ClaudeCodeAgentRunner:
                         ),
                     }}
                     return
-                # A bare turn-end carries no separate question payload: the
-                # agent's prose IS the question, already journaled and rendered.
-                # Emit an empty prompt.
-                elog.append(agent_id=aid, type="awaiting_user_input",
-                            payload={"prompt": ""})
-                # Queued interjects satisfy the pending yield directly; fall back
-                # to user_input_fn only when the queue is empty.
-                reply: str = await _resolve_wait_reply(
+                # _resolve_wait_reply owns the SOLE awaiting_user_input emit and
+                # fires it only when it actually solicits. Route by source: a
+                # human turn ('solicited'/'interject') renders as `>`; a 'nudge'
+                # is an internal engine continuation, not a user turn.
+                reply, source = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn,
-                    invocation.resume_should_continue)
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, reply)
+                    invocation.resume_should_continue,
+                    elog=elog, agent_id=aid)
+                if source == "nudge":
+                    deliver_engine_continuation(
+                        messages, transcript, elog, aid, reply)
+                else:
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
             # §2 resume-entry drain: fold pending interjects into the history
@@ -1658,7 +1661,7 @@ class ClaudeCodeAgentRunner:
             # continuation, so it wins (parity with AWAITING_USER).
             if (resume_state is not ResumeState.AWAITING_USER
                     and invocation.resume_should_continue and drained == 0):
-                deliver_reply_on_resume(
+                deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     _CONTINUATION_NUDGE)
             # A delta-only replay stream must never be empty (a bare goto with no

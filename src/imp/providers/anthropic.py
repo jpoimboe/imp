@@ -47,6 +47,7 @@ from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
 )
@@ -568,18 +569,21 @@ class AnthropicAgentRunner:
                         ),
                     }}
                     return
-                # A bare turn-end carries no separate question payload: the
-                # agent's prose IS the question, already journaled and rendered.
-                # Emit an empty prompt.
-                elog.append(agent_id=aid, type="awaiting_user_input",
-                            payload={"prompt": ""})
-                # Queued interjects satisfy the pending yield directly; fall back
-                # to user_input_fn only when the queue is empty.
-                reply: str = await _resolve_wait_reply(
+                # _resolve_wait_reply owns the SOLE awaiting_user_input emit and
+                # fires it only when it actually solicits (not on a queued
+                # interject, not on a retry-continue). Route the reply by source:
+                # a human turn ('solicited'/'interject') renders as `>`; a 'nudge'
+                # is an internal engine continuation, not a user turn.
+                reply, source = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn,
-                    invocation.resume_should_continue)
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, reply)
+                    invocation.resume_should_continue,
+                    elog=elog, agent_id=aid)
+                if source == "nudge":
+                    deliver_engine_continuation(
+                        messages, transcript, elog, aid, reply)
+                else:
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
             # §2 resume-entry drain: mid-turn pending texts fold into the first
@@ -595,7 +599,7 @@ class AnthropicAgentRunner:
                 # clarifying question. A drained human interject already drives
                 # continuation, so it wins (parity with AWAITING_USER).
                 if invocation.resume_should_continue and drained == 0:
-                    deliver_reply_on_resume(
+                    deliver_engine_continuation(
                         messages, transcript, elog, aid,
                         _CONTINUATION_NUDGE)
         else:
