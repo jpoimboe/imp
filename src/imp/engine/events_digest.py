@@ -129,3 +129,31 @@ def digest_event(event: dict[str, Any]) -> str:
     if event.get("_malformed"):
         return f"<malformed> {_clip(str(event.get('raw', '')), _RESULT_CAP)}"
     return f"{_envelope(event)} {_summarize(event)}"
+
+
+_FULL_CAP = 2048
+_TRUNC_MARK = "…[truncated — narrow the query]"
+_REDACTED = "…[redacted]"
+
+
+def _redact(event: dict[str, Any]) -> dict[str, Any]:
+    if event.get("type") != "step_context":
+        return event
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return event
+    redacted = dict(event)
+    p = dict(payload)
+    for key in ("system_prompt", "tools_schema"):
+        if key in p:
+            p[key] = _REDACTED
+    redacted["payload"] = p
+    return redacted
+
+
+def full_line(event: dict[str, Any]) -> str:
+    """One raw event object as JSON, step_context-redacted and byte-capped."""
+    serialized = json.dumps(_redact(event), default=str)
+    if len(serialized) > _FULL_CAP:
+        return serialized[:_FULL_CAP] + _TRUNC_MARK
+    return serialized

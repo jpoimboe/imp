@@ -175,3 +175,27 @@ def test_agent_id_only_path_does_not_use_tail(tmp_path: Path, mocker) -> None:
     spy = mocker.spy(JsonlEventLog, "tail")
     _call(tmp_path, agent_id="sub:")
     assert spy.call_count == 0
+
+
+def test_full_true_returns_raw_json_objects(tmp_path: Path) -> None:
+    _write_log(tmp_path)
+    lines = _lines(_call(tmp_path, full=True))
+    # Every non-truncated line parses back to a JSON object.
+    parsed = [json.loads(ln) for ln in lines if "…[truncated" not in ln]
+    assert any(obj.get("type") == "llm_response" for obj in parsed)
+
+
+def test_full_true_redacts_step_context(tmp_path: Path) -> None:
+    _write_log(tmp_path)
+    out = _call(tmp_path, full=True)
+    assert "SECRET_SYSTEM_PROMPT_BODY" not in out
+    assert "SECRET_TOOL_SCHEMA" not in out
+
+
+def test_full_no_filter_matches_manual_tail(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    for i in range(10):
+        log.append(agent_id=None, type="tick", payload={"i": i})
+    from imp.engine.events_digest import full_line
+    expected = [full_line(e) for e in list(log.read())[-3:]]
+    assert _lines(_call(tmp_path, limit=3, full=True)) == expected

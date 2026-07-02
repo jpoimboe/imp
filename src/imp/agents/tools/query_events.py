@@ -8,7 +8,7 @@ from typing import Any
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.events_digest import digest_event
+from imp.engine.events_digest import digest_event, full_line
 from imp.engine.state import JsonlEventLog
 
 _DEFAULT_LIMIT = 100
@@ -27,6 +27,7 @@ def query_events(
     type: str | None = None,
     agent_id: str | None = None,
     limit: int | None = None,
+    full: bool = False,
 ) -> str:
     log = JsonlEventLog(ctx.events_path)
     if limit is None:
@@ -56,4 +57,5 @@ def query_events(
             buf.append(e)
         events = list(buf)
 
-    return "\n".join(digest_event(e) for e in events)
+    render = full_line if full else digest_event
+    return "\n".join(render(e) for e in events)

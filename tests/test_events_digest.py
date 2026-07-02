@@ -1,7 +1,9 @@
 # tests/test_events_digest.py
 from __future__ import annotations
 
-from imp.engine.events_digest import digest_event
+import json
+
+from imp.engine.events_digest import _FULL_CAP, _TRUNC_MARK, digest_event, full_line
 
 
 def test_digest_event_is_single_line() -> None:
@@ -136,3 +138,32 @@ def test_tool_call_digest_shows_name_and_input() -> None:
     assert "read_file" in line
     assert "x.py" in line
     assert "\n" not in line
+
+
+def test_full_line_roundtrips_a_small_event() -> None:
+    ev = {"id": "e", "parent_id": None, "agent_id": "step:x/y",
+          "timestamp": "2026-07-01T00:00:00+00:00", "type": "tool_call",
+          "payload": {"id": "t1", "name": "grep", "input": {"pattern": "z"}}}
+    assert json.loads(full_line(ev)) == ev
+
+
+def test_full_line_truncates_a_large_payload() -> None:
+    ev = {"id": "e", "parent_id": None, "agent_id": "step:x/y",
+          "timestamp": "2026-07-01T00:00:00+00:00", "type": "tool_result",
+          "payload": {"id": "t1", "error": False, "content": "A" * 10000}}
+    line = full_line(ev)
+    assert line.endswith("…[truncated — narrow the query]")
+    assert len(line) == _FULL_CAP + len(_TRUNC_MARK)
+
+
+def test_full_line_redacts_step_context_secrets() -> None:
+    ev = {"id": "e", "parent_id": None, "agent_id": "step:plan/plan-writer",
+          "timestamp": "2026-07-01T00:00:00+00:00", "type": "step_context",
+          "payload": {"provider": "anthropic", "model": "claude-x",
+                      "system_prompt": "SECRET_SYSTEM_PROMPT_BODY",
+                      "tools_schema": [{"name": "SECRET_TOOL_SCHEMA"}],
+                      "params": {}, "max_tool_calls": 40}}
+    line = full_line(ev)
+    assert "SECRET_SYSTEM_PROMPT_BODY" not in line
+    assert "SECRET_TOOL_SCHEMA" not in line
+    assert "claude-x" in line
