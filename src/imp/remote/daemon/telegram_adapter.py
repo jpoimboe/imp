@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from imp.remote.daemon.alert_all import AlertAll
-from imp.remote.daemon.commands import CatchupAlert, Command, ListResult, Response, parse
+from imp.remote.daemon.commands import Command, ListResult, Response, parse
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.drivers.telegram import (
     _compose_message,
@@ -120,9 +120,6 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
 def render_response(
     response: Response, subscribed_ids: Iterable[str] = (), alerts_on: bool = False,
 ) -> str:
-    if isinstance(response, CatchupAlert):
-        return "\n".join(
-            f"@{handle_for(c.id)}  {c.title} — {c.status}" for c in response.changes)
     if isinstance(response, ListResult):
         header = "Alerts: all changes" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
@@ -216,6 +213,10 @@ class TelegramNorthAdapter:
             self._alert_all_event(change_id, event)
             return
         event_id = event.get("id")
+        if event.get("_replay"):
+            if event_id is not None:
+                self._subscriptions.mark_seen(change_id, event_id)
+            return
         if event_id is not None and self._subscriptions.seen(change_id, event_id):
             return
         etype = event.get("type")
@@ -255,6 +256,11 @@ class TelegramNorthAdapter:
         re-surfaces this blocked Change would be permanently suppressed. A
         prompt-less awaiting_user_input needs no special handling: format_outbound
         renders the '[title] needs your input' header alone, a useful alert."""
+        if event.get("_replay"):
+            event_id = event.get("id")
+            if event_id is not None:
+                self._alert_all.mark(change_id, event_id)
+            return
         if not self._alert_all.enabled():
             return
         etype = event.get("type")
@@ -275,10 +281,6 @@ class TelegramNorthAdapter:
             self._alert_all.mark(change_id, event_id)
 
     def on_response(self, response: Response) -> None:
-        if isinstance(response, CatchupAlert):
-            with self._lock:
-                for c in response.changes:
-                    self._handle_to_change[handle_for(c.id)] = c.id
         text = render_response(
             response, self._subscriptions.all(), self._alert_all.enabled())
         if text:

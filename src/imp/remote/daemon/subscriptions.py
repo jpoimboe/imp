@@ -32,6 +32,12 @@ class Subscriptions:
             ids = self._subs.get(change_id)
             return ids is not None and event_id in ids
 
+    def mark_seen(self, change_id: str, event_id: str) -> None:
+        with self._lock:
+            ids = self._subs.get(change_id)
+            if ids is not None:
+                ids.add(event_id)
+
     def snapshot_and_add(
         self, change_id: str, snapshot: Callable[[], list[dict[str, Any]]],
     ) -> list[dict[str, Any]]:

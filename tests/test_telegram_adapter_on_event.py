@@ -256,3 +256,53 @@ def test_subscribed_change_unaffected_by_alert_all_on() -> None:
     assert len(sent) == 2
     assert any(not silent for _, silent in sent)   # buzz delivered loud
     assert any(silent for _, silent in sent)        # narrative delivered silent
+
+
+REPLAY_LOUD = {**LOUD_EVENT, "_replay": True}   # same buzz event, tagged as history
+
+
+def test_replayed_event_on_subscribed_path_sends_nothing_and_marks_seen() -> None:
+    sent: list = []
+    subs = _subs("k3f9qa")
+    adapter = _adapter(sent, subscriptions=subs)
+    adapter.on_event(REPLAY_LOUD)
+    assert sent == []                          # history is never sent
+    assert subs.seen("k3f9qa", "L1") is True   # id recorded so a live dup is deduped
+
+
+def test_replayed_then_live_duplicate_is_deduped_but_a_new_live_buzz_sends() -> None:
+    sent: list = []
+    adapter = _adapter(sent, subscriptions=_subs("k3f9qa"))
+    adapter.on_event(REPLAY_LOUD)                    # id "L1", history: seed dedup, no send
+    adapter.on_event(LOUD_EVENT)                     # id "L1", live: deduped
+    assert sent == []
+    adapter.on_event({**LOUD_EVENT, "id": "L2"})     # a different live buzz
+    assert len(sent) == 1                            # still delivered
+
+
+def test_replayed_unsubscribed_buzz_sends_nothing_and_marks_alert_all_seen() -> None:
+    sent: list = []
+    alert = _alert_all_on()
+    adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=alert)
+    adapter.on_event(REPLAY_LOUD)              # unsubscribed → alert-all path, history
+    assert sent == []                          # history is never sent
+    assert alert.seen("k3f9qa", "L1") is True  # id recorded in the AlertAll log
+
+
+def test_replayed_then_live_alert_all_duplicate_is_deduped_new_id_sends() -> None:
+    sent: list = []
+    adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    adapter.on_event(REPLAY_LOUD)                    # id "L1", history: seed dedup, no send
+    adapter.on_event(LOUD_EVENT)                     # id "L1", live: deduped
+    assert sent == []
+    adapter.on_event({**LOUD_EVENT, "id": "L2"})     # a different live buzz
+    assert len(sent) == 1                            # still delivered loud
+
+
+def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> None:
+    sent: list = []
+    alert = AlertAll()  # default OFF — no set(True)
+    adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=alert)
+    adapter.on_event(REPLAY_LOUD)              # unsubscribed → alert-all path, history
+    assert sent == []                          # never sends
+    assert alert.seen("k3f9qa", "L1") is True  # marked even though alert-all is off
