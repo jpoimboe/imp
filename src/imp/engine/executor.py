@@ -658,6 +658,10 @@ async def _route_script(
     # signal receiver, the remote-channel poller), freezing the UI at
     # "running · 0s" until the command returns. Only the blocking wait moves off
     # the loop; the event emits stay on the loop thread (single terminal writer).
+    if step.interruptible:
+        assert coordinator is not None, \
+            "interruptible step requires a coordinator to read should_pause"
+
     def _abort() -> bool:
         return bool(coordinator.should_pause)
 
