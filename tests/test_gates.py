@@ -647,6 +647,78 @@ def test_graceful_kill_reaps_on_sigterm_without_waiting_grace(tmp_path) -> None:
     assert proc.stdout.closed and proc.stderr.closed
 
 
+def test_run_script_abort_kills_group_and_raises(tmp_path) -> None:
+    """An abort predicate that flips true mid-run tears down the whole process
+    group (background grandchild included) and raises ScriptInterrupted."""
+    from imp.engine.gates import ScriptInterrupted, run_script
+
+    pidfile = tmp_path / "child.pid"
+    # sh is the group leader; the backgrounded sleep is a group member. Killing
+    # the GROUP (not just sh) must reap the grandchild too.
+    step = _script_step(f"sleep 30 & echo $! > {shlex.quote(str(pidfile))}; wait")
+
+    calls = {"n": 0}
+    def abort() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1          # false on the first tick, true after
+
+    with pytest.raises(ScriptInterrupted):
+        run_script(step, cwd=tmp_path, abort=abort)
+
+    child_pid = int(pidfile.read_text())
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)      # still alive (or a reaped zombie)
+        except ProcessLookupError:
+            break                      # gone: the group was torn down
+        time.sleep(0.05)
+    else:
+        pytest.fail("backgrounded child survived the group kill")
+
+
+def test_run_script_abort_keeps_draining_large_output(tmp_path) -> None:
+    """Regression guard against a non-draining wait()/poll() loop: a child writes
+    far more than a pipe buffer (~64KB) to stdout, then touches a marker file,
+    then sleeps. Only a loop that keeps draining stdout lets the child get PAST
+    the blocking write to create the marker. Assert the marker exists after the
+    abort — with a non-draining loop the child would still be blocked on the full
+    pipe and the marker would never appear."""
+    from imp.engine.gates import ScriptInterrupted, run_script
+
+    marker = tmp_path / "marker"
+    prog = (
+        "import sys, time\n"
+        "sys.stdout.write('x' * 200000)\n"
+        "sys.stdout.flush()\n"
+        "open(sys.argv[1], 'w').write('done')\n"
+        "time.sleep(30)\n"
+    )
+    cmd = f"exec {sys.executable} -c {shlex.quote(prog)} {shlex.quote(str(marker))}"
+    step = _script_step(cmd)
+
+    calls = {"n": 0}
+    def abort() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 2          # ~1.5s: ample time for the drained child to progress
+
+    with pytest.raises(ScriptInterrupted):
+        run_script(step, cwd=tmp_path, abort=abort)
+
+    assert marker.exists(), "child never progressed past the 200KB write — pipe was not drained"
+
+
+def test_run_script_no_abort_runs_to_completion(tmp_path) -> None:
+    """With abort=None (today's default for every current caller) the poll loop
+    ignores interruption and returns the real exit/stdout."""
+    from imp.engine.gates import run_script
+
+    step = _script_step("echo done; exit 4")
+    out = run_script(step, cwd=tmp_path, abort=None)
+    assert out["exit"] == 4
+    assert out["stdout"] == "done"
+
+
 def test_run_script_timeout_tears_down_gracefully(tmp_path) -> None:
     """The timeout path now uses graceful teardown: a SIGTERM-ignoring child is
     SIGTERMed (grace waited) before the SIGKILL, so total time is at least the

@@ -5,6 +5,8 @@ import contextlib
 import os
 import signal
 import subprocess
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv
 from imp.engine.types import Action, Continue, Rule, Step
 
 GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess group
+_POLL_INTERVAL_S = 0.5  # max interrupt-to-kill latency: one poll tick
 
 
 class ScriptInterrupted(Exception):
@@ -77,6 +80,7 @@ def evaluate_rules(
 def run_script(
     step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
     policy: SandboxPolicy | None = None, command: str | None = None,
+    abort: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
@@ -88,9 +92,11 @@ def run_script(
 
     Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a timeout
     must kill the process GROUP, not just the bwrap pid — else the inner `sh` is
-    orphaned. So this uses Popen(start_new_session=True) + communicate(timeout) and
-    killpg(SIGKILL) on TimeoutExpired. A gate's cwd (step.cwd or cwd) must lie
-    inside the writable set (worktree/`/tmp`); a gate pointed at the RO floor fails.
+    orphaned. So this uses Popen(start_new_session=True) + a poll loop of
+    communicate(timeout=poll) calls and a graceful group kill (SIGTERM -> grace ->
+    SIGKILL) on both the timeout and abort paths. A gate's cwd (step.cwd or cwd)
+    must lie inside the writable set (worktree/`/tmp`); a gate pointed at the RO
+    floor fails.
 
     `env_extra` (an engine_env result) is overlaid authoritatively so engine vars
     are visible while a stale inherited engine var cannot leak (engine_env's
@@ -110,12 +116,23 @@ def run_script(
         argv, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, env=env, start_new_session=True,
     )
-    try:
-        stdout, stderr = proc.communicate(timeout=step.timeout_seconds)
-    except subprocess.TimeoutExpired:
-        # H-A: --die-with-parent is dropped, so kill the GROUP to reap the inner
-        # sh. Graceful teardown (SIGTERM -> grace -> SIGKILL) also closes the
-        # parent-side read FDs that a timed-out communicate() leaves open.
-        _graceful_kill(proc)
-        raise
-    return {"exit": proc.returncode, "stdout": stdout.rstrip(), "stderr": stderr}
+    # Drain-preserving poll loop: each tick is a communicate() call (NOT
+    # wait()/poll()), which is what reads stdout/stderr — so a chatty child never
+    # deadlocks on a full pipe. CPython accumulates output across repeated
+    # communicate(timeout=...) retries without loss. On each caught timeout,
+    # check the abort predicate (interruptible steps only) and the overall
+    # elapsed timeout; both terminal paths tear the group down gracefully.
+    start = time.monotonic()
+    timeout = step.timeout_seconds
+    while True:
+        try:
+            stdout, stderr = proc.communicate(timeout=_POLL_INTERVAL_S)
+        except subprocess.TimeoutExpired:
+            if abort is not None and abort():
+                _graceful_kill(proc)
+                raise ScriptInterrupted from None
+            if timeout is not None and time.monotonic() - start >= timeout:
+                _graceful_kill(proc)
+                raise subprocess.TimeoutExpired(proc.args, timeout) from None
+            continue
+        return {"exit": proc.returncode, "stdout": stdout.rstrip(), "stderr": stderr}
