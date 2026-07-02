@@ -529,6 +529,14 @@ def test_reconcile_store_tail_truncates_surplus_turns() -> None:
 
     assert len(out) == 2
     assert out == store_body[:2]
+    # exclude timestamp: it is stamped once per call, so two calls differ on it
+    expected = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    assert (
+        [{k: v for k, v in r.items() if k != "timestamp"} for r in out]
+        == [{k: v for k, v in r.items() if k != "timestamp"} for r in expected]
+    )
 
 
 def test_reconcile_store_tail_empty_messages_returns_empty() -> None:
@@ -594,7 +602,7 @@ def test_store_reconcilable_true_when_body_fits_transcript() -> None:
     assert store_reconcilable(messages, None) is True
 
 
-def test_store_reconcilable_false_when_body_drifts_ahead() -> None:
+def test_store_reconcilable_true_when_body_drifts_ahead() -> None:
     from imp.agents.runner import Message, TextBlock
     from imp.providers.claude_code_session_store import store_reconcilable
 
@@ -604,5 +612,6 @@ def test_store_reconcilable_false_when_body_drifts_ahead() -> None:
         {"type": "assistant", "uuid": "m1", "message": {"role": "assistant", "content": "a"}},
         {"type": "user", "uuid": "m2", "message": {"role": "user", "content": "b"}},
     ]
-    # 3 body turns > 1 transcript message -> the store drifted ahead -> not reconcilable.
-    assert store_reconcilable(messages, body) is False
+    # 3 body turns > 1 transcript message: a store-ahead drift (mid-turn kill).
+    # reconcile drops the stalled surplus turn, so this is reconcilable -> native.
+    assert store_reconcilable(messages, body) is True
