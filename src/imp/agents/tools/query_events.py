@@ -17,9 +17,14 @@ _DEFAULT_LIMIT = 100
 @imp_tool(
     name="query_events",
     description=(
-        "Return events.jsonl as JSONL (one JSON event per line, chunkable and "
-        "greppable). Optionally filter by type. `limit` returns the last N events; "
-        "with no limit, returns the last 100."
+        "The change's event log: the provenance record, in order, of what was "
+        "said and what prior agents and reviews did on this change. Returns one "
+        "compact digest line per event by default; pass full=True for raw event "
+        "payloads (each capped at ~2 KB, marked when truncated). Narrow the "
+        "result with type (an event type, or a comma-separated list of them), "
+        "agent_id (a substring matched against an event's role/phase id), and "
+        "limit (the last N events; default 100). A history channel, not a status "
+        "one — for current state, prefer your durable working files."
     ),
 )
 def query_events(

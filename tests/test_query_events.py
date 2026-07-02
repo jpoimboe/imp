@@ -199,3 +199,23 @@ def test_full_no_filter_matches_manual_tail(tmp_path: Path) -> None:
     from imp.engine.events_digest import full_line
     expected = [full_line(e) for e in list(log.read())[-3:]]
     assert _lines(_call(tmp_path, limit=3, full=True)) == expected
+
+
+def test_description_frames_provenance_documents_new_params() -> None:
+    desc = get_registry()["query_events"].description
+    low = desc.lower()
+    # Provenance framing, not the old state/format framing.
+    assert "provenance" in low
+    assert "what was said" in low
+    assert "greppable" not in low
+    assert "one json event per line" not in low
+    # Documents the two params added in Part 1.
+    assert "full=True" in desc
+    assert "agent_id" in desc
+    assert "substring" in low
+    assert "comma-separated" in low
+    assert "limit" in low
+    assert "default 100" in low
+    # Generic current-state nudge, and no workflow artifact filenames.
+    assert "current state" in low
+    assert ".md" not in desc
