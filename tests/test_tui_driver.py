@@ -103,3 +103,62 @@ def test_render_full_suppresses_system_prompt_in_live_viewer() -> None:
            tools_schema=[{"name": "bash"}], params={}, max_tool_calls=50),
     ]), full=True, color=False, width=80))
     assert "SECRET SYSTEM PROMPT" in log
+
+
+def _terminal_pause_with_warning() -> list[dict]:
+    # A reasoned terminal pause (max_loops) preceded by a runner_warning: the
+    # step completes (pause nests as a phase child), then the run stops paused.
+    return [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "runner_warning", agent_id="step:design/spec", message="alpha"),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "workflow_paused", reason="max_loops", interrupt_reason="max_loops"),
+    ]
+
+
+def test_finalize_flushes_terminal_pause_warnings_summary() -> None:
+    events = _terminal_pause_with_warning()
+    drv = _drv()
+    for e in events:
+        drv.on_event(e)
+
+    # Before finalize the shared build_tree render already carries the summary
+    # (build_tree finalizes internally), but the driver's own tree does not —
+    # this is the dropped-summary regression the wiring fixes.
+    before = io.StringIO()
+    drv.print_collapsed_transcript(before)
+    assert "warning this run" not in before.getvalue()
+
+    drv.finalize()
+
+    after = io.StringIO()
+    drv.print_collapsed_transcript(after)
+    assert "1 warning this run" in after.getvalue()
+    # Live == imp log: the finalized transcript matches build_tree's render,
+    # which finalizes its own builder over the same events.
+    expected = "\n".join(render_tree(build_tree(events), full=False,
+                                     color=False, width=80, live_viewer=True)) + "\n"
+    assert after.getvalue() == expected
+
+
+def test_finalize_no_summary_for_resumable_pause() -> None:
+    # Pause then resume (run ends non-paused): finalize() is a no-op, so no
+    # warnings summary is flushed even though a warning preceded the pause.
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "runner_warning", agent_id="step:design/spec", message="alpha"),
+        ev("4", "workflow_paused", reason="ctrl-c", interrupt_reason="ctrl-c"),
+        ev("5", "workflow_resumed"),
+    ]
+    drv = _drv()
+    for e in events:
+        drv.on_event(e)
+    drv.finalize()
+    out = io.StringIO()
+    drv.print_collapsed_transcript(out)
+    assert "warning this run" not in out.getvalue()
