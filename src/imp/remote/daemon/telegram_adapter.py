@@ -216,6 +216,10 @@ class TelegramNorthAdapter:
             self._alert_all_event(change_id, event)
             return
         event_id = event.get("id")
+        if event.get("_replay"):
+            if event_id is not None:
+                self._subscriptions.mark_seen(change_id, event_id)
+            return
         if event_id is not None and self._subscriptions.seen(change_id, event_id):
             return
         etype = event.get("type")
