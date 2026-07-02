@@ -1691,11 +1691,19 @@ def _h_max_tokens_truncated(
     return
 
 
+def _h_engine_continuation(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Internal retry self-continuation; suppressed live (human sees it via agent_retry).
+    return
+
+
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
+NarrativeBuilder._HANDLERS["engine_continuation"] = _h_engine_continuation
 
 
 def _h_script_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
