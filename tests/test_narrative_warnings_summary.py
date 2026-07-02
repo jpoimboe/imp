@@ -145,8 +145,9 @@ def _paused(eid: str = "z", reason: str = "ctrl-c") -> dict:
 
 
 def test_pause_with_no_reason_appends_no_outcome_and_no_summary() -> None:
-    # The `if reason:` guard wraps both the flush and the PauseNode append, so a
-    # reasonless pause produces neither at root.
+    # The `if reason:` guard skips the PauseNode append and leaves
+    # `_pause_outcome_shown` False; the run-level warnings summary flush now lives
+    # in finalize(), gated on that flag, so a reasonless pause produces neither at root.
     tree = nv.build_tree([
         {"id": "c", "agent_id": None, "type": "change_created",
          "payload": {"id": "abc123", "title": "x"}},
