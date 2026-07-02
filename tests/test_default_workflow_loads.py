@@ -188,6 +188,15 @@ def test_route_labels_assigned() -> None:
     assert by["finalize"].rules[1].label == "addressing review feedback"
 
 
+def test_stateless_verify_gates_are_interruptible() -> None:
+    by = {s.name: s for s in _wf().flat_steps()}
+    for name in ("verify", "sweep-verify", "converge-verify", "integration-verify"):
+        assert by[name].interruptible is True, name
+    # Commit gates mutate the tree and must stay run-to-completion.
+    for name in ("spec-verify-commit", "plan-verify-commit"):
+        assert by[name].interruptible is False, name
+
+
 def test_phase_labels_assigned() -> None:
     by = {p.name: p for p in _wf().phases}
     assert by["front-door"].label is None
