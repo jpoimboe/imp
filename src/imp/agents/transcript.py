@@ -35,15 +35,7 @@ from imp.agents.runner import (
 if TYPE_CHECKING:
     from imp.engine.state import EventLog
 
-# Frames rework feedback carried AS an is_error complete_step tool_result on
-# resume, so the model reads it as a revision request (not a system failure) and
-# re-runs the step. Used by balance_success_on_resume (anthropic/openai and the
-# claude_code replay path) and by repair_dangling_tool_use_on_resume (the
-# claude_code native rework delta, Task 2). Also the model-facing resume
-# recognition cue taught in the plan-writer/spec-finalizer prompt assets, so it
-# is a SINGLE unbroken line (no embedded newlines) for verbatim prompt-embedding
-# and the test_confirm_gate_prompts substring guard; call sites join it to the
-# feedback with `+ "\n\n" +`.
+# Rework-resume frame for is_error complete_step result; SINGLE unbroken line (prompt-embedded).
 REWORK_RESULT_FRAME = (
     "[revision required] Your previous complete_step output was recorded, then "
     "sent back for revision — this is NOT a system failure. Address the feedback "
@@ -315,8 +307,7 @@ def balance_success_on_resume(
     for tu in tool_uses:
         if tu.name == "complete_step":
             if wrapper_text:
-                # Rework: the feedback IS the complete_step result, is_error-shaped
-                # and framed. No separate feedback text block.
+                # Rework: deliver feedback as is_error complete_step result.
                 result_blocks.append(ToolResultBlock(
                     tool_use_id=tu.id,
                     content=REWORK_RESULT_FRAME + "\n\n" + wrapper_text,
@@ -336,8 +327,7 @@ def balance_success_on_resume(
     blocks: list[TextBlock | ToolResultBlock] = list(result_blocks)
     # Resume-durability note frames the (possibly error-shaped) results above.
     blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
-    # Fallback: with no complete_step to carry it (no trailing tool_use at all),
-    # the wrapper still rides as a trailing text block so feedback is never lost.
+    # Fallback: no complete_step to carry it, so append as trailing text.
     if wrapper_text and not feedback_delivered:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
