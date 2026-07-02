@@ -9,10 +9,23 @@ from __future__ import annotations
 
 from typing import Any
 
-_WRAPPER = (
-    "Your previous attempt completed but was not accepted. {detail} "
-    "Address this, then call `complete_step` again."
+_WRAPPER = "Your previous attempt completed but was not accepted. {detail}"
+
+# Single source of truth for the finish-with-complete_step reminder appended by the executor.
+COMPLETION_BACKSTOP = (
+    "When you've addressed this, end this same turn by calling `complete_step` — a "
+    "turn that ends on prose alone pauses the run for a human instead of advancing "
+    "it. Only stop without `complete_step` if you genuinely need a person to weigh "
+    "in."
 )
+
+
+def apply_completion_backstop(feedback: str | None, *, has_schema: bool) -> str | None:
+    """Append the backstop when feedback is truthy and has_schema, else return it unchanged."""
+    if feedback and has_schema:
+        return f"{feedback}\n\n{COMPLETION_BACKSTOP}"
+    return feedback
+
 
 _TRUNCATE_LIMIT = 4000
 
