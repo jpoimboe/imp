@@ -12,6 +12,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.transcript import Transcript
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.state import State
 
 
@@ -2944,3 +2945,103 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     assert reincarnating[0]["payload"]["reason"] == \
         "handoff failed — recovering from transcript"
     assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+
+
+@pytest.mark.anyio
+async def test_resume_keep_path_feedback_ends_with_backstop(tmp_path: Path) -> None:
+    """Kept-transcript resume (retry_wrapper path): the feedback delivered to the
+    resumed schema'd agent preserves the source feedback and ends with the
+    completion backstop."""
+    change = _seed_back_edge_workflow(
+        tmp_path, verb="resume", feedback="reviewer findings:")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
+    assert coder_feedback[0] is None                     # fresh entry: no wrapper
+    assert coder_feedback[1] is not None
+    assert "reviewer findings:" in coder_feedback[1]     # source feedback preserved
+    assert coder_feedback[1].endswith(COMPLETION_BACKSTOP)
+
+
+@pytest.mark.anyio
+async def test_bare_resume_backstop_rides_on_prior_attempts_preamble(tmp_path: Path) -> None:
+    """A bare (feedback=None) resume back-edge is still a rework re-entry: the
+    engine injects a prior-attempts preamble as wrapper_text, so the schema'd
+    coder's resumed feedback is non-empty and ends with the backstop."""
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")  # feedback=None
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
+    assert coder_feedback[0] is None                          # fresh entry: no wrapper
+    assert coder_feedback[1] is not None
+    assert "Prior attempts at this step" in coder_feedback[1]  # engine preamble
+    assert coder_feedback[1].endswith(COMPLETION_BACKSTOP)
+
+
+@pytest.mark.anyio
+async def test_resume_handoff_framed_feedback_ends_with_backstop(tmp_path: Path) -> None:
+    """Regression: a handoff-framed feedback string still gets the backstop appended."""
+    change = _seed_back_edge_workflow(
+        tmp_path, verb="resume",
+        feedback="Your work is done for now — hand back to the reviewer.")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
+    assert coder_feedback[1].endswith(COMPLETION_BACKSTOP)
+
+
+@pytest.mark.anyio
+async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None:
+    """Fresh-transcript resume (feedback_lead path): the backstop rides in the
+    relocated first user message of the freshly-restarted schema'd agent."""
+    change = _seed_back_edge_workflow(
+        tmp_path, verb="goto", feedback="Address these findings:")
+    invs: list[AgentInvocation] = []
+
+    class _Rec:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            invs.append(invocation)
+            _persist_initial(invocation)
+            if invocation.agent_def.name == "reviewer":
+                reviewer_n = len([i for i in invs if i.agent_def.name == "reviewer"])
+                verdict = "rework" if reviewer_n == 1 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "verdict": verdict, "status": "Success"}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Prov:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Rec:
+            return _Rec()
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
+
+    await run_change(change, on_event=lambda _e: None, non_interactive=True)
+
+    coder_invs = [i for i in invs if i.agent_def.name == "coder"]
+    assert len(coder_invs) == 2
+    reworked = coder_invs[1].initial_messages[0].content[0].text
+    assert "Address these findings:" in reworked   # source feedback preserved
+    assert COMPLETION_BACKSTOP in reworked         # backstop applied once
+    assert reworked.count(COMPLETION_BACKSTOP) == 1

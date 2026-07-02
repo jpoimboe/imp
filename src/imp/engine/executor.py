@@ -45,6 +45,7 @@ from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError
 from imp.engine.feedback import (
+    apply_completion_backstop,
     format_script_feedback,
     render_output_fields,
 )
@@ -939,6 +940,9 @@ async def _route_agent(
     keep = is_resume and _resume_replays_transcript(transcript_dir)
     # Plain lifecycle bit: True only on an empty-transcript process-resume (restart from scratch).
     restarted = is_resume and not keep
+    # Backstop applied once here; the raw parameter is what recursive re-entries re-apply.
+    delivered_wrapper = apply_completion_backstop(
+        wrapper_text, has_schema=bool(agent_def.output_schema.fields))
     run_opening = ""
     feedback_lead: str | None = None
     if not keep:
@@ -950,7 +954,7 @@ async def _route_agent(
         # wrapper_text (goto/rework feedback) is not rendered by the target's
         # template, so it is delivered as the lead of the relocated user message.
         run_opening = seed_opening or ""
-        feedback_lead = wrapper_text if seed_opening is None else None
+        feedback_lead = delivered_wrapper if seed_opening is None else None
         initial: tuple[Message, ...] = ()
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
@@ -958,7 +962,7 @@ async def _route_agent(
         # No opener on resume: providers replay the on-disk transcript and
         # never iterate initial_messages. retry_wrapper rides on
         # retry_feedback (balance_success_on_resume), a separate channel.
-        retry_wrapper = wrapper_text
+        retry_wrapper = delivered_wrapper
         initial = ()
 
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
