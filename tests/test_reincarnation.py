@@ -78,6 +78,13 @@ def test_seed_drops_false_claim_points_at_bounded_query_and_names_transcript_pri
     assert "/x/steps/impl/coder.attempt-1/transcript.jsonl" in seed
 
 
+def test_seed_frames_query_events_as_provenance_not_current_state() -> None:
+    seed = reincarnation_seed(stashed_dir=None, handoff_path=None)
+    assert "provenance" in seed
+    assert "not for current state" in seed
+    assert "query_events limit=N" in seed
+
+
 def test_seed_degrades_to_orientation_only_when_nothing_stashed() -> None:
     seed = reincarnation_seed(stashed_dir=None, handoff_path=None)
     assert seed                                  # non-empty

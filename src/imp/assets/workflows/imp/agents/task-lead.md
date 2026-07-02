@@ -299,7 +299,7 @@ missing context and **re-dispatch**. Because the re-dispatch is a fresh subagent
 with an empty context window, you must **re-pack the full context into the new
 `task_description`** — the original task + your answer + what the subagent's
 final message surfaced (and, if that message is thin, a `query_events` peek at the
-subagent's events, logged under `agent_id=sub:<…>`). The next subagent inherits
+subagent's events — filter with `agent_id=sub:<…>`). The next subagent inherits
 *only* what you write. Before returning at the end of the plan, load
 verification-before-completion and confirm the plan's tasks are actually done.
 
