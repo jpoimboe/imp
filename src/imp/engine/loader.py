@@ -636,6 +636,10 @@ def _parse_step(
     if _show_output_raw is not None and kind != "script":
         raise LoadError("show_output: only valid on a script step", source)
     show_output = _show_output_raw if _show_output_raw is not None else False
+    _interruptible_raw = _parse_optional_bool_flag(raw, "interruptible", source)
+    if _interruptible_raw is not None and kind != "script":
+        raise LoadError("interruptible: only valid on a script step", source)
+    interruptible = _interruptible_raw if _interruptible_raw is not None else False
     output_schema = None
     if "output" in raw:
         if kind != "script":
@@ -704,6 +708,7 @@ def _parse_step(
             phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
+            interruptible=interruptible,
         )
     elif kind == "script":
         step = Step(
@@ -719,6 +724,7 @@ def _parse_step(
             show_label=show_label,
             show_output=show_output,
             output_schema=output_schema,
+            interruptible=interruptible,
         )
     elif kind in ("merge_and_exit_worktree",):
         step = Step(
@@ -729,6 +735,7 @@ def _parse_step(
             phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
+            interruptible=interruptible,
         )
     else:  # branch
         step = Step(
@@ -741,6 +748,7 @@ def _parse_step(
             phase_show_label=phase_show_label,
             show_label=show_label,
             show_output=show_output,
+            interruptible=interruptible,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).

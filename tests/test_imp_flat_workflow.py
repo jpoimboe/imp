@@ -399,6 +399,14 @@ def test_imp_flat_plan_writer_consumes_outline_with_express_carveout() -> None:
     assert "outline-driven plan loop" in low    # the supercycle sentence refreshed (edit c)
 
 
+def test_flat_stateless_verify_gates_are_interruptible() -> None:
+    by = _steps(_flat())
+    for name in ("verify", "integration-verify"):
+        assert by[name].interruptible is True, name
+    for name in ("spec-verify-commit", "plan-verify-commit"):
+        assert by[name].interruptible is False, name
+
+
 def test_imp_flat_plan_reviewer_uses_outline_for_scope() -> None:
     text = _read_agent("plan-reviewer.md")
     low = text.lower()

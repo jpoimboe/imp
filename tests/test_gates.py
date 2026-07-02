@@ -1,5 +1,9 @@
 # tests/test_gates.py — rewrite
+import os
+import shlex
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -593,5 +597,272 @@ def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
         action, _, _ = await _route_script(step, change, state, log)
         assert isinstance(action, Continue)
         assert not any(e["type"] == "script_output" for e in log.read())
+
+    anyio.run(main)
+
+
+def test_graceful_kill_escalates_to_sigkill_when_sigterm_ignored(tmp_path) -> None:
+    """A child that ignores SIGTERM is SIGKILLed after the grace window; the
+    helper waits the full grace before escalating, reaps the process, and closes
+    the parent-side read FDs."""
+    from imp.engine.gates import GATE_KILL_GRACE_S, _graceful_kill
+
+    # Write a byte to stdout once SIG_IGN is installed so the parent can
+    # synchronize — without this handshake, killpg races Python's ~30 ms startup
+    # and the default SIGTERM handler kills the process before SIG_IGN is set.
+    prog = ("import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "sys.stdout.write('r'); sys.stdout.flush(); "
+            "time.sleep(30)")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", prog],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
+    proc.stdout.read(1)  # wait until child has installed SIG_IGN
+    t0 = time.monotonic()
+    _graceful_kill(proc)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed >= GATE_KILL_GRACE_S            # waited the grace before SIGKILL
+    assert proc.returncode is not None             # reaped, no zombie
+    assert proc.stdout.closed and proc.stderr.closed
+
+
+def test_graceful_kill_reaps_on_sigterm_without_waiting_grace(tmp_path) -> None:
+    """A child that exits on SIGTERM is reaped promptly — the helper does NOT
+    burn the full grace window when SIGTERM already worked."""
+    from imp.engine.gates import GATE_KILL_GRACE_S, _graceful_kill
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
+    t0 = time.monotonic()
+    _graceful_kill(proc)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < GATE_KILL_GRACE_S             # exited on SIGTERM, no grace burn
+    assert proc.returncode is not None
+    assert proc.stdout.closed and proc.stderr.closed
+
+
+def test_run_script_abort_kills_group_and_raises(tmp_path) -> None:
+    """An abort predicate that flips true mid-run tears down the whole process
+    group (background grandchild included) and raises ScriptInterrupted."""
+    from imp.engine.gates import ScriptInterrupted, run_script
+
+    pidfile = tmp_path / "child.pid"
+    # sh is the group leader; the backgrounded sleep is a group member. Killing
+    # the GROUP (not just sh) must reap the grandchild too.
+    step = _script_step(f"sleep 30 & echo $! > {shlex.quote(str(pidfile))}; wait")
+
+    calls = {"n": 0}
+    def abort() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1          # false on the first tick, true after
+
+    with pytest.raises(ScriptInterrupted):
+        run_script(step, cwd=tmp_path, abort=abort)
+
+    child_pid = int(pidfile.read_text())
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)      # still alive (or a reaped zombie)
+        except ProcessLookupError:
+            break                      # gone: the group was torn down
+        time.sleep(0.05)
+    else:
+        pytest.fail("backgrounded child survived the group kill")
+
+
+def test_run_script_abort_keeps_draining_large_output(tmp_path) -> None:
+    """Regression guard against a non-draining wait()/poll() loop: a child writes
+    far more than a pipe buffer (~64KB) to stdout, then touches a marker file,
+    then sleeps. Only a loop that keeps draining stdout lets the child get PAST
+    the blocking write to create the marker. Assert the marker exists after the
+    abort — with a non-draining loop the child would still be blocked on the full
+    pipe and the marker would never appear."""
+    from imp.engine.gates import ScriptInterrupted, run_script
+
+    marker = tmp_path / "marker"
+    prog = (
+        "import sys, time\n"
+        "sys.stdout.write('x' * 200000)\n"
+        "sys.stdout.flush()\n"
+        "open(sys.argv[1], 'w').write('done')\n"
+        "time.sleep(30)\n"
+    )
+    cmd = f"exec {sys.executable} -c {shlex.quote(prog)} {shlex.quote(str(marker))}"
+    step = _script_step(cmd)
+
+    calls = {"n": 0}
+    def abort() -> bool:
+        calls["n"] += 1
+        return calls["n"] > 2          # ~1.5s: ample time for the drained child to progress
+
+    with pytest.raises(ScriptInterrupted):
+        run_script(step, cwd=tmp_path, abort=abort)
+
+    assert marker.exists(), "child never progressed past the 200KB write — pipe was not drained"
+
+
+def test_run_script_no_abort_runs_to_completion(tmp_path) -> None:
+    """With abort=None (today's default for every current caller) the poll loop
+    ignores interruption and returns the real exit/stdout."""
+    from imp.engine.gates import run_script
+
+    step = _script_step("echo done; exit 4")
+    out = run_script(step, cwd=tmp_path, abort=None)
+    assert out["exit"] == 4
+    assert out["stdout"] == "done"
+
+
+def test_run_script_timeout_tears_down_gracefully(tmp_path) -> None:
+    """The timeout path now uses graceful teardown: a SIGTERM-ignoring child is
+    SIGTERMed (grace waited) before the SIGKILL, so total time is at least the
+    timeout plus the grace window. Still raises TimeoutExpired."""
+    from imp.engine.gates import GATE_KILL_GRACE_S, run_script
+
+    prog = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "time.sleep(30)")
+    # `exec` so the traced process IS the SIGTERM-ignoring python (the group
+    # leader), not a sh wrapper that dies immediately and short-circuits the wait.
+    step = _script_step(f"exec {sys.executable} -c {shlex.quote(prog)}",
+                        timeout_seconds=1)
+    t0 = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_script(step, cwd=tmp_path)
+    elapsed = time.monotonic() - t0
+    assert elapsed >= 1 + GATE_KILL_GRACE_S
+
+
+def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> None:
+    """An interruptible gate whose run_script raises ScriptInterrupted resolves to
+    Pause(interrupt=True): rule evaluation, feedback, and the script_blocked/
+    step_completed events are all skipped (a killed run is not a gate verdict)."""
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.gates import ScriptInterrupted
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="verify", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="./scripts/run-verify.sh fast", interruptible=True,
+    )
+    coordinator = types.SimpleNamespace(should_pause=True)
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with mock.patch("imp.engine.executor.run_script",
+                        side_effect=ScriptInterrupted):
+            action, feedback, muts = await _route_script(
+                step, change, state, log, coordinator=coordinator)
+        assert isinstance(action, Pause)
+        assert action.interrupt is True
+        assert feedback is None
+        assert muts == {}
+        types_seen = [e["type"] for e in log.read()]
+        assert "script_blocked" not in types_seen
+        assert "step_completed" not in types_seen
+
+    anyio.run(main)
+
+
+def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
+    """For an interruptible step run_script receives a callable abort predicate
+    that reads coordinator.should_pause live (not a snapshot)."""
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="verify", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo hi", interruptible=True,
+    )
+    coordinator = types.SimpleNamespace(should_pause=False)
+    captured: dict[str, object] = {}
+
+    def fake_run_script(*args, **kwargs):
+        captured["abort"] = kwargs.get("abort")
+        return {"exit": 0, "stdout": "hi", "stderr": ""}
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
+            action, _feedback, _ = await _route_script(
+                step, change, state, log, coordinator=coordinator)
+        assert isinstance(action, Continue)
+        abort = captured["abort"]
+        assert callable(abort)
+        assert abort() is False                 # reads should_pause == False
+        coordinator.should_pause = True
+        assert abort() is True                   # live read, not a snapshot
+
+    anyio.run(main)
+
+
+def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
+    """Regression: a non-interruptible gate (default) passes abort=None and runs
+    to completion, ignoring should_pause entirely (today's behavior)."""
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="mutating-gate", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo hi",                        # interruptible defaults False
+    )
+    coordinator = types.SimpleNamespace(should_pause=True)
+    captured: dict[str, object] = {"abort": "unset"}
+
+    def fake_run_script(*args, **kwargs):
+        captured["abort"] = kwargs.get("abort")
+        return {"exit": 0, "stdout": "hi", "stderr": ""}
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
+            action, _feedback, _ = await _route_script(
+                step, change, state, log, coordinator=coordinator)
+        assert isinstance(action, Continue)
+        assert captured["abort"] is None
 
     anyio.run(main)

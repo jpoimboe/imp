@@ -1694,3 +1694,67 @@ def test_verify_gates_acquire_test_lane() -> None:
             for s in ph.steps}
     for gate in ("verify", "integration-verify"):
         assert flat[gate].acquire == "test-lane", gate
+
+
+def test_interruptible_true_on_script_parses(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: implement
+            steps:
+              - name: verify
+                command: ./scripts/run-verify.sh fast
+                interruptible: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["verify"].interruptible is True
+
+
+def test_interruptible_absent_defaults_false_on_script(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: implement
+            steps:
+              - name: verify
+                command: ./scripts/run-verify.sh fast
+                rules:
+                  - {else: true, continue: true}
+        """)
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["verify"].interruptible is False
+
+
+def test_interruptible_on_agent_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                interruptible: true
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises(LoadError, match="interruptible"):
+        load_workflow(wf)
+
+
+def test_interruptible_on_branch_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: route
+                interruptible: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="interruptible"):
+        load_workflow(wf)

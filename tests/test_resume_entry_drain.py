@@ -872,54 +872,75 @@ def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
     assert coord.drain_interject() is None
 
 
-# ── F5: script-step routing — automatic (queue preserved, no drain) ───────────
+# ── F5: script-step routing — no interject drain (queue preserved) ────────────
 
 
-def test_script_step_route_does_not_drain_interjects() -> None:
-    """_route_branch and _route_script take no coordinator parameter — they
-    cannot drain the interject queue. Interjects stay queued and are consumed by
-    the NEXT _route_agent call's resume-entry drain.
+def test_script_step_route_does_not_drain_interjects(tmp_path) -> None:
+    """_route_branch takes no coordinator parameter; _route_script accepts one (to
+    read coordinator.should_pause for interruptible verify gates) but must never
+    touch the interject queue. Interjects stay queued and are consumed by the NEXT
+    _route_agent call's resume-entry drain.
 
-    The test proves the invariant structurally (signature inspection) rather
-    than running a full executor loop (which would require a real git repo +
-    script files). The behavioral guarantee is: if _route_branch/_route_script
-    accepted `coordinator` and called drain_all_interjects_at_resume, queued
-    interjects would be silently lost before the next agent step sees them.
+    _route_branch keeps the structural proof (no coordinator param at all).
+    _route_script — which now DOES accept coordinator — is proven BEHAVIORALLY:
+    a coordinator whose interject queue would be observably consumed if drained
+    passes through a real (echo) script step untouched.
 
     Note: _route_script IS a coroutine (it awaits the script subprocess off the
     event loop so a long gate doesn't starve concurrent tasks — see
-    test_route_script_does_not_block_event_loop). Coroutine-ness is orthogonal to
-    the no-drain guarantee; the load-bearing assertion is the absent coordinator
-    parameter, not sync-ness.
+    test_route_script_does_not_block_event_loop). Coroutine-ness and the new
+    should_pause read are both orthogonal to the no-drain guarantee.
     """
     import inspect as _inspect
+    import types as _types
+
+    import anyio
 
     from imp.engine import executor as _executor
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import Continue, Pause, Rule, SourceLoc, Step
 
-    # The guarantee is the ABSENCE of a coordinator parameter — no coordinator
-    # API can be reached, drain included. (_route_branch stays sync; _route_script
-    # is async only to offload its blocking subprocess, not to gain coordinator
-    # access.)
+    # _route_branch reaches no coordinator API at all — keep the structural proof.
     branch_params = set(_inspect.signature(_executor._route_branch).parameters)
-    script_params = set(_inspect.signature(_executor._route_script).parameters)
     assert "coordinator" not in branch_params, (
         f"_route_branch must not accept coordinator: {branch_params}"
     )
-    assert "coordinator" not in script_params, (
-        f"_route_script must not accept coordinator: {script_params}"
-    )
 
-    # Behavioral proof: a coordinator with queued interjects is undisturbed by
-    # passing through a simulated script step (no drain call).
+    # A coordinator that (a) never signals a pause and (b) holds a queued
+    # interject. _route_script may read should_pause but must NOT drain the queue.
     class _Coord:
         def __init__(self) -> None:
             self._q = ["queued-for-next-agent"]
+            self.should_pause = False
 
         def drain_interject(self) -> str | None:
             return self._q.pop(0) if self._q else None
 
     coord = _Coord()
-    # After a script step (no coordinator interaction), the queue is intact.
+    change = _types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="verify", phase="p", kind="script",
+        rules=(Rule(condition=None, action=Continue(), mutations=(),
+                    source=SourceLoc(file=Path("x"), line=1)),),
+        on_max_retries=Pause(), max_loops=10,
+        source=SourceLoc(file=Path("x"), line=1),
+        command="echo hi", interruptible=True,
+    )
+
+    async def main() -> None:
+        state = _types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, _feedback, _ = await _executor._route_script(
+            step, change, state, log, coordinator=coord)
+        assert isinstance(action, Continue)
+
+    anyio.run(main)
+
+    # The interject queue is intact — the script step drained nothing.
     assert coord.drain_interject() == "queued-for-next-agent", (
         "queue must be intact after a script step"
     )

@@ -153,6 +153,7 @@ phases:
 
       - name: verify
         command: ./scripts/run-verify.sh fast
+        interruptible: true
         acquire: test-lane
         label: running tests
         max_loops: 5
@@ -275,6 +276,7 @@ phases:
 
       - name: integration-verify
         command: ./scripts/run-verify.sh slow
+        interruptible: true
         acquire: test-lane
         label: running tests
         max_loops: 5
