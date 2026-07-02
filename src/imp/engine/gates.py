@@ -14,6 +14,37 @@ from imp.engine.expr import EvalEnv, evaluate
 from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv
 from imp.engine.types import Action, Continue, Rule, Step
 
+GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess group
+
+
+class ScriptInterrupted(Exception):
+    """Raised by run_script when its abort predicate fires mid-run. The process
+    group has already been torn down gracefully; the caller treats this as a
+    pre-navigation pause, not a gate verdict."""
+
+
+def _graceful_kill(proc: subprocess.Popen[str]) -> None:
+    """Tear down a gate subprocess GROUP gracefully, then close its read FDs.
+
+    SIGTERM the group (with start_new_session=True, proc.pid is the group
+    leader, so this reaches the whole bwrap -> sh -> make -> pytest -> xdist
+    tree), wait GATE_KILL_GRACE_S for it to flush and exit, SIGKILL any
+    survivors, then reap. The final proc.wait() cannot deadlock on a full pipe:
+    a SIGKILLed process is already dead, so wait returns regardless of unread
+    buffer. Closing proc.stdout/proc.stderr releases the parent-side read FDs
+    that a timed-out or aborted communicate() leaves open."""
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=GATE_KILL_GRACE_S)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            stream.close()
+
 
 @dataclass(frozen=True, slots=True)
 class RuleMatch:
@@ -82,14 +113,9 @@ def run_script(
     try:
         stdout, stderr = proc.communicate(timeout=step.timeout_seconds)
     except subprocess.TimeoutExpired:
-        # H-A: --die-with-parent is dropped, so kill the GROUP to reap the inner sh.
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGKILL)
-        proc.wait()
-        # communicate() leaves the parent-side read FDs open when it times out;
-        # close them so a timed-out gate doesn't leak two FDs until GC.
-        for stream in (proc.stdout, proc.stderr):
-            if stream is not None:
-                stream.close()
+        # H-A: --die-with-parent is dropped, so kill the GROUP to reap the inner
+        # sh. Graceful teardown (SIGTERM -> grace -> SIGKILL) also closes the
+        # parent-side read FDs that a timed-out communicate() leaves open.
+        _graceful_kill(proc)
         raise
     return {"exit": proc.returncode, "stdout": stdout.rstrip(), "stderr": stderr}

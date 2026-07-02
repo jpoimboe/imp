@@ -1,5 +1,9 @@
 # tests/test_gates.py — rewrite
+import os
+import shlex
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -595,3 +599,68 @@ def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
         assert not any(e["type"] == "script_output" for e in log.read())
 
     anyio.run(main)
+
+
+def test_graceful_kill_escalates_to_sigkill_when_sigterm_ignored(tmp_path) -> None:
+    """A child that ignores SIGTERM is SIGKILLed after the grace window; the
+    helper waits the full grace before escalating, reaps the process, and closes
+    the parent-side read FDs."""
+    from imp.engine.gates import GATE_KILL_GRACE_S, _graceful_kill
+
+    # Write a byte to stdout once SIG_IGN is installed so the parent can
+    # synchronize — without this handshake, killpg races Python's ~30 ms startup
+    # and the default SIGTERM handler kills the process before SIG_IGN is set.
+    prog = ("import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "sys.stdout.write('r'); sys.stdout.flush(); "
+            "time.sleep(30)")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", prog],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
+    proc.stdout.read(1)  # wait until child has installed SIG_IGN
+    t0 = time.monotonic()
+    _graceful_kill(proc)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed >= GATE_KILL_GRACE_S            # waited the grace before SIGKILL
+    assert proc.returncode is not None             # reaped, no zombie
+    assert proc.stdout.closed and proc.stderr.closed
+
+
+def test_graceful_kill_reaps_on_sigterm_without_waiting_grace(tmp_path) -> None:
+    """A child that exits on SIGTERM is reaped promptly — the helper does NOT
+    burn the full grace window when SIGTERM already worked."""
+    from imp.engine.gates import GATE_KILL_GRACE_S, _graceful_kill
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        start_new_session=True,
+    )
+    t0 = time.monotonic()
+    _graceful_kill(proc)
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < GATE_KILL_GRACE_S             # exited on SIGTERM, no grace burn
+    assert proc.returncode is not None
+    assert proc.stdout.closed and proc.stderr.closed
+
+
+def test_run_script_timeout_tears_down_gracefully(tmp_path) -> None:
+    """The timeout path now uses graceful teardown: a SIGTERM-ignoring child is
+    SIGTERMed (grace waited) before the SIGKILL, so total time is at least the
+    timeout plus the grace window. Still raises TimeoutExpired."""
+    from imp.engine.gates import GATE_KILL_GRACE_S, run_script
+
+    prog = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "time.sleep(30)")
+    # `exec` so the traced process IS the SIGTERM-ignoring python (the group
+    # leader), not a sh wrapper that dies immediately and short-circuits the wait.
+    step = _script_step(f"exec {sys.executable} -c {shlex.quote(prog)}",
+                        timeout_seconds=1)
+    t0 = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_script(step, cwd=tmp_path)
+    elapsed = time.monotonic() - t0
+    assert elapsed >= 1 + GATE_KILL_GRACE_S
