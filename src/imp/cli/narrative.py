@@ -417,6 +417,7 @@ class NarrativeBuilder:
         self._root = WorkflowNode()
         self._warnings: list[str] = []
         self._warnings_flushed: bool = False
+        self._pause_outcome_shown: bool = False
         self._tokens = TokenTotals()
         self._latest_prompt_tokens: int | None = None
         self._latest_context_pct: float | None = None
@@ -747,6 +748,11 @@ class NarrativeBuilder:
             total=len(self._warnings)))
         self._warnings_flushed = True
 
+    def finalize(self) -> None:
+        """End-of-stream flush of the root warnings summary, only for a reasoned terminal pause."""
+        if self._root.status == "paused" and self._pause_outcome_shown:
+            self._flush_warnings_summary()
+
     def _flush_burst(self) -> None:
         self._current_burst = None
 
@@ -773,6 +779,7 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
     b = NarrativeBuilder()
     for e in events:
         b.add(e)
+    b.finalize()
     return b.tree
 
 
@@ -1072,11 +1079,14 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     self._root.status = "paused"
     reason = p.get("interrupt_reason") or p.get("reason")
     if reason:
-        # A pause is a run-level terminal outcome: append at the WORKFLOW ROOT (not
-        # the still-open phase) so the root-level warnings summary renders
-        # immediately above it.
-        self._flush_warnings_summary()
-        self._root.children.append(PauseNode(reason=reason))
+        # Unblock the live DFS walk to the nested pause; narrower than the resume
+        # loop (no membership/salvage mutation).
+        for fold in self._open_sub_by_event.values():
+            fold.running = False
+            fold.terminal_state = "interrupted"
+        # Anchor the pause in the innermost open scope so it renders where it fired.
+        self._append(PauseNode(reason=reason))
+        self._pause_outcome_shown = True
 
 
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1100,6 +1110,7 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     self._open_sub_by_event.clear()
     self._resuming = True                # open the re-entry window
     self._warnings_flushed = False       # let the next terminal flush a fresh summary
+    self._pause_outcome_shown = False    # a resumed run is no longer a reasoned pause
 
 
 NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
