@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 from pathlib import Path
 from typing import Any
 
@@ -360,3 +361,32 @@ async def test_solicit_shows_your_turn_status(tmp_path: Path) -> None:
 
     assert "your turn" in captured["status"]
     assert app._solicit_question == ""      # reset after solicit returns
+
+
+def test_finish_flushes_terminal_pause_warnings_into_exit_transcript() -> None:
+    # Mirrors the real exit path: session_terminal's finally calls driver.finish()
+    # (the driver IS the TuiApp), then main.py prints the collapsed transcript.
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "runner_warning", agent_id="step:design/spec", message="alpha"),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "workflow_paused", reason="max_loops", interrupt_reason="max_loops"),
+    ]
+    app = _app()
+    for e in events:
+        app.on_event(e)
+
+    # Without finish() the exit transcript drops the warnings summary (the regression).
+    before = io.StringIO()
+    app.print_collapsed_transcript(before)
+    assert "warning this run" not in before.getvalue()
+
+    app.finish()
+
+    after = io.StringIO()
+    app.print_collapsed_transcript(after)
+    assert "1 warning this run" in after.getvalue()
+    assert any("paused (max_loops)" in ln for ln in after.getvalue().splitlines())

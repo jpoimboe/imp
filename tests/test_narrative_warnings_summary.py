@@ -145,8 +145,9 @@ def _paused(eid: str = "z", reason: str = "ctrl-c") -> dict:
 
 
 def test_pause_with_no_reason_appends_no_outcome_and_no_summary() -> None:
-    # The `if reason:` guard wraps both the flush and the PauseNode append, so a
-    # reasonless pause produces neither at root.
+    # The `if reason:` guard skips the PauseNode append and leaves
+    # `_pause_outcome_shown` False; the run-level warnings summary flush now lives
+    # in finalize(), gated on that flag, so a reasonless pause produces neither at root.
     tree = nv.build_tree([
         {"id": "c", "agent_id": None, "type": "change_created",
          "payload": {"id": "abc123", "title": "x"}},
@@ -159,9 +160,13 @@ def test_pause_with_no_reason_appends_no_outcome_and_no_summary() -> None:
     assert "WarningsSummaryNode" not in kinds
 
 
-def test_pause_outcome_and_summary_land_at_workflow_root() -> None:
-    # A phase is still open when the pause fires; both the summary and the
-    # PauseNode must land at the root, adjacent, not nested in the open phase.
+def test_reasoned_terminal_pause_nests_and_summary_lands_at_root() -> None:
+    # The pause fired while a step is open; it nests in the open container (NOT
+    # root — here one level below the phase, inside the open StepNode), while the
+    # single warnings summary lands at the workflow root via finalize() (which
+    # build_tree now calls). The exact phase-vs-step nesting is pinned by the
+    # dedicated placement tests in test_narrative_pause.py; here we assert only
+    # that the summary is at root and the pause is nested somewhere below it.
     tree = nv.build_tree([
         {"id": "c", "agent_id": None, "type": "change_created",
          "payload": {"id": "abc123", "title": "x"}},
@@ -169,12 +174,16 @@ def test_pause_outcome_and_summary_land_at_workflow_root() -> None:
         _warn("w1", "alpha"),
         _paused(),
     ])
-    kinds = [type(c).__name__ for c in tree.root.children]
-    assert "PauseNode" in kinds
-    assert kinds.count("WarningsSummaryNode") == 1  # surfaces exactly once
-    si = kinds.index("WarningsSummaryNode")
-    pi = kinds.index("PauseNode")
-    assert si + 1 == pi  # summary directly above the pause outcome, both at root
+    root_kinds = [type(c).__name__ for c in tree.root.children]
+    assert root_kinds.count("WarningsSummaryNode") == 1   # summary at root
+    assert "PauseNode" not in root_kinds                  # pause is NOT at root
+
+    def _pauses(node: object) -> list:
+        found = [node] if isinstance(node, nv.PauseNode) else []
+        for c in getattr(node, "children", []):
+            found += _pauses(c)
+        return found
+    assert len(_pauses(tree.root)) == 1                   # pause nests deeper in the tree
 
 
 def _resumed(eid: str = "r") -> dict:
@@ -194,10 +203,64 @@ def test_pause_resume_complete_shows_all_warnings_at_completion() -> None:
         _completed(),
     ])
     summaries = _summary_nodes(tree.root)
-    # pause produces one summary node, completion produces a second
-    assert len(summaries) == 2
-    completion_summary = summaries[1]
+    # No pause-time flush anymore: only completion produces a summary node.
+    assert len(summaries) == 1
+    completion_summary = summaries[0]
     assert completion_summary.total == 2
     msgs = [msg for msg, _ in completion_summary.lines]
     assert "before" in msgs
     assert "after" in msgs
+
+
+def test_terminal_pause_with_reason_and_warnings_flushes_one_root_summary() -> None:
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _started("s1"),
+        _warn("w1", "alpha"),
+        _paused(),
+    ])
+    assert len(_summary_nodes(tree.root)) == 1
+
+
+def test_terminal_pause_with_reason_no_warnings_flushes_nothing() -> None:
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _started("s1"),
+        _paused(),
+    ])
+    assert _summary_nodes(tree.root) == []
+
+
+def test_resumable_pause_produces_no_root_summary() -> None:
+    # Pause then resume (run ends non-paused): finalize() is a no-op, so no
+    # summary is flushed by the pause at all.
+    tree = nv.build_tree([
+        {"id": "c", "agent_id": None, "type": "change_created",
+         "payload": {"id": "abc123", "title": "x"}},
+        _warn("w1", "alpha"),
+        _paused(),
+        _resumed(),
+    ])
+    assert _summary_nodes(tree.root) == []
+
+
+def test_finalize_flushes_only_when_paused_and_outcome_shown() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_warn("w1", "alpha"))
+    b.finalize()                       # not paused → no flush
+    assert _summary_nodes(b.tree.root) == []
+    b.add(_paused())                   # reasoned pause: status=paused, outcome shown
+    b.finalize()
+    assert len(_summary_nodes(b.tree.root)) == 1
+    b.finalize()                       # idempotent
+    assert len(_summary_nodes(b.tree.root)) == 1
+
+
+def test_finalize_no_flush_for_reasonless_terminal_pause() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_warn("w1", "alpha"))
+    b.add({"id": "z", "agent_id": None, "type": "workflow_paused", "payload": {}})
+    b.finalize()                       # status=paused but _pause_outcome_shown is False
+    assert _summary_nodes(b.tree.root) == []

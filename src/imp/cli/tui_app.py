@@ -129,7 +129,8 @@ class TuiApp:
 
     # -- lifecycle / exit transcript -----------------------------------------
     def finish(self) -> None:
-        pass
+        # Run-end flush before the exit transcript renders (see LiveDriver.finish).
+        self._driver.finalize()
 
     def print_collapsed_transcript(self, stream: Any) -> None:
         self._driver.print_collapsed_transcript(stream)

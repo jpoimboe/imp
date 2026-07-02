@@ -24,6 +24,10 @@ class TuiDriver:
         if self._on_invalidate is not None:
             self._on_invalidate()
 
+    def finalize(self) -> None:
+        """Run-end flush (mirrors LiveDriver.finish); idempotent."""
+        self._builder.finalize()
+
     def seed_opening_intent(self, text: str) -> None:
         self._builder.seed_opening_intent(text)
         if self._on_invalidate is not None:
