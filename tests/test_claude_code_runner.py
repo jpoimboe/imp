@@ -4091,3 +4091,82 @@ async def test_stream_event_usage_overrides_partial_assistant_usage(
     assert resps[0]["payload"]["stop_reason"] == "end_turn"
     assert resps[0]["payload"]["raw"]["stop_reason"] == "end_turn"
 
+
+@pytest.mark.anyio
+async def test_no_stream_events_falls_back_to_assistant_usage(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    # No StreamEvent messages at all: the flush must use the AssistantMessage
+    # fragment's usage/stop_reason without error (AC4).
+    scripted = [
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+            message_id="m1", model="served-x",
+            usage={"input_tokens": 100, "output_tokens": 42},
+            stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    assert [r["payload"]["message_id"] for r in resps] == ["m1"]
+    assert resps[0]["payload"]["usage"]["output_tokens"] == 42
+    assert resps[0]["payload"]["usage"]["input_tokens"] == 100
+    assert resps[0]["payload"]["stop_reason"] == "end_turn"
+    assert resps[0]["payload"]["raw"]["usage"]["output_tokens"] == 42
+    assert resps[0]["payload"]["raw"]["stop_reason"] == "end_turn"
+
+
+@pytest.mark.anyio
+async def test_multi_fragment_group_uses_harvested_usage(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    # One streamed API message m1 whose AssistantMessage arrives as two
+    # fragments; the stream trio precedes them. Expect exactly one llm_response
+    # for m1, both fragments' blocks in order, and the harvested finalized
+    # figures (AC5 grouping + AC1/AC2 harvest).
+    scripted = [
+        message_start("m1", usage={"input_tokens": 500, "output_tokens": 1}),
+        message_delta(usage={"output_tokens": 175}, stop_reason="end_turn"),
+        message_stop(),
+        assistant(text("reading the files"), message_id="m1", model="served-x"),
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+            message_id="m1", model="served-x",
+            usage={"output_tokens": 6}, stop_reason=None),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    # AC5: exactly one llm_response for the single message_id.
+    assert [r["payload"]["message_id"] for r in resps] == ["m1"]
+    # AC5: both fragments' blocks coalesced in order.
+    assert [b["type"] for b in resps[0]["payload"]["raw"]["content"]] == \
+        ["text", "text", "tool_use"]
+    # AC1/AC2: harvested finalized figures on the coalesced event.
+    assert resps[0]["payload"]["usage"]["output_tokens"] == 175
+    assert resps[0]["payload"]["usage"]["input_tokens"] == 500
+    assert resps[0]["payload"]["stop_reason"] == "end_turn"
+    assert resps[0]["payload"]["raw"]["usage"]["output_tokens"] == 175
+    assert resps[0]["payload"]["raw"]["stop_reason"] == "end_turn"
