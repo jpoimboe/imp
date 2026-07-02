@@ -860,3 +860,53 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
     assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
     assert yielded[-1]["payload"] == {"text": "the conclusion"}
     assert not any(e["type"] == "llm_response" for e in log.read())
+
+
+@pytest.mark.anyio
+async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_message(
+    tmp_path: Path,
+) -> None:
+    """openai retry-continue on a bare turn-end: no awaiting_user_input, no
+    user_message; the nudge is an internal engine_continuation event."""
+    from dataclasses import replace
+
+    from imp.agents.transcript import Transcript
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="what color?"),)))
+
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
+    ])
+
+    def _must_not_solicit(_prompt):
+        raise AssertionError("retry-continue must not solicit the human")
+
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: fake,
+        user_input_fn=_must_not_solicit)
+
+    async for _ in runner.run(
+        replace(inv, event_log=log, balance_on_resume=True,
+                resume_should_continue=True)
+    ):
+        pass
+
+    types = [e["type"] for e in log.read()]
+    assert "awaiting_user_input" not in types
+    assert "user_message" not in types
+    assert "engine_continuation" in types
+    cont = next(e for e in log.read() if e["type"] == "engine_continuation")
+    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    loaded = t.load()
+    assert loaded[2].role == "user"
+    assert loaded[2].content[0].text == _CONTINUATION_NUDGE

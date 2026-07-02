@@ -2687,6 +2687,17 @@ def test_waiting_for_test_lane_renders_lifecycle_line() -> None:
                for n in lits)
 
 
+def test_engine_continuation_produces_no_narrative_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
+        _ev("2", "engine_continuation", text="continue from where you left off"),
+    ])
+    step = tree.root.children[0].children[0]
+    # No FallbackLine (would leak the nudge) and no node of any kind for it.
+    assert [c for c in step.children if isinstance(c, nv.FallbackLine)] == []
+    assert step.children == []
+
+
 def test_test_lane_acquired_emits_no_visible_line() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))

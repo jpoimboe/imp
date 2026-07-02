@@ -365,19 +365,31 @@ async def _resolve_wait_reply(
     coordinator: Any,
     user_input_fn: Callable[[str], str | Awaitable[str]],
     resume_should_continue: bool = False,
-) -> str:
-    """Satisfy a bare-turn-end / AWAITING_USER yield on resume. Precedence:
+    *,
+    elog: Any,
+    agent_id: str,
+) -> tuple[str, str]:
+    """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
+    (reply, source) where source is 'interject' | 'nudge' | 'solicited'.
+    Precedence:
     1. pending interject / --message present → drain+join and return it (a human
-       spoke; wins).
-    2. else if resume_should_continue → return the continuation nudge so a
-       headless resume continues the step, instead of soliciting.
-    3. else → solicit empty via user_input_fn (a genuine yield → park)."""
+       spoke; wins) as ('interject').
+    2. else if resume_should_continue → return the continuation nudge as ('nudge')
+       so a headless resume continues the step instead of soliciting.
+    3. else → emit the sole awaiting_user_input gate and solicit empty via
+       user_input_fn (a genuine yield → park), returning ('solicited').
+
+    The gate emit lives HERE (not in the provider resume branches) so it fires in
+    exactly one place and ONLY when we actually solicit — a retry-continue or a
+    queued interject satisfies the wait internally and emits no phantom prompt."""
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
-        return joined
+        return joined, "interject"
     if resume_should_continue:
-        return _CONTINUATION_NUDGE
+        return _CONTINUATION_NUDGE, "nudge"
+    elog.append(agent_id=agent_id, type="awaiting_user_input",
+                payload={"prompt": ""})
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
         # Resume-side blocked solicit (all four providers route here): freeze the
@@ -391,7 +403,7 @@ async def _resolve_wait_reply(
         finally:
             if coordinator is not None:
                 coordinator.end_solicit_watchdog()
-    return str(raw)
+    return str(raw), "solicited"
 
 
 def drain_all_interjects_at_resume(

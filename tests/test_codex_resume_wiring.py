@@ -248,3 +248,72 @@ async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path)
                and RESUME_CONTINUE_NUDGE in json.dumps(e.get("payload", {}),
                                                        ensure_ascii=False)
                for e in elog.read())
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_retry_continue_journals_engine_continuation_not_user_message(
+    tmp_path: Path,
+) -> None:
+    """codex retry-continue of a bare-turn-end AWAITING_USER (derived from
+    events.jsonl): the resume branch emits NO awaiting_user_input, journals the
+    nudge as an internal engine_continuation event (not a user_message), and
+    still drives the resumed prompt with the nudge."""
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-rc-1.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-rc-1", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-rc-1"}\n')
+
+    # events.jsonl deriving AWAITING_USER: a tail llm_response + the journaled
+    # awaiting_user_input, with no complete_step.
+    _write_events(tmp_path / "events.jsonl", [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+    ])
+
+    elog = InMemoryEventLog()
+    scripted = [[
+        thread_started("thr-rc-1"),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "42"},
+                 result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    def _must_not_solicit(_prompt):
+        raise AssertionError("retry-continue must not solicit the human")
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True)
+    object.__setattr__(inv, "resume_should_continue", True)
+    object.__setattr__(inv, "user_input_fn", _must_not_solicit)
+
+    events = [ev async for ev in runner.run(inv)]
+
+    types = [e["type"] for e in elog.read()]
+    assert "engine_continuation" in types
+    # The resume branch no longer emits awaiting_user_input to the event log
+    # (the seeded one is on-disk in events.jsonl, a separate file the classifier
+    # reads; elog is the fresh in-memory log the run writes to).
+    assert "awaiting_user_input" not in types
+    # Defect B: the nudge is NOT journaled as a user_message.
+    assert not any(
+        e["type"] == "user_message"
+        and _CONTINUATION_NUDGE in json.dumps(e.get("payload", {}),
+                                              ensure_ascii=False)
+        for e in elog.read())
+    cont = next(e for e in elog.read() if e["type"] == "engine_continuation")
+    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    # The resumed prompt is the nudge, so the run continues and completes.
+    assert _CONTINUATION_NUDGE in str(fake.thread.run_calls[0][0])
+    assert any(e.get("type") == "agent_output" for e in events)

@@ -531,21 +531,24 @@ class CodexAgentRunner:
                         "category": "config", "kind": "no_user_input_fn",
                         "message": "AWAITING_USER resume requires user_input_fn"}}
                     return
-                # Parity with the other providers: the awaiting_user_input gate
-                # carries no question payload. The agent's prose IS the question;
-                # codex's last_text is already journaled as its llm_response and
-                # rendered in the narrative, so an empty prompt loses nothing.
-                elog.append(agent_id=aid, type="awaiting_user_input",
-                            payload={"prompt": ""})
                 # §2 resume-reply join (F5): queued interjects satisfy the
                 # bare-turn-end yield directly. Fall back to user_input_fn only
-                # when the queue is empty.
-                reply: str = await _resolve_wait_reply(
+                # when the queue is empty. _resolve_wait_reply owns the SOLE
+                # awaiting_user_input emit (fired only when it actually solicits);
+                # the resume-branch duplicate is dropped (Part 1 is centralized).
+                reply, source = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn,
-                    invocation.resume_should_continue)
-                user_msg = Message(
-                    role="user", content=(TextBlock(text=reply),))
-                elog.append_user_message(agent_id=aid, message=user_msg)
+                    invocation.resume_should_continue,
+                    elog=elog, agent_id=aid)
+                if source == "nudge":
+                    # Internal continuation, not a human turn: journal an internal
+                    # engine_continuation event (no `>` caret), not a user_message.
+                    elog.append(agent_id=aid, type="engine_continuation",
+                                payload={"text": reply})
+                else:
+                    user_msg = Message(
+                        role="user", content=(TextBlock(text=reply),))
+                    elog.append_user_message(agent_id=aid, message=user_msg)
                 next_prompt = reply
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 # Replay-and-continue: nudge is the resumed prompt; journal for audit trail.
