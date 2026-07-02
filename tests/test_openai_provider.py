@@ -125,10 +125,9 @@ def test_imp_to_responses_user_with_tool_results_fans_out() -> None:
 
 
 def test_imp_to_responses_text_co_riding_with_tool_results_is_kept() -> None:
-    # On resume, balance_success_on_resume builds a single user message that
-    # carries the synthesized complete_step tool_result AND the reviewer/gate
-    # feedback (plus the resume-durability note) as co-riding TextBlocks. The
-    # function_call_output(s) must still be emitted, but the trailing text must
+    # A resume user message can carry a tool_result AND co-riding TextBlock(s)
+    # (e.g. the resume-durability note, or the no-complete_step feedback fallback).
+    # The function_call_output(s) must still be emitted, and the trailing text must
     # NOT be dropped -- it has to reach the model as a follow-on user message.
     msg = Message(
         role="user",

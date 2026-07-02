@@ -19,7 +19,7 @@ from imp.agents.runner import (
     ToolUseBlock,
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
-from imp.agents.transcript import Transcript
+from imp.agents.transcript import RESUME_DURABILITY_NOTE, Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
@@ -217,10 +217,13 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
     msgs = transcript.load()
     injected = msgs[2]
     assert injected.role == "user"
-    assert any(isinstance(b, ToolResultBlock) and not b.is_error
-               for b in injected.content)
-    assert any(isinstance(b, TextBlock) and "FAIL: assertion" in b.text
-               for b in injected.content)
+    # The feedback IS the complete_step result -- is_error-shaped, framed --
+    # not a success result plus a separate feedback text block.
+    result = next(b for b in injected.content if isinstance(b, ToolResultBlock))
+    assert result.is_error is True
+    assert "FAIL: assertion" in result.content
+    texts = [b for b in injected.content if isinstance(b, TextBlock)]
+    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE]
 
 
 @pytest.mark.anyio

@@ -7,7 +7,7 @@ from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
-    RESUME_SUPERSEDED_NOTE,
+    REWORK_RESULT_FRAME,
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
@@ -53,7 +53,7 @@ def test_append_creates_parent_dir(tmp_path: Path) -> None:
     assert deep.exists()
 
 
-def test_inject_after_complete_step_yields_single_nonerror_user_turn(
+def test_inject_after_complete_step_delivers_feedback_as_error_result(
     tmp_path: Path,
 ) -> None:
     t = Transcript(tmp_path / "transcript.jsonl")
@@ -74,12 +74,14 @@ def test_inject_after_complete_step_yields_single_nonerror_user_turn(
     # Exactly one new trailing user message.
     assert msgs[-1] is injected
     assert injected.role == "user"
-    # It carries a NON-error result for the complete_step + the feedback text.
+    # The feedback IS the complete_step result: is_error-shaped and framed.
     results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
     texts = [b for b in injected.content if isinstance(b, TextBlock)]
     assert len(results) == 1 and results[0].tool_use_id == "c1"
-    assert results[0].is_error is False
-    assert texts[-1].text == "the test failed"
+    assert results[0].is_error is True
+    assert results[0].content == REWORK_RESULT_FRAME + "\n\n" + "the test failed"
+    # No separate feedback text block — only the resume-durability note rides along.
+    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE]
     # classify_resume now routes onto the live SEND_TO_LLM turn.
     assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
     # Persisted to disk and audit-logged once.
@@ -141,9 +143,11 @@ def test_balance_with_wrapper_rides_on_same_user_turn(tmp_path: Path) -> None:
     balance_success_on_resume(msgs, t, elog, "step:x", wrapper_text="not accepted")
     texts = [b for b in msgs[-1].content if isinstance(b, TextBlock)]
     results = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
-    assert results[0].is_error is False
-    # Note frames the results first; the actionable wrapper stays last.
-    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE, "not accepted"]
+    # Rework feedback rides IN the is_error complete_step result, framed.
+    assert results[0].is_error is True
+    assert results[0].content == REWORK_RESULT_FRAME + "\n\n" + "not accepted"
+    # Only the durability note remains as a text block (no feedback text block).
+    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE]
 
 
 def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
@@ -153,7 +157,36 @@ def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
     assert balance_success_on_resume(msgs, t, InMemoryEventLog(), "x", wrapper_text=None) is None
 
 
-def test_balance_success_on_resume_emits_superseded_note_with_wrapper_text(tmp_path: Path) -> None:
+def test_balance_fallback_delivers_wrapper_as_text_block_when_no_trailing_tool_use(
+    tmp_path: Path,
+) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="begin"),)),
+        Message(role="assistant", content=(TextBlock(text="thinking out loud"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    elog = InMemoryEventLog()
+
+    injected = balance_success_on_resume(msgs, t, elog, "step:p/s", wrapper_text="review failed")
+
+    # A new trailing user message IS returned (not None).
+    assert injected is not None
+    assert msgs[-1] is injected
+    assert injected.role == "user"
+    # No ToolResultBlock — there was nothing to balance.
+    assert not any(isinstance(b, ToolResultBlock) for b in injected.content)
+    # Wrapper feedback rides as a trailing TextBlock (the fallback path).
+    texts = [b for b in injected.content if isinstance(b, TextBlock)]
+    assert any(b.text == "review failed" for b in texts)
+    # Resume-durability note is also present.
+    assert any(b.text == RESUME_DURABILITY_NOTE for b in texts)
+    # A live user turn was appended — routes to SEND_TO_LLM.
+    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
+
+
+def test_balance_success_on_resume_delivers_feedback_as_error_result(tmp_path: Path) -> None:
     t = Transcript(tmp_path / "transcript.jsonl")
     msgs = [
         Message(role="user", content=(TextBlock(text="begin"),)),
@@ -168,8 +201,9 @@ def test_balance_success_on_resume_emits_superseded_note_with_wrapper_text(tmp_p
                                          wrapper_text="feedback")
     assert injected is not None
     results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
-    assert len(results) >= 1
-    assert results[0].content == RESUME_SUPERSEDED_NOTE
+    assert len(results) == 1
+    assert results[0].is_error is True
+    assert results[0].content == REWORK_RESULT_FRAME + "\n\n" + "feedback"
 
 
 def test_repair_dangling_tool_use_appends_durability_note(tmp_path: Path) -> None:
@@ -452,3 +486,28 @@ def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path
     t.append(msgs[0])
     assert synthesize_native_success_on_resume(
         msgs, t, InMemoryEventLog(), "x") is None
+
+
+def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="c0", name="complete_step", input={"status": "Success"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    synth = repair_dangling_tool_use_on_resume(
+        msgs, t, feedback="REVISE: rewrite plan.md")
+    assert synth is not None and len(synth) == 1
+    rb = synth[0]
+    assert rb.tool_use_id == "c0"
+    # The dangling complete_step is paired with an is_error result whose content
+    # IS the framed feedback (not the synthetic "interrupted" filler).
+    assert rb.is_error is True
+    assert rb.content == REWORK_RESULT_FRAME + "\n\n" + "REVISE: rewrite plan.md"
+    # Appended as a trailing user turn (repair shape) with the durability note.
+    assert msgs[-1].role == "user"
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in msgs[-1].content)
+    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM

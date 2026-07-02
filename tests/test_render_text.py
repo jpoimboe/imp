@@ -10,6 +10,7 @@ from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
+from tests._event_fixtures import ev
 
 
 class _FakeRendered:
@@ -2211,3 +2212,51 @@ def test_other_pause_reasons_still_render_verbatim() -> None:
         _ev("1", "workflow_paused", reason="retry_ceiling"),
     ]))
     assert "paused (retry_ceiling)" in out
+
+
+def test_result_less_complete_step_renders_closed_terminal() -> None:
+    # Part A persists a result-less complete_step tail: the tool_call has no matching tool_result.
+    events = [
+        ev("1", "change_created", change_id=1, title="fix"),
+        ev("2", "step_started", step="coder", kind="agent", phase="implement",
+           model="m", provider="claude_code",
+           timestamp="2026-07-01T00:00:00+00:00"),
+        ev("3", "llm_response", agent_id="step:implement/coder",
+           provider="claude_code", model="m", usage={},
+           raw={"content": [{"type": "text", "text": "Implemented the fix."}]},
+           timestamp="2026-07-01T00:00:01+00:00"),
+        # The dangling `complete_step`: a tool_call with NO sibling tool_result.
+        ev("4", "tool_call", agent_id="step:implement/coder", id="cs1",
+           name="complete_step", input={"status": "Success", "summary": "did it"},
+           timestamp="2026-07-01T00:00:02+00:00"),
+        ev("5", "agent_output", agent_id="step:implement/coder",
+           status="Success", summary="did it",
+           timestamp="2026-07-01T00:00:03+00:00"),
+        ev("6", "step_completed", step="coder", kind="agent",
+           action={"verb": "continue"}, var_mutations={},
+           timestamp="2026-07-01T00:00:04+00:00"),
+    ]
+
+    # Structural: closed terminal; the result-less call neither froze it nor became a subagent fold.
+    tree = nv.build_tree(events)
+    step = tree.root.children[0].children[0]
+    assert step.closed is True
+    assert step.end_ts == "2026-07-01T00:00:04+00:00"
+    subfolds = [c for c in step.children if isinstance(c, nv.SubagentFold)]
+    assert subfolds == []
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert len(bursts) == 1
+    (call,) = bursts[0].calls
+    assert call.name == "complete_step"
+    assert call.result is None            # genuinely dangling (no phantom result)
+    assert bursts[0].end_ts is None       # missing result never advanced the clock
+
+    # Lean render: closed terminal with step elapsed; the result-less call is still recapped.
+    lean = "\n".join(_lines(events, full=False))
+    assert "coder · complete · 4s" in lean
+    assert "1 call · complete_step" in lean
+
+    # --full render: the call shows under the tools fold; same closed terminal with elapsed.
+    full = "\n".join(_lines(events, full=True))
+    assert "· complete_step" in full
+    assert "coder · complete · status=Success · summary=did it · 4s" in full

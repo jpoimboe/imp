@@ -309,10 +309,13 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
     """True when the transcript's last turn is an assistant turn whose tool_use is
     a `complete_step` awaiting its result.
 
-    This shape native-resumes: imp folds a SUCCESS result into the loaded session
-    via `synthesize_native_success_on_resume` (claude-p's own pairing would inject
-    an `is_error` for the dangling `complete_step`, telling the agent its
-    already-accepted work failed), and the handback rides the streamed delta."""
+    On a non-rework resume of this shape (bare backward goto) imp folds a SUCCESS
+    result into the loaded session via `synthesize_native_success_on_resume`
+    (claude-p's own pairing would inject an `is_error` for the dangling
+    `complete_step`, telling the agent its already-accepted work failed) and kicks
+    the delta with a redo nudge. On a rework resume the `complete_step` is left
+    dangling instead, and the is_error feedback result streams as the delta
+    claude-p pairs it against."""
     last = messages[-1] if messages else None
     if last is None or last.role != "assistant":
         return False
@@ -1129,6 +1132,10 @@ class ClaudeCodeAgentRunner:
         # generalized balanced-close site to continue with a handoff-instruction
         # increment.
         self._handoff_requested = False
+        # Part A completion-interrupt intent flag: set when complete_step is seen
+        # (preempting the trailing turn via interrupt), consumed at the balanced
+        # close to fall through to agent_output.
+        self._complete_requested = False
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None,
@@ -1522,43 +1529,57 @@ class ClaudeCodeAgentRunner:
                         elog.append_tool_result(agent_id=aid, block=rb)
                         dangling_ids.add(rb.tool_use_id)
             else:
-                # Native tail-balancing. A trailing complete_step is balanced with
-                # a SUCCESS result folded INTO the loaded session (resume_base
-                # advances over it) so claude-p loads a balanced session and never
-                # auto-pairs an is_error; any other dangling tool_use keeps the
-                # placeholder repair (which streams as the delta and kicks the turn).
-                #
+                # Native tail-balancing.
+                #  - Rework (retry_feedback) + complete_step tail: leave the
+                #    complete_step DANGLING in the loaded session and stream an
+                #    is_error result whose content IS the feedback as the delta —
+                #    claude-p pairs the dangling call against it, so the feedback
+                #    reaches the model AS the result of its own complete_step call
+                #    (parity with the anthropic/openai is_error path). A SUCCESS
+                #    fold here would pre-balance the call and the feedback would
+                #    never reach the model.
+                #  - Bare backward goto (no feedback) + complete_step tail: fold a
+                #    SUCCESS result INTO the loaded session (resume_base advances
+                #    over it) so claude-p never auto-pairs an is_error telling the
+                #    agent its accepted work failed, then kick the otherwise-empty
+                #    delta with a redo nudge.
+                #  - Any other dangling tool_use keeps the placeholder repair.
+                #    Such a genuinely-dangling non-complete_step tail is a
+                #    mid-tool interrupt that resumes as a forward-continue with
+                #    retry_feedback=None, so this arm never coincides with feedback
+                #    (the if/elif ordering would otherwise drop it — it cannot here).
+                #  - A mid-step forward tail (SEND_TO_LLM) carrying rework feedback
+                #    keeps the UNCHANGED separate-user-turn handback — the spec's
+                #    removal scope is completed (complete_step-tail) steps only, and
+                #    such a tail can still carry retry_feedback. The AWAITING_USER
+                #    exclusion is preserved here (that shape delivers its reply via
+                #    the AWAITING_USER arm below, not this handback).
                 # Capture the tail shape BEFORE synthesis: synthesize_*/repair_*
                 # append a user turn to `messages` (which IS `existing`), so a
-                # later _tail_has_complete_step(existing) would see the new user
-                # tail and wrongly return False. The redo-nudge guard below depends
-                # on this captured boolean.
+                # later _tail_has_complete_step(existing) would wrongly return False.
                 tail_is_complete_step = _tail_has_complete_step(existing)
-                if tail_is_complete_step:
+                if tail_is_complete_step and invocation.retry_feedback:
+                    synth = repair_dangling_tool_use_on_resume(
+                        messages, transcript, feedback=invocation.retry_feedback)
+                    if synth is not None:
+                        for rb in synth:
+                            elog.append_tool_result(agent_id=aid, block=rb)
+                elif tail_is_complete_step:
                     injected = synthesize_native_success_on_resume(
                         messages, transcript, elog, aid)
                     if injected is not None:
                         resume_base += 1
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, RESUME_REDO_NUDGE)
                 elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
                     synth = repair_dangling_tool_use_on_resume(messages, transcript)
                     if synth is not None:
                         for rb in synth:
                             elog.append_tool_result(agent_id=aid, block=rb)
-                # The corrective handback rides the streamed delta, kept out of the
-                # loaded session — the same co-location SEND_TO_LLM uses for its
-                # trailing user turn. A bare backward goto to a completed step has
-                # no handback, so kick the otherwise-empty delta with a redo nudge.
-                # `classify_resume(existing)` in the feedback guard is robust to the
-                # synthesis mutation (post-append it is SEND_TO_LLM, never
-                # AWAITING_USER), but the redo-nudge branch MUST use the captured
-                # `tail_is_complete_step` — re-reading the tail here returns False.
-                if (invocation.retry_feedback
+                elif (invocation.retry_feedback
                         and classify_resume(existing) is not ResumeState.AWAITING_USER):
                     deliver_reply_on_resume(
                         messages, transcript, elog, aid, invocation.retry_feedback)
-                elif not invocation.retry_feedback and tail_is_complete_step:
-                    deliver_reply_on_resume(
-                        messages, transcript, elog, aid, RESUME_REDO_NUDGE)
             # Rebind the replay delta base to AFTER tail-balancing. Replay streams
             # ONLY what is appended from here on (the composed manifest+handback
             # turn, plus any AWAITING_USER reply / nudge) — never prior history or
@@ -1881,6 +1902,23 @@ class ClaudeCodeAgentRunner:
                                     if _canon_tool_name(b.name) == "complete_step":
                                         state.complete_step_called = True
                                         state.complete_step_args = b.input
+                                        # Part A: complete_step is terminal — re-emit
+                                        # the result-less tool_call (parity with
+                                        # anthropic/openai), then preempt the trailing
+                                        # turn via interrupt (args already captured from
+                                        # b.input; `continue` skips the normal append
+                                        # path, re-emitted here).
+                                        if not self._complete_requested:
+                                            elog.append_tool_call(
+                                                agent_id=aid,
+                                                block=ToolUseBlock(
+                                                    id=b.id, name="complete_step",
+                                                    input=b.input))
+                                            await _flush_llm_group()
+                                            self._complete_requested = True
+                                            with contextlib.suppress(Exception):
+                                                await client.interrupt()
+                                            continue
                                     # Ceiling guard: observational here. With
                                     # Claude Code we can't prevent the (K+1)th
                                     # tool dispatch — MCP invocation is async
@@ -1993,7 +2031,16 @@ class ClaudeCodeAgentRunner:
                             api_error_status=getattr(sdk_msg, "api_error_status", None),
                             permission_denials=getattr(sdk_msg, "permission_denials", None),
                             errors=getattr(sdk_msg, "errors", None))
-                        if ((self._steer_requested or self._handoff_requested)
+                        if (self._complete_requested
+                                and getattr(sdk_msg, "subtype", None)
+                                == "error_during_execution"):
+                            # Part A: interrupt landed — fall through to agent_output;
+                            # deliberately do NOT balance the tail so the dangling
+                            # result-less complete_step stays the persisted tail (parity
+                            # with anthropic/openai; the Part B resume relies on it).
+                            self._complete_requested = False
+                            _flush_pending()
+                        elif ((self._steer_requested or self._handoff_requested)
                                 and getattr(sdk_msg, "subtype", None)
                                 == "error_during_execution"):
                             if self._handoff_requested:
@@ -2071,7 +2118,8 @@ class ClaudeCodeAgentRunner:
                             next_query = reply
                             requery = True
                             break
-                        elif self._handoff_requested or self._steer_requested:
+                        elif (self._handoff_requested or self._steer_requested
+                                or self._complete_requested):
                             # Non-error_during_execution close while a flag was set:
                             # the cooperative interrupt() did not land. Reset both flags
                             # so neither bleeds into a later unrelated
@@ -2080,6 +2128,7 @@ class ClaudeCodeAgentRunner:
                                 self._handoff_requested = False
                                 handoff_phase = None
                             self._steer_requested = False
+                            self._complete_requested = False
 
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE

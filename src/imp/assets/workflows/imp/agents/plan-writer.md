@@ -50,7 +50,8 @@ If `{{ change.home }}/progress.md` exists, read it.
 first by its injected `feedback:` preamble; structured fields (`blocking:`,
 rendered capitalized — match case-insensitively) are secondary. **Two arrival
 kinds:** a `resume` continues this session and opens with a synthesized
-tool_result — "previous step output recorded; superseded by the feedback below"
+`is_error` tool_result whose content is the rework feedback, framed
+"[revision required] Your previous complete_step output was recorded, then sent back for revision — this is NOT a system failure. Address the feedback below and re-run the step; call complete_step again when the work is done."
 — on the same user message, before the preamble; a `goto` (fresh session) has
 no such element — the feedback IS the opening message. In both kinds,
 **`progress.md` stays authoritative for revise-N vs author-N+1**, and the

@@ -1810,10 +1810,10 @@ async def test_complete_step_tail_with_feedback_native_resumes(tmp_path: Path) -
 
 
 @pytest.mark.anyio
-async def test_complete_step_tail_balanced_record_before_load(tmp_path: Path) -> None:
-    """Before claude-p loads the native session, the stored record is balanced:
-    the complete_step tool_use carries a synthesized non-error success result and
-    there is no dangling tool_use."""
+async def test_complete_step_tail_left_dangling_in_record_before_load(tmp_path: Path) -> None:
+    """A rework resume leaves the complete_step DANGLING in the loaded session
+    (no success fold); the is_error feedback result streams as the delta and pairs
+    it. So the stored record's trailing entry is the unpaired complete_step turn."""
     from imp.providers.claude_code_session_store import session_key
 
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
@@ -1828,20 +1828,21 @@ async def test_complete_step_tail_balanced_record_before_load(tmp_path: Path) ->
     [ev async for ev in runner.run(inv)]
 
     entries = await store.load(skey)
-    # The reconciled record ends on the synthesized success-result USER turn —
-    # the complete_step tool_use is paired, not dangling.
+    # The loaded session ends on the DANGLING complete_step assistant turn — no
+    # success result was folded in (that would pre-balance the call and the
+    # feedback would never reach the model).
     last = entries[-1]
-    assert last["message"]["role"] == "user"
-    results = [b for b in last["message"]["content"]
-               if isinstance(b, dict) and b.get("type") == "tool_result"]
-    assert results and results[0]["tool_use_id"] == "c0"
-    assert results[0]["is_error"] is False
+    assert last["message"]["role"] == "assistant"
+    tool_uses = [b for b in last["message"]["content"]
+                 if isinstance(b, dict) and b.get("type") == "tool_use"]
+    assert tool_uses and tool_uses[0]["id"] == "c0"
+    assert tool_uses[0]["name"] == "complete_step"
 
 
 @pytest.mark.anyio
 async def test_complete_step_tail_handback_rides_streamed_delta(tmp_path: Path) -> None:
-    """The handback rides the streamed delta (messages[resume_base:]) — the success
-    result stays in the loaded session, never the delta."""
+    """A rework handback rides the streamed delta as the is_error complete_step
+    result whose content IS the feedback — the delta pairs the dangling call."""
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     created: list[FakeClaudeSDKClient] = []
@@ -1855,15 +1856,13 @@ async def test_complete_step_tail_handback_rides_streamed_delta(tmp_path: Path) 
     [ev async for ev in runner.run(inv)]
 
     delta = created[0].queries[0]
-    # Exactly one streamed user turn — the handback.
-    assert _user_text_blob(delta).strip() == "REVISE: rewrite plan.md"
-    # The success tool_result is NOT in the delta (it is in the loaded session).
-    assert not any(
-        d.get("type") == "user"
-        and isinstance(d["message"]["content"], list)
-        and any(b.get("type") == "tool_result" and b.get("tool_use_id") == "c0"
-                for b in d["message"]["content"])
-        for d in delta)
+    # Exactly one streamed user turn — the is_error feedback result for c0.
+    assert len(delta) == 1 and delta[0]["type"] == "user"
+    tr = delta[0]["message"]["content"][0]
+    assert tr["type"] == "tool_result"
+    assert tr["tool_use_id"] == "c0"
+    assert tr["is_error"] is True
+    assert "REVISE: rewrite plan.md" in tr["content"]
 
 
 @pytest.mark.anyio
@@ -1940,7 +1939,7 @@ async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_native_resume_streams_retry_feedback_last(tmp_path: Path) -> None:
+async def test_native_resume_streams_retry_feedback_as_error_result(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
     from imp.agents.transcript import Transcript
 
@@ -1980,14 +1979,46 @@ async def test_native_resume_streams_retry_feedback_last(tmp_path: Path) -> None
     )
     [ev async for ev in runner.run(inv)]
 
-    blob = _user_text_blob(created[0].queries[0])
-    # The retry feedback IS present on the streamed delta and no replay manifest
-    # is built (native path) — so nothing displaces the revision instruction.
-    assert "REVISE: rewrite plan.md" in blob
+    delta = created[0].queries[0]
+    # The retry feedback rides IN the is_error complete_step result (c0), not as a
+    # plain text turn, and no replay manifest is built on the native path.
+    tr = delta[0]["message"]["content"][0]
+    assert tr["type"] == "tool_result" and tr["tool_use_id"] == "c0"
+    assert tr["is_error"] is True
+    assert "REVISE: rewrite plan.md" in tr["content"]
+    blob = _user_text_blob(delta)
     assert "replay artifact" not in blob
     assert "write_file — succeeded" not in blob
-    # The retry feedback is the LAST text the model reads on resume.
-    assert blob.rstrip().endswith("REVISE: rewrite plan.md")
+
+
+@pytest.mark.anyio
+async def test_rework_resume_delivers_feedback_and_does_not_repark(tmp_path: Path) -> None:
+    """Core-bug regression: a rework resume of a completed step (clean dangling
+    complete_step tail, post Part A) delivers the feedback AS the is_error
+    complete_step result on the streamed delta and re-runs the step — it never
+    solicits the human (no awaiting_user_input)."""
+    log = InMemoryEventLog()
+    inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
+    inv = replace(inv, event_log=log)
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    events = [ev async for ev in runner.run(inv)]
+
+    # It re-ran and completed — never re-parked on an empty prompt.
+    assert events[-1]["type"] == "agent_output"
+    assert not any(e["type"] == "awaiting_user_input" for e in log.read())
+    # The feedback reached the model as the is_error complete_step result on the delta.
+    tr = created[0].queries[0][0]["message"]["content"][0]
+    assert tr["type"] == "tool_result" and tr["tool_use_id"] == "c0"
+    assert tr["is_error"] is True
+    assert "REVISE: rewrite plan.md" in tr["content"]
 
 
 @pytest.mark.anyio
@@ -2888,7 +2919,9 @@ async def test_cooperative_interrupt_steer_continues_no_pause(
     assert not any(e.get("payload", {}).get("kind") == "interrupted"
                    for e in events if e["type"] == "error")
     assert holder["c"].disconnected is False
-    assert holder["c"].interrupt_calls == 1
+    # Two interrupts: the cooperative steer (#1), then Part A's completion-interrupt
+    # preempting the steered turn that emits complete_step (#2).
+    assert holder["c"].interrupt_calls == 2
     assert coord.should_pause is False
     assert holder["c"].queries[-1] == "go check the other file instead"
 
