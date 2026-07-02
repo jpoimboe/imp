@@ -81,3 +81,42 @@ def test_nonterminal_interrupt_error_is_dropped() -> None:
 def test_errored_is_not_a_buzz_event_or_label() -> None:
     assert "errored" not in imp_telegram._BUZZ
     assert "errored" not in imp_telegram._EVENT_LABELS
+
+
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("reauth_needed", "needs re-auth"),
+        ("retry_ceiling", "stopped after repeated errors"),
+        ("context_window", "hit the context limit"),
+        ("max_loops", "stuck in a loop"),
+        ("unknown_step", "workflow error"),
+    ],
+)
+def test_paused_body_maps_reason_to_plain_speak(reason: str, expected: str) -> None:
+    assert imp_telegram.event_body("workflow_paused", {"reason": reason}) == expected
+
+
+def test_paused_body_unmapped_reason_falls_back() -> None:
+    body = imp_telegram.event_body("workflow_paused", {"reason": "context_shift"})
+    assert body == "paused (context_shift)"
+
+
+def test_paused_body_missing_reason_is_bare_paused() -> None:
+    assert imp_telegram.event_body("workflow_paused", {}) == "paused"
+
+
+def test_paused_message_has_header_and_plain_speak_body() -> None:
+    event = {
+        "type": "workflow_paused",
+        "change": {"title": "Foo"},
+        "payload": {"reason": "reauth_needed"},
+    }
+    assert imp_telegram.format_event_message(event) == "[Foo] paused\nneeds re-auth"
+
+
+# A silenced pause must produce no body, so the adapter's
+# `kind == "silent" and not body.strip()` guard drops it (no redundant quiet line).
+@pytest.mark.parametrize("reason", ["merge_blocked", "script_blocked", "interrupt"])
+def test_silenced_paused_has_empty_body(reason: str) -> None:
+    assert imp_telegram.event_body("workflow_paused", {"reason": reason}) == ""

@@ -45,6 +45,17 @@ _PAUSE_SILENT_REASONS = frozenset({
     "interrupt",             # esc (self-inflicted) or awaiting-user bare-turn-end
 })
 
+# imp-canon plain-speak bodies for a buzzing workflow_paused (companion-less
+# reasons only — companion-buzzed reasons are silenced upstream in curate()).
+# An unmapped reason falls back to `paused (<reason>)`.
+_PAUSE_REASON_BODIES = {
+    "reauth_needed": "needs re-auth",
+    "retry_ceiling": "stopped after repeated errors",
+    "context_window": "hit the context limit",
+    "max_loops": "stuck in a loop",
+    "unknown_step": "workflow error",
+}
+
 # Human-readable labels for buzz events — phone notifications read as plain English,
 # not imp's internal snake_case types. An unmapped type falls back to its raw name.
 _EVENT_LABELS = {
@@ -205,6 +216,13 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
         reason = str(payload.get("reason") or "").strip()
         detail = str(payload.get("detail") or "").strip()
         return f"{reason}\n{detail}".strip() if detail else reason
+    if event_type == "workflow_paused":
+        reason = str(payload.get("reason") or "").strip()
+        if reason in _PAUSE_SILENT_REASONS:
+            return ""
+        if reason in _PAUSE_REASON_BODIES:
+            return _PAUSE_REASON_BODIES[reason]
+        return f"paused ({reason})" if reason else "paused"
     return str(payload.get("text") or payload.get("message") or "")
 
 
