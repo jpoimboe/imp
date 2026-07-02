@@ -84,15 +84,10 @@ class ListResult:
     resident: frozenset[str] = frozenset()
 
 
-@dataclass(frozen=True)
-class CatchupAlert:
-    changes: list[ChangeInfo]
-
-
 Command = (
     Reply | Create | Abandon | ListChanges | Help | Notice |
     Subscribe | Unsubscribe | Replay | Search | Resume | Save | Alerts)
-Response = ListResult | Notice | CatchupAlert
+Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
 SEARCH_USAGE = "Usage: /search <query>"
