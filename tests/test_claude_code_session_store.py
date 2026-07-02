@@ -529,6 +529,14 @@ def test_reconcile_store_tail_truncates_surplus_turns() -> None:
 
     assert len(out) == 2
     assert out == store_body[:2]
+    # exclude timestamp: it is stamped once per call, so two calls differ on it
+    expected = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    assert (
+        [{k: v for k, v in r.items() if k != "timestamp"} for r in out]
+        == [{k: v for k, v in r.items() if k != "timestamp"} for r in expected]
+    )
 
 
 def test_reconcile_store_tail_empty_messages_returns_empty() -> None:
