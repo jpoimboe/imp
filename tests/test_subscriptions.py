@@ -48,3 +48,18 @@ def test_snapshot_and_add_registers_membership_and_ids_from_events() -> None:
     assert subs.seen("aaa", "e1") is True
     assert subs.seen("aaa", "e2") is True
     assert subs.seen("aaa", "e3") is False
+
+
+def test_mark_seen_records_an_id_for_a_subscribed_change() -> None:
+    subs = Subscriptions()
+    subs.add("aaa")
+    assert subs.seen("aaa", "e1") is False   # not seen before marking
+    subs.mark_seen("aaa", "e1")
+    assert subs.seen("aaa", "e1") is True
+
+
+def test_mark_seen_on_an_unsubscribed_change_grants_no_membership() -> None:
+    subs = Subscriptions()
+    subs.mark_seen("ghost", "e1")            # never subscribed
+    assert subs.contains("ghost") is False   # must not create membership
+    assert subs.seen("ghost", "e1") is False
