@@ -278,16 +278,16 @@ def reconcile_store_tail(
 def store_reconcilable(
     messages: list[Message], store_entries: list[dict[str, Any]] | None,
 ) -> bool:
-    """True iff reconcile_store_tail can faithfully map the store body onto the
-    transcript. reconcile_store_tail assumes the store body's conversation turns
-    are a 1:1 PREFIX of the transcript messages; a body carrying MORE turns than
-    the transcript has drifted (a partial/corrupt transcript), so reconcile
-    cannot represent it as a loadable session and the resume must fall back to
-    stream-json replay. An absent/empty body is always reconcilable — it is
-    rebuilt wholly from the transcript.
+    """Always True: reconcile_store_tail can map ANY store body onto the
+    transcript — TRUNCATE a surplus (store-ahead) body, append a deficit, or
+    rebuild an absent body — so no at-rest store shape forces stream-json replay.
+    A store carrying MORE turns than the transcript is the mid-turn-kill case:
+    claude-p flushed a partial post-kill turn imp never recorded, and dropping
+    that stalled turn (which is exactly the turn we re-run) is the correct
+    resolution. Retained as a named always-True marker at the native-resume gate;
+    the parameters are part of that call contract.
     """
-    kept = strip_trailing_error_turn(store_entries or [])
-    return _store_body_turn_count(kept) <= len(messages)
+    return True
 
 
 def message_to_session_records(

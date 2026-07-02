@@ -1412,10 +1412,10 @@ class ClaudeCodeAgentRunner:
         # store is reconstructed from the transcript when absent, so neither the
         # complete_step tail nor retry_feedback forces stream-json replay.
         # Shape eligibility for native resume — decided WITHOUT the store. The
-        # store gate (store_reconcilable) folds in only for a PARTIAL native
-        # resume below; a dispatch-only tail collapses resume_base to 0
-        # (fresh_stream) and rebuilds the store from scratch, where the gate is
-        # moot.
+        # store marker (store_reconcilable) is now always True: reconcile maps any
+        # at-rest store body (including a store-ahead drift) onto the transcript,
+        # so no store shape forces replay. A dispatch-only tail collapses
+        # resume_base to 0 (fresh_stream) and rebuilds the store from scratch.
         shape_native_eligible = (
             (not is_fresh)
             and classify_resume(existing) in (
@@ -1447,10 +1447,11 @@ class ClaudeCodeAgentRunner:
         # history streams fresh and the store is truncated/rebuilt from scratch —
         # store_reconcilable is moot (prefix-faithfulness is guaranteed).
         fresh_stream = shape_native_eligible and resume_base == 0
-        # A PARTIAL native resume (resume_base > 0) loads the store, so a drifted
-        # store (more turns than the transcript) can't be faithfully reconciled
-        # and must fall back to stream-json replay; a fresh_stream rebuild never
-        # needs the gate.
+        # A PARTIAL native resume (resume_base > 0) loads the store. A store-ahead
+        # drift (more turns than the transcript, from a mid-turn kill flushing a
+        # partial turn) is reconciled by dropping that stalled turn, so it resolves
+        # NATIVELY rather than falling back to replay — store_reconcilable is now
+        # an always-True marker, so native_resume reduces to shape_native_eligible.
         native_resume = shape_native_eligible and (
             fresh_stream or store_reconcilable(existing, store_body)
         )

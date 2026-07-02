@@ -602,7 +602,7 @@ def test_store_reconcilable_true_when_body_fits_transcript() -> None:
     assert store_reconcilable(messages, None) is True
 
 
-def test_store_reconcilable_false_when_body_drifts_ahead() -> None:
+def test_store_reconcilable_true_when_body_drifts_ahead() -> None:
     from imp.agents.runner import Message, TextBlock
     from imp.providers.claude_code_session_store import store_reconcilable
 
@@ -612,5 +612,6 @@ def test_store_reconcilable_false_when_body_drifts_ahead() -> None:
         {"type": "assistant", "uuid": "m1", "message": {"role": "assistant", "content": "a"}},
         {"type": "user", "uuid": "m2", "message": {"role": "user", "content": "b"}},
     ]
-    # 3 body turns > 1 transcript message -> the store drifted ahead -> not reconcilable.
-    assert store_reconcilable(messages, body) is False
+    # 3 body turns > 1 transcript message: a store-ahead drift (mid-turn kill).
+    # reconcile drops the stalled surplus turn, so this is reconcilable -> native.
+    assert store_reconcilable(messages, body) is True
