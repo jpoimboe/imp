@@ -1735,6 +1735,13 @@ class ClaudeCodeAgentRunner:
         llm_model: str | None = None
         llm_stop_reason: Any = None
         llm_usage: dict[str, Any] = {}
+        # Finalized per-turn figures harvested from the raw Anthropic stream
+        # events (StreamEvent). Keyed by streaming message id; each entry is
+        # (usage, stop_reason). Popped on flush so it never grows across a run.
+        stream_usage_by_msg: dict[str, tuple[dict[str, Any], Any]] = {}
+        stream_cur_msg_id: str | None = None
+        stream_cur_usage: dict[str, Any] = {}
+        stream_cur_stop_reason: Any = None
 
         async def _flush_llm_group(backstop_stop_reason: Any = None) -> None:
             nonlocal llm_group_open, llm_group_key, llm_blocks
@@ -1742,14 +1749,26 @@ class ClaudeCodeAgentRunner:
             if not llm_group_open:
                 return
             cu_fields = await _context_usage_fields(client)
-            stop = llm_stop_reason if llm_stop_reason is not None \
-                else backstop_stop_reason
+            # Prefer the finalized figures harvested from the stream for this
+            # message_id; fall back to the AssistantMessage-derived values when
+            # the turn produced no stream events for that key.
+            harvested = (stream_usage_by_msg.pop(llm_group_key, None)
+                         if llm_group_key is not None else None)
+            if harvested is not None:
+                usage, harvested_stop = harvested
+                stop = harvested_stop if harvested_stop is not None else (
+                    llm_stop_reason if llm_stop_reason is not None
+                    else backstop_stop_reason)
+            else:
+                usage = llm_usage
+                stop = llm_stop_reason if llm_stop_reason is not None \
+                    else backstop_stop_reason
             elog.append_llm_response(
                 agent_id=aid, provider=invocation.provider_name,
                 model=llm_model or self.model,
                 raw={"content": llm_blocks, "stop_reason": stop,
-                     "usage": llm_usage},
-                usage=llm_usage, stop_reason=stop,
+                     "usage": usage},
+                usage=usage, stop_reason=stop,
                 message_id=llm_group_key,
                 context_window=cu_fields.get("context_window"),
                 context_pct=cu_fields.get("context_pct"),
@@ -1804,6 +1823,38 @@ class ClaudeCodeAgentRunner:
                     await _bg._sweep_bg(ctx)
 
                     cls_name = type(sdk_msg).__name__
+                    if cls_name == "StreamEvent":
+                        # message_start carries accurate input/cache tokens (and
+                        # a priming output_tokens) plus the streaming message id;
+                        # message_delta overlays the finalized cumulative
+                        # output_tokens and the real stop_reason; message_stop
+                        # finalizes the message into stream_usage_by_msg. The
+                        # message id is tracked from message_start because the
+                        # delta/stop events do not repeat it.
+                        ev = getattr(sdk_msg, "event", None)
+                        ev = ev if isinstance(ev, dict) else {}
+                        etype = ev.get("type")
+                        if etype == "message_start":
+                            start_msg = ev.get("message")
+                            start_msg = start_msg if isinstance(start_msg, dict) else {}
+                            stream_cur_msg_id = start_msg.get("id")
+                            u = start_msg.get("usage")
+                            stream_cur_usage = dict(u) if isinstance(u, dict) else {}
+                            stream_cur_stop_reason = None
+                        elif etype == "message_delta":
+                            u = ev.get("usage")
+                            if isinstance(u, dict):
+                                stream_cur_usage.update(u)
+                            delta = ev.get("delta")
+                            if isinstance(delta, dict):
+                                stream_cur_stop_reason = delta.get("stop_reason")
+                        elif etype == "message_stop":
+                            if stream_cur_msg_id is not None:
+                                stream_usage_by_msg[stream_cur_msg_id] = (
+                                    stream_cur_usage, stream_cur_stop_reason)
+                            stream_cur_msg_id = None
+                            stream_cur_usage = {}
+                            stream_cur_stop_reason = None
                     imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
                     for content in thinkings:
                         elog.append(agent_id=aid, type="thinking",

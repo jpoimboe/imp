@@ -59,6 +59,16 @@ FakeThinkingBlock.__name__ = "ThinkingBlock"
 
 
 @dataclass
+class FakeStreamEvent:
+    # Runner uses type(msg).__name__ == "StreamEvent" and reads .event, the raw
+    # Anthropic API stream event dict the SDK delivers as StreamEvent.event.
+    event: dict[str, Any]
+
+
+FakeStreamEvent.__name__ = "StreamEvent"
+
+
+@dataclass
 class FakeAssistantMessage:
     content: list[Any]
     message_id: str | None = None
@@ -201,6 +211,25 @@ def tool_result(id_: str, content: str, is_error: bool = False) -> FakeToolResul
 
 def thinking(content: str) -> FakeThinkingBlock:
     return FakeThinkingBlock(thinking=content)
+
+
+def message_start(message_id: str, usage: dict[str, Any]) -> FakeStreamEvent:
+    return FakeStreamEvent(event={
+        "type": "message_start",
+        "message": {"id": message_id, "usage": usage},
+    })
+
+
+def message_delta(usage: dict[str, Any], stop_reason: Any) -> FakeStreamEvent:
+    return FakeStreamEvent(event={
+        "type": "message_delta",
+        "usage": usage,
+        "delta": {"stop_reason": stop_reason},
+    })
+
+
+def message_stop() -> FakeStreamEvent:
+    return FakeStreamEvent(event={"type": "message_stop"})
 
 
 @dataclass

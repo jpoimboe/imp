@@ -25,6 +25,9 @@ from imp.providers.claude_code_session_store import (
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
     assistant,
+    message_delta,
+    message_start,
+    message_stop,
     result,
     text,
     thinking,
@@ -4034,4 +4037,57 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     loaded = t.load()
     assert loaded[2].role == "user"
     assert loaded[2].content[0].text == _CONTINUATION_NUDGE
+
+
+@pytest.mark.anyio
+async def test_stream_event_usage_overrides_partial_assistant_usage(
+        tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    # Stream events for message m1 precede its AssistantMessage. message_start
+    # carries accurate input/cache tokens plus a priming output_tokens=1; the
+    # AssistantMessage fragment carries a streaming-partial output_tokens=8 and a
+    # null stop_reason; message_delta carries the finalized output_tokens=250 and
+    # the real stop_reason.
+    scripted = [
+        message_start("m1", usage={
+            "input_tokens": 1200,
+            "cache_read_input_tokens": 800,
+            "cache_creation_input_tokens": 300,
+            "output_tokens": 1,
+        }),
+        message_delta(usage={"output_tokens": 250}, stop_reason="end_turn"),
+        message_stop(),
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+            message_id="m1", model="served-x",
+            usage={"input_tokens": 1200, "output_tokens": 8},
+            stop_reason=None),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    assert [r["payload"]["message_id"] for r in resps] == ["m1"]
+    usage = resps[0]["payload"]["usage"]
+    # AC1: finalized cumulative output_tokens from message_delta, not 8 or 1.
+    assert usage["output_tokens"] == 250
+    # AC3: input/cache come from message_start and stay accurate.
+    assert usage["input_tokens"] == 1200
+    assert usage["cache_read_input_tokens"] == 800
+    assert usage["cache_creation_input_tokens"] == 300
+    # AC1: raw.usage mirrors the persisted usage.
+    assert resps[0]["payload"]["raw"]["usage"]["output_tokens"] == 250
+    # AC2: real stop_reason from the stream, never null.
+    assert resps[0]["payload"]["stop_reason"] == "end_turn"
+    assert resps[0]["payload"]["raw"]["stop_reason"] == "end_turn"
 
