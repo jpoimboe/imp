@@ -50,6 +50,7 @@ from imp.engine.feedback import (
 )
 from imp.engine.gates import (
     RuleMatch,
+    ScriptInterrupted,
     evaluate_rules,
     run_script,
 )
@@ -528,7 +529,8 @@ async def _dispatch_step(
         return await _route_script(step, change, state, log,
                                    test_gates=test_gates,
                                    sandbox_policy=sandbox_policy,
-                                   max_parallel_test_runs=max_parallel_test_runs)
+                                   max_parallel_test_runs=max_parallel_test_runs,
+                                   coordinator=coordinator)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -637,6 +639,7 @@ async def _route_script(
     *, test_gates: TestGates | None = None,
     sandbox_policy: Any = None,
     max_parallel_test_runs: int = 1,
+    coordinator: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step, state, change)
     command = step.command
@@ -655,6 +658,10 @@ async def _route_script(
     # signal receiver, the remote-channel poller), freezing the UI at
     # "running · 0s" until the command returns. Only the blocking wait moves off
     # the loop; the event emits stay on the loop thread (single terminal writer).
+    def _abort() -> bool:
+        return bool(coordinator.should_pause)
+
+    abort = _abort if step.interruptible else None
     output_path = None
     if step.output_schema is not None:
         fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json")
@@ -679,7 +686,7 @@ async def _route_script(
                                      change_dir=change.change_dir,
                                      output_path=output_path,
                                      test_gates=test_gates),
-                policy=sandbox_policy, command=command))
+                policy=sandbox_policy, command=command, abort=abort))
         if output_path is not None:
             assert step.output_schema is not None
             try:
@@ -692,6 +699,8 @@ async def _route_script(
                     "step": step.name, "exit": out["exit"],
                     "stdout": out["stdout"], "stderr": str(e)})
                 return Pause(reason="script_blocked"), str(e), {}
+    except ScriptInterrupted:
+        return Pause(interrupt=True), None, {}
     finally:
         if output_path is not None:
             output_path.unlink(missing_ok=True)

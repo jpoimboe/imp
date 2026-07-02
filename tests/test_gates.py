@@ -736,3 +736,133 @@ def test_run_script_timeout_tears_down_gracefully(tmp_path) -> None:
         run_script(step, cwd=tmp_path)
     elapsed = time.monotonic() - t0
     assert elapsed >= 1 + GATE_KILL_GRACE_S
+
+
+def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> None:
+    """An interruptible gate whose run_script raises ScriptInterrupted resolves to
+    Pause(interrupt=True): rule evaluation, feedback, and the script_blocked/
+    step_completed events are all skipped (a killed run is not a gate verdict)."""
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.gates import ScriptInterrupted
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="verify", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="./scripts/run-verify.sh fast", interruptible=True,
+    )
+    coordinator = types.SimpleNamespace(should_pause=True)
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with mock.patch("imp.engine.executor.run_script",
+                        side_effect=ScriptInterrupted):
+            action, feedback, muts = await _route_script(
+                step, change, state, log, coordinator=coordinator)
+        assert isinstance(action, Pause)
+        assert action.interrupt is True
+        assert feedback is None
+        assert muts == {}
+        types_seen = [e["type"] for e in log.read()]
+        assert "script_blocked" not in types_seen
+        assert "step_completed" not in types_seen
+
+    anyio.run(main)
+
+
+def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
+    """For an interruptible step run_script receives a callable abort predicate
+    that reads coordinator.should_pause live (not a snapshot)."""
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="verify", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo hi", interruptible=True,
+    )
+    coordinator = types.SimpleNamespace(should_pause=False)
+    captured: dict[str, object] = {}
+
+    def fake_run_script(*args, **kwargs):
+        captured["abort"] = kwargs.get("abort")
+        return {"exit": 0, "stdout": "hi", "stderr": ""}
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
+            action, _feedback, _ = await _route_script(
+                step, change, state, log, coordinator=coordinator)
+        assert isinstance(action, Continue)
+        abort = captured["abort"]
+        assert callable(abort)
+        assert abort() is False                 # reads should_pause == False
+        coordinator.should_pause = True
+        assert abort() is True                   # live read, not a snapshot
+
+    anyio.run(main)
+
+
+def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
+    """Regression: a non-interruptible gate (default) passes abort=None and runs
+    to completion, ignoring should_pause entirely (today's behavior)."""
+    import types
+    import unittest.mock as mock
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        change_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="mutating-gate", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo hi",                        # interruptible defaults False
+    )
+    coordinator = types.SimpleNamespace(should_pause=True)
+    captured: dict[str, object] = {"abort": "unset"}
+
+    def fake_run_script(*args, **kwargs):
+        captured["abort"] = kwargs.get("abort")
+        return {"exit": 0, "stdout": "hi", "stderr": ""}
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
+            action, _feedback, _ = await _route_script(
+                step, change, state, log, coordinator=coordinator)
+        assert isinstance(action, Continue)
+        assert captured["abort"] is None
+
+    anyio.run(main)
