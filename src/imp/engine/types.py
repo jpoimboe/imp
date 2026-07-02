@@ -188,6 +188,7 @@ class Step:
     show_output: bool = False   # script body: stdout as a • message (scripts only)
     phase_show_label: bool = True  # owning phase's show_label, stamped at load (like phase_label)
     output_schema: OutputSchema | None = None  # script-only typed $IMP_OUTPUT contract
+    interruptible: bool = False  # script-only: gate is safe to kill mid-run on interrupt
 
 
 @dataclass(frozen=True, slots=True)
