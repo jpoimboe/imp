@@ -2078,3 +2078,63 @@ def test_show_label_false_script_reveals_frame_on_pause_live_and_matches_log() -
     body = _body(out)
     assert any("merge-guard" in ln for ln in body)   # frame revealed on pause
     assert body == _render_body(events)              # live == imp log, line for line
+
+
+def test_terminal_nested_pause_renders_live_and_matches_render_tree() -> None:
+    # Pause fires after step_completed (mid-phase): the PauseNode nests as a phase
+    # child. finish()'s force-walk must reach and emit it, and the live body must
+    # match render_tree line-for-line (live == imp log).
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("4", "workflow_paused", reason="max_loops", interrupt_reason="max_loops"),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("paused (max_loops)" in ln for ln in body)
+    assert body == _render_body(events)
+
+
+def test_terminal_pause_flushes_warnings_summary_in_live() -> None:
+    # finish() calls finalize() before the force-walk, so a reasoned terminal
+    # pause with a warning drops the root warnings summary into the live body.
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "runner_warning", agent_id="step:design/spec", message="alpha"),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "workflow_paused", reason="max_loops", interrupt_reason="max_loops"),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("paused (max_loops)" in ln for ln in body)
+    assert any("1 warning this run" in ln for ln in body)
+
+
+def test_mid_session_nested_pause_emits_via_normal_walk() -> None:
+    # A pause during an OPEN step nests inside it. A still-open subagent fold in
+    # that step would block the DFS walk; the fold-finalize guard clears
+    # `running`, so the normal on_event walk (no finish()) reaches the pause.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
+           input={"subagent_name": "reviewer"}),
+        ev("4", "workflow_paused", reason="interrupt", interrupt_reason="interrupt"),
+    ]:
+        drv.on_event(e)
+    # No finish(): the normal walk must already have emitted the nested pause.
+    assert any("paused (interrupt)" in ln for ln in _body(out))

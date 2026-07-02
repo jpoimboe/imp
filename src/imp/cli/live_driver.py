@@ -233,6 +233,7 @@ class LiveDriver:
     def finish(self) -> None:
         """Run end / pause / error: force-flush any still-open burst/subagent so
         the final block is emitted, then clear the status line."""
+        self._builder.finalize()
         self._walk(force=True)
         self._status.reset()
 
