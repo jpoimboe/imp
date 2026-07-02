@@ -861,9 +861,27 @@ def _h_waiting_for_test_lane(
 ) -> None:
     self._flush_burst()
     self._append(LiteralTextNode(text="waiting for a test slot", color_role="lifecycle"))
+    # The step's `started` already fired, so current_activity() reads the step's
+    # "running tests" phrase — wrong while we're blocked on the lane. Override the
+    # live footer verb until test_lane_acquired clears it back.
+    if self._step_stack:
+        self._step_stack[-1].live_label = "waiting for a test slot"
 
 
 NarrativeBuilder._HANDLERS["waiting_for_test_lane"] = _h_waiting_for_test_lane
+
+
+def _h_test_lane_acquired(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    self._flush_burst()
+    # Slot in hand — drop the "waiting for a test slot" override so the footer
+    # reverts to the step's phrase ("running tests").
+    if self._step_stack:
+        self._step_stack[-1].live_label = None
+
+
+NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
 
 
 def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -883,7 +901,6 @@ def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, An
 NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
-NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_lane_event
 
 
 def _ensure_phase(self: NarrativeBuilder, name: str,
