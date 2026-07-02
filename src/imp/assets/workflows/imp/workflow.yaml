@@ -220,7 +220,7 @@ phases:
 
       - name: deferred-sweep
         file: agents/deferred-sweep.md
-        tier: medium
+        tier: high
         label: sweeping deferred tasks
         rules:
           - {if: {converge_verify_tolerated: true}, goto: wait-for-head}
