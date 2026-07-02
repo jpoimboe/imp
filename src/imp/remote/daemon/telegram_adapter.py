@@ -259,6 +259,11 @@ class TelegramNorthAdapter:
         re-surfaces this blocked Change would be permanently suppressed. A
         prompt-less awaiting_user_input needs no special handling: format_outbound
         renders the '[title] needs your input' header alone, a useful alert."""
+        if event.get("_replay"):
+            event_id = event.get("id")
+            if event_id is not None:
+                self._alert_all.mark(change_id, event_id)
+            return
         if not self._alert_all.enabled():
             return
         etype = event.get("type")
