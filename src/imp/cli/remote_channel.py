@@ -121,6 +121,16 @@ def _default_on_error(message: str) -> None:
     _log.warning("%s", message)
 
 
+def _close_proc_streams(proc: Any) -> None:
+    """Close the driver's pipe fds so a GC'd Popen doesn't leak a ResourceWarning.
+    Idempotent and best-effort: stderr may already be closed by the drain task, and
+    stdout is DEVNULL (None). stdin is the one nothing else closes."""
+    for stream in (proc.stdin, proc.stderr):
+        if stream is not None:
+            with contextlib.suppress(Exception):
+                stream.close()
+
+
 class RemoteChannel:
     """imp's host for one external driver process. on_event is the synchronous
     event tap (allowlist -> augment -> one best-effort NDJSON line); start/stop own
@@ -197,6 +207,7 @@ class RemoteChannel:
         if self._proc.poll() is not None:
             self._on_error(
                 f"driver exited during startup (rc {self._proc.returncode})")
+            _close_proc_streams(self._proc)
             self._proc = None
             return False
         tg.start_soon(self._stderr_drain)
@@ -230,17 +241,25 @@ class RemoteChannel:
 
     async def stop(self) -> None:
         """Tear the driver down: SIGTERM, a short grace, then SIGKILL (spec AC 9).
-        No-op when never spawned or already exited (idempotent). Closing stderr via
-        termination ends the stderr-drain thread's blocked readline.
+        No-op when never spawned; when the driver already exited, skips signalling
+        but still closes the pipe fds (idempotent). Closing stderr via termination
+        ends the stderr-drain thread's blocked readline.
         Uses abandon_on_cancel=True so the grace window is honoured even if the
         process ignores SIGTERM — the abandoned thread is safe; Popen.wait() is
         internally locked."""
         proc = self._proc
-        if proc is None or proc.poll() is not None:
+        if proc is None:
             return
-        proc.terminate()
-        with anyio.move_on_after(_TERM_GRACE_SECONDS):
-            await anyio.to_thread.run_sync(proc.wait, abandon_on_cancel=True)
-        if proc.poll() is None:
-            proc.kill()
-            await anyio.to_thread.run_sync(proc.wait)
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                with anyio.move_on_after(_TERM_GRACE_SECONDS):
+                    await anyio.to_thread.run_sync(proc.wait, abandon_on_cancel=True)
+                if proc.poll() is None:
+                    proc.kill()
+                    await anyio.to_thread.run_sync(proc.wait)
+        finally:
+            # Close stdin (and stderr, if the drain task didn't) so the Popen can be
+            # GC'd without a ResourceWarning — including the path where the driver
+            # already exited on its own before stop() was called.
+            _close_proc_streams(proc)

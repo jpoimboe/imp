@@ -24,6 +24,8 @@ class TestGates:
     subprocess. A falsy command (None or "") => its IMP_TEST_CMD_* var is omitted
     (treated as not configured); a None timeout => its var is omitted and the gate
     script applies its own default."""
+
+    __test__ = False  # pytest: not a test class — these are test-command gates
     fast: str | None = None
     slow: str | None = None
     fast_timeout: int | None = None

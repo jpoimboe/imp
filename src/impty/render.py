@@ -179,7 +179,10 @@ def _coverage(path: str | None) -> frozenset[int]:
         return frozenset()
     try:
         from fontTools.ttLib import TTFont
-        return frozenset(TTFont(path, fontNumber=0, lazy=True).getBestCmap())
+        # lazy=True keeps the font file open for on-demand table reads; close it
+        # (via the context manager) once the cmap is read so the fd isn't leaked.
+        with TTFont(path, fontNumber=0, lazy=True) as tt:
+            return frozenset(tt.getBestCmap())
     except Exception:
         return frozenset()
 

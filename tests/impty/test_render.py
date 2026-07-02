@@ -33,7 +33,8 @@ def test_render_full_includes_history_rows(tmp_path: Path) -> None:
         stream.feed(f"row {i}\r\n".encode())   # scroll rows into history
     frame = render_screen(screen, str(tmp_path / "frame.png"))
     full = render_screen(screen, str(tmp_path / "full.png"), full=True)
-    assert Image.open(full).height > Image.open(frame).height
+    with Image.open(full) as full_img, Image.open(frame) as frame_img:
+        assert full_img.height > frame_img.height
 
 
 def test_render_full_excludes_prealt_history_in_screen_regime(tmp_path: Path) -> None:
@@ -47,4 +48,5 @@ def test_render_full_excludes_prealt_history_in_screen_regime(tmp_path: Path) ->
     frame = render_screen(screen, str(tmp_path / "frame.png"))
     full = render_screen(screen, str(tmp_path / "full.png"), full=True)
     # No history prepended in SCREEN regime -> full is the same height as the frame.
-    assert Image.open(full).height == Image.open(frame).height
+    with Image.open(full) as full_img, Image.open(frame) as frame_img:
+        assert full_img.height == frame_img.height

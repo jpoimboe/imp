@@ -55,11 +55,19 @@ markers = [
     "codex_parallel: codex parallel-MCP-dispatch concurrency probe; XFAIL on codex builds that serialize MCP sub_agent dispatch. Deselected from the default test-live via -m 'not codex_parallel'; run on demand with `make test-live-codex-parallel`.",
 ]
 filterwarnings = [
-    # Regression guards — message-scoped so they fire ONLY on the specific
-    # issues we fixed, never on unrelated third-party / Python deprecations or
-    # the (deliberately deferred) resource-warning backlog.
-    "error:.*use of fork\\(\\) may lead to deadlocks in the child:DeprecationWarning",
-    "error:There is no current event loop:DeprecationWarning",
+    # Allowlist posture: EVERY warning is an error, so first-party mistakes —
+    # bad test collection, our own deprecations, any newly-introduced warning —
+    # fail the run instead of scrolling past unseen. The carve-outs below are
+    # the only exceptions, each justified.
+    "error",
+    # ResourceWarning is a deferred backlog. The bulk are unclosed anyio/asyncio
+    # streams raised from third-party close sites during GC, which filterwarnings
+    # can't attribute back to imp — so we can't error on "just ours" without
+    # also failing on third-party leaks. Kept ignored until the leaks are chased
+    # down. A few DO originate in first-party code (src/imp/cli/remote_channel.py,
+    # tests/impty/test_render.py) and are worth fixing at the source separately.
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
     # Third-party, not fixable here: uvicorn imports deprecated websockets.legacy,
     # pulled in transitively by the codex SDK test server. Re-evaluate on a
     # uvicorn / codex-SDK bump.
