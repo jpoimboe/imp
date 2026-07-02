@@ -11,6 +11,7 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
+    deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
     synthesize_native_success_on_resume,
@@ -486,6 +487,32 @@ def test_synthesize_native_success_noop_without_trailing_tool_use(tmp_path: Path
     t.append(msgs[0])
     assert synthesize_native_success_on_resume(
         msgs, t, InMemoryEventLog(), "x") is None
+
+
+def test_deliver_engine_continuation_journals_internal_event_not_user_message(
+    tmp_path: Path,
+) -> None:
+    msgs: list[Message] = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="asking a question"),)),
+    ]
+    t = Transcript(tmp_path / "transcript.jsonl")
+    elog = InMemoryEventLog()
+
+    injected = deliver_engine_continuation(msgs, t, elog, "step:p/s", "CONTINUE NOW")
+
+    # Drives the LLM: appended as the trailing user turn in messages AND transcript.
+    assert msgs[-1] is injected
+    assert injected.role == "user"
+    assert injected.content[0].text == "CONTINUE NOW"
+    assert t.load()[-1].content[0].text == "CONTINUE NOW"
+
+    # Journaled as an INTERNAL engine_continuation event — never a human user_message.
+    types = [e["type"] for e in elog.read()]
+    assert "engine_continuation" in types
+    assert "user_message" not in types
+    cont = next(e for e in elog.read() if e["type"] == "engine_continuation")
+    assert cont["payload"] == {"text": "CONTINUE NOW"}
 
 
 def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: Path) -> None:

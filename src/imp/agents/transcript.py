@@ -396,4 +396,21 @@ def deliver_reply_on_resume(
     return injected
 
 
+def deliver_engine_continuation(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, reply: str,
+) -> Message:
+    """Deliver an engine-generated continuation nudge as the next user turn.
+
+    Same transcript effect as deliver_reply_on_resume — append the nudge to
+    `messages`/`transcript` so it drives the next LLM turn — but journal an
+    INTERNAL `engine_continuation` event (payload `{"text": reply}`) instead of a
+    human `user_message`. The nudge is the engine self-continuing a retry, not a
+    person speaking, so it must NOT render with the `>` caret.
+    """
+    injected = Message(role="user", content=(TextBlock(text=reply),))
+    messages.append(injected)
+    transcript.append(injected)
+    elog.append(agent_id=agent_id, type="engine_continuation", payload={"text": reply})
+    return injected
 
