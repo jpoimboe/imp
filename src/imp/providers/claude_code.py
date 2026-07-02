@@ -1846,7 +1846,7 @@ class ClaudeCodeAgentRunner:
                             if isinstance(u, dict):
                                 stream_cur_usage.update(u)
                             delta = ev.get("delta")
-                            if isinstance(delta, dict):
+                            if isinstance(delta, dict) and delta.get("stop_reason") is not None:
                                 stream_cur_stop_reason = delta.get("stop_reason")
                         elif etype == "message_stop":
                             if stream_cur_msg_id is not None:
