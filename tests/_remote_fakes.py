@@ -1,10 +1,10 @@
 # tests/_remote_fakes.py
 """A real, minimal fake driver process for RemoteChannel lifecycle tests.
 
-It logs each NDJSON stdin line to --log, optionally floods --stderr-bytes to stderr
-before reading stdin, and exits with code 1 when --exit 1 is given (the "fails to
-come up" case). Reading stdin to EOF lets a clean teardown (imp closes stdin) end
-the process by itself."""
+It logs each NDJSON stdin line to --log and optionally floods --stderr-bytes to
+stderr before reading stdin. Reading stdin to EOF lets a clean teardown (imp closes
+stdin) end the process by itself. The "fails to come up" case (exit_immediately) is
+a separate near-instant shell command — see fake_driver_command."""
 from __future__ import annotations
 
 import sys
@@ -15,8 +15,6 @@ import sys
 import signal
 
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
-if args.get("--exit") == "1":
-    sys.exit(1)
 if args.get("--ignore-sigterm") == "1":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 log = args.get("--log")
@@ -38,6 +36,15 @@ def fake_driver_command(
     exit_immediately: bool = False, ignore_sigterm: bool = False,
     stderr_bytes: int | None = None,
 ) -> list[str]:
+    if exit_immediately:
+        # The "fails to come up" case: exit 1 without paying Python-interpreter
+        # startup. On a loaded box the child's boot can exceed RemoteChannel's
+        # crash-probe window (_CRASH_PROBE_SECONDS, 0.2s), so a Python driver that
+        # exits on startup can still look alive at the probe's single poll —
+        # flaking the "start returns False" assertion. A shell exit is near-instant
+        # and reliably lands inside the window. This mode is never combined with
+        # the other flags below (they configure a driver that stays up).
+        return ["/bin/sh", "-c", "exit 1"]
     script = tmp_path / "fake_driver.py"
     script.write_text(_DRIVER_SRC)
     cmd = [sys.executable, str(script)]
