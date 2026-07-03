@@ -12,7 +12,7 @@ import pytest
 
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import Help
-from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
+from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.runner import (
     _await_shutdown_signals,
     _poll_worker,
@@ -52,9 +52,9 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
 ) -> None:
     _seed_control(tmp_path)
     cid = "2026-06-13-abc"
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    home = tmp_path / ".imp" / "changes" / cid
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "change.json").write_text("{}")
     monkeypatch.setattr(
         "imp.remote.daemon.discover.snapshot",
         lambda _cr, c: ("running", "plan", "T") if c == cid else None)

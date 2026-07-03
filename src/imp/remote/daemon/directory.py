@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.remote.daemon.discover import list_changes, socket_is_live
+from imp.remote.daemon.discover import socket_is_live
 from imp.remote.session.discover import session_socket_path
 
 
@@ -13,9 +13,10 @@ def session_is_resident(control_root: Path, change_id: str) -> bool:
 
 
 def resident_session_ids(control_root: Path) -> set[str]:
-    """The in-flight change ids whose session daemon is currently resident."""
+    """Change ids with a live session socket; scans live homes only, never the archive."""
+    from imp.cli.main import _list_change_homes
     return {
-        info.id
-        for info in list_changes(control_root)
-        if socket_is_live(session_socket_path(control_root, info.id))
+        cid
+        for cid in _list_change_homes(control_root)
+        if socket_is_live(session_socket_path(control_root, cid))
     }

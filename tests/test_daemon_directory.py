@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
 import socket
 from pathlib import Path
 from typing import Any
 
 from imp.remote.daemon.directory import resident_session_ids, session_is_resident
-from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.session.discover import session_socket_path
 
 
@@ -35,29 +35,56 @@ def test_session_is_resident_tracks_a_live_session_socket(tmp_path: Path) -> Non
         path.unlink(missing_ok=True)
 
 
-def test_resident_session_ids_returns_only_changes_with_a_live_session(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    # Two in-flight changes are known to the per-repo daemon, but only one has a
-    # resident session daemon (a live socket). The directory returns that one only —
-    # a hibernated in-flight change is NOT resident.
-    control_root = tmp_path
-    infos = [
-        ChangeInfo(id="live-one", title="t1", status="running", step="plan"),
-        ChangeInfo(id="hibernated-one", title="t2", status="paused", step="plan"),
-    ]
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes", lambda _cr: infos)
+def _make_home(control_root: Path, change_id: str) -> Path:
+    home = control_root / ".imp" / "changes" / change_id
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "change.json").write_text(json.dumps({"title": change_id}))
+    return home
 
-    live_path = session_socket_path(control_root, "live-one")
-    live_path.parent.mkdir(parents=True, exist_ok=True)
-    if live_path.exists():
-        live_path.unlink()
+
+def _bind_live_socket(control_root: Path, change_id: str) -> socket.socket:
+    path = session_socket_path(control_root, change_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen()
+    return srv
+
+
+def test_resident_session_ids_returns_only_changes_with_a_live_session(
+    tmp_path: Path,
+) -> None:
+    # Two live in-flight homes on disk; only one has a resident session daemon
+    # (a live socket). A hibernated in-flight home (no live socket) is NOT
+    # resident, and no session is invented for a home that has none.
+    control_root = tmp_path
+    _make_home(control_root, "live-one")
+    _make_home(control_root, "hibernated-one")
+
+    srv = _bind_live_socket(control_root, "live-one")
     try:
-        srv.bind(str(live_path))
-        srv.listen()
         assert resident_session_ids(control_root) == {"live-one"}
     finally:
         srv.close()
-        live_path.unlink(missing_ok=True)
+        session_socket_path(control_root, "live-one").unlink(missing_ok=True)
+
+
+def test_resident_session_ids_never_enumerates_the_archive(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    # archived_ids is the sole archive gateway; guarding it uncalled proves zero event-blob reads.
+    control_root = tmp_path
+    _make_home(control_root, "live-one")
+
+    def _boom(_cr: Path) -> list[str]:
+        raise AssertionError("residency poll must not enumerate the archive")
+
+    monkeypatch.setattr("imp.cli.main.archive_read.archived_ids", _boom)
+
+    srv = _bind_live_socket(control_root, "live-one")
+    try:
+        assert resident_session_ids(control_root) == {"live-one"}
+    finally:
+        srv.close()
+        session_socket_path(control_root, "live-one").unlink(missing_ok=True)
