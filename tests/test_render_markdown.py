@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
-from imp.cli.render_markdown import _md_escape, render_markdown
+from imp.cli.render_markdown import (
+    _md_escape,
+    _subagent_status_md,
+    render_markdown,
+)
 
 
 def _ev(eid, etype, agent_id=None, **payload):
@@ -192,3 +196,54 @@ def test_step_context_fold_default_full_and_hostile_prompt() -> None:
     assert "provider: anthropic" in full
     assert "max_tool_calls: 50" in full
     assert _in_code_fence(full, "<script>")   # untrusted system_prompt is fenced/inert
+
+
+def _subagent_events():
+    return [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "looks good"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success","summary":"all clear"}', error=False),
+    ]
+
+
+def test_subagent_lean_row_default_no_children_no_io() -> None:
+    out = _md(_subagent_events())
+    assert "· reviewer" in out          # lean one-line status row
+    assert "looks good" not in out      # no recursed subagent I/O
+    assert "all clear" not in out       # no outcome in default mode
+    assert "<details>" not in out       # a subagent fold is NOT a <details>
+
+
+def test_subagent_expands_inline_under_full() -> None:
+    out = _md(_subagent_events(), full=True)
+    assert "**reviewer**" in out        # expanded fold header
+    assert "looks good" in out          # recursed subagent narrative
+    assert "all clear" in out           # structured outcome rendered
+    assert "<details>" not in out       # a subagent fold is never a <details>
+
+
+def _make_subagent(**kw):
+    defaults = dict(subagent_name="reviewer", event_id="e", block_id="b",
+                    nested=nv.NarrativeBuilder(), running=False)
+    defaults.update(kw)
+    return nv.SubagentFold(**defaults)
+
+
+def test_subagent_status_tags_and_elapsed() -> None:
+    assert "(running)" in _subagent_status_md(_make_subagent(running=True))
+    assert "(stalled)" in _subagent_status_md(
+        _make_subagent(terminal_state="stalled"))
+    assert "(interrupted)" in _subagent_status_md(
+        _make_subagent(terminal_state="interrupted"))
+    assert "(context exhausted)" in _subagent_status_md(
+        _make_subagent(terminal_state="context_exhausted"))
+    assert "(failed)" in _subagent_status_md(_make_subagent(is_error=True))
+    row = _subagent_status_md(_make_subagent(start_ts="2024-01-01T00:00:00Z",
+                                             end_ts="2024-01-01T00:00:05Z"))
+    assert "reviewer" in row and "5" in row   # elapsed suffix present

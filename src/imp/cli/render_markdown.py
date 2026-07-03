@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -53,6 +54,53 @@ def _tool_call_text(c: nv.ToolCall) -> str:
         lines.append("")
         lines.append(c.result.rstrip("\n"))
     return "\n".join(lines)
+
+
+def _subagent_status_md(sub: nv.SubagentFold) -> str:
+    label = sub.subagent_name
+    model = rt._subagent_model(sub)
+    if model:
+        label += f" · {model}"
+    if sub.running:
+        label += " (running)"
+    elif sub.terminal_state == "stalled":
+        label += " (stalled)"
+    elif sub.terminal_state == "interrupted":
+        label += " (interrupted)"
+    elif sub.terminal_state == "context_exhausted":
+        label += " (context exhausted)"
+    elif sub.is_error:
+        label += " (failed)"
+    elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
+    done = "" if sub.running else rt.fmt_seconds_done(elapsed)
+    if done:
+        label += f" · {done}"
+    return f"· {_md_escape(label)}"
+
+
+def _subagent_outcome_md(sub: nv.SubagentFold) -> str:
+    raw = sub.outcome or ""
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        data = None
+    if not isinstance(data, dict):
+        return _md_escape(raw)
+    scalars: list[str] = []
+    blocks: list[tuple[str, str]] = []
+    for k, v in data.items():
+        if isinstance(v, str) and "\n" in v:
+            blocks.append((k, v))
+        else:
+            scalars.append(f"{k}={v}")
+    parts: list[str] = []
+    if scalars:
+        parts.append("→ " + _md_escape(" · ".join(scalars)))
+    for k, v in blocks:
+        parts.append(f"**{_md_escape(k)}:**\n\n{_md_escape(v)}")
+    return "\n\n".join(parts)
 
 
 def _walk_children(children: list[Any], *, full: bool, level: int) -> Iterator[str]:
@@ -115,6 +163,16 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
             inner_blocks.append(_fence(system_prompt))
         yield _details(_md_escape(f"context · {provider}/{model}"),
                        "\n\n".join(inner_blocks), full=full)
+        return
+    if isinstance(node, nv.SubagentFold):
+        if not full:
+            yield _subagent_status_md(node)
+            return
+        yield f"**{_md_escape(node.subagent_name)}**"
+        yield from _walk_children(node.tree.root.children, full=full, level=level + 1)
+        outcome = _subagent_outcome_md(node)
+        if outcome:
+            yield outcome
         return
     # Additional node branches are appended by later tasks, before this return.
     return
