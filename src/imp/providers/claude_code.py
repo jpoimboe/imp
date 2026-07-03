@@ -82,6 +82,7 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     build_resume_manifest,
+    captured_result_key,
     deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
@@ -598,6 +599,25 @@ def _append_captured_tool_result(
             {"name": name, "input": tool_input, "content": content, "is_error": False})
         with path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+
+
+def _load_captured_tool_results(
+    transcript_dir: Path,
+) -> dict[str, tuple[str, bool]]:
+    """Load the per-step capture sidecar into a captured_result_key(name, input) ->
+    (content, is_error) dict; {} when absent, so repair falls back to placeholders.
+    """
+    path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
+    if not path.exists():
+        return {}
+    out: dict[str, tuple[str, bool]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        key = captured_result_key(rec["name"], rec["input"])
+        out[key] = (rec["content"], rec["is_error"])
+    return out
 
 
 def _wrap_one(
@@ -1547,7 +1567,9 @@ class ClaudeCodeAgentRunner:
                         b.tool_use_id for b in balanced.content
                         if isinstance(b, ToolResultBlock) and b.is_error)
             elif not native_resume:
-                synth = repair_dangling_tool_use_on_resume(messages, transcript)
+                synth = repair_dangling_tool_use_on_resume(
+                    messages, transcript,
+                    captured=_load_captured_tool_results(invocation.transcript_dir))
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
@@ -1594,7 +1616,8 @@ class ClaudeCodeAgentRunner:
                     classify_resume(existing) is ResumeState.STEP_COMPLETED)
                 if tail_is_complete_step and invocation.retry_feedback:
                     synth = repair_dangling_tool_use_on_resume(
-                        messages, transcript, feedback=invocation.retry_feedback)
+                        messages, transcript, feedback=invocation.retry_feedback,
+                        captured=_load_captured_tool_results(invocation.transcript_dir))
                     if synth is not None:
                         for rb in synth:
                             elog.append_tool_result(agent_id=aid, block=rb)
@@ -1612,7 +1635,9 @@ class ClaudeCodeAgentRunner:
                     deliver_reply_on_resume(
                         messages, transcript, elog, aid, RESUME_REDO_NUDGE)
                 elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                    synth = repair_dangling_tool_use_on_resume(messages, transcript)
+                    synth = repair_dangling_tool_use_on_resume(
+                        messages, transcript,
+                        captured=_load_captured_tool_results(invocation.transcript_dir))
                     if synth is not None:
                         for rb in synth:
                             elog.append_tool_result(agent_id=aid, block=rb)
@@ -2152,7 +2177,8 @@ class ClaudeCodeAgentRunner:
                                 # later transcript stash); it no longer feeds a live
                                 # replay.
                                 repair_dangling_tool_use_on_resume(
-                                    messages, transcript)
+                                    messages, transcript,
+                                    captured=_load_captured_tool_results(invocation.transcript_dir))
                                 instr = handoff_instruction(handoff_path)
                                 instr_msg = Message(
                                     role="user",

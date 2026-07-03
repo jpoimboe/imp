@@ -1,6 +1,7 @@
 # tests/test_claude_code_runner.py
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
@@ -4170,3 +4171,94 @@ async def test_multi_fragment_group_uses_harvested_usage(
     assert resps[0]["payload"]["stop_reason"] == "end_turn"
     assert resps[0]["payload"]["raw"]["usage"]["output_tokens"] == 175
     assert resps[0]["payload"]["raw"]["stop_reason"] == "end_turn"
+
+
+def test_load_captured_tool_results_reads_sidecar(tmp_path: Path) -> None:
+    from imp.agents.transcript import captured_result_key
+    from imp.providers.claude_code import (
+        CAPTURED_TOOL_RESULTS_FILENAME,
+        _load_captured_tool_results,
+    )
+
+    sidecar = tmp_path / CAPTURED_TOOL_RESULTS_FILENAME
+    sidecar.write_text(
+        json.dumps({"name": "write_file", "input": {"path": "a"},
+                    "content": "wrote a", "is_error": False}) + "\n"
+        + json.dumps({"name": "edit_file", "input": {"path": "b"},
+                      "content": "edited b", "is_error": False}) + "\n")
+
+    got = _load_captured_tool_results(tmp_path)
+    # Keyed by captured_result_key; the prefix-stripped transcript name resolves the
+    # same entry, proving capture(bare) <-> resume(mcp__imp__-prefixed) reconciliation.
+    assert got[captured_result_key("write_file", {"path": "a"})] == ("wrote a", False)
+    assert got[captured_result_key("mcp__imp__edit_file", {"path": "b"})] == ("edited b", False)
+
+
+def test_load_captured_tool_results_missing_file_is_empty(tmp_path: Path) -> None:
+    from imp.providers.claude_code import _load_captured_tool_results
+
+    assert _load_captured_tool_results(tmp_path) == {}
+
+
+@pytest.mark.anyio
+async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> None:
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code import CAPTURED_TOOL_RESULTS_FILENAME
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        session_key,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)),
+        # Mid-tool interrupt: a dangling read_file with NO tool_result — but its real
+        # success WAS captured before the teardown.
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t1", name="mcp__imp__read_file",
+                         input={"path": "b.txt"}),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    await store.append(skey, message_to_session_records(
+        msgs[:2], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model="claude-sonnet-4-5", start_index=0))
+
+    # The sidecar Task 1 would have written at execution time — keyed by name+input.
+    (inv.transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME).write_text(
+        json.dumps({"name": "read_file", "input": {"path": "b.txt"},
+                    "content": "REAL BODY OF b.txt", "is_error": False}) + "\n")
+
+    scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    # The streamed repair result for the dangling t1 carries the REAL captured body
+    # (not the synthetic "interrupted" placeholder) and is success-shaped.
+    streamed = created[0].queries[0]
+    tr = streamed[0]["message"]["content"][0]
+    assert tr["type"] == "tool_result"
+    assert tr["tool_use_id"] == "t1"
+    assert tr["content"] == "REAL BODY OF b.txt"
+    assert "interrupted" not in tr["content"]
+    assert tr.get("is_error") in (False, None)
