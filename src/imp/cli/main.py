@@ -1942,8 +1942,15 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
     state_json: bytes | None
     change_json: bytes | None
     if (cdir / "change.json").exists():
-        state_json = (cdir / "state" / "state.json").read_bytes()
-        change_json = (cdir / "change.json").read_bytes()
+        # A change home mid-creation has change.json written but state.json not
+        # yet (Change.create is not atomic across the two files). The daemon's
+        # scan loop can hit that window, so tolerate it like _scan_change_homes
+        # rather than crashing the whole listing.
+        try:
+            state_json = (cdir / "state" / "state.json").read_bytes()
+            change_json = (cdir / "change.json").read_bytes()
+        except FileNotFoundError:
+            return None
         last = _last_event_iso(cdir / "events.jsonl") or ""
     else:
         state_json = archive_read.read_state_json(control, change_id)
