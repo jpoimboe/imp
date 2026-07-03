@@ -99,3 +99,19 @@ def test_build_nudge_message_is_deterministic_and_names_reason() -> None:
     assert msg == build_nudge_message(reason)  # stable, no nonce/timestamp
     assert reason in msg
     assert "complete_step" in msg
+
+
+def test_make_nudge_event_carries_reason_and_attempt() -> None:
+    from imp.agents.output_guard import make_nudge_event
+
+    nudge = Nudge(
+        message="Your complete_step call was invalid: ...",
+        reason="missing required field 'blocking'",
+        attempt=2,
+    )
+    ev = make_nudge_event(nudge)
+    assert ev["type"] == "output_validation_nudge"
+    assert ev["payload"] == {
+        "message": "missing required field 'blocking'",
+        "attempt": 2,
+    }

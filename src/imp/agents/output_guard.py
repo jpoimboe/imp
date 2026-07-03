@@ -71,3 +71,11 @@ def validate_output_or_nudge(
             attempt=guard.noprogress_streak,
         )
     return Ok()
+
+
+def make_nudge_event(nudge: Nudge) -> dict[str, object]:
+    """Single-sourced nudge event payload, emitted identically by every provider."""
+    return {
+        "type": "output_validation_nudge",
+        "payload": {"message": nudge.reason, "attempt": nudge.attempt},
+    }

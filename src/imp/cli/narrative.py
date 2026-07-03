@@ -1682,6 +1682,18 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         message=f"[{cat}] retry {attempt} ({secs}s)", category=cat, is_warning=True))
 
 
+def _h_output_validation_nudge(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Render inline as a warning so a malformed complete_step that was nudged and
+    # recovered in-session doesn't look like a failure (mirrors agent_retry).
+    reason = str(p.get("message", "output validation"))
+    attempt = p.get("attempt", "?")
+    self._append(ErrorNode(
+        message=f"malformed complete_step, nudged (attempt {attempt}): {reason}",
+        is_warning=True))
+
+
 def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     step = str(p.get("step", "?"))
@@ -1715,6 +1727,7 @@ def _h_engine_continuation(
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
+NarrativeBuilder._HANDLERS["output_validation_nudge"] = _h_output_validation_nudge
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
 NarrativeBuilder._HANDLERS["engine_continuation"] = _h_engine_continuation
