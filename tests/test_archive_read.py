@@ -5,7 +5,6 @@ from pathlib import Path
 
 from imp.engine.archive.read import (
     completed_rows,
-    last_event_iso,
     pick_newest_plan,
     read_change_json,
     read_state_json,
@@ -109,39 +108,6 @@ def _git_init(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
-
-
-def test_last_event_iso_returns_last_event_timestamp(tmp_path: Path) -> None:
-    _git_init(tmp_path)
-    _archive(tmp_path, "alpha", "completed")
-    assert last_event_iso(tmp_path, "alpha") == "2026-06-01T00:00:09+00:00"
-
-
-def test_last_event_iso_returns_none_when_not_archived(tmp_path: Path) -> None:
-    _git_init(tmp_path)
-    assert last_event_iso(tmp_path, "ghost") is None
-
-
-def test_last_event_iso_returns_none_for_empty_events(tmp_path: Path) -> None:
-    from imp.engine import archive
-
-    _git_init(tmp_path)
-    events_path = tmp_path / "alpha.jsonl"
-    events_path.write_bytes(b"")
-    change_json_path = tmp_path / "alpha-change.json"
-    change_json_path.write_text(json.dumps({
-        "id": "alpha", "title": "Alpha", "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    state_json_path = tmp_path / "alpha-state.json"
-    state_json_path.write_text(json.dumps({
-        "id": "alpha", "status": "completed", "step": None, "merge_commit": "c0ffee"}))
-    archive.archive_change(
-        tmp_path, "alpha",
-        events_path=events_path,
-        change_json_path=change_json_path,
-        state_json_path=state_json_path,
-    )
-    assert last_event_iso(tmp_path, "alpha") is None
 
 
 def test_status_of_returns_status_from_record(tmp_path: Path) -> None:

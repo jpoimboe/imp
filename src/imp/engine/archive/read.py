@@ -196,20 +196,6 @@ def rehydrate_change(control_root: Path, change_id: str) -> Path:
     return change_dir
 
 
-def last_event_iso(control_root: Path, change_id: str) -> str | None:
-    raw = read_events(control_root, change_id)
-    if raw is None:
-        return None
-    stripped = raw.rstrip()
-    if not stripped:
-        return None
-    line = stripped[stripped.rfind(b"\n") + 1:].decode("utf-8", errors="replace")
-    try:
-        return str(json.loads(line)["timestamp"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-
-
 def status_of(control_root: Path, change_id: str) -> str | None:
     raw = read_state_json(control_root, change_id)
     if raw is None:
