@@ -161,6 +161,10 @@ class LoopGuard:
             return exc
         return None
 
+    @property
+    def noprogress_streak(self) -> int:
+        return self._noprogress_count
+
     def _is_progress(self, record: TurnRecord) -> bool:
         if record.has_complete_step:
             return True
