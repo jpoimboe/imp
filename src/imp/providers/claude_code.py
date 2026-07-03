@@ -1421,7 +1421,7 @@ class ClaudeCodeAgentRunner:
             (not is_fresh)
             and classify_resume(existing) in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
-                ResumeState.DANGLING_TOOL_USE)
+                ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
         )
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
@@ -1460,7 +1460,7 @@ class ClaudeCodeAgentRunner:
             shape = classify_resume(existing)
             native_eligible = shape in (
                 ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
-                ResumeState.DANGLING_TOOL_USE)
+                ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
             reason = (
                 "resume shape is not native-eligible"
                 if not native_eligible
@@ -1560,6 +1560,16 @@ class ClaudeCodeAgentRunner:
                 # append a user turn to `messages` (which IS `existing`), so a
                 # later _tail_has_complete_step(existing) would wrongly return False.
                 tail_is_complete_step = _tail_has_complete_step(existing)
+                # STEP_COMPLETED: trailing prose over an ALREADY-resolved
+                # complete_step. Unlike the dangling arms above, the result is
+                # already in the loaded session, so there is NO SUCCESS-fold and
+                # NO resume_base advance — rewriting the accepted result to
+                # is_error would lie about history. Deliver the handback (feedback
+                # or redo nudge) as a plain trailing user turn; it becomes the
+                # streamed kicking delta and re-drives the step (an empty delta
+                # would deadlock receive_response()).
+                tail_step_completed = (
+                    classify_resume(existing) is ResumeState.STEP_COMPLETED)
                 if tail_is_complete_step and invocation.retry_feedback:
                     synth = repair_dangling_tool_use_on_resume(
                         messages, transcript, feedback=invocation.retry_feedback)
@@ -1571,6 +1581,12 @@ class ClaudeCodeAgentRunner:
                         messages, transcript, elog, aid)
                     if injected is not None:
                         resume_base += 1
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+                elif tail_step_completed and invocation.retry_feedback:
+                    deliver_reply_on_resume(
+                        messages, transcript, elog, aid, invocation.retry_feedback)
+                elif tail_step_completed:
                     deliver_reply_on_resume(
                         messages, transcript, elog, aid, RESUME_REDO_NUDGE)
                 elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:

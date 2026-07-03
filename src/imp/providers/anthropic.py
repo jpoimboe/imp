@@ -550,6 +550,10 @@ class AnthropicAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
+            # STEP_COMPLETED never arises in-process: this runner returns at
+            # complete_step, so a trailing prose turn can never persist over a
+            # resolved complete_step here — the new state is inert for the
+            # in-process providers (openai/codex mirror this resume block).
             state = classify_resume(messages)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
