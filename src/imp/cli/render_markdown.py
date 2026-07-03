@@ -8,6 +8,12 @@ from typing import Any
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
+from imp.cli.render_summary import (
+    _WAIT_THRESHOLD,
+    StepRow,
+    SummaryHeader,
+    _fmt_compact,
+)
 
 _MAX_HEADING = 6
 
@@ -247,4 +253,34 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
 def render_markdown(tree: nv.NarrativeTree, *, full: bool) -> str:
     """Render a NarrativeTree to a Markdown document string."""
     blocks = [b for b in _walk(tree.root, full=full, level=1) if b]
+    return "\n\n".join(blocks).strip() + "\n"
+
+
+def render_summary_markdown(summary: list[StepRow], *,
+                            header: SummaryHeader) -> str:
+    """Render the `imp log --summary` view as a Markdown document."""
+    total = ("running" if header.total_seconds is None
+             else _fmt_compact(header.total_seconds))
+    blocks = [
+        _heading(1, _md_escape(f"{header.workflow} — {header.change_id}")),
+        f"**Status:** {_md_escape(header.status)} · **Total:** {total}",
+    ]
+    grouped: list[tuple[str, list[str]]] = []
+    for row in summary:
+        if not grouped or grouped[-1][0] != row.phase:
+            grouped.append((row.phase, []))
+        wall = row.wall_seconds
+        dur = "running" if wall is None else _fmt_compact(wall)
+        wait = (_fmt_compact(row.wait_seconds)
+                if row.wait_seconds >= _WAIT_THRESHOLD else "—")
+        step = _md_escape(row.step).replace("|", "\\|")
+        grouped[-1][1].append(f"| {step} | {dur} | {wait} |")
+    for phase, rows in grouped:
+        table = "\n".join([
+            _heading(2, _md_escape(phase)),
+            "| Step | Duration | Wait |",
+            "|---|---|---|",
+            *rows,
+        ])
+        blocks.append(table)
     return "\n\n".join(blocks).strip() + "\n"

@@ -6,6 +6,13 @@ from imp.cli.render_markdown import (
     _md_escape,
     _subagent_status_md,
     render_markdown,
+    render_summary_markdown,
+)
+from imp.cli.render_summary import (
+    StepRow,
+    SummaryHeader,
+    build_summary,
+    summary_total,
 )
 
 
@@ -363,3 +370,62 @@ def test_breadcrumb_interrupted_variant() -> None:
     tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
     out = render_markdown(tree, full=True)
     assert "_spec interrupted_" in out
+
+
+def _tev(eid, etype, *, timestamp, **payload):
+    return {"id": eid, "type": etype, "timestamp": timestamp, "payload": payload}
+
+
+def test_summary_markdown_carries_header_and_step_table() -> None:
+    events = [
+        _tev("1", "change_created", timestamp="2024-01-01T00:00:00Z", title="x"),
+        _tev("2", "step_started", timestamp="2024-01-01T00:00:00Z",
+             step="spec", kind="agent", phase="design"),
+        _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",
+             step="spec", kind="agent", action={"verb": "continue"}, var_mutations={}),
+    ]
+    header = SummaryHeader(workflow="imp", change_id="gumu81",
+                           status="merged", total_seconds=summary_total(events))
+    out = render_summary_markdown(build_summary(events), header=header)
+    assert "# imp — gumu81" in out           # SummaryHeader workflow/id
+    assert "merged" in out                    # status carried
+    assert "## design" in out                 # phase grouping heading
+    assert "| Step | Duration | Wait |" in out
+    assert "| spec |" in out                  # step row
+    assert "1m00s" in out                     # start→completion wall clock
+
+
+def test_summary_wait_threshold_running_duration_and_total() -> None:
+    rows = [
+        StepRow(phase="design", step="waited",
+                start_ts="2024-01-01T00:00:00Z",
+                end_ts="2024-01-01T00:00:30Z", wait_seconds=10.0),
+        StepRow(phase="design", step="quick",
+                start_ts="2024-01-01T00:00:00Z",
+                end_ts="2024-01-01T00:00:05Z", wait_seconds=2.0),
+        StepRow(phase="design", step="open",
+                start_ts="2024-01-01T00:00:00Z", end_ts=None),
+    ]
+    header = SummaryHeader(workflow="imp", change_id="c",
+                           status="running", total_seconds=None)
+    out = render_summary_markdown(rows, header=header)
+    assert "| waited | 0m30s | 0m10s |" in out   # wait >= threshold → shown
+    assert "| quick | 0m05s | — |" in out        # wait < threshold → dash
+    assert "| open | running | — |" in out       # open step → running duration
+    assert "**Total:** running" in out           # total_seconds None → running
+
+
+def test_summary_multiple_phases_grouped_in_order() -> None:
+    rows = [
+        StepRow(phase="design", step="spec",
+                start_ts="2024-01-01T00:00:00Z",
+                end_ts="2024-01-01T00:00:10Z"),
+        StepRow(phase="build", step="impl",
+                start_ts="2024-01-01T00:00:10Z",
+                end_ts="2024-01-01T00:00:20Z"),
+    ]
+    header = SummaryHeader(workflow="imp", change_id="c",
+                           status="merged", total_seconds=30.0)
+    out = render_summary_markdown(rows, header=header)
+    assert out.index("## design") < out.index("## build")
+    assert "| spec |" in out and "| impl |" in out
