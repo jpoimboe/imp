@@ -87,3 +87,39 @@ def test_html_and_md_are_mutually_exclusive(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         main(["log", slug, "--html", "--md"])
     assert exc.value.code == 2
+
+
+def test_md_dash_streams_to_stdout(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    rc = main(["log", slug, "--md", "-"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "# add auth" in out                   # document streamed, not a path
+    assert not (tmp_path / f"imp-log-{slug}.md").exists()
+
+
+def test_html_dash_streams_to_stdout(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    rc = main(["log", slug, "--html", "-"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "<!DOCTYPE html>" in out
+    assert not (tmp_path / f"imp-log-{slug}.html").exists()
+
+
+def test_md_explicit_path_writes_there(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    rc = main(["log", slug, "--md", "out.md"])
+    assert rc == 0
+    assert (tmp_path / "out.md").read_text().startswith("# add auth")
+    assert not (tmp_path / f"imp-log-{slug}.md").exists()
+    assert "out.md" in capsys.readouterr().out
+
+
+def test_html_explicit_path_writes_there(tmp_path, monkeypatch, capsys):
+    slug = _setup(tmp_path, monkeypatch)
+    rc = main(["log", slug, "--html", "out.html"])
+    assert rc == 0
+    assert "<!DOCTYPE html>" in (tmp_path / "out.html").read_text()
+    assert not (tmp_path / f"imp-log-{slug}.html").exists()
+    assert "out.html" in capsys.readouterr().out

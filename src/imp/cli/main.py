@@ -1767,9 +1767,17 @@ def _write_log_export(args: argparse.Namespace, control: Path,
         from imp.cli.render_html import render_html
         document = render_html(document)
         ext = "html"
+        target = args.html
     else:
         ext = "md"
-    path = Path(f"imp-log-{change_id}.{ext}")
+        target = args.md
+    if target == "-":
+        sys.stdout.write(document)
+        return 0
+    if target is _LOG_EXPORT_DEFAULT:
+        path = Path(f"imp-log-{change_id}.{ext}")
+    else:
+        path = Path(target)
     path.write_text(document, encoding="utf-8")
     print(path)
     return 0
