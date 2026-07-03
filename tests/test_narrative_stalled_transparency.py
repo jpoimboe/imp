@@ -37,3 +37,33 @@ def test_non_stalled_error_keeps_hard_error_line() -> None:
     ])
     assert "error: [api] 500 upstream" in out
     assert "resuming" not in out          # the stalled rewording never leaks here
+
+
+def test_non_stalled_retry_keeps_bracket_format() -> None:
+    """A non-stalled retry category is untouched — still `[cat] retry N (Xs)`."""
+    out = _render([
+        {"id": "e1", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "network", "attempt": 1, "backoff_seconds": 1.0}},
+    ])
+    assert "warning: [network] retry 1 (1.0s)" in out
+    assert "resuming" not in out
+
+
+def test_stall_retry_sequence_both_lines_calm() -> None:
+    """The normal stall-retry: the always-present stalled `error` followed by the
+    retry-only stalled `agent_retry` render as two non-alarming warning siblings and
+    NO hard error node — the whole teardown reads calm."""
+    out = _render([
+        {"id": "e1", "parent_id": None, "agent_id": "step:implement/coder",
+         "type": "error",
+         "payload": {"category": "stalled", "kind": "stalled",
+                     "message": "no events for 300s"}},
+        {"id": "e2", "parent_id": None, "agent_id": None,
+         "type": "agent_retry",
+         "payload": {"category": "stalled", "attempt": 1, "backoff_seconds": 4.0}},
+    ])
+    assert TEARDOWN in out
+    assert "warning: resuming — verifying prior work, not redoing it" in out
+    assert "error:" not in out
+    assert "[stalled] retry" not in out

@@ -1672,6 +1672,12 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     cat = p.get("category", "?")
     attempt = p.get("attempt", "?")
     secs = p.get("backoff_seconds", "?")
+    if cat == "stalled":
+        # Stalled retry is the calm resume re-entry breadcrumb, not a technical retry line.
+        self._append(ErrorNode(
+            message="resuming — verifying prior work, not redoing it",
+            category=cat, is_warning=True))
+        return
     self._append(ErrorNode(
         message=f"[{cat}] retry {attempt} ({secs}s)", category=cat, is_warning=True))
 

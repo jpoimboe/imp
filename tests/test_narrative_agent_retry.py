@@ -23,7 +23,7 @@ def test_agent_retry_renders_category_and_attempt() -> None:
     assert "retry" in blob.lower()
 
 
-def test_stalled_agent_retry_renders_as_warning_not_config_error() -> None:
+def test_stalled_agent_retry_renders_verification_breadcrumb() -> None:
     from imp.cli.render_text import render_tree
 
     tree = nv.build_tree([
@@ -33,6 +33,7 @@ def test_stalled_agent_retry_renders_as_warning_not_config_error() -> None:
     ])
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
 
-    assert "warning: [stalled] retry 2 (4.0s)" in out
+    assert "warning: resuming — verifying prior work, not redoing it" in out
+    assert "[stalled] retry" not in out   # the old technical retry line is gone
     assert "error:" not in out
     assert "[config]" not in out
