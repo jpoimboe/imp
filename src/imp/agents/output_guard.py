@@ -39,7 +39,10 @@ def build_nudge_message(reason: str) -> str:
     return (
         f"Your complete_step call was invalid: {reason}. "
         "Call complete_step again with all required fields present and correctly "
-        "typed."
+        "typed. Emit each field as its own separate argument; if your tool call "
+        "renders as XML, close every parameter with the literal </parameter> tag "
+        "(not a name-matched tag like </findings>), so no field is folded into "
+        "another."
     )
 
 

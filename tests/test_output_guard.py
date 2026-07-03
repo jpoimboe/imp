@@ -39,6 +39,10 @@ def test_missing_required_field_returns_nudge_naming_the_field() -> None:
     assert "blocking" in res.reason
     assert "missing required field" in res.reason
     assert "complete_step" in res.message
+    # the nudge always spells out the tool-call format so a name-mirrored
+    # closing tag (e.g. </findings>) that folds one field into another is
+    # correctable in-session.
+    assert "</parameter>" in res.message
 
 
 def test_wrong_type_returns_nudge_naming_the_field_and_type() -> None:
