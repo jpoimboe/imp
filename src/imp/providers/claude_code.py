@@ -581,33 +581,6 @@ def _readonly_annotations() -> Any | None:
     return None
 
 
-CAPTURED_TOOL_RESULTS_FILENAME = "captured_tool_results.jsonl"
-
-
-def _append_captured_tool_result(
-    transcript_dir: Path, tool_use_id: str, content: str,
-) -> None:
-    """Append one execution-time success result to the per-step sidecar.
-
-    Write-only-at-execution: a stall/resume that tears down the turn after a plain
-    tool already succeeded can then prefer this real result over the synthetic
-    'interrupted' placeholder. Captured results are always is_error=False (only the
-    success path calls this).
-
-    Best-effort telemetry: the write is called from inside _impl's try/except, so a
-    raised OSError would be caught there and flip the tool's REAL success into an
-    is_error result — the exact false-failure this change exists to eliminate. Swallow
-    write errors so capture can never do that; a lost capture line merely falls back to
-    today's synthetic placeholder on resume.
-    """
-    line = json.dumps(
-        {"tool_use_id": tool_use_id, "content": content, "is_error": False})
-    path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
-    with contextlib.suppress(OSError):
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-
-
 def _wrap_one(
     name: str, t: Tool, ctx: ToolContext, state: _RunState, sdk_tool: Any,
 ) -> Any:
@@ -738,9 +711,6 @@ def _wrap_one(
                         "name": "bash",
                         "signal": -rc,
                     })
-            if tuid and ctx.parent_transcript_dir is not None:
-                _append_captured_tool_result(
-                    ctx.parent_transcript_dir, tuid, content_str)
             return _tool_response(content_str, is_error=False)
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))
