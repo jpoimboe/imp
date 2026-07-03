@@ -40,6 +40,22 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         yield _heading(level, _md_escape(node.label or node.name))
         yield from _walk_children(node.children, full=full, level=level + 1)
         return
+    if isinstance(node, nv.AgentTextNode):
+        text = node.text.strip()
+        if text:
+            yield _md_escape(text)
+        return
+    if isinstance(node, nv.LiteralTextNode):
+        text = node.text.strip()
+        if text:
+            yield _md_escape(text)
+        return
+    if isinstance(node, nv.UserMessageNode):
+        text = node.text.strip()
+        if node.interactive and text:
+            yield "\n".join("> " + line
+                            for line in _md_escape(text).split("\n"))
+        return
     # Additional node branches are appended by later tasks, before this return.
     return
 
