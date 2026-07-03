@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import imp.cli.main as m
+from imp.engine import archive
 
 
 # _Row = (id, status, step, last_iso, title, created_at)
@@ -38,3 +40,44 @@ def test_past_change_count_counts_completed_rows(monkeypatch, tmp_path: Path) ->
         m, "_completed_rows",
         lambda control: [_row("x", "completed", ""), _row("y", "abandoned", "")])
     assert m._past_change_count(tmp_path) == 2
+
+
+def _git_init(root: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+
+
+def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
+    events = control / f"{cid}.jsonl"
+    events.write_bytes((
+        f'{{"id":"{cid}-e0","timestamp":"2026-06-01T00:00:00+00:00",'
+        f'"type":"change_created","payload":{{"id":"{cid}"}}}}\n'
+        f'{{"id":"{cid}-e1","timestamp":"{last_ts}",'
+        '"type":"step_started","payload":{"step":"plan-writer"}}\n'
+    ).encode())
+    cj = control / f"{cid}-change.json"
+    cj.write_text(json.dumps({
+        "id": cid, "title": cid.title(), "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = control / f"{cid}-state.json"
+    sj.write_text(json.dumps({"id": cid, "status": "completed", "step": None}))
+    archive.archive_change(
+        control, cid, events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+
+def test_resolve_default_id_uses_index_not_blob(monkeypatch, tmp_path: Path) -> None:
+    from imp.engine.archive.blobstore import LocalBlobStore
+
+    _git_init(tmp_path)
+    _archive_with_last_ts(tmp_path, "older", "2026-06-01T00:00:05+00:00")
+    _archive_with_last_ts(tmp_path, "newer", "2026-06-09T00:00:05+00:00")
+
+    def _boom_get(self, digest):
+        raise AssertionError("_resolve_default_id must not read an event blob")
+
+    monkeypatch.setattr(LocalBlobStore, "get", _boom_get)
+    assert m._resolve_default_id(tmp_path) == "newer"

@@ -1584,15 +1584,12 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
 
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent change home by its events.jsonl mtime, else
-    most-recent archived id (by last-event timestamp), else None."""
+    the most-recent archived id (by the index's last_event_ts), else None."""
     homes = _list_change_homes(control)
     if homes:
         return max(homes, key=lambda s: (_change_home(control, s)
                                          / "events.jsonl").stat().st_mtime)
-    archived = archive_read.archived_ids(control)
-    if not archived:
-        return None
-    return max(archived, key=lambda s: _journal_last_iso(control, s) or "")
+    return archive_read.most_recent_archived_id(control)
 
 
 _NO_CHANGES_MESSAGE = "No changes."

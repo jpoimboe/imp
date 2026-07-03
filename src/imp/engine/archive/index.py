@@ -65,6 +65,13 @@ def has_change(conn: sqlite3.Connection, change_id: str) -> bool:
         "SELECT 1 FROM changes WHERE id = ?", (change_id,)).fetchone() is not None
 
 
+def most_recent_id(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT id FROM changes WHERE last_event_ts IS NOT NULL"
+        " ORDER BY last_event_ts DESC, id DESC LIMIT 1").fetchone()
+    return row[0] if row else None
+
+
 def completed_rows(
     conn: sqlite3.Connection,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:

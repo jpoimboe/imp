@@ -13,6 +13,33 @@ from imp.engine.archive.read import (
 )
 
 
+def _boom_get(self, digest: str) -> bytes | None:
+    raise AssertionError("index-backed lookup must not read an event blob")
+
+
+def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
+    from imp.engine import archive
+
+    events = control / f"{cid}.jsonl"
+    events.write_bytes((
+        f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:00+00:00","type":"change_created",'
+        f'"payload":{{"id":"{cid}"}}}}\n'
+        f'{{"id":"{cid}-e1","parent_id":"{cid}-e0","agent_id":"plan-writer",'
+        f'"timestamp":"{last_ts}","type":"step_started",'
+        '"payload":{"step":"plan-writer"}}\n'
+    ).encode())
+    cj = control / f"{cid}-change.json"
+    cj.write_text(json.dumps({
+        "id": cid, "title": cid.title(), "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    sj = control / f"{cid}-state.json"
+    sj.write_text(json.dumps({"id": cid, "status": "completed", "step": None}))
+    archive.archive_change(
+        control, cid, events_path=events,
+        change_json_path=cj, state_json_path=sj)
+
+
 def _events_bytes(cid: str) -> bytes:
     return (
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
@@ -253,3 +280,23 @@ def test_read_step_blobs_empty_when_not_resumable(tmp_path: Path) -> None:
         steps_dir=steps, resumable=False)
 
     assert read_step_blobs(tmp_path, "conv") == {}
+
+
+def test_most_recent_archived_id_returns_newest_without_blob_read(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from imp.engine.archive.blobstore import LocalBlobStore
+    from imp.engine.archive.read import most_recent_archived_id
+
+    _git_init(tmp_path)
+    _archive_with_last_ts(tmp_path, "older", "2026-06-01T00:00:05+00:00")
+    _archive_with_last_ts(tmp_path, "newer", "2026-06-09T00:00:05+00:00")
+    monkeypatch.setattr(LocalBlobStore, "get", _boom_get)
+    assert most_recent_archived_id(tmp_path) == "newer"
+
+
+def test_most_recent_archived_id_none_when_archive_empty(tmp_path: Path) -> None:
+    from imp.engine.archive.read import most_recent_archived_id
+
+    _git_init(tmp_path)
+    assert most_recent_archived_id(tmp_path) is None
