@@ -2,6 +2,7 @@
 events to a sink."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ from imp.remote.daemon.directory import resident_session_ids
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.relay import SessionRelay
+
+_log = logging.getLogger("imp.daemon")
 
 
 class RelaySupervisor:
@@ -37,16 +40,31 @@ class RelaySupervisor:
     async def run(self) -> None:
         """Poll the directory forever, running one relay per resident change. Cancel
         the surrounding scope to stop."""
+        failing = False
         async with anyio.create_task_group() as tg:
             while True:
-                resident = resident_session_ids(self._control_root)
-                # A gated change that has since hibernated (left the directory) is
-                # eligible again, so a reply that rehydrates it re-attaches a relay.
-                self._gated &= resident
-                for change_id in resident:
-                    if change_id not in self._running and change_id not in self._gated:
-                        self._running.add(change_id)
-                        tg.start_soon(self._relay_one, change_id)
+                try:
+                    resident = resident_session_ids(self._control_root)
+                    # A gated change that has since hibernated (left the directory)
+                    # is eligible again, so a reply that rehydrates it re-attaches a
+                    # relay.
+                    self._gated &= resident
+                    for change_id in resident:
+                        if (change_id not in self._running
+                                and change_id not in self._gated):
+                            self._running.add(change_id)
+                            tg.start_soon(self._relay_one, change_id)
+                    failing = False
+                except Exception:
+                    # A poll must never kill the daemon. Directory reads are guarded
+                    # per-change in discover.py; this is the backstop for anything
+                    # else (a probe error, a bug). Log the first failure of a run,
+                    # suppress the repeats, and retry on the next poll. CancelledError
+                    # is a BaseException, so cancel-to-stop still propagates.
+                    if not failing:
+                        failing = True
+                        _log.warning("relay supervisor poll failed; retrying",
+                                     exc_info=True)
                 await anyio.sleep(self._poll_gap)
 
     def _subscribed_probe(self, change_id: str) -> Callable[[], bool] | None:

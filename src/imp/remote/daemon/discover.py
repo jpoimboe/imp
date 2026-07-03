@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger("imp.daemon")
 
 
 def socket_path(control_root: Path) -> Path:
@@ -30,7 +33,16 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
     from imp.cli.main import _INFLIGHT, _iter_change_ids, _row_for_id
     out: list[ChangeInfo] = []
     for change_id in _iter_change_ids(control_root):
-        row = _row_for_id(control_root, change_id)
+        try:
+            row = _row_for_id(control_root, change_id)
+        except Exception:
+            # A single mid-write or corrupt change home must never blind the
+            # whole directory — that would drop every resident session's relay
+            # and (in the daemon's scan loop) crash the daemon. Skip it; a later
+            # poll re-reads it once it settles.
+            _log.warning("list_changes: skipping %s (row read failed)",
+                         change_id, exc_info=True)
+            continue
         if row is None:
             continue
         change_id_, status_, step_, _last, title_, _created, _step_label = row
@@ -42,7 +54,14 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
 
 def snapshot(control_root: Path, change_id: str) -> tuple[str, str, str] | None:
     from imp.cli.main import _row_for_id
-    row = _row_for_id(control_root, change_id)
+    try:
+        row = _row_for_id(control_root, change_id)
+    except Exception:
+        # snapshot() feeds the relay's title_for from inside a task-group child,
+        # so a raise here would escape the supervisor's poll-loop guard and crash
+        # the daemon. Treat a transient/corrupt read as "no snapshot".
+        _log.warning("snapshot: %s row read failed", change_id, exc_info=True)
+        return None
     if row is None:
         return None
     _id, status, step, _last, title, _created, _step_label = row
