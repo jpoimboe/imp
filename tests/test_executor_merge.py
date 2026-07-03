@@ -256,6 +256,31 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
     anyio.run(main)
 
 
+def test_complete_merged_reaps_whole_home(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    (ch.project_root / "feature.txt").write_text("hi")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "feat")
+    state, log = _ctx(ch)
+
+    _action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
+    assert state.merge_commit is not None
+    home = ch.change_dir
+    assert home.exists()                       # home present before finalize
+
+    result = _complete(ch, state, log)
+    assert result.value == "completed"
+    assert not home.exists()                    # whole state home reaped, not just steps/
+
+    # The change is still fully recoverable from the archive.
+    from imp.engine import archive
+    from imp.engine.archive import record
+    rec = record.read_record(archive.records_root(tmp_path), "feat")
+    assert rec is not None
+    assert rec["final_state"]["status"] == "completed"
+
+
 def test_decisions_body_extracts_summary_section(tmp_path: Path) -> None:
     from imp.engine import executor
     spec = tmp_path / "spec.md"
