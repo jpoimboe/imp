@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from imp.agents.runner import (
     Message,
@@ -175,9 +175,21 @@ def _synthetic_tool_result_content(tool_name: str) -> str:
     return f"tool {tool_name!r} interrupted before result was captured"
 
 
+def captured_result_key(name: str, tool_input: dict[str, Any]) -> str:
+    """Reconciliation key matching a captured result to a dangling tool_use by name +
+    canonical input (no usable execution-time id exists for in-process MCP tools); the
+    mcp__imp__ prefix is stripped and input sorted-key canonicalized so a bare-name
+    capture matches a prefixed transcript block regardless of field order.
+    """
+    bare = (name[len("mcp__imp__"):]
+            if name.startswith("mcp__imp__") else name)
+    return bare + "\x00" + json.dumps(tool_input, sort_keys=True, default=str)
+
+
 def repair_dangling_tool_use_on_resume(
     messages: list[Message], transcript: Transcript,
     feedback: str | None = None,
+    captured: dict[str, tuple[str, bool]] | None = None,
 ) -> tuple[ToolResultBlock, ...] | None:
     """Restore the tool_use ↔ tool_result invariant before resuming.
 
@@ -209,6 +221,23 @@ def repair_dangling_tool_use_on_resume(
     model's own revision instruction. Rework tails are always shape-1 (a dangling
     `complete_step` assistant turn), so shape-2 ignores `feedback`.
     """
+    def _result_for(tu: ToolUseBlock) -> ToolResultBlock:
+        if captured is not None:
+            key = captured_result_key(tu.name, tu.input)
+            if key in captured:
+                content, is_err = captured[key]
+                return ToolResultBlock(
+                    tool_use_id=tu.id, content=content, is_error=is_err)
+        if feedback is not None and tu.name == "complete_step":
+            return ToolResultBlock(
+                tool_use_id=tu.id,
+                content=REWORK_RESULT_FRAME + "\n\n" + feedback,
+                is_error=True)
+        return ToolResultBlock(
+            tool_use_id=tu.id,
+            content=_synthetic_tool_result_content(tu.name),
+            is_error=True)
+
     if not messages:
         return None
     last = messages[-1]
@@ -219,16 +248,7 @@ def repair_dangling_tool_use_on_resume(
         ]
         if not tool_uses:
             return None
-        result_blocks = tuple(
-            ToolResultBlock(
-                tool_use_id=tu.id,
-                content=(REWORK_RESULT_FRAME + "\n\n" + feedback
-                         if feedback is not None and tu.name == "complete_step"
-                         else _synthetic_tool_result_content(tu.name)),
-                is_error=True,
-            )
-            for tu in tool_uses
-        )
+        result_blocks = tuple(_result_for(tu) for tu in tool_uses)
         repair = Message(
             role="user",
             content=(*result_blocks, TextBlock(text=RESUME_DURABILITY_NOTE)),
@@ -249,14 +269,7 @@ def repair_dangling_tool_use_on_resume(
         unmatched = [tu for tu in tool_uses if tu.id not in matched]
         if not unmatched:
             return None
-        result_blocks = tuple(
-            ToolResultBlock(
-                tool_use_id=tu.id,
-                content=_synthetic_tool_result_content(tu.name),
-                is_error=True,
-            )
-            for tu in unmatched
-        )
+        result_blocks = tuple(_result_for(tu) for tu in unmatched)
         # Anthropic requires tool_result blocks at the head of the user turn; the
         # original interrupt text follows, and the durability note frames the
         # (error-shaped) reconstructed results last.

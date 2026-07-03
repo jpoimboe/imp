@@ -538,3 +538,140 @@ def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: 
     assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
                for b in msgs[-1].content)
     assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
+
+
+def test_repair_prefers_captured_success_over_synthetic(tmp_path: Path) -> None:
+    """A dangling plain-tool whose (name, input) is in `captured` is repaired with the
+    REAL success body and is_error=False — not the synthetic 'interrupted' placeholder.
+    The transcript block is mcp__imp__-prefixed; the key strips the prefix."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                                      input={"path": "a.py", "content": "X"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("write_file", {"path": "a.py", "content": "X"})
+    synth = repair_dangling_tool_use_on_resume(
+        msgs, t, captured={key: ("wrote 42 bytes to a.py", False)})
+
+    assert synth is not None and len(synth) == 1
+    assert synth[0].tool_use_id == "w1"
+    assert synth[0].is_error is False
+    assert synth[0].content == "wrote 42 bytes to a.py"
+    # Survives the round-trip to disk (replayed on resume).
+    reloaded_results = [
+        b for m in Transcript(tmp_path / "transcript.jsonl").load()
+        for b in m.content if isinstance(b, ToolResultBlock)]
+    assert reloaded_results[0].content == "wrote 42 bytes to a.py"
+    assert reloaded_results[0].is_error is False
+
+
+def test_repair_falls_back_to_synthetic_when_key_absent(tmp_path: Path) -> None:
+    """A dangling tool_use whose (name, input) is NOT in `captured` keeps today's
+    synthetic is_error result — a genuinely-killed mid-execution tool has nothing
+    captured to prefer."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="b1", name="mcp__imp__bash",
+                                      input={"command": "x"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    # A captured entry for a DIFFERENT command — no match for {"command": "x"}.
+    other = captured_result_key("bash", {"command": "other"})
+    synth = repair_dangling_tool_use_on_resume(msgs, t, captured={other: ("ran", False)})
+
+    assert synth is not None and len(synth) == 1
+    assert synth[0].tool_use_id == "b1"
+    assert synth[0].is_error is True                     # synthetic fallback
+    assert "interrupted" in synth[0].content
+
+
+def test_repair_mixed_captured_and_synthetic_in_one_turn(tmp_path: Path) -> None:
+    """Two dangling tool_uses, one captured and one not: the captured one gets its real
+    success, the other the synthetic placeholder."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                         input={"path": "a", "content": "X"}),
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "y"}),
+        )),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("write_file", {"path": "a", "content": "X"})
+    synth = repair_dangling_tool_use_on_resume(msgs, t, captured={key: ("wrote a", False)})
+
+    by_id = {b.tool_use_id: b for b in synth}
+    assert by_id["w1"].is_error is False and by_id["w1"].content == "wrote a"
+    assert by_id["b1"].is_error is True and "interrupted" in by_id["b1"].content
+
+
+def test_repair_default_captured_none_unchanged(tmp_path: Path) -> None:
+    """Omitting `captured` (the default) reproduces today's synthetic-only repair, note
+    included."""
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="b1", name="mcp__imp__bash",
+                                      input={"command": "x"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    synth = repair_dangling_tool_use_on_resume(msgs, t)   # no captured
+
+    assert synth is not None and synth[0].is_error is True
+    # Durability note still rides on the turn (Task 3 refines when it drops).
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_DURABILITY_NOTE
+               for b in msgs[-1].content)
+
+
+def test_repair_shape2_prefers_captured_success(tmp_path: Path) -> None:
+    """Shape-2 (trailing user interrupt turn): a captured (name, input) is injected as
+    the REAL success into the existing user turn and survives the rewrite to disk."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                                      input={"path": "a", "content": "X"}),)),
+        Message(role="user",
+                content=(TextBlock(text="[Request interrupted by user]"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("write_file", {"path": "a", "content": "X"})
+    synth = repair_dangling_tool_use_on_resume(msgs, t, captured={key: ("wrote a", False)})
+
+    assert synth is not None and len(synth) == 1
+    assert synth[0].tool_use_id == "w1"
+    assert synth[0].is_error is False
+    assert synth[0].content == "wrote a"
+    # Injected into the trailing user turn and written back to disk via rewrite.
+    reloaded = Transcript(tmp_path / "transcript.jsonl").load()
+    results = [b for m in reloaded for b in m.content if isinstance(b, ToolResultBlock)]
+    assert results[0].content == "wrote a" and results[0].is_error is False
+    # Original interrupt text preserved.
+    assert any(isinstance(b, TextBlock) and "[Request interrupted by user]" in b.text
+               for m in reloaded for b in m.content)
