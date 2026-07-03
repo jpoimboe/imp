@@ -49,6 +49,12 @@ from imp.agents.loop_guard import (
     TurnRecord,
     _result_preview,
 )
+from imp.agents.output_guard import (
+    Nudge,
+    Ok,
+    make_nudge_event,
+    validate_output_or_nudge,
+)
 from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import (
     AgentInvocation,
@@ -98,7 +104,6 @@ from imp.engine.agent_run import (
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.drivers import driver_allowed_tools
-from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
@@ -2254,8 +2259,12 @@ class ClaudeCodeAgentRunner:
                         # (a turn ending in complete_step set pending_complete →
                         # progress → never trips). Observe before the end-of-turn
                         # handling so a detected loop wins over a nudge.
+                        # A complete_step turn is fed to the guard EXACTLY ONCE by
+                        # validate_output_or_nudge below. Skip the flush-observe
+                        # here so a malformed complete_step turn is not observed a
+                        # second time (double-feed would skew no-progress counters).
                         flushed = _flush_pending()
-                        if flushed is not None:
+                        if flushed is not None and not state.complete_step_called:
                             loop_err = guard.observe(flushed)
                             if loop_err is not None:
                                 yield perr.make_error_event(
@@ -2278,20 +2287,42 @@ class ClaudeCodeAgentRunner:
                         #   b) nudge via continuation_fn → send another query
                         #   c) no complete_step and no nudge → error
                         if state.complete_step_called:
-                            try:
-                                validate_agent_output(
-                                    state.complete_step_args,
-                                    invocation.agent_def.output_schema,
-                                )
-                            except Exception as ve:
-                                yield {"type": "error", "payload": {
-                                    "category": "agent_output_missing",
-                                    "kind": "output_validation",
-                                    "message": str(ve),
-                                }}
+                            res = validate_output_or_nudge(
+                                state.complete_step_args,
+                                invocation.agent_def.output_schema, guard)
+                            if isinstance(res, Ok):
+                                # Observe the flush-skipped TurnRecord so co-turn
+                                # tool outcomes remain visible to the guard. Result
+                                # is safely discarded: the invocation returns
+                                # immediately and guard state is thrown away.
+                                if flushed is not None:
+                                    guard.observe(flushed)
+                                yield {"type": "agent_output",
+                                       "payload": state.complete_step_args}
                                 return
-                            yield {"type": "agent_output",
-                                   "payload": state.complete_step_args}
+                            if isinstance(res, Nudge):
+                                ev = make_nudge_event(res)
+                                elog.append(agent_id=aid, type=ev["type"],
+                                            payload=ev["payload"])
+                                # Re-query the SAME session with the nudge so the
+                                # agent re-emits. Reset capture and interrupt-preempt
+                                # flag so next turn's complete_step is detected fresh.
+                                state.complete_step_called = False
+                                state.complete_step_args = {}
+                                self._complete_requested = False
+                                nudge_msg = Message(
+                                    role="user",
+                                    content=(TextBlock(text=res.message),))
+                                messages.append(nudge_msg)
+                                transcript.append(nudge_msg)
+                                elog.append_user_message(
+                                    agent_id=aid, message=nudge_msg)
+                                next_query = res.message
+                                requery = True
+                                break
+                            # LoopError: pause-to-human.
+                            yield perr.make_error_event(
+                                res, kind=getattr(res, "kind", ""))
                             return
 
                         if (ceiling is not None and tool_calls_used >= ceiling
