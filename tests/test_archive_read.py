@@ -300,3 +300,22 @@ def test_most_recent_archived_id_none_when_archive_empty(tmp_path: Path) -> None
 
     _git_init(tmp_path)
     assert most_recent_archived_id(tmp_path) is None
+
+
+def test_last_event_ts_matches_blob_last_line_without_blob_read(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from imp.engine.archive.blobstore import LocalBlobStore
+    from imp.engine.archive.read import last_event_ts
+
+    _git_init(tmp_path)
+    _archive(tmp_path, "alpha", "completed")
+    monkeypatch.setattr(LocalBlobStore, "get", _boom_get)
+    assert last_event_ts(tmp_path, "alpha") == "2026-06-01T00:00:09+00:00"
+
+
+def test_last_event_ts_none_when_not_archived(tmp_path: Path) -> None:
+    from imp.engine.archive.read import last_event_ts
+
+    _git_init(tmp_path)
+    assert last_event_ts(tmp_path, "ghost") is None

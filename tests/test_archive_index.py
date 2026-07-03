@@ -239,3 +239,34 @@ def test_most_recent_id_breaks_tie_on_highest_id(tmp_path: Path) -> None:
         assert index.most_recent_id(conn) == "zzz"
     finally:
         conn.close()
+
+
+def test_last_event_ts_returns_denormalized_value(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, ?)",
+            ("alpha", "2026-06-01T09:00:00+00:00"))
+        conn.commit()
+        assert index.last_event_ts(conn, "alpha") == "2026-06-01T09:00:00+00:00"
+    finally:
+        conn.close()
+
+
+def test_last_event_ts_none_when_id_absent(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        assert index.last_event_ts(conn, "ghost") is None
+    finally:
+        conn.close()
+
+
+def test_last_event_ts_none_when_column_null(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, NULL)", ("alpha",))
+        conn.commit()
+        assert index.last_event_ts(conn, "alpha") is None
+    finally:
+        conn.close()

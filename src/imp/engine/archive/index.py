@@ -72,6 +72,12 @@ def most_recent_id(conn: sqlite3.Connection) -> str | None:
     return row[0] if row else None
 
 
+def last_event_ts(conn: sqlite3.Connection, change_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT last_event_ts FROM changes WHERE id = ?", (change_id,)).fetchone()
+    return row[0] if row and row[0] else None
+
+
 def completed_rows(
     conn: sqlite3.Connection,
 ) -> list[tuple[str, str, str, str, str, str, str | None]]:

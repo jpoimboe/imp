@@ -1851,7 +1851,7 @@ def _last_event_iso(events_path: Path) -> str | None:
 
 
 def _journal_last_iso(control: Path, change_id: str) -> str | None:
-    return archive_read.last_event_iso(control, change_id)
+    return archive_read.last_event_ts(control, change_id)
 
 
 def _journal_status(control: Path, change_id: str) -> str | None:
