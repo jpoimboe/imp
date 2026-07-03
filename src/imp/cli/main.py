@@ -1692,6 +1692,10 @@ def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
                 pass
 
 
+_LOG_EXPORT_DEFAULT = object()
+"""Sentinel `const` for `--html`/`--md` given without a FILE argument."""
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
@@ -1723,6 +1727,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
 
+    if args.html is not None or args.md is not None:
+        return _write_log_export(args, control, change_id, events)
+
     width = _term_width()
     color = should_use_color(sys.stdout)
 
@@ -1747,6 +1754,42 @@ def _cmd_log(args: argparse.Namespace) -> int:
     lines = render_tree(tree, full=args.full, color=color, width=width,
                         display_width=_display_width())
     _page_or_print(lines, no_pager=args.no_pager)
+    return 0
+
+
+def _write_log_export(args: argparse.Namespace, control: Path,
+                      change_id: str, events: list[dict[str, Any]]) -> int:
+    if args.summary:
+        from imp.cli.render_markdown import render_summary_markdown
+        from imp.cli.render_summary import (
+            SummaryHeader,
+            build_summary,
+            summary_total,
+        )
+        row = _row_for_id(control, change_id)
+        status = row[1] if row is not None else "?"
+        workflow = parse_default_workflow(control / "imp" / "project.yaml")
+        header = SummaryHeader(workflow=workflow, change_id=change_id,
+                               status=status, total_seconds=summary_total(events))
+        document = render_summary_markdown(build_summary(events), header=header)
+    else:
+        from imp.cli import narrative
+        from imp.cli.render_markdown import render_markdown
+        document = render_markdown(narrative.build_tree(events), full=args.full)
+    if args.html is not None:
+        from imp.cli.render_html import render_html
+        document = render_html(document)
+        ext = "html"
+        target = args.html
+    else:
+        ext = "md"
+        target = args.md
+    if target == "-":
+        sys.stdout.write(document)
+        return 0
+    path = Path(f"imp-log-{change_id}.{ext}") if target is _LOG_EXPORT_DEFAULT else Path(target)
+    path.write_text(document, encoding="utf-8")
+    print(path)
     return 0
 
 
@@ -2495,6 +2538,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.",
+    )
+    p_log_export = p_log.add_mutually_exclusive_group()
+    p_log_export.add_argument(
+        "--html", nargs="?", metavar="FILE", const=_LOG_EXPORT_DEFAULT,
+        default=None,
+        help="Export the narrative as a self-contained HTML file "
+             "(FILE, or imp-log-<id>.html when omitted; '-' streams to stdout).",
+    )
+    p_log_export.add_argument(
+        "--md", nargs="?", metavar="FILE", const=_LOG_EXPORT_DEFAULT,
+        default=None,
+        help="Export the narrative as a Markdown file "
+             "(FILE, or imp-log-<id>.md when omitted; '-' streams to stdout).",
     )
     p_log.set_defaults(func=_cmd_log)
 
