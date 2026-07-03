@@ -675,3 +675,134 @@ def test_repair_shape2_prefers_captured_success(tmp_path: Path) -> None:
     # Original interrupt text preserved.
     assert any(isinstance(b, TextBlock) and "[Request interrupted by user]" in b.text
                for m in reloaded for b in m.content)
+
+
+def test_repair_drops_durability_note_when_all_captured(tmp_path: Path) -> None:
+    """Every dangling result came from `captured` (real successes) — the durability
+    note is dropped (there is no error-shaped reconstruction to explain)."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                         input={"path": "a", "content": "X"}),
+            ToolUseBlock(id="w2", name="mcp__imp__edit_file", input={"path": "b"}),
+        )),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    captured = {
+        captured_result_key("write_file", {"path": "a", "content": "X"}): ("wrote a", False),
+        captured_result_key("edit_file", {"path": "b"}): ("edited b", False),
+    }
+    repair_dangling_tool_use_on_resume(msgs, t, captured=captured)
+
+    texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
+    assert RESUME_DURABILITY_NOTE not in texts
+    # The real results are still present.
+    results = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
+    assert {b.tool_use_id for b in results} == {"w1", "w2"}
+    assert all(b.is_error is False for b in results)
+
+
+def test_repair_keeps_durability_note_when_any_synthetic(tmp_path: Path) -> None:
+    """One captured success + one synthetic fallback: the note is kept (an error-shaped
+    reconstruction remains)."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                         input={"path": "a", "content": "X"}),
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "y"}),
+        )),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("write_file", {"path": "a", "content": "X"})
+    repair_dangling_tool_use_on_resume(msgs, t, captured={key: ("wrote a", False)})
+
+    texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
+    assert RESUME_DURABILITY_NOTE in texts
+
+
+def test_repair_shape2_drops_note_when_all_captured(tmp_path: Path) -> None:
+    """Shape-2 (trailing user interrupt turn): a captured-only unmatched tool_use drops
+    the trailing durability note too, and preserves the original interrupt text."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                                      input={"path": "a", "content": "X"}),)),
+        Message(role="user",
+                content=(TextBlock(text="[Request interrupted by user]"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("write_file", {"path": "a", "content": "X"})
+    repair_dangling_tool_use_on_resume(msgs, t, captured={key: ("wrote a", False)})
+
+    texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
+    assert RESUME_DURABILITY_NOTE not in texts
+    assert any("[Request interrupted by user]" in x for x in texts)
+
+
+def test_repair_shape2_keeps_note_when_any_synthetic(tmp_path: Path) -> None:
+    """Shape-2 with one captured success + one synthetic fallback keeps the note."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="w1", name="mcp__imp__write_file",
+                         input={"path": "a", "content": "X"}),
+            ToolUseBlock(id="b1", name="mcp__imp__bash", input={"command": "y"}),
+        )),
+        Message(role="user",
+                content=(TextBlock(text="[Request interrupted by user]"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("write_file", {"path": "a", "content": "X"})
+    repair_dangling_tool_use_on_resume(msgs, t, captured={key: ("wrote a", False)})
+
+    texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
+    assert RESUME_DURABILITY_NOTE in texts
+
+
+def test_repair_keeps_note_when_captured_result_is_error(tmp_path: Path) -> None:
+    """A captured entry whose is_error is True is not an all-success repair — the note
+    is kept even though every dangling tool_use had a captured entry."""
+    from imp.agents.transcript import captured_result_key
+
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="b1", name="mcp__imp__bash",
+                                      input={"command": "y"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    key = captured_result_key("bash", {"command": "y"})
+    synth = repair_dangling_tool_use_on_resume(
+        msgs, t, captured={key: ("boom", True)})
+
+    # The captured error result IS used (real body, is_error True)...
+    assert synth is not None and synth[0].content == "boom" and synth[0].is_error is True
+    # ...but because it is error-shaped, the durability note is retained.
+    texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
+    assert RESUME_DURABILITY_NOTE in texts

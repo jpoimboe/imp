@@ -238,6 +238,15 @@ def repair_dangling_tool_use_on_resume(
             content=_synthetic_tool_result_content(tu.name),
             is_error=True)
 
+    def _all_captured_success(tus: list[ToolUseBlock]) -> bool:
+        if captured is None:
+            return False
+        for tu in tus:
+            key = captured_result_key(tu.name, tu.input)
+            if key not in captured or captured[key][1]:
+                return False
+        return True
+
     if not messages:
         return None
     last = messages[-1]
@@ -249,10 +258,9 @@ def repair_dangling_tool_use_on_resume(
         if not tool_uses:
             return None
         result_blocks = tuple(_result_for(tu) for tu in tool_uses)
-        repair = Message(
-            role="user",
-            content=(*result_blocks, TextBlock(text=RESUME_DURABILITY_NOTE)),
-        )
+        note = ((TextBlock(text=RESUME_DURABILITY_NOTE),)
+                if not _all_captured_success(tool_uses) else ())
+        repair = Message(role="user", content=(*result_blocks, *note))
         messages.append(repair)
         transcript.append(repair)
         return result_blocks
@@ -273,13 +281,11 @@ def repair_dangling_tool_use_on_resume(
         # Anthropic requires tool_result blocks at the head of the user turn; the
         # original interrupt text follows, and the durability note frames the
         # (error-shaped) reconstructed results last.
+        note = ((TextBlock(text=RESUME_DURABILITY_NOTE),)
+                if not _all_captured_success(unmatched) else ())
         repaired = Message(
             role="user",
-            content=(
-                *result_blocks,
-                *last.content,
-                TextBlock(text=RESUME_DURABILITY_NOTE),
-            ),
+            content=(*result_blocks, *last.content, *note),
         )
         messages[-1] = repaired
         transcript.rewrite(messages)
