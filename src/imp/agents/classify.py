@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from imp.agents.runner import Message, ToolUseBlock
+from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
 
 
 class ResumeState(Enum):
@@ -17,6 +17,7 @@ class ResumeState(Enum):
     AWAITING_USER = "awaiting_user"            # bare turn-end: assistant text, no complete_step
     MISSING_COMPLETE_STEP = "missing_complete" # agent stopped without complete_step; replay+nudge
     DANGLING_TOOL_USE = "dangling_tool_use"    # other dangling tool_use; repaired with placeholder
+    STEP_COMPLETED = "step_completed"          # resolved complete_step masked by trailing prose
 
 
 def classify_resume(messages: list[Message]) -> ResumeState:
@@ -36,7 +37,40 @@ def classify_resume(messages: list[Message]) -> ResumeState:
     tool_uses = [b for b in last.content if isinstance(b, ToolUseBlock)]
     if tool_uses:
         return ResumeState.DANGLING_TOOL_USE
+    if _trailing_prose_over_resolved_complete_step(messages):
+        return ResumeState.STEP_COMPLETED
     return ResumeState.AWAITING_USER
+
+
+def _trailing_prose_over_resolved_complete_step(messages: list[Message]) -> bool:
+    """True when the tail is one-or-more trailing assistant text-only turns (and
+    system replay artifacts) sitting directly on a `complete_step` tool_use whose
+    tool_result immediately follows it. Bounded to the trailing run: the resolved
+    complete_step must be immediately behind the prose, never buried behind other
+    tool activity."""
+    i = len(messages) - 1
+    while i >= 0 and (
+        messages[i].role == "system"
+        or (
+            messages[i].role == "assistant"
+            and not any(isinstance(b, ToolUseBlock) for b in messages[i].content)
+        )
+    ):
+        i -= 1
+    if i <= 0 or messages[i].role != "user":
+        return False
+    result_ids = {
+        b.tool_use_id for b in messages[i].content if isinstance(b, ToolResultBlock)
+    }
+    if not result_ids:
+        return False
+    prev = messages[i - 1]
+    return prev.role == "assistant" and any(
+        isinstance(b, ToolUseBlock)
+        and b.name == "complete_step"
+        and b.id in result_ids
+        for b in prev.content
+    )
 
 
 def count_tool_uses(messages: list[Message]) -> int:
