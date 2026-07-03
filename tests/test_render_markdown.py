@@ -247,3 +247,119 @@ def test_subagent_status_tags_and_elapsed() -> None:
     row = _subagent_status_md(_make_subagent(start_ts="2024-01-01T00:00:00Z",
                                              end_ts="2024-01-01T00:00:05Z"))
     assert "reviewer" in row and "5" in row   # elapsed suffix present
+
+
+def test_completion_breadcrumb_and_end_to_end_structure() -> None:
+    out = _md([
+        _ev("1", "change_created", title="add auth"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:design/spec", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "drafted the spec"}]}),
+        _ev("4", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    # Spine + prose + a completion line, in document order.
+    assert out.index("# add auth") < out.index("## design") < out.index("### spec")
+    assert "drafted the spec" in out
+    assert "_spec · complete_" in out             # exact BreadcrumbLine status line
+
+
+def test_error_node_renders_as_blockquote_callout() -> None:
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("3", "error", agent_id="step:p/s", message="boom", category="script"),
+    ])
+    assert "> **error:**" in out
+    assert "boom" in out
+
+
+def test_pause_node_renders_status_line() -> None:
+    out = _md([
+        _ev("2", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("3", "workflow_paused", agent_id="step:p/s", reason="ctrl_c"),
+    ])
+    assert "paused" in out
+    assert "ctrl_c" in out
+
+
+def test_structure_covers_line_and_footer_nodes() -> None:
+    # Golden/structure guard: a hand-built tree exercising the remaining line and
+    # footer branches so they stay covered against regression. Built directly (not
+    # via events) because these nodes arise from many disparate event shapes.
+    root = nv.WorkflowNode(title="demo")
+    phase = nv.PhaseNode(name="design")
+    step = nv.StepNode(name="spec", kind="agent")
+    step.children = [
+        nv.SkillLoadNode(name="brainstorming"),
+        nv.OutcomeLine(action={"verb": "continue"}),
+        nv.RenameNode(name="new title"),
+        nv.StepContextNode(payload={"provider": "anthropic", "model": "claude",
+                                    "max_tool_calls": 50, "system_prompt": "SYS"}),
+    ]
+    phase.children = [step]
+    root.children = [
+        phase,
+        nv.TiersResolvedNode(rows=[{"tier": "high", "provider": "anthropic",
+                                    "model": "claude", "differ_tier": None,
+                                    "differ_from": None}]),
+        nv.WarningsSummaryNode(lines=[("disk low", 2)], total=2),
+        nv.CompletedNode(change_id="gumu81"),
+        nv.MergedNode(change_id="gumu81", base="main"),
+        nv.FallbackLine(event_type="odd_event", payload={"k": "v"}),
+    ]
+    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    out = render_markdown(tree, full=True)
+    assert "loading skill brainstorming" in out        # SkillLoadNode
+    assert "→ continue" in out                         # OutcomeLine
+    assert 'Set name to "new title"' in out            # RenameNode
+    assert "context · anthropic/claude" in out         # StepContextNode fold (full)
+    assert "tiers resolved:" in out                    # TiersResolvedNode (full)
+    assert "- high → anthropic/claude" in out          # tiers list item
+    assert "**2 warnings this run**" in out            # WarningsSummaryNode
+    assert "disk low" in out and "(×2)" in out
+    assert "**✓ Completed gumu81.**" in out            # CompletedNode
+    assert "**✓ Merged gumu81 into main.**" in out     # MergedNode
+    assert "odd_event k=v" in out                      # FallbackLine
+
+
+def test_error_node_detail_block_rendered_and_escaped() -> None:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.ErrorNode(message="boom", category="script",
+                                  detail="line1 <x>\nline2")]
+    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    out = render_markdown(tree, full=True)
+    assert "> **error:** [script] boom" in out
+    assert "> line1 &lt;x&gt;" in out     # detail escaped + per-line blockquoted
+    assert "> line2" in out
+    assert "line1 <x>" not in out         # raw untrusted detail never leaks
+
+
+def test_error_node_warning_callout() -> None:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.ErrorNode(message="disk low", is_warning=True)]
+    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    out = render_markdown(tree, full=True)
+    assert "> **warning:** disk low" in out
+    assert "> **error:**" not in out
+
+
+def test_tiers_resolved_suppressed_in_default_mode() -> None:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.TiersResolvedNode(rows=[{"tier": "high",
+                                                 "provider": "anthropic",
+                                                 "model": "claude",
+                                                 "differ_tier": None,
+                                                 "differ_from": None}])]
+    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    assert "tiers resolved" not in render_markdown(tree, full=False)
+    assert "tiers resolved" in render_markdown(tree, full=True)
+
+
+def test_breadcrumb_interrupted_variant() -> None:
+    root = nv.WorkflowNode(title="t")
+    root.children = [nv.BreadcrumbLine(step_name="spec", interrupted=True)]
+    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+    out = render_markdown(tree, full=True)
+    assert "_spec interrupted_" in out

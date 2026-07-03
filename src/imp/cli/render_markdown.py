@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from imp.cli import narrative as nv
+from imp.cli import palette as pal
 from imp.cli import render_text as rt
 
 _MAX_HEADING = 6
@@ -173,6 +174,71 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         outcome = _subagent_outcome_md(node)
         if outcome:
             yield outcome
+        return
+    if isinstance(node, nv.OutcomeLine):
+        yield "→ " + _md_escape(pal.action_text(node.action))
+        return
+    if isinstance(node, nv.BreadcrumbLine):
+        name = node.step_label or node.step_name
+        if node.interrupted:
+            parts = [f"{name} interrupted"]
+        elif node.show_complete:
+            parts = [f"{name} · complete"]
+        else:
+            parts = [name]
+        done = rt.fmt_seconds_done(node.elapsed_s)
+        if done:
+            parts.append(done)
+        yield "_" + _md_escape(" · ".join(parts)) + "_"
+        return
+    if isinstance(node, nv.SkillLoadNode):
+        yield "loading skill " + _md_escape(node.name)
+        return
+    if isinstance(node, nv.ErrorNode):
+        if node.is_warning:
+            yield "> **warning:** " + _md_escape(node.message)
+            return
+        tag = f"[{node.category}] " if node.category else ""
+        block = "> **error:** " + _md_escape(f"{tag}{node.message}")
+        if node.detail and node.detail not in node.message:
+            block += "\n>\n" + "\n".join(
+                "> " + line for line in _md_escape(node.detail).split("\n"))
+        yield block
+        return
+    if isinstance(node, nv.PauseNode):
+        yield f"**paused ({_md_escape(node.reason)})**"
+        return
+    if isinstance(node, nv.RenameNode):
+        yield 'Set name to "' + _md_escape(node.name) + '"'
+        return
+    if isinstance(node, nv.WarningsSummaryNode):
+        noun = "warning" if node.total == 1 else "warnings"
+        lines = [f"> **{node.total} {noun} this run**"]
+        for message, count in node.lines:
+            suffix = f" (×{count})" if count > 1 else ""
+            lines.append("> - " + _md_escape(message) + suffix)
+        yield "\n".join(lines)
+        return
+    if isinstance(node, nv.CompletedNode):
+        yield f"**✓ Completed {_md_escape(node.change_id)}.**"
+        return
+    if isinstance(node, nv.MergedNode):
+        yield f"**✓ Merged {_md_escape(node.change_id)} into {_md_escape(node.base)}.**"
+        return
+    if isinstance(node, nv.TiersResolvedNode):
+        if not full:
+            return
+        yield "tiers resolved:"
+        rows = "\n".join(
+            f"- {_md_escape(str(r['tier']))} → "
+            f"{_md_escape(str(r['provider']))}/{_md_escape(str(r['model']))}"
+            for r in node.rows)
+        if rows:
+            yield rows
+        return
+    if isinstance(node, nv.FallbackLine):
+        kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
+        yield _md_escape(f"{node.event_type} {kv}".rstrip())
         return
     # Additional node branches are appended by later tasks, before this return.
     return
