@@ -68,3 +68,91 @@ def test_wait_for_user_resume_fill_helpers_removed() -> None:
     assert not hasattr(classify_mod, "unresolved_wait_for_user")
     assert "unresolved_wait_for_user" not in classify_mod.__all__
     assert not hasattr(transcript_mod, "resolve_wait_for_user_on_resume")
+
+
+def test_resolved_complete_step_with_one_trailing_prose_is_step_completed() -> None:
+    # The incident shape: complete_step succeeded (its tool_result is present),
+    # then one trailing assistant prose turn survived on top of it.
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs", content="ok", is_error=False),
+        )),
+        Message(role="assistant", content=(TextBlock(text="All done — summary."),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.STEP_COMPLETED
+
+
+def test_resolved_complete_step_with_two_trailing_prose_is_step_completed() -> None:
+    # Two consecutive trailing text-only assistant turns still resolve to the
+    # completed step behind them.
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs", content="ok", is_error=False),
+        )),
+        Message(role="assistant", content=(TextBlock(text="First tail."),)),
+        Message(role="assistant", content=(TextBlock(text="Second tail."),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.STEP_COMPLETED
+
+
+def test_complete_step_then_other_tool_then_prose_is_awaiting_user() -> None:
+    # The resolved complete_step is NOT immediately behind the prose: a bash
+    # tool cycle sits between them, so this is a genuine mid-step question.
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs", content="ok", is_error=False),
+        )),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="b1", name="bash", input={"command": "ls"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="b1", content="files", is_error=False),
+        )),
+        Message(role="assistant", content=(TextBlock(text="Which one?"),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.AWAITING_USER
+
+
+def test_bare_turn_end_without_complete_step_is_awaiting_user() -> None:
+    # A real yield to the human: assistant text with no complete_step behind it.
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(TextBlock(text="what color?"),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.AWAITING_USER
+
+
+def test_dangling_complete_step_at_tail_is_dangling_tool_use() -> None:
+    # An unresolved complete_step at [-1] (no tool_result) is still DANGLING.
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),
+        )),
+    ]
+    assert classify_resume(msgs) is ResumeState.DANGLING_TOOL_USE
+
+
+def test_earlier_lap_complete_step_buried_deep_is_awaiting_user() -> None:
+    # An earlier lap's completed complete_step lives deep in history, but the
+    # current tail is a genuine bare turn-end. The bounded scan must not reach
+    # back to the old completion.
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs1", name="complete_step", input={"status": "Success"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs1", content="ok", is_error=False),
+        )),
+        Message(role="user", content=(TextBlock(text="here is lap-2 feedback"),)),
+        Message(role="assistant", content=(TextBlock(text="what should I do?"),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.AWAITING_USER

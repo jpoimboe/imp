@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import Message, TextBlock, ToolUseBlock
+from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
 from imp.cli.inert_resume import (
     bare_turn_end_question,
@@ -213,3 +213,16 @@ async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -
     assert rc == 0
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before              # launch never ran -> no events appended
+
+
+def test_bare_turn_end_question_none_for_step_completed(tmp_path: Path) -> None:
+    # Trailing prose over a RESOLVED complete_step classifies STEP_COMPLETED, not
+    # AWAITING_USER, so no phantom pending question is previewed.
+    ch = _seed_paused_change(tmp_path, [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs", content="ok", is_error=False),)),
+        Message(role="assistant", content=(TextBlock(text="All done — summary."),)),
+    ])
+    assert bare_turn_end_question(ch) is None

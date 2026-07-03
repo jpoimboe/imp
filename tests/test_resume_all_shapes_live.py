@@ -374,3 +374,82 @@ async def test_complete_step_handback_native_resume(
         isinstance(b, dict) and b.get("type") == "tool_use"
         and b.get("id") == "c0" and b.get("name") == "complete_step"
         for b in reconciled["message"]["content"]), reconciled
+
+
+@pytest.mark.skipif(
+    not opted_in("claude_code"),
+    reason="claude_code not in IMP_LIVE_PROVIDERS",
+)
+@pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
+@pytest.mark.anyio
+async def test_step_completed_native_resume_redrives_with_feedback(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A STEP_COMPLETED tail (trailing prose over a resolved complete_step) with
+    rework feedback native-resumes against real claude-p: the feedback streams as
+    the single delta, the model re-drives and calls complete_step again, and no
+    awaiting_user_input / runner_warning is emitted."""
+    assert shutil.which("claude") is not None, (
+        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
+        "not found on PATH"
+    )
+    _init_repo(tmp_path)
+    inv = _corrective_live_inv(tmp_path)
+    # Mirror the executor's real kept-transcript resume config.
+    inv = replace(
+        inv, balance_on_resume=True,
+        retry_feedback=(
+            "Your recorded outcome needs revision. Call complete_step with "
+            "status=Success now to re-record it; do not read any file."))
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    # Incident shape: resolved complete_step masked by one trailing prose turn.
+    msgs = [
+        Message(role="user", content=(TextBlock(text="Finish the step."),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="complete_step",
+                         input={"status": "Success"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs",
+                            content="previous step output recorded",
+                            is_error=False),)),
+        Message(role="assistant", content=(TextBlock(text="All done — summary."),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    # The store flushed only through the complete_step result (msgs[:3]); the
+    # trailing prose (msgs[3]) is the unflushed deficit reconcile_store_tail
+    # appends before claude-p loads its native session.
+    await store.append(skey, message_to_session_records(
+        msgs[:3], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL, start_index=0))
+
+    # Spy on the first-query history stream to prove the native path: native
+    # resume streams ONLY the delivered feedback turn (1 turn); a stream-json
+    # fallback would replay the full transcript.
+    streamed: list[list[Message]] = []
+    _orig_stream = claude_code._stream_history
+    monkeypatch.setattr(
+        claude_code, "_stream_history",
+        lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
+
+    runner = ClaudeCodeAgentRunner(model_name=_MODEL)
+    events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output", events[-1]
+    assert not any(e["type"] == "error" for e in events), [
+        e for e in events if e["type"] == "error"]
+    log_types = [ev["type"] for ev in inv.event_log.read()]
+    assert "awaiting_user_input" not in log_types
+    assert "runner_warning" not in log_types
+    # Zero re-execution: no read_file was issued on resume.
+    assert _read_file_call_count(inv.event_log) == 0
+    # Native single-turn delta: the first query streamed exactly the delivered
+    # feedback turn, not the whole transcript a replay fallback would send.
+    assert len(streamed) == 1, streamed
+    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
+    block = streamed[0][0].content[0]
+    assert isinstance(block, TextBlock)
+    assert block.text == inv.retry_feedback
