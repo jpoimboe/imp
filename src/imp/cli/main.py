@@ -1758,11 +1758,24 @@ def _cmd_log(args: argparse.Namespace) -> int:
 
 
 def _write_log_export(args: argparse.Namespace, control: Path,
-                      change_id: str, events: list) -> int:
-    from imp.cli import narrative
-    from imp.cli.render_markdown import render_markdown
-
-    document = render_markdown(narrative.build_tree(events), full=args.full)
+                      change_id: str, events: list[dict[str, Any]]) -> int:
+    if args.summary:
+        from imp.cli.render_markdown import render_summary_markdown
+        from imp.cli.render_summary import (
+            SummaryHeader,
+            build_summary,
+            summary_total,
+        )
+        row = _row_for_id(control, change_id)
+        status = row[1] if row is not None else "?"
+        workflow = parse_default_workflow(control / "imp" / "project.yaml")
+        header = SummaryHeader(workflow=workflow, change_id=change_id,
+                               status=status, total_seconds=summary_total(events))
+        document = render_summary_markdown(build_summary(events), header=header)
+    else:
+        from imp.cli import narrative
+        from imp.cli.render_markdown import render_markdown
+        document = render_markdown(narrative.build_tree(events), full=args.full)
     if args.html is not None:
         from imp.cli.render_html import render_html
         document = render_html(document)
@@ -1774,10 +1787,7 @@ def _write_log_export(args: argparse.Namespace, control: Path,
     if target == "-":
         sys.stdout.write(document)
         return 0
-    if target is _LOG_EXPORT_DEFAULT:
-        path = Path(f"imp-log-{change_id}.{ext}")
-    else:
-        path = Path(target)
+    path = Path(f"imp-log-{change_id}.{ext}") if target is _LOG_EXPORT_DEFAULT else Path(target)
     path.write_text(document, encoding="utf-8")
     print(path)
     return 0

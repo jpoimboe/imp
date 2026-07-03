@@ -123,3 +123,33 @@ def test_html_explicit_path_writes_there(tmp_path, monkeypatch, capsys):
     assert "<!DOCTYPE html>" in (tmp_path / "out.html").read_text()
     assert not (tmp_path / f"imp-log-{slug}.html").exists()
     assert "out.html" in capsys.readouterr().out
+
+
+def test_md_summary_uses_summary_document(tmp_path, monkeypatch):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--md", "--summary"]) == 0
+    text = (tmp_path / f"imp-log-{slug}.md").read_text()
+    assert "**Status:**" in text                 # SummaryHeader line
+    assert "| Step | Duration | Wait |" in text   # summary table, not the tree spine
+    assert "<details>" not in text
+
+
+def test_html_summary_renders_header(tmp_path, monkeypatch):
+    slug = _setup(tmp_path, monkeypatch)
+    assert main(["log", slug, "--html", "--summary"]) == 0
+    html = (tmp_path / f"imp-log-{slug}.html").read_text()
+    assert "<!DOCTYPE html>" in html
+    assert "<strong>Status:</strong>" in html     # bold header carried into HTML
+
+
+def test_export_never_pages(tmp_path, monkeypatch):
+    slug = _setup(tmp_path, monkeypatch)
+
+    def _boom(*a, **k):
+        raise AssertionError("export must not page")
+
+    monkeypatch.setattr(m, "_page_or_print", _boom)
+    assert main(["log", slug, "--md", "-"]) == 0
+    assert main(["log", slug, "--html"]) == 0
+    assert main(["log", slug, "--md", "--summary"]) == 0
+    assert main(["log", slug, "--html", "--summary"]) == 0
