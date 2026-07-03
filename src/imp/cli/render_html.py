@@ -81,3 +81,28 @@ def _md_to_fragment(markdown: str) -> str:
         i += 1
     flush()
     return "".join(parts)
+
+
+def render_html(markdown: str) -> str:
+    """Wrap the converted Markdown fragment in a single self-contained HTML page:
+    the vendored github-markdown-css inlined into <style>, the body carrying the
+    `.markdown-body` class it targets, and no external href/src reference."""
+    fragment = _md_to_fragment(markdown)
+    css = _load_css()
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        "<style>\n"
+        f"{css}\n"
+        ".markdown-body { box-sizing: border-box; min-width: 200px; "
+        "max-width: 980px; margin: 0 auto; padding: 45px; }\n"
+        "</style>\n"
+        "</head>\n"
+        '<body class="markdown-body">\n'
+        f"{fragment}"
+        "</body>\n"
+        "</html>\n"
+    )

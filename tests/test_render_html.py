@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.resources as ir
 
-from imp.cli.render_html import _md_to_fragment
+from imp.cli import narrative as nv
+from imp.cli.render_html import _md_to_fragment, render_html
+from imp.cli.render_markdown import render_markdown
 
 
 def test_github_markdown_css_asset_is_bundled() -> None:
@@ -70,3 +72,38 @@ def test_fold_inner_fence_with_details_marker_is_not_split_early() -> None:
     assert frag.index("&lt;/details&gt;") < fold_end
     assert "tail-line" in frag               # content after the fake marker survived
     assert frag.index("tail-line") < fold_end
+
+
+def _ev(eid, etype, agent_id=None, **payload):
+    return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
+
+
+def test_render_html_is_self_contained_document() -> None:
+    out = render_html("# Title\n\nsome **bold** prose\n")
+    assert out.startswith("<!DOCTYPE html>")
+    assert '<body class="markdown-body">' in out
+    assert "<style>" in out
+    assert "color-scheme: light" in out        # vendored CSS inlined into <head>
+    assert "<h1>Title</h1>" in out             # the markdown body rendered
+    assert "<strong>bold</strong>" in out
+    # a single offline file — no external references
+    assert "<link" not in out
+    assert 'href="http' not in out
+    assert 'src="http' not in out
+
+
+def test_render_html_end_to_end_neutralizes_hostile_tool_result() -> None:
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "cat evil"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content="<script>alert(1)</script>\x00", error=False),
+    ]
+    tree = nv.build_tree(events)
+    out = render_html(render_markdown(tree, full=True))
+    assert "<script>alert(1)</script>" not in out   # never a live tag
+    assert "&lt;script&gt;" in out                  # escaped / inert
+    assert "\x00" not in out                        # control byte neutralized (-> ^@)
+    assert "^@" in out
