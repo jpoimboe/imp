@@ -225,3 +225,29 @@ def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> No
     rc = main._handle_terminal_outcome(change, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == 2
+
+
+def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(monkeypatch) -> None:
+    # _Change([]) has no events_path attribute and event_log().read() returns [] —
+    # so the code falls through to the archive_read.read_events fallback branch.
+    change = _Change([])
+    change.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
+
+    # Two runner_warning events plus one non-warning event in the archived blob.
+    archive_blob = (
+        b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
+        b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
+        b'{"type": "step_started", "payload": {"step": "s"}}\n'
+    )
+    monkeypatch.setattr(
+        main.archive_read, "read_events",
+        lambda control_root, change_id: archive_blob)
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        main, "_emit_completed",
+        lambda ch, value, *, merged, warnings: captured.update(warnings=warnings))
+
+    rc = main._handle_terminal_outcome(change, RunResult.COMPLETED, coord=None)
+    assert rc == 0
+    assert captured["warnings"] == 2

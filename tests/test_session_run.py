@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.signals import InterruptCoordinator
+from imp.engine import archive
 from imp.engine.change import Change
 from imp.engine.executor import RunResult
 from imp.engine.state import State
@@ -709,3 +712,32 @@ def test_should_run_ctrl_d_reader_requires_interactive_tty(monkeypatch) -> None:
 
     monkeypatch.setattr("sys.stdin", _FakeStdin(False))
     assert _should_run_ctrl_d_reader(non_interactive=False) is False
+
+
+def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: Path) -> None:
+    change_id = "2026-07-03-reaped"
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+
+    events_file = tmp_path / f"{change_id}.jsonl"
+    events_file.write_bytes(
+        f'{{"id":"{change_id}-e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        f'"payload":{{"id":"{change_id}"}}}}\n'.encode()
+    )
+    change_json = tmp_path / f"{change_id}-change.json"
+    change_json.write_text(json.dumps({
+        "id": change_id, "title": "Reaped", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / f"{change_id}-state.json"
+    state_json.write_text(json.dumps({"id": change_id, "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, change_id, events_path=events_file,
+        change_json_path=change_json, state_json_path=state_json)
+
+    # Build the Change WITHOUT creating the live home/state dir — State.load raises
+    # FileNotFoundError, forcing the archive fallback branch.
+    change = _make_change(tmp_path, change_id)
+    assert not change.state_dir.exists()
+    assert infer_session_result(change) is RunResult.COMPLETED
