@@ -393,8 +393,15 @@ def _handle_terminal_outcome(
     if result is RunResult.COMPLETED:
         # Worktree gone = the merge gate was exercised.
         wt_path = change.control_root / ".imp" / "worktrees" / change.id
-        warnings = sum(1 for ev in change.event_log().read()
-                       if ev.get("type") == "runner_warning")
+        _ep = getattr(change, 'events_path', None)
+        if _ep is not None and not _ep.exists():
+            events: list[dict[str, Any]] = []
+        else:
+            events = list(change.event_log().read())
+        if not events:
+            raw = archive_read.read_events(change.control_root, change.id)
+            events = _parse_jsonl(raw) if raw is not None else []
+        warnings = sum(1 for ev in events if ev.get("type") == "runner_warning")
         _emit_completed(change, result.value, merged=not wt_path.exists(),
                         warnings=warnings)
         return 0

@@ -31,6 +31,12 @@ from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 from tests.openai_fakes import resp_function_call, resp_response
 
 
+def _run_events(change):
+    """Post-run events read the way production does: home first, archive second."""
+    from imp.cli.main import _load_events_for_id
+    return _load_events_for_id(change.control_root, change.id) or []
+
+
 def _canned_anthropic(**overrides):
     """A single complete_step response carrying every field any agent needs.
     Override individual fields (e.g. complexity='trivial') per test."""
@@ -570,7 +576,7 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
     )
     result = await run_change(change, non_interactive=True)
     assert result is RunResult.COMPLETED
-    steps = [e["payload"].get("step") for e in change.event_log().read()
+    steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     for name in ("wait-for-head", "integrate-rebase", "integration-verify",
                  "integration-reviewer", "summarizer", "finalize", "merge-to-base"):
@@ -605,7 +611,7 @@ async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None
     )
     result = await run_change(change, non_interactive=True)
     assert result is RunResult.COMPLETED
-    steps = [e["payload"].get("step") for e in change.event_log().read()
+    steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     for name in ("integrate-rebase", "reconciler", "integration-verify",
                  "integration-reviewer", "merge-to-base"):
@@ -631,8 +637,8 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
     )
     result = await run_change(change, non_interactive=True)
     assert result is RunResult.COMPLETED
-    types_seen = [e.get("type") for e in change.event_log().read()]
-    steps = [e["payload"].get("step") for e in change.event_log().read()
+    types_seen = [e.get("type") for e in _run_events(change)]
+    steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started"]
     assert "wait-for-head" in steps
     assert "merge-to-base" in steps
@@ -681,10 +687,10 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
     )
     result = await run_change(change, non_interactive=True)
     assert result is RunResult.COMPLETED
-    steps = [e["payload"].get("step") for e in change.event_log().read()
+    steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started"]
     assert "integrate-rebase" in steps and "finalize" in steps
-    assert "change_merged" in [e.get("type") for e in change.event_log().read()]
+    assert "change_merged" in [e.get("type") for e in _run_events(change)]
 
 
 @pytest.mark.anyio
@@ -713,7 +719,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     result = await run_change(change, non_interactive=True)
     assert result is RunResult.COMPLETED
 
-    events = list(change.event_log().read())          # the same source `imp log` renders
+    events = _run_events(change)          # the same source `imp log` renders
     body = list(render_tree(nv.build_tree(events), full=False, color=False, width=100))
 
     # Every quiet step is HIDDEN: it never renders its own block — neither a header

@@ -24,10 +24,13 @@ def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
 
 
 def infer_session_result(change: Change) -> RunResult:
-    """Read persisted state: 'completed' → COMPLETED, else PAUSED."""
-    if State.load(change.state_dir).status == "completed":
-        return RunResult.COMPLETED
-    return RunResult.PAUSED
+    """Read persisted status, home first then archive: 'completed' → COMPLETED, else PAUSED."""
+    try:
+        status: str | None = State.load(change.state_dir).status
+    except FileNotFoundError:
+        from imp.engine.archive import read as archive_read
+        status = archive_read.status_of(change.control_root, change.id)
+    return RunResult.COMPLETED if status == "completed" else RunResult.PAUSED
 
 
 async def run_session_client(
