@@ -15,13 +15,21 @@ def _md(events, *, full=False):
 
 
 def _in_code_fence(md: str, needle: str) -> bool:
-    """True when `needle` appears on a line that sits inside a ``` fence."""
-    inside = False
+    """True when `needle` appears on a line that sits inside a ``` fence.
+    Tracks the opening fence length so backtick runs inside the fenced body
+    (which produce a longer fence) do not falsely toggle the state."""
+    fence_len = None
     for line in md.split("\n"):
-        if line.lstrip().startswith("```"):
-            inside = not inside
+        stripped = line.lstrip()
+        run = len(stripped) - len(stripped.lstrip("`"))
+        if fence_len is None:
+            if run >= 3:
+                fence_len = run
             continue
-        if inside and needle in line:
+        if run >= fence_len and stripped == "`" * run:
+            fence_len = None
+            continue
+        if needle in line:
             return True
     return False
 
@@ -121,3 +129,66 @@ def test_literal_text_node_is_escaped() -> None:
     out = render_markdown(tree, full=False)
     assert "&lt;script&gt;x&lt;/script&gt;" in out
     assert "<script>" not in out
+
+
+def _burst_events():
+    return [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "thinking", agent_id="step:p/s", content="pondering deeply"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "ls"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content="file-a\nfile-b", error=False),
+    ]
+
+
+def test_folds_collapse_to_details_by_default() -> None:
+    out = _md(_burst_events())
+    assert "<details>" in out
+    assert "<summary>thinking</summary>" in out
+    assert "pondering deeply" in out            # collapsed, but present inside details
+    # tool burst recap appears as a <summary>; the call count is present
+    assert "1 call" in out
+
+
+def test_folds_expand_inline_under_full() -> None:
+    out = _md(_burst_events(), full=True)
+    assert "<details>" not in out               # expanded inline, no collapse wrapper
+    assert "**thinking**" in out
+    assert "pondering deeply" in out
+    assert "```" in out                         # tool I/O in a fenced code block
+    assert "file-a" in out and "file-b" in out  # tool result body present
+
+
+def test_hostile_tool_result_inert_in_code_fence() -> None:
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "cat evil"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content="<script>alert(1)</script>\x00", error=False),
+    ]
+    out = _md(events, full=True)
+    assert _in_code_fence(out, "<script>")      # inert: sits inside a ``` fence
+    assert "\x00" not in out                    # control byte neutralized
+    assert "^@" in out
+
+
+def test_step_context_fold_default_full_and_hostile_prompt() -> None:
+    ctx = nv.StepContextNode(payload={"provider": "anthropic", "model": "claude",
+                                      "max_tool_calls": 50,
+                                      "system_prompt": "<script>alert(1)</script>"})
+    root = nv.WorkflowNode(title="t")
+    root.children = [ctx]
+    tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
+
+    default = render_markdown(tree, full=False)
+    assert "<summary>context · anthropic/claude</summary>" in default
+
+    full = render_markdown(tree, full=True)
+    assert "**context · anthropic/claude**" in full
+    assert "provider: anthropic" in full
+    assert "max_tool_calls: 50" in full
+    assert _in_code_fence(full, "<script>")   # untrusted system_prompt is fenced/inert
