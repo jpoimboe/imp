@@ -185,3 +185,33 @@ def test_task_lead_uses_agent_id_filter_for_subagent_events() -> None:
     body = _agent_prompt("task-lead")
     assert "filter with `agent_id=sub:" in body
     assert "logged under `agent_id=sub:" not in body
+
+
+def test_patent_writer_resume_prose_finishes_with_complete_step() -> None:
+    # The six named patent writers must tell a resumed agent to FINISH the turn
+    # with complete_step, not the vague/handoff-implying "and re-emit." tail. The
+    # assertion targets the handoff phrase "and re-emit." rather than the bare
+    # substring "re-emit", because assemble.md legitimately says "your own pre-emit
+    # pass" (which CONTAINS "re-emit") in unrelated, out-of-scope prose (line 57) —
+    # a bare `"re-emit" not in body` check would false-fail on assemble forever.
+    base = pathlib.Path("src/imp/assets/workflows/patent/agents")
+    for name in ("design-spec", "claims", "spec-body", "figures",
+                 "independent-claims", "assemble"):
+        body = (base / f"{name}.md").read_text()
+        assert "and re-emit." not in body, \
+            f"{name} still ends its resume sentence with 'and re-emit.'"
+        assert "finish the same turn with `complete_step`" in body, name
+
+
+def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
+    # Regression guard: imp `reconciler` and imp-flat `coder` are named in the AC
+    # but already end firmly on complete_step with no "re-emit"/handoff resume
+    # sentence. Lock that so a future edit cannot reintroduce the pattern.
+    imp_reconciler = pathlib.Path(
+        "src/imp/assets/workflows/imp/agents/reconciler.md").read_text()
+    flat_coder = pathlib.Path(
+        "src/imp/assets/workflows/imp-flat/agents/coder.md").read_text()
+    assert "re-emit" not in imp_reconciler
+    assert "complete_step" in imp_reconciler
+    assert "re-emit" not in flat_coder
+    assert "a turn that ends in prose instead of a tool call is a failure" in flat_coder
