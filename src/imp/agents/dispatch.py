@@ -25,6 +25,13 @@ from typing import Any
 
 import anyio
 
+from imp.agents.loop_guard import LoopGuard
+from imp.agents.output_guard import (
+    Nudge,
+    Ok,
+    make_nudge_event,
+    validate_output_or_nudge,
+)
 from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import (
@@ -46,6 +53,7 @@ class TurnState:
 
     tool_calls_used: int
     ceiling_tripped: bool = False
+    nudged: bool = False
 
 
 async def dispatch_one_tool_use(
@@ -58,6 +66,7 @@ async def dispatch_one_tool_use(
     tu: ToolUseBlock,
     tool_results: list[ToolResultBlock],
     state: TurnState,
+    guard: LoopGuard | None = None,
     ceiling: int | None,
 ) -> dict[str, Any] | None:
     """Execute ONE tool_use block.
@@ -106,15 +115,38 @@ async def dispatch_one_tool_use(
         with suspend_inactivity_watchdog(ctx):
             raw_result = await tool.async_invoke(ctx, tu.input)
     except StepComplete as sc:
-        try:
-            validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)
-        except Exception as ve:
-            return {"type": "error", "payload": {
-                "category": "agent_output_missing",
-                "kind": "output_validation",
-                "message": str(ve),
-            }}
-        return {"type": "agent_output", "payload": sc.args_payload}
+        if guard is None:
+            # No loop guard (e.g. the scripted provider): in-session nudging needs
+            # a guard to be bounded, so preserve today's terminal
+            # validate-or-error behavior.
+            try:
+                validate_agent_output(
+                    sc.args_payload, invocation.agent_def.output_schema)
+            except Exception as ve:
+                return {"type": "error", "payload": {
+                    "category": "agent_output_missing",
+                    "kind": "output_validation",
+                    "message": str(ve),
+                }}
+            return {"type": "agent_output", "payload": sc.args_payload}
+        res = validate_output_or_nudge(
+            sc.args_payload, invocation.agent_def.output_schema, guard)
+        if isinstance(res, Ok):
+            return {"type": "agent_output", "payload": sc.args_payload}
+        if isinstance(res, Nudge):
+            block = ToolResultBlock(tu.id, res.message, is_error=True)
+            tool_results.append(block)
+            elog.append_tool_result(
+                agent_id=aid, block=block,
+                duration_ms=(time.perf_counter() - start) * 1000.0)
+            ev = make_nudge_event(res)
+            elog.append(agent_id=aid, type=ev["type"], payload=ev["payload"])
+            state.nudged = True
+            return None
+        # LoopError: the guard tripped on repeated/no-progress malformed
+        # completions — surface the terminal loop event (pause-to-human).
+        from imp.providers.errors import make_error_event
+        return make_error_event(res, kind=getattr(res, "kind", ""))
     except FatalToolError as fte:
         return {"type": "error", "payload": {
             "category": "config",
@@ -325,6 +357,7 @@ async def dispatch_turn_tool_uses(
     tool_uses: list[ToolUseBlock],
     tool_results: list[ToolResultBlock],
     state: TurnState,
+    guard: LoopGuard | None = None,
     ceiling: int | None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Dispatch one assistant turn's tool_use blocks (design §1). Partition: ALL
@@ -349,7 +382,7 @@ async def dispatch_turn_tool_uses(
                 terminal = await dispatch_one_tool_use(
                     ctx=ctx, elog=elog, aid=aid, invocation=invocation,
                     tools=tools, tu=tu, tool_results=tool_results,
-                    state=state, ceiling=ceiling)
+                    state=state, guard=guard, ceiling=ceiling)
                 if terminal is not None:
                     yield terminal
                     return
@@ -371,7 +404,7 @@ async def dispatch_turn_tool_uses(
         terminal = await dispatch_one_tool_use(
             ctx=ctx, elog=elog, aid=aid, invocation=invocation,
             tools=tools, tu=tu, tool_results=tool_results,
-            state=state, ceiling=ceiling)
+            state=state, guard=guard, ceiling=ceiling)
         if terminal is not None:
             yield terminal
             return
