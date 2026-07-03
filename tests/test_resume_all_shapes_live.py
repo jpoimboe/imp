@@ -393,7 +393,7 @@ async def test_step_completed_native_resume_redrives_with_feedback(
         "not found on PATH"
     )
     _init_repo(tmp_path)
-    inv = _live_inv(tmp_path)
+    inv = _corrective_live_inv(tmp_path)
     # Mirror the executor's real kept-transcript resume config.
     inv = replace(
         inv, balance_on_resume=True,
