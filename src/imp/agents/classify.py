@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from enum import Enum
 
-from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
+from imp.agents.runner import (
+    Message,
+    ToolResultBlock,
+    ToolUseBlock,
+    canonicalize_tool_name,
+)
 
 
 class ResumeState(Enum):
@@ -67,7 +72,7 @@ def _trailing_prose_over_resolved_complete_step(messages: list[Message]) -> bool
     prev = messages[i - 1]
     return prev.role == "assistant" and any(
         isinstance(b, ToolUseBlock)
-        and b.name == "complete_step"
+        and canonicalize_tool_name(b.name) == "complete_step"
         and b.id in result_ids
         for b in prev.content
     )

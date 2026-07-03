@@ -85,6 +85,25 @@ def test_resolved_complete_step_with_one_trailing_prose_is_step_completed() -> N
     assert classify_resume(msgs) is ResumeState.STEP_COMPLETED
 
 
+def test_mcp_prefixed_complete_step_with_trailing_prose_is_step_completed() -> None:
+    # claude_code persists the imp tool MCP-namespaced as `mcp__imp__complete_step`
+    # (anthropic/openai use the bare name). The STEP_COMPLETED detector must
+    # canonicalize the prefix; a bare `== "complete_step"` compare misclassifies
+    # this as AWAITING_USER, whose resume arm drops rework feedback and parks on
+    # an empty user prompt (kibe87 incident, 2026-07-03).
+    msgs = [
+        Message(role="assistant", content=(
+            ToolUseBlock(id="cs", name="mcp__imp__complete_step",
+                         input={"status": "Success"}),
+        )),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="cs", content="ok", is_error=False),
+        )),
+        Message(role="assistant", content=(TextBlock(text="All done — summary."),)),
+    ]
+    assert classify_resume(msgs) is ResumeState.STEP_COMPLETED
+
+
 def test_resolved_complete_step_with_two_trailing_prose_is_step_completed() -> None:
     # Two consecutive trailing text-only assistant turns still resolve to the
     # completed step behind them.

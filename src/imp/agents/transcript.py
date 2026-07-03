@@ -28,6 +28,7 @@ from imp.agents.runner import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
+    canonicalize_tool_name,
     message_from_json,
     message_to_json,
 )
@@ -228,7 +229,7 @@ def repair_dangling_tool_use_on_resume(
                 content, is_err = captured[key]
                 return ToolResultBlock(
                     tool_use_id=tu.id, content=content, is_error=is_err)
-        if feedback is not None and tu.name == "complete_step":
+        if feedback is not None and canonicalize_tool_name(tu.name) == "complete_step":
             return ToolResultBlock(
                 tool_use_id=tu.id,
                 content=REWORK_RESULT_FRAME + "\n\n" + feedback,
@@ -324,7 +325,7 @@ def balance_success_on_resume(
     result_blocks: list[ToolResultBlock] = []
     feedback_delivered = False
     for tu in tool_uses:
-        if tu.name == "complete_step":
+        if canonicalize_tool_name(tu.name) == "complete_step":
             if wrapper_text:
                 # Rework: deliver feedback as is_error complete_step result.
                 result_blocks.append(ToolResultBlock(
@@ -379,7 +380,7 @@ def synthesize_native_success_on_resume(
     )
     result_blocks: list[ToolResultBlock] = []
     for tu in tool_uses:
-        if tu.name == "complete_step":
+        if canonicalize_tool_name(tu.name) == "complete_step":
             result_blocks.append(ToolResultBlock(
                 tool_use_id=tu.id,
                 content="previous step output recorded; resuming",

@@ -65,6 +65,7 @@ from imp.agents.runner import (
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
+    canonicalize_tool_name,
 )
 from imp.agents.subagents import (
     SubagentSuspended,
@@ -327,7 +328,7 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
     if last is None or last.role != "assistant":
         return False
     return any(
-        isinstance(b, ToolUseBlock) and b.name == "complete_step"
+        isinstance(b, ToolUseBlock) and _canon_tool_name(b.name) == "complete_step"
         for b in last.content
     )
 
@@ -928,9 +929,6 @@ def _block_to_dict(b: Any) -> dict[str, Any]:
     }
 
 
-_MCP_PREFIX = "mcp__imp__"
-
-
 def _canon_tool_name(name: str) -> str:
     """Strip the MCP namespace from a tool name before it goes into
     events.jsonl / event payloads. Claude exposes our tools as
@@ -938,10 +936,14 @@ def _canon_tool_name(name: str) -> str:
     here so the event log and downstream consumers (renderer, tests, users
     reading `imp log`) see a single canonical name across providers.
 
+    Delegates to the shared ``canonicalize_tool_name`` (imp.agents.runner) —
+    the single source of truth so resume-shape classification and this
+    event-name canonicalization can never drift apart.
+
     Internal SDK-correlation (``b.name`` round-trip back to claude in
     ``_block_to_dict``) keeps the prefix — that's what claude expects on
     history replay."""
-    return name[len(_MCP_PREFIX):] if name.startswith(_MCP_PREFIX) else name
+    return canonicalize_tool_name(name)
 
 
 def _join_text(content: tuple[Any, ...]) -> str:
