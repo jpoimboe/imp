@@ -10,7 +10,7 @@ NOT separately observe() the same turn.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from imp.agents.loop_guard import LoopGuard, TurnRecord
 from imp.engine.errors import LoadError
@@ -73,7 +73,12 @@ def validate_output_or_nudge(
     return Ok()
 
 
-def make_nudge_event(nudge: Nudge) -> dict[str, object]:
+class NudgeEvent(TypedDict):
+    type: str
+    payload: dict[str, object]
+
+
+def make_nudge_event(nudge: Nudge) -> NudgeEvent:
     """Single-sourced nudge event payload, emitted identically by every provider."""
     return {
         "type": "output_validation_nudge",
