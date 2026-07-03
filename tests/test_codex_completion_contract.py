@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.loop_guard import DEFAULT_REPEAT_K
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.engine.types import (
     AgentDef,
@@ -113,17 +114,20 @@ def _inv_with_continuation(
 
 
 @pytest.mark.anyio
-async def test_schema_validation_failure_yields_agent_output_missing(
+async def test_schema_validation_failure_trips_loop_guard_after_retries(
     tmp_path: Path,
 ) -> None:
+    # Malformed complete_step is now nudged (not a terminal error). After
+    # DEFAULT_REPEAT_K consecutive malformed calls the loop guard trips.
     _seed_git_and_auth(tmp_path)
-    scripted = [[
+    bad_turn = [
         thread_started("thr-1"),
         mcp_call(name="complete_step",
                  args={"status": "out-of-enum"},  # bad enum
                  result="step complete"),
         turn_completed(),
-    ]]
+    ]
+    scripted = [list(bad_turn) for _ in range(DEFAULT_REPEAT_K + 2)]
     runner = CodexAgentRunner(
         model_name="gpt-5.5",
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
@@ -131,9 +135,9 @@ async def test_schema_validation_failure_yields_agent_output_missing(
     runner._canonical_auth_override = tmp_path / "auth.json"
     inv = _inv(tmp_path)
     events = [ev async for ev in runner.run(inv)]
-    err = next(e for e in events if e.get("type") == "error")
-    assert err["payload"]["category"] == "agent_output_missing"
-    assert err["payload"]["kind"] == "output_validation"
+    loop = [e for e in events if e.get("payload", {}).get("category") == "loop"]
+    assert loop, events
+    assert loop[-1]["payload"]["kind"] == "repeated_failure"
 
 
 @pytest.mark.anyio
