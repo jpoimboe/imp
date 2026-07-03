@@ -581,6 +581,25 @@ def _readonly_annotations() -> Any | None:
     return None
 
 
+CAPTURED_TOOL_RESULTS_FILENAME = "captured_tool_results.jsonl"
+
+
+def _append_captured_tool_result(
+    transcript_dir: Path, name: str, tool_input: dict[str, Any], content: str,
+) -> None:
+    """Best-effort append of one plain-tool success to the per-step sidecar, keyed by
+    tool name + input (the SDK gives no usable tool_use_id for in-process MCP tools).
+    The whole body is inside suppress: a capture failure must never flip a real
+    success into an is_error result — a lost line just falls back to the placeholder.
+    """
+    path = transcript_dir / CAPTURED_TOOL_RESULTS_FILENAME
+    with contextlib.suppress(Exception):
+        line = json.dumps(
+            {"name": name, "input": tool_input, "content": content, "is_error": False})
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+
+
 def _wrap_one(
     name: str, t: Tool, ctx: ToolContext, state: _RunState, sdk_tool: Any,
 ) -> Any:
@@ -711,6 +730,9 @@ def _wrap_one(
                         "name": "bash",
                         "signal": -rc,
                     })
+            if ctx.parent_transcript_dir is not None:
+                _append_captured_tool_result(
+                    ctx.parent_transcript_dir, name, clean_args, content_str)
             return _tool_response(content_str, is_error=False)
         except FatalToolError as fte:
             state.fatal_tool_error = (name, str(fte))

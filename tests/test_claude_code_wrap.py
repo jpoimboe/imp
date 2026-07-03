@@ -105,6 +105,23 @@ async def test_wrap_tool_raises_surfaces_as_is_error(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_wrap_tool_raises_writes_no_sidecar_entry(tmp_path: Path) -> None:
+    """A tool that raises must write NO sidecar entry even with parent_transcript_dir set."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    read = get_registry()["read_file"]
+
+    wrapped = _wrap_one("read_file", read, ctx, state, _passthrough_decorator)
+    out = await wrapped({"path": "nonexistent.txt"})
+
+    assert out.get("isError") is True
+    assert not (tmp_path / "captured_tool_results.jsonl").exists()
+
+
+@pytest.mark.anyio
 async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     from imp.agents.subagents import make_task_tool
 
@@ -602,3 +619,96 @@ async def test_wrap_brackets_regular_tool_with_tool_watchdog(tmp_path: Path) -> 
     assert out["content"][0]["text"] == "ok"
     assert seen["active"] is True       # watchdog frozen DURING the tool call
     assert coord.tool_active is False   # balanced after return -> window re-arms
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_captures_result_to_sidecar(tmp_path: Path) -> None:
+    """A successful plain-tool call through _impl appends one captured line recording
+    the bare tool name, the cleaned input, the REAL body, and is_error=False —
+    keyed by NAME+INPUT, needing no tool_use_id."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path            # step dir for the sidecar
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    out = await wrapped({"path": "x.txt"})          # NOTE: no __tool_use_id__ at all
+
+    sidecar = tmp_path / "captured_tool_results.jsonl"
+    lines = sidecar.read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["name"] == "read_file"
+    assert entry["input"] == {"path": "x.txt"}
+    assert entry["is_error"] is False
+    # The captured content is EXACTLY the real success body the SDK received — not a
+    # placeholder, and falsifiable against a synthetic "interrupted" string.
+    assert entry["content"] == out["content"][0]["text"]
+    assert "hello" in entry["content"]
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_captures_even_when_tool_use_id_empty(tmp_path: Path) -> None:
+    """The keystone fix: capture no longer depends on __tool_use_id__ (always "" for
+    in-process MCP tools). An empty id still captures, and the stored input is the
+    CLEANED input (dunder keys stripped), not the raw args."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    await wrapped({"path": "x.txt", "__tool_use_id__": ""})
+
+    sidecar = tmp_path / "captured_tool_results.jsonl"
+    entry = json.loads(sidecar.read_text().splitlines()[0])
+    assert entry["input"] == {"path": "x.txt"}       # dunder stripped, id gone
+    assert "hello" in entry["content"]
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_no_capture_without_transcript_dir(tmp_path: Path) -> None:
+    """No step dir (parent_transcript_dir is None) → nothing to capture into."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)                             # parent_transcript_dir defaults to None
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    await wrapped({"path": "x.txt"})
+
+    assert not (tmp_path / "captured_tool_results.jsonl").exists()
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_tool_capture_failure_preserves_success(tmp_path: Path) -> None:
+    """Honesty guarantee: a sidecar-write failure must NEVER turn a real tool success
+    into an is_error result — the capture is best-effort telemetry."""
+    from imp.agents.tools import get_registry
+
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    # Nonexistent step dir → the append raises FileNotFoundError (an OSError), which
+    # must be swallowed inside the helper rather than surfacing through _impl's except.
+    ctx.parent_transcript_dir = tmp_path / "does" / "not" / "exist"
+    (tmp_path / "x.txt").write_text("hello")
+    wrapped = _wrap_one(
+        "read_file", get_registry()["read_file"], ctx, state, _passthrough_decorator,
+    )
+
+    out = await wrapped({"path": "x.txt"})
+
+    assert out.get("isError") is not True            # success preserved
+    assert "hello" in out["content"][0]["text"]
+    assert state.runtime_errors == []                # no error recorded
