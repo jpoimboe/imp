@@ -750,7 +750,7 @@ class OpenAIAgentRunner:
             async for ev in dispatch_turn_tool_uses(
                     ctx=ctx, elog=elog, aid=aid, invocation=invocation,
                     tools=tools, tool_uses=tool_uses, tool_results=tool_results,
-                    state=turn, ceiling=ceiling):
+                    state=turn, guard=guard, ceiling=ceiling):
                 yield ev
                 if ev.get("type") != "tool_heartbeat":
                     return  # terminal event already yielded; stop the loop
@@ -770,23 +770,27 @@ class OpenAIAgentRunner:
                 return
 
             by_id = {tu.id: tu for tu in tool_uses}
-            record = TurnRecord(
-                assistant_text="".join(
-                    b.text for b in assistant_msg.content if isinstance(b, TextBlock)),
-                tools=[
-                    ToolOutcome(
-                        name=by_id[b.tool_use_id].name if b.tool_use_id in by_id else "",
-                        tool_use_id=b.tool_use_id,
-                        input=by_id[b.tool_use_id].input if b.tool_use_id in by_id else {},
-                        is_error=b.is_error,
-                        result_preview=_result_preview(b.content))
-                    for b in tool_results
-                ],
-                has_complete_step=False)
-            loop_err = guard.observe(record)
-            if loop_err is not None:
-                yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
-                return
+            if not turn.nudged:
+                # A nudged turn was already observed once by
+                # validate_output_or_nudge; observing again here would
+                # double-count the malformed turn.
+                record = TurnRecord(
+                    assistant_text="".join(
+                        b.text for b in assistant_msg.content if isinstance(b, TextBlock)),
+                    tools=[
+                        ToolOutcome(
+                            name=by_id[b.tool_use_id].name if b.tool_use_id in by_id else "",
+                            tool_use_id=b.tool_use_id,
+                            input=by_id[b.tool_use_id].input if b.tool_use_id in by_id else {},
+                            is_error=b.is_error,
+                            result_preview=_result_preview(b.content))
+                        for b in tool_results
+                    ],
+                    has_complete_step=False)
+                loop_err = guard.observe(record)
+                if loop_err is not None:
+                    yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
+                    return
 
             # Turn boundary: this turn's tool_results are appended; deliver any
             # queued human interject as a user message before the next model

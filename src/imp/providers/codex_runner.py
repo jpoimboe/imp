@@ -22,6 +22,12 @@ from pathlib import Path
 from typing import Any
 
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
+from imp.agents.output_guard import (
+    Nudge,
+    Ok,
+    make_nudge_event,
+    validate_output_or_nudge,
+)
 from imp.agents.runner import (
     AgentInvocation,
     Diagnostics,
@@ -36,7 +42,6 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, change_home_path, terminate_running_processes
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef
 from imp.providers import errors as perr
@@ -610,6 +615,7 @@ class CodexAgentRunner:
             streamed = await thread.run_streamed(next_prompt)
             need_nudge = False  # set when turn ends without complete_step
             handoff_turn_queued = False  # set when a Tier A handoff turn is queued
+            nudge_requery = False  # set when a malformed complete_step re-drives
             async for event in streamed.events:
                 # Dead-server poll: if the MCP server task has ended, bail
                 # immediately rather than letting codex's retry-loop be
@@ -703,40 +709,53 @@ class CodexAgentRunner:
                     return
 
                 if etype == "turn.completed":
-                    record = TurnRecord(
-                        assistant_text=proc_state.get("last_agent_text", "") or "",
-                        tools=list(proc_state.get("turn_tool_outcomes", [])),
-                        has_complete_step=bool(proc_state.get("complete_step_called")),
-                    )
-                    # Every turn observes the loop guard: repeated no-progress
-                    # automated nudges accumulate toward a trip (the C1
-                    # loop-guard backstop the unification work was waiting on).
-                    loop_err = guard.observe(record)
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
+                    if not proc_state.get("complete_step_called"):
+                        # Only NON-complete turns are observed here. A malformed
+                        # complete_step turn is fed to the guard exactly once by
+                        # validate_output_or_nudge below (as non-progress);
+                        # observing has_complete_step=True here would reset the
+                        # streak and the malformed loop would never trip.
+                        record = TurnRecord(
+                            assistant_text=proc_state.get("last_agent_text", "")
+                            or "",
+                            tools=list(proc_state.get("turn_tool_outcomes", [])),
+                            has_complete_step=False,
+                        )
+                        loop_err = guard.observe(record)
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
                     if handoff_phase == "instruction_sent":
-                        # The handoff-writing turn just completed (the agent
-                        # wrote the note as instructed). Signal the captured
-                        # handoff and stop; the engine reincarnates the session
-                        # seeded from it. Wins over a stray complete_step on this
-                        # turn — the agent was told to write & stop, not complete.
+                        # Handoff wins over a stray complete_step on this turn.
                         yield {"type": "handoff",
                                "payload": {"handoff_path": str(handoff_path)}}
                         return
                     if proc_state.get("complete_step_called"):
                         args = proc_state.get("complete_step_args") or {}
-                        try:
-                            validate_agent_output(
-                                args, invocation.agent_def.output_schema)
-                        except Exception as ve:
-                            yield {"type": "error", "payload": {
-                                "category": "agent_output_missing",
-                                "kind": "output_validation",
-                                "message": str(ve)}}
+                        res = validate_output_or_nudge(
+                            args, invocation.agent_def.output_schema, guard)
+                        if isinstance(res, Ok):
+                            yield {"type": "agent_output", "payload": args}
                             return
-                        yield {"type": "agent_output", "payload": args}
+                        if isinstance(res, Nudge):
+                            ev = make_nudge_event(res)
+                            elog.append(agent_id=aid, type=ev["type"],
+                                        payload=ev["payload"])
+                            elog.append_user_message(
+                                agent_id=aid,
+                                message=Message(
+                                    role="user",
+                                    content=(TextBlock(text=res.message),)))
+                            # Re-drive this session with the nudge as the next
+                            # prompt (per-turn proc_state reset at the loop top
+                            # clears the stale capture).
+                            next_prompt = res.message
+                            nudge_requery = True
+                            break
+                        # LoopError: pause-to-human.
+                        yield perr.make_error_event(
+                            res, kind=getattr(res, "kind", ""))
                         return
                     # Tier A watch: this turn crossed the checkpoint threshold
                     # while still working (no complete_step). Inject the
@@ -792,6 +811,8 @@ class CodexAgentRunner:
             # already holds the handoff instruction). The write turn's boundary
             # yields the terminal `handoff` above.
             if handoff_turn_queued:
+                continue
+            if nudge_requery:
                 continue
             # Inner loop exited. If we set need_nudge, invoke continuation_fn
             # and either run another turn or yield the after-nudges error.

@@ -322,3 +322,15 @@ def test_summary_display_clips_to_200_with_trailing_ellipsis() -> None:
     assert line and str(err).endswith("…")
     summary_part = str(err).split("repeated failure", 1)[1].split(": ", 1)[1]
     assert len(summary_part) <= 200 and summary_part.endswith("…")
+
+
+def test_noprogress_streak_tracks_consecutive_nonprogress() -> None:
+    g = LoopGuard()
+    assert g.noprogress_streak == 0
+    g.observe(_err_turn("API Error: 400 x"))
+    assert g.noprogress_streak == 1
+    g.observe(_err_turn("API Error: 400 x"))
+    assert g.noprogress_streak == 2
+    # Progress resets the streak.
+    g.observe(TurnRecord(assistant_text="", tools=[], has_complete_step=True))
+    assert g.noprogress_streak == 0
