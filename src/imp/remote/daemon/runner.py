@@ -107,30 +107,54 @@ class DaemonAlreadyRunning(Exception):
     """A daemon is already accepting on this repo's socket (single daemon per repo)."""
 
 
-def drain_outbound(adapter: Any, outbound: queue.Queue[dict[str, Any]]) -> bool:
-    """Flush every queued south event into the adapter. Returns True iff at least
-    one event was dequeued."""
-    drained = False
+def _drain(
+    get_next: Callable[[], Any], deliver: Callable[[Any], None],
+    carry: list[Any], what: str,
+) -> bool:
+    """Deliver the carried item (if any), then every queued item, in order.
+    Returns True iff at least one item was delivered.
+
+    `carry` is the caller-owned one-slot buffer for the in-flight item. A
+    transient network failure leaves the item in `carry` so the next cycle
+    retries it — an outage delays delivery instead of losing it (retrying may
+    duplicate a message whose send landed but whose response read timed out;
+    at-least-once beats silently-never). Any other failure is treated as poison
+    for that item alone: it is dropped loudly so a persistent per-message error
+    cannot wedge everything queued behind it. Both re-raise for the caller's
+    gate/backoff."""
+    delivered = False
     while True:
+        if not carry:
+            try:
+                carry.append(get_next())
+            except queue.Empty:
+                return delivered
         try:
-            event = outbound.get_nowait()
-        except queue.Empty:
-            return drained
-        drained = True
-        adapter.on_event(event)
+            deliver(carry[0])
+        except Exception as exc:
+            if not _is_transient_net_error(exc):
+                carry.clear()
+                _log.warning("dropping queued %s after non-transient send failure", what)
+            raise
+        carry.clear()
+        delivered = True
 
 
-def drain_responses(adapter: Any, responses: queue.Queue[Response]) -> bool:
-    """Flush every queued command response into the adapter. Returns True iff at
-    least one response was dequeued."""
-    drained = False
-    while True:
-        try:
-            response = responses.get_nowait()
-        except queue.Empty:
-            return drained
-        drained = True
-        adapter.on_response(response)
+def drain_outbound(
+    adapter: Any, outbound: queue.Queue[dict[str, Any]],
+    carry: list[dict[str, Any]],
+) -> bool:
+    """Flush the carried event, then every queued south event, into the adapter.
+    Returns True iff at least one event was delivered."""
+    return _drain(outbound.get_nowait, adapter.on_event, carry, "south event")
+
+
+def drain_responses(
+    adapter: Any, responses: queue.Queue[Response], carry: list[Response],
+) -> bool:
+    """Flush the carried response, then every queued command response, into the
+    adapter. Returns True iff at least one response was delivered."""
+    return _drain(responses.get_nowait, adapter.on_response, carry, "command response")
 
 
 def pid_path(control_root: Path) -> Path:
@@ -234,10 +258,12 @@ def _sender_worker(
     they appear, independent of the inbound long-poll. When both queues are empty
     it waits a short _SENDER_GAP, bounding delivery latency without busy-spinning."""
     gate = _WorkerGate()
+    carry_events: list[dict[str, Any]] = []
+    carry_responses: list[Response] = []
     while not stop.is_set():
         try:
-            sent = drain_outbound(adapter, outbound)
-            sent = drain_responses(adapter, responses) or sent
+            sent = drain_outbound(adapter, outbound, carry_events)
+            sent = drain_responses(adapter, responses, carry_responses) or sent
             gate.ok()
             if not sent:
                 stop.wait(_SENDER_GAP)
@@ -245,11 +271,11 @@ def _sender_worker(
             gate.fail(exc)
             stop.wait(_WORKER_GAP)
     try:
-        drain_outbound(adapter, outbound)
+        drain_outbound(adapter, outbound, carry_events)
     except Exception:
         _log.warning("final outbound drain failed during shutdown", exc_info=True)
     try:
-        drain_responses(adapter, responses)
+        drain_responses(adapter, responses, carry_responses)
     except Exception:
         _log.warning("final response drain failed during shutdown", exc_info=True)
 

@@ -29,9 +29,97 @@ def test_drain_outbound_feeds_each_queued_event_to_on_event() -> None:
     q: queue.Queue[dict] = queue.Queue()
     q.put({"type": "a"})
     q.put({"type": "b"})
-    runner.drain_outbound(FakeAdapter(), q)
+    runner.drain_outbound(FakeAdapter(), q, [])
     assert seen == [{"type": "a"}, {"type": "b"}]
     assert q.empty()
+
+
+def test_drain_outbound_transient_failure_keeps_event_for_retry() -> None:
+    # A network blip mid-send must delay the alert, not eat it: the in-flight
+    # event stays in `carry` and the next drain cycle delivers it first, ahead
+    # of anything queued behind it.
+    sent: list[dict] = []
+
+    class FlakyAdapter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def on_event(self, event: dict) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("The read operation timed out")
+            sent.append(event)
+
+    q: queue.Queue[dict] = queue.Queue()
+    q.put({"type": "a"})
+    q.put({"type": "b"})
+    adapter = FlakyAdapter()
+    carry: list[dict] = []
+    with pytest.raises(TimeoutError):
+        runner.drain_outbound(adapter, q, carry)
+    assert carry == [{"type": "a"}]                  # held, not lost
+    runner.drain_outbound(adapter, q, carry)         # next cycle retries
+    assert sent == [{"type": "a"}, {"type": "b"}]    # order preserved
+    assert carry == []
+
+
+def test_drain_outbound_non_transient_failure_drops_event_loudly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A persistent API error (e.g. HTTP 400 on this message) must not wedge the
+    # queue behind a poison event: drop it, say so, and keep the rest flowing.
+    sent: list[dict] = []
+
+    class PoisonFirstAdapter:
+        def on_event(self, event: dict) -> None:
+            if event["type"] == "poison":
+                raise urllib.error.HTTPError("u", 400, "Bad Request", {}, None)  # type: ignore[arg-type]
+            sent.append(event)
+
+    q: queue.Queue[dict] = queue.Queue()
+    q.put({"type": "poison"})
+    q.put({"type": "b"})
+    adapter = PoisonFirstAdapter()
+    carry: list[dict] = []
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"), \
+            pytest.raises(urllib.error.HTTPError):
+        runner.drain_outbound(adapter, q, carry)
+    assert carry == []                               # poison dropped, not retried
+    assert "dropping" in caplog.text
+    runner.drain_outbound(adapter, q, carry)
+    assert sent == [{"type": "b"}]
+
+
+def test_sender_worker_retries_alert_after_transient_send_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # End to end through the sender loop: a send that dies on a network blip is
+    # retried on the next cycle and the alert still reaches chat.
+    monkeypatch.setattr(runner, "_WORKER_GAP", 0.01)
+    stop = threading.Event()
+    outbound: queue.Queue = queue.Queue()
+    outbound.put({"type": "awaiting_user_input"})
+    sent: list[dict] = []
+
+    class FlakyAdapter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def on_event(self, event: dict) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise urllib.error.URLError(OSError(101, "Network is unreachable"))
+            sent.append(event)
+            stop.set()
+
+        def on_response(self, response: object) -> None:
+            pass
+
+        def poll_once(self) -> None:
+            raise AssertionError("sender worker must not poll")
+
+    runner._sender_worker(FlakyAdapter(), outbound, queue.Queue(), stop)
+    assert sent == [{"type": "awaiting_user_input"}]
 
 
 def test_pidfile_roundtrip(tmp_path: Path) -> None:
@@ -55,7 +143,7 @@ def test_drain_outbound_is_a_no_op_on_empty_queue() -> None:
         def on_event(self, event: dict) -> None:
             seen.append(event)
 
-    runner.drain_outbound(FakeAdapter(), queue.Queue())
+    runner.drain_outbound(FakeAdapter(), queue.Queue(), [])
     assert seen == []
 
 
