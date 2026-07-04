@@ -1,7 +1,10 @@
 import base64
+import dataclasses
+import hashlib
 import io
 import os
 
+import pytest
 from PIL import Image
 
 from imp.agents.runner import ContentPart, ImagePart, TextPart
@@ -32,9 +35,6 @@ def test_image_part_carries_wire_and_persistence_fields():
 
 
 def test_image_part_is_frozen():
-    import dataclasses
-    import pytest
-
     part = ImagePart(
         media_type="image/jpeg",
         data="Zm9v",
@@ -48,9 +48,6 @@ def test_image_part_is_frozen():
 
 
 def test_text_part_is_frozen():
-    import dataclasses
-    import pytest
-
     part = TextPart(text="hi")
     with pytest.raises(dataclasses.FrozenInstanceError):
         part.text = "changed"  # type: ignore[misc]
@@ -134,3 +131,34 @@ def test_incompressible_oversized_image_walks_jpeg_ladder_and_fits():
     assert len(out.data) < len(raw)                 # genuinely smaller
     assert len(out.data) <= imgmod.RAW_TARGET_BYTES
     assert len(base64.b64encode(out.data)) <= imgmod.BASE64_TARGET_BYTES
+
+
+def test_write_blob_names_by_sha_and_writes_bytes(tmp_path):
+    blobs = tmp_path / "blobs"
+    name = imgmod.write_blob(blobs, b"hello-bytes", "png")
+    sha = hashlib.sha256(b"hello-bytes").hexdigest()
+    assert name == f"{sha}.png"
+    assert (blobs / name).read_bytes() == b"hello-bytes"
+
+
+def test_write_blob_dedups_identical_bytes_to_one_file(tmp_path):
+    blobs = tmp_path / "blobs"
+    n1 = imgmod.write_blob(blobs, b"same", "jpg")
+    n2 = imgmod.write_blob(blobs, b"same", "jpg")
+    assert n1 == n2
+    assert [p.name for p in blobs.iterdir()] == [n1]  # exactly one blob
+
+
+def test_store_image_returns_populated_image_part_and_blob(tmp_path):
+    raw = _png_bytes(4, 4)
+    blobs = tmp_path / "blobs"
+    part = imgmod.store_image(raw, blobs)
+
+    assert part.type == "image"
+    assert part.media_type == "image/png"
+    assert (part.width, part.height) == (4, 4)
+    assert part.blob.endswith(".png")
+    assert part.nbytes == len(raw)  # small PNG passthrough: processed == raw
+    # `data` is base64 of the processed bytes, and decodes to the blob content.
+    assert base64.b64decode(part.data) == (blobs / part.blob).read_bytes()
+    assert base64.b64decode(part.data) == raw

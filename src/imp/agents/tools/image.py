@@ -9,10 +9,16 @@ provider — so it is testable standalone.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
+import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from PIL import Image
+
+from imp.agents.runner import ImagePart
 
 # --- Tunables (Claude Code's numbers) ---------------------------------------
 IMAGE_MAX_DIM = 2000                 # longest side after downscale
@@ -29,6 +35,8 @@ _FORMAT_TABLE = {
     "GIF": ("image/gif", "gif"),
     "WEBP": ("image/webp", "webp"),
 }
+
+_EXT_FOR_MEDIA = {media_type: ext for media_type, ext in _FORMAT_TABLE.values()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,3 +95,39 @@ def process_image(raw: bytes) -> ProcessedImage:
             return ProcessedImage(data, "image/jpeg", width, height)
     # Nothing fit even at the lowest quality: return the smallest we produced.
     return ProcessedImage(data, "image/jpeg", width, height)
+
+
+def write_blob(blobs_dir: Path, data: bytes, ext: str) -> str:
+    """Write `data` to <blobs_dir>/<sha256>.<ext> atomically and return the
+    "<sha>.<ext>" filename. Deduped: identical bytes reuse the existing blob."""
+    sha = hashlib.sha256(data).hexdigest()
+    name = f"{sha}.{ext}"
+    dest = blobs_dir / name
+    if dest.exists():
+        return name
+    blobs_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=blobs_dir)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    return name
+
+
+def store_image(raw: bytes, blobs_dir: Path) -> ImagePart:
+    """Process `raw`, store the processed bytes as a content-addressed blob under
+    `blobs_dir`, and return the on-wire ImagePart (base64 `data` + lean-reference
+    metadata). The sole entry point read_file's vision branch calls (Part 3)."""
+    processed = process_image(raw)
+    ext = _EXT_FOR_MEDIA[processed.media_type]
+    blob = write_blob(blobs_dir, processed.data, ext)
+    return ImagePart(
+        media_type=processed.media_type,
+        data=base64.b64encode(processed.data).decode("ascii"),
+        width=processed.width,
+        height=processed.height,
+        blob=blob,
+        nbytes=len(processed.data),
+    )
