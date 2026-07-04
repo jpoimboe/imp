@@ -104,7 +104,7 @@ def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "context instead of intent" in out
     assert "ending your turn" in out
@@ -561,7 +561,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
     # Key on a phrase unique to the handoff true-branch.
     assert "the base branch advanced since the draft started" in moved   # head_changed=true
@@ -575,7 +575,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
         cur_base_head="SAME", orig_base_head="SAME",
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
     assert "adopt near-silently" in same           # head_changed=false branch
     assert "the base branch advanced since the draft started" not in same
@@ -587,7 +587,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
         change_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
         autonomous=True,
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
     assert autonomous_moved == moved
 
@@ -659,7 +659,7 @@ def test_front_door_documents_split_off_a_change(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # The capability is documented (create_change is otherwise absent from this file).
     assert "create_change" in out
@@ -721,7 +721,7 @@ def test_authoring_agent_renders_human_decision_partial(
             cur_base_head="X", orig_base_head="X",
             vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
                   "task_total": 1, "integration_fork": "P"},
-            project_facts={}, guidance=""),
+            project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Sentinel lives entirely on one partial line (the canonical sentence wraps
     # across a newline, so assert a within-line substring that survives the wrap).
@@ -794,7 +794,7 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
             return render_prompt(body, build_context(
                 change_title="t", event_log=log, change_id="abc",
                 change_home=".imp/changes/abc",
-                project_facts={}, guidance="", autonomous=autonomous),
+                project_facts={}, autonomous=autonomous),
                 workflow_dir=wdir).lower()
 
         attended = render(False)

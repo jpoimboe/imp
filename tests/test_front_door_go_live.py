@@ -17,7 +17,7 @@ def _render(tmp_path: Path, *, autonomous: bool = False) -> str:
         build_context(change_title="t", event_log=log, change_id="abc",
                       change_home=".imp/changes/abc",
                       autonomous=autonomous,
-                      project_facts={}, guidance=""),
+                      project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
 
 

@@ -27,7 +27,7 @@ def _seed(root: Path, *, facts_yaml: str):
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "hello {{ project.greeting }} :: {{ project.guidance }}\n"
+        "hello {{ project.greeting }}\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -57,7 +57,9 @@ async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: 
     assert state.project_facts == {"greeting": "hi"}
     assert state.guidance == "live note"
     body = sink[0].initial_messages[0].content[0].text
-    assert "hello hi :: live note" in body
+    assert "hello hi" in body                     # fact still rendered via the template
+    assert "## Project guidance" in body          # engine-injected section
+    assert "live note" in body                    # frozen guidance text
 
 
 @pytest.mark.anyio
@@ -78,7 +80,9 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
     await run_change(change, on_event=lambda _e: None)
 
     body = sink[0].initial_messages[0].content[0].text
-    assert "hello FROZEN :: FROZEN-GUIDANCE" in body
-    assert "hello hi :: live" not in body
+    assert "hello FROZEN" in body                 # frozen fact, not live project.yaml
+    assert "## Project guidance" in body
+    assert "FROZEN-GUIDANCE" in body              # frozen guidance, injected
+    assert "hello hi" not in body                 # live greeting never used
     # The guard never overwrites an already-frozen value.
     assert State.load(change.state_dir).project_facts == {"greeting": "FROZEN"}

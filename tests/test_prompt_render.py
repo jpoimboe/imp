@@ -142,18 +142,20 @@ def test_renders_project_facts(tmp_path: Path) -> None:
     ctx = build_context(
         change_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
-        project_facts={"test_command": "make test"}, guidance="be careful",
+        project_facts={"test_command": "make test"},
     )
     assert render_prompt("{{ project.test_command }}", ctx) == "make test"
-    assert render_prompt("{{ project.guidance }}", ctx) == "be careful"
 
 
-def test_guidance_defaults_empty(tmp_path: Path) -> None:
+def test_project_guidance_reference_raises(tmp_path: Path) -> None:
+    # guidance is no longer a template fact: a stale reference fails loudly at
+    # render (strict project namespace) instead of silently rendering empty.
     ctx = build_context(
         change_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
     )
-    assert render_prompt("{{ project.guidance }}", ctx) == ""
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ project.guidance }}", ctx)
 
 
 def test_missing_fact_attr_raises(tmp_path: Path) -> None:
