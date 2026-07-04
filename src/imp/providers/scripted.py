@@ -10,7 +10,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, cast
 
-from imp.agents.dispatch import TurnState, dispatch_one_tool_use
+from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -149,15 +149,17 @@ class ScriptedAgentRunner:
 
                 tool_results: list[Any] = []
                 state = TurnState(tool_calls_used=used)
-                for tu in tool_uses:
-                    terminal = await dispatch_one_tool_use(
+                # Shared turn partition (same as the real providers): sub_agent
+                # tus spawn children via ctx.spawn_subagent; everything else
+                # flows through dispatch_one_tool_use inside.
+                async for ev in dispatch_turn_tool_uses(
                         ctx=ctx, elog=elog, aid=aid, invocation=invocation,
-                        tools=tools, tu=tu, tool_results=tool_results,
-                        state=state, ceiling=ceiling)
-                    if terminal is not None:
-                        yield terminal
+                        tools=tools, tool_uses=tool_uses,
+                        tool_results=tool_results, state=state,
+                        ceiling=ceiling):
+                    yield ev
+                    if ev.get("type") != "tool_heartbeat":
                         return
-                    yield {"type": "tool_heartbeat", "payload": {}}
                 used = state.tool_calls_used
 
                 if tool_results:
