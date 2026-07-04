@@ -306,3 +306,78 @@ def test_recover_kibe87_findings_folds_blocking_and_outcome() -> None:
     assert res.recovered.container == "findings"
     assert res.recovered.fields == ("blocking", "outcome")
     assert g.noprogress_streak == 0
+
+
+def test_recover_terminator_precedence_cuts_at_earliest() -> None:
+    # A folded value carrying ALL THREE terminators (`</outcome>`, `</parameter>`,
+    # `</invoke>`) is cut at the EARLIEST one. Here `</outcome>` precedes the
+    # others, so the value is "VAL" — a naive `</parameter>`-only cut would wrongly
+    # yield "VAL</outcome>junk".
+    args = {
+        "summary": (
+            'B</summary>\n<parameter name="outcome">VAL</outcome>junk'
+            "</parameter>more</invoke>tail"
+        )
+    }
+    repaired = recover_folded_fields(args, _recovery_schema())
+    assert repaired == {"summary": "B", "outcome": "VAL"}
+
+
+def test_recover_coerces_bool_false() -> None:
+    schema = parse_output_schema(
+        {"findings": {"type": "string"}, "blocking": {"type": "bool"}},
+        source=SourceLoc(file=Path("a.yaml"), line=1),
+    )
+    folded = 'x</findings>\n<parameter name="blocking">false</parameter>\n</invoke>'
+    repaired = recover_folded_fields({"findings": folded}, schema)
+    assert repaired["blocking"] is False
+
+
+def test_recover_non_coercible_value_left_missing() -> None:
+    # A folded `blocking` value of "maybe" is not a bool: it is NOT injected, so
+    # the field stays missing in the repaired copy.
+    schema = parse_output_schema(
+        {"summary": {"type": "string"}, "blocking": {"type": "bool"}},
+        source=SourceLoc(file=Path("a.yaml"), line=1),
+    )
+    folded = 'B</summary>\n<parameter name="blocking">maybe</parameter>\n</invoke>'
+    repaired = recover_folded_fields({"summary": folded}, schema)
+    assert repaired == {"summary": "B"}
+
+
+def test_validate_non_coercible_fold_falls_to_nudge() -> None:
+    # Same non-coercible fold at the decision-point level: the still-missing
+    # required `blocking` fails re-validation -> atomic discard -> nudge.
+    schema = parse_output_schema(
+        {"summary": {"type": "string"}, "blocking": {"type": "bool"}},
+        source=SourceLoc(file=Path("a.yaml"), line=1),
+    )
+    g = LoopGuard()
+    folded = 'B</summary>\n<parameter name="blocking">maybe</parameter>\n</invoke>'
+    res = validate_output_or_nudge({"summary": folded}, schema, g)
+    assert isinstance(res, Nudge)
+    assert "blocking" in res.reason
+    assert g.noprogress_streak == 1
+
+
+def test_clean_value_bails_beyond_depth_bound() -> None:
+    # Direct contract test of the depth guard: within budget the mirror-close
+    # chased by a param opener is truncated; beyond the budget it bails with None
+    # so the caller skips the field rather than recursing without bound.
+    from imp.agents.output_guard import _MAX_FOLD_DEPTH, _clean_value
+
+    nested = 'real</x>\n<parameter name="z">tail'
+    assert _clean_value(nested, "x", 0) == "real"
+    assert _clean_value(nested, "x", _MAX_FOLD_DEPTH + 1) is None
+
+
+def test_recover_json_without_param_markers_is_unchanged() -> None:
+    # OpenAI/codex JSON path: args carry no `<parameter name="...">` markers, so
+    # the fold fingerprint never matches and the args pass through unchanged.
+    schema = parse_output_schema(
+        {"status": {"type": "enum", "values": ["Success", "Error"]},
+         "note": {"type": "string"}},
+        source=SourceLoc(file=Path("a.yaml"), line=1),
+    )
+    args = {"status": "Success", "note": "plain narrative, no tags at all"}
+    assert recover_folded_fields(args, schema) == args
