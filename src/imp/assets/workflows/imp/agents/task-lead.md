@@ -2,7 +2,7 @@
 name: task-lead
 label: "task 1/{{ vars.task_total }}"
 description: Implement-phase controller — pick the next task, dispatch coder + one reviewer, adjudicate, commit one clean unit, record progress.
-subagents: [coder, code-reviewer, explorer, researcher]
+subagents: [coder, code-reviewer, explorer, researcher, spiker]
 output:
   status: {type: enum, values: [Success, Error]}
   verify_tolerated: {type: bool}
@@ -251,6 +251,16 @@ unimplemented task, or the re-opened task from injected feedback):
 7. Loop back to step 1 for the next task. Return only when the plan is fully
    implemented — every task committed — at which point the engine advances to the
    `verify` gate.
+
+## Implementation-local spikes
+
+When a build-time unknown can only be settled empirically — how one specific
+piece is best built, not the shape of the change — dispatch a **`spiker`** to run
+a throwaway experiment and report findings. These **implementation-local** spikes
+are allowed in place during the build: they change *how* one piece is
+implemented, never *what* the change delivers. A spike whose outcome would change
+the shape of the change is not implementation-local — that belonged to the spec
+phase, not here.
 
 ## Verify triage — tolerated failures
 
