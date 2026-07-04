@@ -55,6 +55,17 @@ def format_script_feedback(
     return _WRAPPER.format(detail=detail)
 
 
+def format_clean_tree_feedback(paths: str) -> str:
+    body = _truncate(paths)
+    detail = (
+        "The worktree still has uncommitted changes after your turn:\n"
+        f"{body}\n"
+        "Commit all of your work before continuing — or, if a merge or rebase "
+        "resolution is in progress, complete it first."
+    )
+    return _WRAPPER.format(detail=detail)
+
+
 def summarize_transition_reason(feedback: str | None, *, limit: int = 80) -> str | None:
     """First non-empty line of `feedback`, framing stripped and truncated; None if empty."""
     if not feedback:
