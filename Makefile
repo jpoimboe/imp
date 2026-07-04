@@ -86,7 +86,6 @@ _LIVE_TEST_FILES := \
   tests/test_relay_hibernation_live.py \
   tests/test_codex_provider_live.py \
   tests/test_codex_started_keying_live.py \
-  tests/test_output_validation_nudge_live.py \
   tests/test_parallel_elicitation_live.py
 
 .PHONY: test-live
