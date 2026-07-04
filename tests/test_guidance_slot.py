@@ -1,59 +1,71 @@
-"""The {{ project.guidance }} slot lands in judgment-making prompts only, and
-renders the maintainer's directive when set (spec item 5 / AC 9)."""
+"""Project guidance is injected by the engine (build_agent_invocation) into an
+agent's body when the change froze non-empty guidance, and produces no
+scaffolding when unset (vima66 §1). Templates no longer carry a
+{{ project.guidance }} block (see the guard test below)."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.prompts import build_context, render_prompt
-from imp.engine.state import InMemoryEventLog
+from imp.agents.runner import ChangeContext, Message, TextBlock
+from imp.engine.agent_run import build_agent_invocation
+from tests.test_agent_run import _agent
 
-AGENTS = Path("src/imp/assets/workflows/imp/agents")
-SCRIPTS = Path("src/imp/assets/workflows/imp/scripts")
-
-TARGETS = [
-    "spec-finalizer", "plan-writer", "coder",
-    "spec-reviewer", "plan-reviewer", "plan-code-reviewer", "code-reviewer",
-]
-NON_TARGETS = [
-    "task-lead", "reconciler", "deferred-sweep", "gap-check",
-    "finalize", "autosquash-resolve", "explorer", "researcher",
-]
-
-GUIDANCE_BLOCK = (
-    "{% if project.guidance %}\n"
-    "## Project guidance\n\n"
-    "The project maintainer set this guidance for this codebase — follow it "
-    "unless it conflicts with a hard correctness or safety requirement:\n\n"
-    "{{ project.guidance }}\n\n"
-    "{% endif %}\n"
-)
+_HEAD = "## Project guidance"
 
 
-def test_slot_present_in_every_judgment_prompt() -> None:
-    for stem in TARGETS:
-        assert GUIDANCE_BLOCK in (AGENTS / f"{stem}.md").read_text(), stem
+def _cc(tmp: Path, guidance: str) -> ChangeContext:
+    return ChangeContext(title="t", project_root=tmp,
+                         workflow_dir=tmp / "wf", guidance=guidance)
 
 
-def test_slot_absent_from_mechanical_and_orchestration_prompts() -> None:
-    for stem in NON_TARGETS:
-        assert "{{ project.guidance }}" not in (AGENTS / f"{stem}.md").read_text(), stem
+def _inv(tmp: Path, *, guidance: str, subagent: bool, feedback_lead=None):
+    return build_agent_invocation(
+        agent_def=_agent(),
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(
+            (Message(role="user", content=(TextBlock(text="SUB TASK"),)),)
+            if subagent else ()),
+        change_context=_cc(tmp, guidance),
+        user_chat_input_fn=None, transcript_dir=tmp / "td",
+        events_path=tmp / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None,
+        subagent_depth=1 if subagent else 0,
+        feedback_lead=feedback_lead,
+    )
 
 
-def test_slot_absent_from_scripts() -> None:
-    for sh in SCRIPTS.glob("*"):
-        if sh.is_file():
-            assert "{{ project.guidance }}" not in sh.read_text(), sh.name
+def test_toplevel_injects_guidance_at_head_of_user_task(tmp_path: Path) -> None:
+    inv = _inv(tmp_path, guidance="NO BACKCOMPAT.", subagent=False)
+    text = inv.initial_messages[0].content[0].text
+    assert _HEAD in text
+    assert "NO BACKCOMPAT." in text
+    assert "follow it" in text                       # the maintainer sentence rides along
+    assert text.index(_HEAD) < text.index("RENDERED BODY")
+    assert _HEAD not in inv.system_prompt             # not the role-only system prompt
 
 
-def test_block_renders_directive_when_guidance_set() -> None:
-    ctx = build_context("t", InMemoryEventLog(), guidance="NO BACKCOMPAT.")
-    out = render_prompt(GUIDANCE_BLOCK, ctx)
-    assert "## Project guidance" in out
-    assert "NO BACKCOMPAT." in out
+def test_subagent_injects_guidance_at_head_of_body(tmp_path: Path) -> None:
+    inv = _inv(tmp_path, guidance="NO BACKCOMPAT.", subagent=True)
+    sp = inv.system_prompt
+    assert _HEAD in sp
+    assert "NO BACKCOMPAT." in sp
+    assert sp.index(_HEAD) < sp.index("RENDERED BODY")
 
 
-def test_block_is_empty_when_guidance_unset() -> None:
-    ctx = build_context("t", InMemoryEventLog(), guidance="")
-    out = render_prompt(GUIDANCE_BLOCK, ctx)
-    assert "## Project guidance" not in out
-    assert out.strip() == ""
+def test_empty_guidance_injects_no_section_no_scaffolding(tmp_path: Path) -> None:
+    inv = _inv(tmp_path, guidance="", subagent=False)
+    text = inv.initial_messages[0].content[0].text
+    assert "Project guidance" not in text
+    assert text.startswith("RENDERED BODY")          # body head untouched
+
+
+def test_feedback_lead_leads_ahead_of_guidance_section(tmp_path: Path) -> None:
+    inv = _inv(tmp_path, guidance="NO BACKCOMPAT.", subagent=False,
+               feedback_lead="Here's the feedback to address: fix X")
+    text = inv.initial_messages[0].content[0].text
+    assert text.startswith("Here's the feedback to address: fix X")
+    assert text.index("Here's the feedback") < text.index(_HEAD)
+    assert text.index(_HEAD) < text.index("RENDERED BODY")
