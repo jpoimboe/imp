@@ -1982,12 +1982,35 @@ class _HomeScan(NamedTuple):
 
     change_json/state_json are the raw bytes (state_json is None when a home has
     no state.json yet); meta is the parsed change.json (homes whose change.json
-    is missing or malformed are dropped from the scan, so meta is always valid)."""
+    is missing or malformed are dropped from the scan, so meta is always valid);
+    has_user_message records whether events.jsonl holds any user_message event,
+    the conversed signal the shared backlog predicate consumes."""
     change_id: str
     change_json: bytes
     state_json: bytes | None
     meta: dict[str, Any]
     last_iso: str
+    has_user_message: bool
+
+
+def _events_have_user_message(events_path: Path) -> bool:
+    """True iff events.jsonl holds at least one user_message event. Read line by
+    line and short-circuit so a long log isn't fully parsed just to classify."""
+    try:
+        with events_path.open("rb") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "user_message":
+                    return True
+    except FileNotFoundError:
+        return False
+    return False
 
 
 def _scan_change_homes(control: Path) -> list[_HomeScan]:
@@ -2006,7 +2029,9 @@ def _scan_change_homes(control: Path) -> list[_HomeScan]:
         except FileNotFoundError:
             state_json = None
         last_iso = _last_event_iso(cdir / "events.jsonl") or ""
-        scanned.append(_HomeScan(change_id, change_json, state_json, meta, last_iso))
+        has_um = _events_have_user_message(cdir / "events.jsonl")
+        scanned.append(
+            _HomeScan(change_id, change_json, state_json, meta, last_iso, has_um))
     return scanned
 
 
@@ -2064,12 +2089,13 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
     for h in homes:
         if h.state_json is None:
             continue
-        if h.meta.get("materialized", True) is False and h.meta.get("origin", "draft") != "draft":
-            continue  # un-materialized ideas/follow-ups belong to the Backlog zone
+        cdir = _change_home(control, h.change_id)
+        if _is_backlog_home(h.meta, conversed=h.has_user_message,
+                            lock_live=lock_is_live(cdir / "lock")):
+            continue  # un-materialized, never-conversed, unlocked seed -> Backlog
         row = _status_row(h.change_id, h.state_json, h.change_json, h.last_iso)
         if row is None:
             continue
-        cdir = _change_home(control, h.change_id)
         status = resolve_display_status(
             row[1], cdir, materialized=h.meta.get("materialized", True))
         row = (row[0], status, *row[2:])
@@ -2319,11 +2345,11 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
-        if meta.get("materialized", True):
-            continue  # materialized homes are Active, not Backlog
+        cdir = _change_home(control, h.change_id)
+        if not _is_backlog_home(meta, conversed=h.has_user_message,
+                                lock_live=lock_is_live(cdir / "lock")):
+            continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
-        if origin == "draft":
-            continue  # un-materialized drafts are Active, not Backlog
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
