@@ -1504,7 +1504,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         lines.append(f"base_branch:   {meta['base_branch']}")
     if meta.get("depends_on"):
         lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
-    opening = _first_user_message(events)
+    opening = _resolve_intent(events)
     if opening:
         lines.append("")
         lines.append(opening)

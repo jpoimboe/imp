@@ -52,6 +52,15 @@ def _live_change(control: Path, change_id: str) -> None:
     (cdir / "events.jsonl").write_text(
         json.dumps(
             {
+                "type": "awaiting_user_input",
+                "agent_id": None,
+                "timestamp": "2026-06-20T10:59:59+00:00",
+                "payload": {"prompt": "what should I build?"},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
                 "type": "user_message",
                 "agent_id": None,
                 "timestamp": "2026-06-20T11:00:00+00:00",
@@ -73,6 +82,61 @@ def _live_change(control: Path, change_id: str) -> None:
         + "\n"
     )
     State(id=change_id, status="paused", step="spec-writer", step_attempt=0).save(cdir / "state")
+
+
+def _live_change_task_prompt(control: Path, change_id: str) -> None:
+    """A live change whose sole user_message is the composed task prompt (no
+    opening_intent, no awaiting_user_input, no interject) -- the resumed-from-
+    backlog shape whose card must show no prompt dump."""
+    cdir = control / ".imp" / "changes" / change_id
+    cdir.mkdir(parents=True)
+    (cdir / "state").mkdir()
+    (cdir / "change.json").write_text(
+        json.dumps(
+            {
+                "id": change_id,
+                "title": "Resumed seed",
+                "base_branch": "main",
+                "created_at": "2026-06-20T11:00:00+00:00",
+                "layout_version": LAYOUT_VERSION,
+            }
+        )
+    )
+    (cdir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "user_message",
+                "agent_id": "step:implement/coder",
+                "timestamp": "2026-06-20T11:00:00+00:00",
+                "payload": {
+                    "role": "user",
+                    "content": [{"type": "text",
+                                 "text": "## Task\nyou are a coder; do the thing"}],
+                },
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "step_started",
+                "agent_id": None,
+                "timestamp": "2026-06-20T11:00:01+00:00",
+                "payload": {"step": "coder", "phase": "implement"},
+            }
+        )
+        + "\n"
+    )
+    State(id=change_id, status="paused", step="coder", step_attempt=0).save(cdir / "state")
+
+
+def test_detail_card_omits_synthetic_task_prompt_opening(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _live_change_task_prompt(tmp_path, "2026-06-20-task01")
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-task01", now=_NOW))
+    assert "2026-06-20-task01" in card          # the change card still renders
+    assert "Resumed seed" in card               # title shown
+    assert "you are a coder" not in card        # no prompt-dump opening
+    assert "## Task" not in card
 
 
 def test_detail_card_live_source(tmp_path: Path) -> None:
