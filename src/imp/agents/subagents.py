@@ -239,6 +239,10 @@ async def dispatch_task(
             link_change_home(spike_worktree, ctx.change.change_dir)
             dispatch_policy = _build_spike_policy(
                 ctx.change, spike_worktree, ctx.test_gates)
+            if not dispatch_policy.active and ctx.event_log is not None:
+                ctx.event_log.append(
+                    agent_id=ctx.agent_id, type="sandbox_inactive",
+                    payload={"reason": dispatch_policy.note})
         else:
             dispatch_policy = ctx.sandbox_policy
 

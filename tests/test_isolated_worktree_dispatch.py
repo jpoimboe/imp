@@ -1,6 +1,7 @@
 # tests/test_isolated_worktree_dispatch.py
 from __future__ import annotations
 
+import types
 from pathlib import Path
 
 import anyio
@@ -195,6 +196,33 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     assert inv.change_context.project_root == change.project_root
     # no spike worktree was ever created
     assert list((tmp_path / ".imp" / "worktrees").glob("spike-*")) == []
+
+
+def test_inactive_spike_policy_emits_sandbox_inactive_event(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    inactive_policy = types.SimpleNamespace(active=False, note="unsandboxed_by_config")
+    monkeypatch.setattr(
+        "imp.agents.subagents._build_spike_policy", lambda *_a, **_kw: inactive_policy)
+
+    change = _make_change(tmp_path)
+    ctx = _ctx(tmp_path, change, name="prober", agent=_isolated_agent("prober"),
+               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}]))
+    ctx.agent_id = "prober"
+
+    recorded: list[dict] = []
+
+    class _CapturingLog:
+        def append(self, *, agent_id, type, payload):
+            recorded.append({"agent_id": agent_id, "type": type, "payload": payload})
+
+    ctx.event_log = _CapturingLog()
+
+    anyio.run(dispatch_task, ctx, "prober", "measure it")
+
+    sandbox_events = [e for e in recorded if e["type"] == "sandbox_inactive"]
+    assert len(sandbox_events) == 1
+    assert sandbox_events[0]["payload"]["reason"] == "unsandboxed_by_config"
+    assert sandbox_events[0]["agent_id"] == "prober"
 
 
 def test_isolated_dispatch_without_change_context_raises(tmp_path: Path) -> None:
