@@ -34,7 +34,7 @@ class ToolUseBlock:
 @dataclass(frozen=True, slots=True)
 class ToolResultBlock:
     tool_use_id: str
-    content: str
+    content: str | list[ContentPart]
     is_error: bool = False
     type: Literal["tool_result"] = "tool_result"
 
@@ -255,6 +255,26 @@ def message_to_json(msg: Message) -> str:
     return json.dumps(payload, separators=(",", ":"))
 
 
+def _content_part_to_dict(part: ContentPart) -> dict[str, Any]:
+    if isinstance(part, TextPart):
+        return {"type": "text", "text": part.text}
+    return {
+        "type": "image", "media_type": part.media_type, "data": part.data,
+        "width": part.width, "height": part.height,
+        "blob": part.blob, "nbytes": part.nbytes,
+    }
+
+
+def _content_part_from_dict(raw: dict[str, Any]) -> ContentPart:
+    if raw["type"] == "text":
+        return TextPart(text=raw["text"])
+    return ImagePart(
+        media_type=raw["media_type"], data=raw["data"],
+        width=raw["width"], height=raw["height"],
+        blob=raw["blob"], nbytes=raw["nbytes"],
+    )
+
+
 def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
     if isinstance(b, TextBlock):
         return {"type": "text", "text": b.text}
@@ -263,9 +283,11 @@ def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
     if isinstance(b, ThinkingBlock):
         return {"type": "thinking", "thinking": b.thinking,
                 "signature": b.signature, "redacted_thinking": b.redacted_thinking}
+    content = (b.content if isinstance(b.content, str)
+               else [_content_part_to_dict(p) for p in b.content])
     return {
         "type": "tool_result", "tool_use_id": b.tool_use_id,
-        "content": b.content, "is_error": b.is_error,
+        "content": content, "is_error": b.is_error,
     }
 
 
@@ -278,9 +300,12 @@ def message_from_json(data: dict[str, Any]) -> Message:
         elif kind == "tool_use":
             blocks.append(ToolUseBlock(id=raw["id"], name=raw["name"], input=raw["input"]))
         elif kind == "tool_result":
+            raw_content = raw["content"]
+            content = (raw_content if isinstance(raw_content, str)
+                       else [_content_part_from_dict(p) for p in raw_content])
             blocks.append(ToolResultBlock(
                 tool_use_id=raw["tool_use_id"],
-                content=raw["content"],
+                content=content,
                 is_error=raw.get("is_error", False),
             ))
         elif kind == "thinking":

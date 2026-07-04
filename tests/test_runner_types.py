@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 
 from imp.agents.runner import (
+    ImagePart,
     Message,
     TextBlock,
+    TextPart,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -191,3 +193,41 @@ def test_round_trip_redacted_thinking_block() -> None:
     assert back == msg
     assert back.content[0].redacted_thinking == "encrypted-data"
     assert back.content[0].thinking == ""
+
+
+def test_round_trip_tool_result_list_content_is_lossless() -> None:
+    parts = [
+        TextPart(text="login.png — 1200×800 PNG"),
+        ImagePart(
+            media_type="image/png", data="aGVsbG8=", width=1200, height=800,
+            blob="deadbeef.png", nbytes=340_000,
+        ),
+    ]
+    msg = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t1", content=parts),),
+    )
+    back = message_from_json(json.loads(message_to_json(msg)))
+    block = back.content[0]
+    assert isinstance(block, ToolResultBlock)
+    # The list survived as a list of reconstructed parts (not a JSON string).
+    assert isinstance(block.content, list)
+    assert block.content == parts
+    # The base64 payload and image metadata survive the round-trip.
+    img = block.content[1]
+    assert isinstance(img, ImagePart)
+    assert img.data == "aGVsbG8="
+    assert (img.width, img.height, img.blob, img.nbytes) == (
+        1200, 800, "deadbeef.png", 340_000)
+
+
+def test_round_trip_tool_result_str_content_unchanged() -> None:
+    msg = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t1", content="contents", is_error=True),),
+    )
+    back = message_from_json(json.loads(message_to_json(msg)))
+    block = back.content[0]
+    assert block.content == "contents"
+    assert isinstance(block.content, str)
+    assert block.is_error is True
