@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from imp.agents.runner import ImagePart, TextPart
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
@@ -415,3 +416,49 @@ def test_dispatch_brackets_tool_watchdog_on_raise(tmp_path: Path) -> None:
 
     assert "RuntimeError" in out
     assert coord.tool_active is False
+
+
+def _image_parts() -> list:
+    return [
+        TextPart(text="shot.png — 8×8 PNG"),
+        ImagePart(media_type="image/png", data="aGVsbG8=", width=8, height=8,
+                  blob="ab12.png", nbytes=5),
+    ]
+
+
+def _image_tool() -> Tool:
+    parts = _image_parts()
+
+    def _fn(ctx: Any) -> list:
+        return parts
+
+    return Tool(name="read_file", description="read",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+
+def test_dispatch_list_content_returns_mcp_image_content(tmp_path: Path) -> None:
+    from mcp.types import ImageContent, TextContent
+
+    out = asyncio.run(dispatch_tool(
+        tool=_image_tool(), args={}, ctx=_ctx(tmp_path), state=RunState(cap=10)))
+    assert isinstance(out, list)
+    assert isinstance(out[0], TextContent)
+    assert out[0].text == "shot.png — 8×8 PNG"
+    assert isinstance(out[1], ImageContent)
+    assert out[1].mimeType == "image/png"
+    assert out[1].data == "aGVsbG8="
+
+
+def _plain_list_tool() -> Tool:
+    def _fn(ctx: Any) -> list:
+        return [1, 2, 3]
+
+    return Tool(name="nums", description="nums",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+
+def test_dispatch_plain_list_still_json_flattens(tmp_path: Path) -> None:
+    # An ordinary (non-ContentPart) list keeps the json.dumps path unchanged.
+    out = asyncio.run(dispatch_tool(
+        tool=_plain_list_tool(), args={}, ctx=_ctx(tmp_path), state=RunState(cap=10)))
+    assert out == "[1, 2, 3]"

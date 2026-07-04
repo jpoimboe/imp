@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from imp.agents.parallel import max_parallel_tasks
+from imp.agents.runner import ContentPart, ImagePart, TextPart
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, suspend_inactivity_watchdog
@@ -91,9 +92,23 @@ class RunState:
     runner_loop: Any = None
 
 
+def _parts_to_mcp_content(parts: list[ContentPart]) -> list[Any]:
+    # Real mcp.types objects (not dicts): FastMCP's _convert_to_content passes a
+    # ContentBlock straight through but JSON-stringifies a plain dict, so an
+    # ImagePart must become an ImageContent to reach the model as an image.
+    from mcp.types import ImageContent, TextContent
+    blocks: list[Any] = []
+    for p in parts:
+        if isinstance(p, TextPart):
+            blocks.append(TextContent(type="text", text=p.text))
+        else:
+            blocks.append(ImageContent(type="image", data=p.data, mimeType=p.media_type))
+    return blocks
+
+
 async def dispatch_tool(
     *, tool: Tool, args: dict[str, Any], ctx: ToolContext, state: RunState,
-) -> str:
+) -> str | list[Any]:
     """Invoke `tool` against `ctx` with `args`, returning a textual result
     suitable for an MCP tool response body.
 
@@ -171,6 +186,9 @@ async def dispatch_tool(
                     {"id": "", "name": "bash", "signal": -rc})
         except (ValueError, TypeError):
             pass
+    if (isinstance(raw, list) and raw
+            and all(isinstance(p, (TextPart, ImagePart)) for p in raw)):
+        return _parts_to_mcp_content(raw)
     if isinstance(raw, str):
         return raw
     try:
@@ -346,7 +364,7 @@ def _register_tool(
     fn_meta = FuncMetadata(arg_model=ArgModel)
 
     # ── Wrapper: receives unpacked kwargs from model_dump_one_level() ─────────
-    async def _impl(**kwargs: Any) -> str:
+    async def _impl(**kwargs: Any) -> Any:
         return await dispatch_tool(tool=tool_ref, args=kwargs, ctx=ctx, state=state)
 
     # ── Register directly so FastMCP sees the original input_schema ───────────
