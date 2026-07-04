@@ -1433,12 +1433,31 @@ def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _is_backlog_home(
+    meta: dict[str, Any], *, conversed: bool, lock_live: bool
+) -> bool:
+    """Shared zone predicate. A live change home is Backlog iff it is
+    un-materialized, has a non-draft origin, has never been conversed (no
+    user_message event), and is not lock-live. The detail card
+    (`_unstarted_backlog_meta`) and both overview zone builders (`_status_rows`,
+    `_backlog_rows`) classify through this one helper, so a resumed/lock-live
+    seed leaves Backlog and the three classifiers cannot drift."""
+    return (
+        not meta.get("materialized", True)
+        and meta.get("origin", "draft") != "draft"
+        and not conversed
+        and not lock_live
+    )
+
+
 def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | None:
-    """change.json of a LIVE un-materialized, never-conversed Backlog home (idea or
-    followup) — sourced from the worktree home only, never the archive: an abandoned
-    home leaves an archived materialized:false change.json that would otherwise render
-    as a queued `status: backlog` brief instead of a History item. None for any
-    archived-only, materialized, or already-conversed id."""
+    """change.json of a LIVE un-materialized, non-draft-origin, never-conversed,
+    unlocked Backlog home (idea or followup) — sourced from the worktree home
+    only, never the archive: an abandoned home leaves an archived
+    materialized:false change.json that would otherwise render as a queued
+    `status: backlog` brief instead of a History item. None for any archived-only
+    id or any home the shared backlog predicate rejects (materialized,
+    draft-origin, already-conversed, or lock-live)."""
     cdir = _change_home(control, change_id)
     cj = cdir / "change.json"
     if not cj.exists():
@@ -1448,12 +1467,14 @@ def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | N
     except json.JSONDecodeError:
         return None
     if meta.get("materialized", True):
-        return None
+        return None  # materialized homes are never Backlog; skip the event-log read
     try:
         change = Change.load(control, change_id)
     except (LoadError, LoadErrors):
         return None
-    if _first_user_message(list(change.event_log().read())) is not None:
+    conversed = _first_user_message(list(change.event_log().read())) is not None
+    if not _is_backlog_home(meta, conversed=conversed,
+                            lock_live=lock_is_live(cdir / "lock")):
         return None
     return meta
 
