@@ -15,7 +15,7 @@ from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
-from imp.engine.types import Continue, Goto, Pause
+from imp.engine.types import Continue, Goto
 
 AGENTS = Path("src/imp/assets/workflows/imp/agents")
 _TIERS = frozenset({"low", "medium", "high"})
@@ -54,7 +54,7 @@ def test_review_sweep_and_finalize_left_the_implement_loop() -> None:
     conv_names = [s.name for s in next(p for p in wf.phases if p.name == "converge").steps]
     assert conv_names == [
         "gap-check", "change-review", "deferred-sweep", "sweep-verify",
-        "cleanup-sweep", "autosquash-resolve-sweep", "converge-verify",
+        "converge-verify",
     ]
 
 
@@ -278,33 +278,25 @@ def test_plan_code_reviewer_is_not_a_pure_advisor() -> None:
     assert "approve" in text and "task_gap" in text
 
 
-def test_cleanup_sweep_routes_by_exit_code() -> None:
-    wf = _wf()
-    step = _steps(wf)["cleanup-sweep"]
-    assert step.kind == "script"
-    assert step.command == "./scripts/cleanup.sh"
-    m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
-    assert isinstance(m0.action, Goto) and m0.action.target == "converge-verify"
-    m2 = evaluate_rules(step.rules, vars={}, output={"exit": 2})
-    assert isinstance(m2.action, Continue)
-    m3 = evaluate_rules(step.rules, vars={}, output={"exit": 3})
-    assert isinstance(m3.action, Goto) and m3.action.target == "deferred-sweep"
-    assert m3.action.resume is True
-    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
-    assert isinstance(m1.action, Pause)
-
-
-def test_autosquash_resolve_sweep_loops_back_to_cleanup() -> None:
-    step = _steps(_wf())["autosquash-resolve-sweep"]
-    assert step.kind == "agent" and step.tier == "high"
-    assert step.file is not None and step.file.name == "autosquash-resolve.md"
-    assert isinstance(step.rules[-1].action, Goto)
-    assert step.rules[-1].action.target == "cleanup-sweep"
-    assert step.max_loops == 6
-
 
 def test_plan_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
     out = _render_reviewer(tmp_path)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
         assert term in out
+
+
+def test_converge_cleanup_steps_removed() -> None:
+    names = [s.name for s in _wf().flat_steps()]
+    assert "cleanup-sweep" not in names
+    assert "autosquash-resolve-sweep" not in names
+
+
+def test_sweep_verify_green_continues_into_converge_verify() -> None:
+    wf = _wf()
+    conv = next(p for p in wf.phases if p.name == "converge")
+    names = [s.name for s in conv.steps]
+    # sweep-verify continues positionally into converge-verify (no cleanup between).
+    assert names.index("sweep-verify") + 1 == names.index("converge-verify")
+    sv = _steps(wf)["sweep-verify"]
+    assert isinstance(evaluate_rules(sv.rules, vars={}, output={"exit": 0}).action, Continue)

@@ -590,17 +590,17 @@ def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
     assert "converge_verify_tolerated" in fields
 
 
-def test_deferred_sweep_tolerated_routes_to_cleanup() -> None:
+def test_deferred_sweep_tolerated_routes_to_converge_verify() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["deferred-sweep"].rules
     # All sweep failures tolerated: deferred-sweep made NO fix and routes straight to
-    # cleanup-sweep, skipping the sweep-verify gate; it carries no var.
+    # converge-verify, skipping the sweep-verify gate; it carries no var.
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "sweep_tolerated": True,
                                "converge_verify_tolerated": False})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "cleanup-sweep" and m.action.resume is False
+    assert m.action.target == "converge-verify" and m.action.resume is False
     assert m.var_mutations == {}
 
 

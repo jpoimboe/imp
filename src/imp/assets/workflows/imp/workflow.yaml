@@ -10,7 +10,7 @@ description: |
 # sole coverage backstop; latches coverage_settled) -> change-review (the single
 # change-wide code review, reusing agents/plan-code-reviewer.md) -> deferred-sweep
 # (drains the whole change's Deferred list once) -> sweep-verify (fast) ->
-# cleanup-sweep -> converge-verify (slow, on the change's own base). integrate then
+# converge-verify (slow, on the change's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, and ends at the human gate (summarizer -> finalize) so
 # the human blesses the locked, rebased, slow-tested state. cleanup.sh is
@@ -205,7 +205,7 @@ phases:
         label: sweeping deferred tasks
         rules:
           - {if: {converge_verify_tolerated: true}, goto: wait-for-head}
-          - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
+          - {if: {sweep_tolerated: true}, goto: converge-verify}
           - {else: true, continue: true}
 
       - name: sweep-verify
@@ -219,26 +219,9 @@ phases:
           - {if: {exit: 124}, pause: true}
           - {else: true, resume: deferred-sweep, feedback: "The fast verify gate (sweep-verify) failed on your sweep fix commits. Triage fix-vs-tolerate:"}
 
-      - name: cleanup-sweep
-        show_label: false
-        command: ./scripts/cleanup.sh
-        rules:
-          - {if: {exit: 0}, goto: converge-verify}
-          - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: deferred-sweep}
-          - {else: true, pause: true}
-
-      - name: autosquash-resolve-sweep
-        file: agents/autosquash-resolve.md
-        tier: high
-        label: resolving sweep fixups
-        max_loops: 6
-        rules:
-          - {else: true, goto: cleanup-sweep}
-
       # Slow tests on the change's own base (off-lock). Clean -> enter integrate. A failure
       # resumes deferred-sweep in slow-gate triage: a fix loops back through sweep-verify ->
-      # cleanup-sweep -> converge-verify; a "not ours" toleration emits converge_verify_tolerated
+      # converge-verify; a "not ours" toleration emits converge_verify_tolerated
       # -> wait-for-head (forward escape; this gate never re-runs).
       - name: converge-verify
         command: ./scripts/run-verify.sh slow

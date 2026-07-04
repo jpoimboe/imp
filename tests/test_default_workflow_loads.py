@@ -152,7 +152,6 @@ def test_every_shown_step_has_its_label() -> None:
         "deferred-sweep": "sweeping deferred tasks",
         "sweep-verify": "running tests",
         "converge-verify": "running tests",
-        "autosquash-resolve-sweep": "resolving sweep fixups",
         "summarizer": "summarizing change",
         "finalize": "finalizing",
         "wait-for-head": "waiting in merge queue",
@@ -165,7 +164,7 @@ def test_every_shown_step_has_its_label() -> None:
         assert by[name].label == label, name
     # Quiet plumbing steps stay label-free.
     for name in ("spec-verify-commit", "plan-verify-commit",
-                 "cleanup-sweep", "cleanup-merge", "check-next-plan",
+                 "cleanup-merge", "check-next-plan",
                  "assert-stamped", "integrate-rebase"):
         assert by[name].label is None, name
 

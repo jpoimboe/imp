@@ -470,14 +470,14 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "injected feedback" in low
     assert "triage only" in low
     # A real regression is fixed with a PLAIN commit, never a --fixup: a sweep fix is its
-    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped by
-    # cleanup-sweep.
+    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped
+    # later by the end-of-change cleanup-merge.
     assert 'git commit -m' in text
     assert "--fixup=HEAD" in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
-    assert "cleanup-sweep" in text                  # the sweep's cleanup gate
+    assert "cleanup-merge" in text                  # fold/stamp deferred to the end-of-change gate
     assert "consume the budget" not in low          # the carry-era budget wording is gone
 
 
