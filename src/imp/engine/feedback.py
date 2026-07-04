@@ -55,6 +55,22 @@ def format_script_feedback(
     return _WRAPPER.format(detail=detail)
 
 
+def summarize_transition_reason(feedback: str | None, *, limit: int = 80) -> str | None:
+    """First non-empty line of `feedback`, framing stripped and truncated; None if empty."""
+    if not feedback:
+        return None
+    text = feedback
+    prefix = _WRAPPER.format(detail="")
+    if text.startswith(prefix):
+        text = text[len(prefix):]
+    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), None)
+    if not first:
+        return None
+    if len(first) > limit:
+        first = first[: limit - 1].rstrip() + "…"
+    return first
+
+
 def render_output_fields(output: dict[str, Any]) -> str:
     """Render every field of a step's structured output as `key: value` lines.
     No editorial, no wrapper — the engine composes `{preamble}\n{fields}` on the

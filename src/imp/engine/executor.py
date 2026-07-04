@@ -48,6 +48,7 @@ from imp.engine.feedback import (
     apply_completion_backstop,
     format_script_feedback,
     render_output_fields,
+    summarize_transition_reason,
 )
 from imp.engine.gates import (
     RuleMatch,
@@ -397,6 +398,16 @@ async def run_change(
                 if parts:
                     state.retry_feedback = {
                         "target_step": target_name, "text": "\n\n".join(parts)}
+
+            # Backward Goto (strictly-earlier target) = a bounce: emit a generic
+            # marker (no step/gate name) so imp log renders it legibly.
+            if isinstance(action, Goto) and target_idx is not None and target_idx < idx:
+                _emit(log, "step_transition", {
+                    "from_step": step.name,
+                    "target_step": flat[target_idx].name,
+                    "backward": True,
+                    "reason": summarize_transition_reason(feedback_text),
+                })
 
             # §3 case 2 — an in-flight interrupt pauses AFTER navigation, so
             # re-entry starts the navigated-to step and §2 pending texts reach it.

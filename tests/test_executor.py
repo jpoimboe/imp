@@ -3045,3 +3045,193 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
     assert "Address these findings:" in reworked   # source feedback preserved
     assert COMPLETION_BACKSTOP in reworked         # backstop applied once
     assert reworked.count(COMPLETION_BACKSTOP) == 1
+
+
+@pytest.mark.anyio
+async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> None:
+    """A gate whose `else` resumes an earlier step emits exactly one
+    `step_transition` event naming source, target, the backward flag, and a
+    reason summarized from the gate feedback — and it is logged after the gate's
+    own step_completed (renders at the bounce point, not the bottom)."""
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "lead.md").write_text(
+        "---\nname: lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: lead\n"
+        "        file: agents/lead.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: gate\n"
+        "        command: 'echo 50 coverage issues >&2; exit 1'\n"
+        "        max_loops: 1\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, resume: lead}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            _persist_initial(invocation)
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    await run_change(change, on_event=lambda _e: None)
+
+    events = list(change.event_log().read())
+    trans = [e for e in events if e["type"] == "step_transition"]
+    assert len(trans) == 1
+    p = trans[0]["payload"]
+    assert p["from_step"] == "gate"
+    assert p["target_step"] == "lead"
+    assert p["backward"] is True
+    assert p["reason"] is not None and "gate" in p["reason"].lower()
+
+    types = [e["type"] for e in events]
+    ti = types.index("step_transition")
+    gate_completions = [
+        i for i, e in enumerate(events)
+        if e["type"] == "step_completed" and e["payload"]["step"] == "gate"]
+    assert any(i < ti for i in gate_completions)
+
+
+@pytest.mark.anyio
+async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None:
+    """A run with only forward Continue/goto edges emits no `step_transition`."""
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "lead.md").write_text(
+        "---\nname: lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: lead\n"
+        "        file: agents/lead.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: gate\n"
+        "        command: 'exit 0'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, resume: lead}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            _persist_initial(invocation)
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    events = list(change.event_log().read())
+    assert not any(e["type"] == "step_transition" for e in events)
+
+
+@pytest.mark.anyio
+async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
+    """A gate that resumes itself (self-goto, target_idx == idx) emits no step_transition."""
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: gate\n"
+        "        command: 'exit 1'\n"
+        "        max_loops: 3\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, goto: gate}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            _persist_initial(invocation)
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    await run_change(change, on_event=lambda _e: None)
+
+    events = list(change.event_log().read())
+    assert not any(e["type"] == "step_transition" for e in events)
