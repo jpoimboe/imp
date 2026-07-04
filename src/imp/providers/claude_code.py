@@ -53,6 +53,7 @@ from imp.agents.output_guard import (
     Nudge,
     Ok,
     make_nudge_event,
+    make_recovery_event,
     validate_output_or_nudge,
 )
 from imp.agents.parallel import max_parallel_tasks
@@ -2299,8 +2300,12 @@ class ClaudeCodeAgentRunner:
                                 # immediately and guard state is thrown away.
                                 if flushed is not None:
                                     guard.observe(flushed)
+                                if res.recovered is not None:
+                                    ev = make_recovery_event(res)
+                                    elog.append(agent_id=aid, type=ev["type"],
+                                                payload=ev["payload"])
                                 yield {"type": "agent_output",
-                                       "payload": state.complete_step_args}
+                                       "payload": res.payload}
                                 return
                             if isinstance(res, Nudge):
                                 ev = make_nudge_event(res)

@@ -30,6 +30,7 @@ from imp.agents.output_guard import (
     Nudge,
     Ok,
     make_nudge_event,
+    make_recovery_event,
     validate_output_or_nudge,
 )
 from imp.agents.parallel import max_parallel_tasks
@@ -132,7 +133,10 @@ async def dispatch_one_tool_use(
         res = validate_output_or_nudge(
             sc.args_payload, invocation.agent_def.output_schema, guard)
         if isinstance(res, Ok):
-            return {"type": "agent_output", "payload": sc.args_payload}
+            if res.recovered is not None:
+                ev = make_recovery_event(res)
+                elog.append(agent_id=aid, type=ev["type"], payload=ev["payload"])
+            return {"type": "agent_output", "payload": res.payload}
         if isinstance(res, Nudge):
             block = ToolResultBlock(tu.id, res.message, is_error=True)
             tool_results.append(block)

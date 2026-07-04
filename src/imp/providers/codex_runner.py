@@ -26,6 +26,7 @@ from imp.agents.output_guard import (
     Nudge,
     Ok,
     make_nudge_event,
+    make_recovery_event,
     validate_output_or_nudge,
 )
 from imp.agents.runner import (
@@ -736,7 +737,11 @@ class CodexAgentRunner:
                         res = validate_output_or_nudge(
                             args, invocation.agent_def.output_schema, guard)
                         if isinstance(res, Ok):
-                            yield {"type": "agent_output", "payload": args}
+                            if res.recovered is not None:
+                                ev = make_recovery_event(res)
+                                elog.append(agent_id=aid, type=ev["type"],
+                                            payload=ev["payload"])
+                            yield {"type": "agent_output", "payload": res.payload}
                             return
                         if isinstance(res, Nudge):
                             ev = make_nudge_event(res)
