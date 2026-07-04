@@ -56,20 +56,23 @@ unimplemented task, or the re-opened task from injected feedback):
    updates only the live status bar; it introduces no task counter and changes
    nothing about how you pick work.
 2. Dispatch the coder with the **full task text +
-   scene-setting context** (it does not read the plan), at the **tier set by the
-   plan's structure**. The plan's task count is `task_total` — the number of
-   `## Task <N>` headings, fixed when the plan was finalized. A **single-task plan**
-   is the atomic single-commit shape that carries the most irreducible context, so its
-   coder gets the higher tier; a **multi-task plan** splits the work across tasks, so
-   each coder gets the default tier. Name tiers, never specific model names — the
-   configured provider may not be Anthropic.
-   {% if vars.task_total == 1 %}
-   This plan has one task — dispatch the coder at the higher tier
-   (`sub_agent(subagent_name="coder", tier="high", task_description=…)`):
-   {% else %}
-   This plan has several tasks — dispatch the coder at the default tier
-   (`sub_agent(subagent_name="coder", tier="medium", task_description=…)`):
-   {% endif %}
+   scene-setting context** (it does not read the plan), at the **tier the plan
+   assigns this task**. The default is the `medium` tier: a plan is written to be
+   executed mechanically, so most tasks are transcription of an already-settled
+   design and do not need the top tier. The plan-writer marks a **genuinely hard**
+   task with a `**Tier:** high` line under its `## Task <N>` heading (reserved for
+   algorithmically subtle, invariant-load-bearing, or genuinely ambiguous work);
+   dispatch that task's coder at `high`, every unmarked task at `medium`. Read the
+   marker from **this task's** heading — never carry a sibling task's tier.
+   Decide the tier **now, at initial dispatch**: a re-dispatch is a fresh subagent
+   (it inherits only the prior coder's final message), so a mid-task bump only
+   makes the higher tier salvage the lower's work cold — it cannot retroactively
+   give opus the hard task from the start. Name tiers, never specific model names —
+   the configured provider may not be Anthropic.
+   - **Unmarked task (the default):**
+     `sub_agent(subagent_name="coder", tier="medium", task_description=…)`
+   - **Task marked `**Tier:** high`:**
+     `sub_agent(subagent_name="coder", tier="high", task_description=…)`
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
      trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record

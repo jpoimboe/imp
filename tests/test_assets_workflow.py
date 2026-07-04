@@ -967,7 +967,12 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     assert "coverage complete" in low
 
 
-def test_task_lead_escalates_coder_tier_for_single_task_plan(tmp_path: Path) -> None:
+def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> None:
+    """The coder tier no longer branches on task_total. Every task defaults to the
+    `medium` tier; a genuinely hard task is raised to `high` only when the plan
+    marks it (a `**Tier:** high` line the plan-writer emits). So both the default
+    (`medium`) and the plan-marked (`high`) coder-dispatch examples appear, and
+    the coder guidance renders identically for single- and multi-task plans."""
     from imp.agents.prompts import build_context, render_prompt
     from imp.assets import bundled_workflow_dir
     from imp.engine.state import JsonlEventLog
@@ -975,20 +980,19 @@ def test_task_lead_escalates_coder_tier_for_single_task_plan(tmp_path: Path) -> 
     body = load_workflow(bundled_workflow_dir("imp")).agents["task-lead"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
-    single = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc",
-        vars={"task_total": 1, "fast_path": False}),
-        workflow_dir=bundled_workflow_dir("imp"))
-    assert 'subagent_name="coder", tier="high"' in single
+    def render(task_total: int) -> str:
+        return render_prompt(body, build_context(
+            change_title="t", event_log=log, change_id="abc",
+            change_home=".imp/changes/abc",
+            vars={"task_total": task_total, "fast_path": False}),
+            workflow_dir=bundled_workflow_dir("imp"))
 
-    multi = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc",
-        vars={"task_total": 3, "fast_path": False}),
-        workflow_dir=bundled_workflow_dir("imp"))
-    assert 'subagent_name="coder", tier="medium"' in multi
-    assert 'subagent_name="coder", tier="high"' not in multi
+    # Both the default (medium) and the plan-marked (high) coder examples appear
+    # regardless of task count. Under the old task_total-gated rule this failed:
+    # a single-task render had no `medium`, a multi-task render had no `high`.
+    for rendered in (render(1), render(3)):
+        assert 'subagent_name="coder", tier="medium"' in rendered
+        assert 'subagent_name="coder", tier="high"' in rendered
 
 
 def test_imp_gate_steps_pass_tier_arg() -> None:

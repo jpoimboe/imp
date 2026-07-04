@@ -337,6 +337,8 @@ to look. Omit the section entirely when there is nothing to record.
 ````markdown
 ## Task N: [Component Name]
 
+**Tier:** high   <!-- HARD tasks ONLY (see "Task difficulty tier"); OMIT this line on ordinary tasks — they default to the cheap tier -->
+
 **Files:**
 - Create: `exact/path/to/file.py`
 - Modify: `exact/path/to/existing.py`
@@ -381,6 +383,34 @@ git add tests/path/test_file.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 ````
+
+## Task difficulty tier
+
+Every task is implemented by a coder at the **`medium` tier by default**. Because
+a plan is written to be executed mechanically, most tasks are transcription of an
+already-settled design and the cheap tier handles them with no loss of quality.
+
+For a **genuinely hard** task — and only then — add a single `**Tier:** high`
+line immediately under its `## Task N:` heading. task-lead reads that marker and
+dispatches this one task's coder at the top tier; unmarked tasks stay `medium`.
+This is the one place the plan raises the implementer's tier, and it is decided
+here, at planning time, because the tier must be right at the coder's **initial**
+dispatch (a later re-dispatch is a fresh subagent and cannot be upgraded without
+losing the task's context).
+
+Mark a task `high` only when it is materially harder than mechanical execution:
+
+- **Algorithmically subtle / correctness-critical** — concurrency, ordering,
+  state machines, teardown and lifecycle.
+- **Load-bearing invariants** — the task turns on an invariant the surrounding
+  code depends on, where a plausible-looking implementation can silently break it.
+- **Genuinely ambiguous** — the design could not be fully pinned in the plan and
+  real judgment is needed at implementation time.
+
+Otherwise omit the marker. This is a **rare** escalation, not a per-task knob —
+if most tasks in a plan look "hard," the plan is under-specified; tighten it
+instead. Name the tier, never a model — the configured provider may not be
+Anthropic.
 
 ## No Redundant Whole-Project Gate Task
 
