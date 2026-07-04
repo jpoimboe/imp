@@ -2,7 +2,7 @@
 name: front-door
 label: "<imp>"
 description: An open conversation — answer questions about imp, scout existing work, or scope a build — that goes live only when the user is ready.
-subagents: [explorer, researcher]
+subagents: [explorer, researcher, spiker]
 drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -80,6 +80,13 @@ you write **only** Change-local artifacts: notably the draft spec at
 `{{ change.home }}/artifacts/spec/{{ change.id }}.md`. You do **not** have
 project-tree write access until go-live. Dispatch `explorer` subagents to map code
 and `researcher` for external facts, exactly as the spec phase does.
+
+Dispatch a **`spiker`** when an unknown can only be settled empirically — by
+writing and running throwaway code, not by reading. A `spiker` runs in its own
+disposable worktree and reports findings without shipping code. When the unknown
+is **spec-shaping** — its outcome could change *what* you build — dispatch the
+spiker and let the finding shape the spec **before finalizing** it; never defer a
+spec-shaping empirical unknown to planning or implementation.
 
 ## Going live (the build path)
 

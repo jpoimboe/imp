@@ -407,6 +407,27 @@ def test_flat_stateless_verify_gates_are_interruptible() -> None:
         assert by[name].interruptible is False, name
 
 
+def test_imp_flat_spiker_matches_imp_and_is_wired() -> None:
+    from imp.engine.loader import BASE_CAPS
+    wf = _flat()
+    spiker = wf.agents["spiker"]
+    assert spiker.isolated_worktree is True
+    # imp-flat dispatches spiker only from front-door (no task-lead in this variant)
+    assert "spiker" in wf.agents["front-door"].subagents
+    assert spiker.tools == BASE_CAPS
+    # byte-identical to the imp copy
+    imp_copy = Path(
+        "src/imp/assets/workflows/imp/agents/spiker.md").read_text()
+    assert (AGENTS / "spiker.md").read_text() == imp_copy
+
+
+def test_imp_flat_front_door_prose_wires_spiker_before_finalize() -> None:
+    low = _read_agent("front-door.md").lower()
+    assert "spiker" in low
+    assert "spec-shaping" in low
+    assert "before finalizing" in low
+
+
 def test_imp_flat_plan_reviewer_uses_outline_for_scope() -> None:
     text = _read_agent("plan-reviewer.md")
     low = text.lower()
