@@ -1376,13 +1376,37 @@ def _first_user_message(events: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _first_genuine_human_turn(events: list[dict[str, Any]]) -> str | None:
+    """First user_message a human actually typed: one that answers an
+    awaiting_user_input solicitation, or one tagged by an immediately following
+    user_interjected event. The composed task prompt -- a synthetic user_message
+    that is neither solicited nor interjected -- is skipped. Mirrors the
+    genuine-turn test narrative.py applies statefully while rendering."""
+    awaiting = False
+    for i, ev in enumerate(events):
+        etype = ev.get("type")
+        if etype == "awaiting_user_input":
+            awaiting = True
+            continue
+        if etype != "user_message":
+            continue
+        nxt = events[i + 1] if i + 1 < len(events) else None
+        interjected = nxt is not None and nxt.get("type") == "user_interjected"
+        if awaiting or interjected:
+            text = _user_message_text(ev.get("payload") or {}).strip()
+            if text:
+                return text
+        awaiting = False
+    return None
+
+
 def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     for ev in events:
         if ev.get("type") == "opening_intent":
             text = ((ev.get("payload") or {}).get("text") or "").strip()
             if text:
                 return text
-    return _first_user_message(events)
+    return _first_genuine_human_turn(events)
 
 
 def _latest_phase(events: list[dict[str, Any]]) -> str | None:
