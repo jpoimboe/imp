@@ -243,12 +243,29 @@ def _worktree_on_branch(control_root: Path, base: str) -> Path | None:
     return None
 
 
+def uncommitted_paths(worktree: Path) -> str:
+    """Porcelain status lines (staged/unstaged/untracked), stripped; '' when
+    clean. Single source of truth for what counts as dirty — is_dirty is its
+    boolean view, the clean_tree hook reads the lines for its diagnostic.
+    `.imp/` is gitignored, so this only sees real tracked/untracked project
+    files."""
+    return _git_ok(worktree, "status", "--porcelain").strip()
+
+
 def is_dirty(worktree: Path) -> bool:
     """True if the worktree has staged/unstaged/untracked changes. Public so
-    `_complete` can refuse to merge a Change with uncommitted work (spec relies
-    on agents committing incrementally — `.imp/` is gitignored, so this only
-    sees real tracked/untracked project files)."""
-    return bool(_git_ok(worktree, "status", "--porcelain").strip())
+    `_complete` can refuse to merge a Change with uncommitted work."""
+    return bool(uncommitted_paths(worktree))
+
+
+def is_worktree(path: Path) -> bool:
+    """True if `path` is inside a git working tree (a real checkout), so a
+    dirtiness check applies. False for a bare/plain dir or a non-repo — the
+    clean_tree hook then no-ops there instead of raising on `git status`. Uses
+    the non-raising `_git` (not `_git_ok`), so a non-repo is a clean False, not
+    an exception."""
+    proc = _git(path, "rev-parse", "--is-inside-work-tree")
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
 def _merge_subject(title: str, change_id: str, body: str | None) -> str:

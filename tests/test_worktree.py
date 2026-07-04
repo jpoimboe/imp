@@ -466,3 +466,27 @@ def test_destroy_spike_worktree_removes_worktree_and_branch(tmp_path: Path) -> N
     assert "spike-chg-2" not in _git(tmp_path, "worktree", "list").stdout
 
 
+def test_uncommitted_paths_empty_when_clean_lists_untracked_when_dirty(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    assert wt.uncommitted_paths(tmp_path) == ""      # committed seed => clean
+    assert wt.is_dirty(tmp_path) is False
+    (tmp_path / "scratch.txt").write_text("uncommitted\n")
+    out = wt.uncommitted_paths(tmp_path)
+    assert "scratch.txt" in out                      # untracked file surfaced
+    assert wt.is_dirty(tmp_path) is True              # boolean view agrees
+
+
+def test_is_worktree_true_in_repo_false_on_bare_dir(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    assert wt.is_worktree(repo) is True               # a real checkout
+    bare = tmp_path / "bare"
+    bare.mkdir()                                       # plain dir, never git-inited
+    assert wt.is_worktree(bare) is False              # non-repo => not a worktree
+
+    truly_bare = tmp_path / "truly-bare"
+    truly_bare.mkdir()
+    subprocess.run(["git", "init", "--bare", str(truly_bare)], check=True, capture_output=True)
+    assert wt.is_worktree(truly_bare) is False        # bare repo: rev-parse says "false"
+
