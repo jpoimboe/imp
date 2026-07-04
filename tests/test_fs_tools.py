@@ -1,15 +1,20 @@
 # tests/test_fs_tools.py
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import os
 from pathlib import Path
 
 import anyio
 import pytest
+from PIL import Image
 
 import imp.agents.tools.fs as fs_tools
+import imp.agents.tools.image as image_mod
 import imp.agents.tools.lines as lines_mod
+from imp.agents.runner import ImagePart, TextPart
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import PermissionDenied
@@ -304,3 +309,79 @@ def test_gate_has_no_workflow_vocabulary() -> None:
         src = Path(module.__file__).read_text()
         for token in forbidden:
             assert token not in src, f"{token!r} leaked into {module.__name__}"
+
+
+def _png_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (10, 20, 200)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _vision_ctx(tmp_path: Path) -> ToolContext:
+    ctx = ToolContext(
+        project_root=tmp_path,
+        events_path=tmp_path / "events.jsonl",
+        provider_name="anthropic",
+        model_name="opus",
+        change_home=tmp_path / "change",
+    )
+    ctx.coordinator = None
+    return ctx
+
+
+def test_read_file_image_returns_text_and_image_parts(tmp_path: Path) -> None:
+    (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
+    ctx = _vision_ctx(tmp_path)
+    result = _read_file(ctx, path="shot.png")
+
+    assert isinstance(result, list)
+    assert len(result) == 2
+    summary, part = result
+    assert isinstance(summary, TextPart)
+    assert summary.text == "shot.png — 300×200 PNG"
+    assert isinstance(part, ImagePart)
+    assert part.media_type == "image/png"
+    assert (part.width, part.height) == (300, 200)
+    blob_path = ctx.change_home / "blobs" / part.blob
+    assert blob_path.exists()
+    assert base64.b64decode(part.data) == blob_path.read_bytes()
+
+
+def test_read_file_detects_image_by_magic_despite_extension(tmp_path: Path) -> None:
+    (tmp_path / "shot.txt").write_bytes(_png_bytes(20, 20))
+    result = _read_file(_vision_ctx(tmp_path), path="shot.txt")
+    assert isinstance(result, list)
+    assert result[1].type == "image"
+
+
+def test_read_file_png_extension_but_text_falls_to_text_path(tmp_path: Path) -> None:
+    (tmp_path / "note.png").write_text("hello\nworld\n")
+    result = _read_file(_vision_ctx(tmp_path), path="note.png")
+    assert isinstance(result, str)
+    assert result.startswith("     1\thello")
+
+
+def test_read_file_image_over_cap_fails_loudly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fs_tools, "FILE_READ_CAP_BYTES", 64)
+    monkeypatch.setattr(image_mod, "IMAGE_READ_CAP_BYTES", 32)
+    (tmp_path / "big.png").write_bytes(_png_bytes(300, 200))
+    with pytest.raises(ValueError, match="image read cap"):
+        _read_file(_vision_ctx(tmp_path), path="big.png")
+
+
+def test_read_image_with_no_change_home_raises(tmp_path: Path) -> None:
+    (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
+    ctx = _vision_ctx(tmp_path)
+    ctx.change_home = None
+    with pytest.raises(ValueError, match="change home"):
+        _read_file(ctx, path="shot.png")
+
+
+def test_write_file_allowed_after_image_read(tmp_path: Path) -> None:
+    (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
+    ctx = _vision_ctx(tmp_path)
+    _read_file(ctx, path="shot.png")
+    _write_file(ctx, path="shot.png", content="replaced")
+    assert (tmp_path / "shot.png").read_text() == "replaced"
