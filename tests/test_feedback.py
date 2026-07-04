@@ -5,6 +5,7 @@ from imp.engine.feedback import (
     apply_completion_backstop,
     format_script_feedback,
     render_output_fields,
+    summarize_transition_reason,
 )
 
 _WRAPPER_HEAD = "Your previous attempt completed but was not accepted."
@@ -81,3 +82,33 @@ def test_gate_feedback_reminder_has_single_source() -> None:
     assert composed is not None
     assert "Address this, then call" not in composed
     assert composed.count(COMPLETION_BACKSTOP) == 1
+
+
+def test_summarize_transition_reason_strips_framing_and_takes_first_line() -> None:
+    fb = format_script_feedback("./scripts/gate.sh", 1, "50 coverage issues\nmore\n", "")
+    reason = summarize_transition_reason(fb)
+    assert reason is not None
+    # framing prefix gone; summary is the meaningful first line, single-line
+    assert reason.startswith("Gate `./scripts/gate.sh` failed (exit 1)")
+    assert _WRAPPER_HEAD not in reason
+    assert "\n" not in reason
+
+
+def test_summarize_transition_reason_none_when_no_feedback() -> None:
+    assert summarize_transition_reason(None) is None
+    assert summarize_transition_reason("") is None
+    assert summarize_transition_reason("   \n  \n\t") is None
+
+
+def test_summarize_transition_reason_takes_first_nonempty_line_of_plain_text() -> None:
+    # an agent review preamble ("Here's review feedback to address:\nfindings: ...")
+    reason = summarize_transition_reason("Here's review feedback to address:\nfindings: x")
+    assert reason == "Here's review feedback to address:"
+
+
+def test_summarize_transition_reason_truncates_long_line() -> None:
+    reason = summarize_transition_reason("x" * 200, limit=80)
+    assert reason is not None
+    assert len(reason) <= 80
+    assert reason.endswith("…")
+    assert reason.startswith("x")
