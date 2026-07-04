@@ -440,3 +440,29 @@ def test_preconditions_message_drops_git_init_hint(tmp_path: Path) -> None:
     assert "git init" not in msg           # the parenthetical hint is gone
 
 
+def test_create_spike_worktree_distinct_from_change_worktree(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    # the change's OWN worktree
+    wt.create_worktree(tmp_path, "chg", "main")
+    # a disposable spike worktree for the same change never collides
+    spike = wt.create_spike_worktree(tmp_path, "chg", 1, "main")
+    assert spike == (tmp_path / ".imp" / "worktrees" / "spike-chg-1").resolve()
+    assert spike.is_dir()
+    assert (spike / "README.md").exists()   # checked out from main's tip
+    assert "imp/spike-chg-1" in _git(
+        tmp_path, "branch", "--list", "imp/spike-chg-1").stdout
+    # the change's own worktree is untouched
+    assert (tmp_path / ".imp" / "worktrees" / "chg").is_dir()
+
+
+def test_destroy_spike_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    spike = wt.create_spike_worktree(tmp_path, "chg", 2, "main")
+    assert spike.is_dir()
+    wt.destroy_spike_worktree(tmp_path, "chg", 2)
+    assert not spike.exists()
+    assert "imp/spike-chg-2" not in _git(
+        tmp_path, "branch", "--list", "imp/spike-chg-2").stdout
+    assert "spike-chg-2" not in _git(tmp_path, "worktree", "list").stdout
+
+
