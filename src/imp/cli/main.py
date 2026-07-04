@@ -1434,7 +1434,7 @@ def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
 
 
 def _is_backlog_home(
-    meta: dict[str, Any], *, conversed: bool, lock_live: bool
+    meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
 ) -> bool:
     """Shared zone predicate. A live change home is Backlog iff it is
     un-materialized, has a non-draft origin, has never been conversed (no
@@ -1446,7 +1446,7 @@ def _is_backlog_home(
         not meta.get("materialized", True)
         and meta.get("origin", "draft") != "draft"
         and not conversed
-        and not lock_live
+        and not lock_live()
     )
 
 
@@ -1474,7 +1474,7 @@ def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | N
         return None
     conversed = _first_user_message(list(change.event_log().read())) is not None
     if not _is_backlog_home(meta, conversed=conversed,
-                            lock_live=lock_is_live(cdir / "lock")):
+                            lock_live=lambda: lock_is_live(cdir / "lock")):
         return None
     return meta
 
@@ -2091,7 +2091,7 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
             continue
         cdir = _change_home(control, h.change_id)
         if _is_backlog_home(h.meta, conversed=h.has_user_message,
-                            lock_live=lock_is_live(cdir / "lock")):
+                            lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # un-materialized, never-conversed, unlocked seed -> Backlog
         row = _status_row(h.change_id, h.state_json, h.change_json, h.last_iso)
         if row is None:
@@ -2347,7 +2347,7 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
         meta = h.meta
         cdir = _change_home(control, h.change_id)
         if not _is_backlog_home(meta, conversed=h.has_user_message,
-                                lock_live=lock_is_live(cdir / "lock")):
+                                lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
