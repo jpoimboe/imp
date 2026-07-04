@@ -69,3 +69,16 @@ def test_feedback_lead_leads_ahead_of_guidance_section(tmp_path: Path) -> None:
     assert text.startswith("Here's the feedback to address: fix X")
     assert text.index("Here's the feedback") < text.index(_HEAD)
     assert text.index(_HEAD) < text.index("RENDERED BODY")
+
+
+def test_no_workflow_template_references_project_guidance() -> None:
+    roots = [
+        Path("src/imp/assets/workflows/imp"),
+        Path("src/imp/assets/workflows/imp-flat"),
+        Path("src/imp/assets/workflows/patent"),
+    ]
+    offenders = [
+        str(p) for root in roots for p in root.rglob("*.md")
+        if "project.guidance" in p.read_text()
+    ]
+    assert offenders == [], offenders

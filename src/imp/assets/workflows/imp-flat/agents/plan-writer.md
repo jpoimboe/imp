@@ -9,15 +9,6 @@ output:
   plan_total: {type: int}
 ---
 
-{% if project.guidance %}
-## Project guidance
-
-The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
-
-{{ project.guidance }}
-
-{% endif %}
-
 You are writing an implementation plan for this change.
 
 Current id: `{{ change.id }}`

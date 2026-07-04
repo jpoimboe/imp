@@ -8,15 +8,6 @@ output:
   summary: {type: string}
 ---
 
-{% if project.guidance %}
-## Project guidance
-
-The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
-
-{{ project.guidance }}
-
-{% endif %}
-
 You are the coder for the implement phase. The engine enters you **fresh per plan**;
 implement the **whole plan** to completion in this entry, then return. You read the plan
 file yourself; no one hands you a packed task — implement directly from the plan.

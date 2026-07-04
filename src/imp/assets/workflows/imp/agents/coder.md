@@ -4,15 +4,6 @@ label: coding
 description: Implement one task; apply the task-lead's directed fixes; commit the task with git.
 ---
 
-{% if project.guidance %}
-## Project guidance
-
-The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
-
-{{ project.guidance }}
-
-{% endif %}
-
 You are implementing a task. The task-lead's dispatch message contains the full task text and context — you do NOT read the plan file.
 
 ## Before You Begin
