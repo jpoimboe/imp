@@ -34,7 +34,7 @@ from imp.agents.output_guard import (
     validate_output_or_nudge,
 )
 from imp.agents.parallel import max_parallel_tasks
-from imp.agents.runner import ToolResultBlock, ToolUseBlock
+from imp.agents.runner import ImagePart, TextPart, ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import (
     dispatch_task,
     raise_if_suspended,
@@ -167,6 +167,15 @@ async def dispatch_one_tool_use(
     except Exception as e:
         err_text = f"{type(e).__name__}: {e}"
         block = ToolResultBlock(tu.id, err_text, is_error=True)
+        tool_results.append(block)
+        elog.append_tool_result(agent_id=aid, block=block,
+                                duration_ms=(time.perf_counter() - start) * 1000.0)
+        return None
+
+    if (isinstance(raw_result, list) and raw_result
+            and all(isinstance(p, (TextPart, ImagePart)) for p in raw_result)):
+        # A list[ContentPart] threads through intact; empty list falls to the JSON path.
+        block = ToolResultBlock(tu.id, raw_result)
         tool_results.append(block)
         elog.append_tool_result(agent_id=aid, block=block,
                                 duration_ms=(time.perf_counter() - start) * 1000.0)
