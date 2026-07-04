@@ -33,10 +33,12 @@ from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_pr
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
+    ContentPart,
     Diagnostics,
     Event,
     Message,
     TextBlock,
+    TextPart,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -180,6 +182,18 @@ def _responses_tool_schema(t: Tool) -> dict[str, Any]:
     }
 
 
+def _content_parts_to_responses(parts: list[ContentPart]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for p in parts:
+        if isinstance(p, TextPart):
+            items.append({"type": "input_text", "text": p.text})
+        else:
+            items.append({"type": "input_image",
+                          "image_url": f"data:{p.media_type};base64,{p.data}",
+                          "detail": "auto"})
+    return items
+
+
 def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
     """Convert imp messages to Responses `input[]` items.
 
@@ -215,6 +229,11 @@ def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
         tool_results = [b for b in m.content if isinstance(b, ToolResultBlock)]
         if tool_results:
             for tr in tool_results:
+                if isinstance(tr.content, list):
+                    out.append({"type": "function_call_output",
+                                "call_id": tr.tool_use_id,
+                                "output": _content_parts_to_responses(tr.content)})
+                    continue
                 output = tr.content
                 if tr.is_error:
                     output = f"[error] {output}"
