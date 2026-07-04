@@ -116,6 +116,23 @@ def write_blob(blobs_dir: Path, data: bytes, ext: str) -> str:
     return name
 
 
+def is_image(data: bytes) -> bool:
+    """True when `data`'s magic bytes identify one of the four supported formats."""
+    return (
+        data.startswith(b"\x89PNG")
+        or data.startswith(b"\xff\xd8\xff")
+        or data.startswith(b"GIF8")
+        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    )
+
+
+def probe_image(raw: bytes) -> tuple[str, int, int]:
+    """(media_type, width, height) of `raw` WITHOUT resizing or re-encoding."""
+    img = Image.open(io.BytesIO(raw))
+    media_type = _FORMAT_TABLE.get(img.format or "", ("image/jpeg", "jpg"))[0]
+    return media_type, img.width, img.height
+
+
 def store_image(raw: bytes, blobs_dir: Path) -> ImagePart:
     """Process `raw`, store the processed bytes as a content-addressed blob under
     `blobs_dir`, and return the on-wire ImagePart (base64 `data` + lean-reference

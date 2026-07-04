@@ -162,3 +162,42 @@ def test_store_image_returns_populated_image_part_and_blob(tmp_path):
     # `data` is base64 of the processed bytes, and decodes to the blob content.
     assert base64.b64decode(part.data) == (blobs / part.blob).read_bytes()
     assert base64.b64decode(part.data) == raw
+
+
+def _jpeg_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 30, 30)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _gif_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("P", (w, h)).save(buf, format="GIF")
+    return buf.getvalue()
+
+
+def _webp_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (30, 200, 30)).save(buf, format="WEBP")
+    return buf.getvalue()
+
+
+def test_is_image_detects_each_supported_format():
+    assert imgmod.is_image(_png_bytes(4, 4)) is True
+    assert imgmod.is_image(_jpeg_bytes(4, 4)) is True
+    assert imgmod.is_image(_gif_bytes(4, 4)) is True
+    assert imgmod.is_image(_webp_bytes(4, 4)) is True
+
+
+def test_is_image_rejects_text_and_empty():
+    assert imgmod.is_image(b"hello, this is plain text\n") is False
+    assert imgmod.is_image(b"") is False
+    # A RIFF container that is not WEBP (e.g. a WAV) is not an image.
+    assert imgmod.is_image(b"RIFF\x00\x00\x00\x00WAVEfmt ") is False
+
+
+def test_probe_image_reports_media_type_and_source_dimensions():
+    assert imgmod.probe_image(_png_bytes(300, 200)) == ("image/png", 300, 200)
+    assert imgmod.probe_image(_jpeg_bytes(64, 48)) == ("image/jpeg", 64, 48)
+    assert imgmod.probe_image(_gif_bytes(10, 8)) == ("image/gif", 10, 8)
+    assert imgmod.probe_image(_webp_bytes(10, 8)) == ("image/webp", 10, 8)
