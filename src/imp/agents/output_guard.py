@@ -220,3 +220,21 @@ def make_nudge_event(nudge: Nudge) -> NudgeEvent:
         "type": "output_validation_nudge",
         "payload": {"message": nudge.reason, "attempt": nudge.attempt},
     }
+
+
+class RecoveryEvent(TypedDict):
+    type: str
+    payload: dict[str, object]
+
+
+def make_recovery_event(ok: Ok) -> RecoveryEvent:
+    """Single-sourced output_recovered event payload, emitted identically by
+    every provider when a fold-recovery fired (ok.recovered is not None)."""
+    assert ok.recovered is not None
+    return {
+        "type": "output_recovered",
+        "payload": {
+            "container": ok.recovered.container,
+            "fields": list(ok.recovered.fields),
+        },
+    }

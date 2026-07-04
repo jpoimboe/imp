@@ -8,7 +8,9 @@ from imp.agents.loop_guard import DEFAULT_NOPROGRESS_N, LoopGuard
 from imp.agents.output_guard import (
     Nudge,
     Ok,
+    RecoveryInfo,
     build_nudge_message,
+    make_recovery_event,
     recover_folded_fields,
     validate_output_or_nudge,
 )
@@ -180,6 +182,18 @@ def test_validate_lone_mirror_tag_still_nudges() -> None:
     res = validate_output_or_nudge(args, _recovery_schema(), g)
     assert isinstance(res, Nudge)
     assert "outcome" in res.reason
+
+
+def test_make_recovery_event_names_container_and_fields() -> None:
+    ok = Ok(
+        payload={"summary": "b", "outcome": "x", "status": "Success"},
+        recovered=RecoveryInfo(container="summary", fields=("outcome", "status")),
+    )
+    ev = make_recovery_event(ok)
+    assert ev == {
+        "type": "output_recovered",
+        "payload": {"container": "summary", "fields": ["outcome", "status"]},
+    }
 
 
 def test_validate_partial_recovery_is_discarded_whole() -> None:
