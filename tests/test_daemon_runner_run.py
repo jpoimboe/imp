@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import signal
 import threading
@@ -12,7 +13,7 @@ import pytest
 
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import Help
-from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
+from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.runner import (
     _await_shutdown_signals,
     _poll_worker,
@@ -52,9 +53,9 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
 ) -> None:
     _seed_control(tmp_path)
     cid = "2026-06-13-abc"
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    home = tmp_path / ".imp" / "changes" / cid
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "change.json").write_text("{}")
     monkeypatch.setattr(
         "imp.remote.daemon.discover.snapshot",
         lambda _cr, c: ("running", "plan", "T") if c == cid else None)
@@ -302,3 +303,45 @@ async def test_run_daemon_injects_a_default_off_alert_all_into_the_adapter(
 
     assert isinstance(captured["alert_all"], AlertAll)
     assert captured["alert_all"].enabled() is False
+
+
+@pytest.mark.anyio
+async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> None:
+    from imp.engine import archive
+
+    _seed_control(tmp_path)
+    cid = "archived-leftover"
+    home = tmp_path / ".imp" / "changes" / cid
+    (home / "state").mkdir(parents=True)
+    (home / "change.json").write_text(json.dumps({
+        "id": cid, "title": cid, "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00"}))
+    (home / "state" / "state.json").write_text(json.dumps({
+        "id": cid, "status": "completed", "step": None}))
+    (home / "events.jsonl").write_text(
+        '{"id":"e0","parent_id":null,"agent_id":null,'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"payload":{"id":"archived-leftover"}}\n')
+    archive.archive_change(
+        tmp_path, cid, events_path=home / "events.jsonl",
+        change_json_path=home / "change.json",
+        state_json_path=home / "state" / "state.json")
+
+    shutdown = anyio.Event()
+    log_path = tmp_path / ".imp" / "remote-control.log"
+    spath = socket_path(tmp_path)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=lambda env, submit, subscriptions, alert_all: FakeAdapter(),
+            install_signals=False, shutdown=shutdown))
+        # The socket only binds AFTER the startup reap runs, so socket-live
+        # guarantees the sweep already executed.
+        with anyio.fail_after(5):
+            while not socket_is_live(spath):
+                await anyio.sleep(0.02)
+        shutdown.set()
+
+    assert not home.exists()                       # leaked home reaped at startup
+    assert "reaped 1" in log_path.read_text()       # INFO count logged

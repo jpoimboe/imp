@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -8,10 +9,16 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
+
+
+def _make_home(control_root: Path, change_id: str) -> Path:
+    home = control_root / ".imp" / "changes" / change_id
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "change.json").write_text("{}")
+    return home
 
 
 @pytest.fixture
@@ -60,14 +67,12 @@ async def _ignore_anyio_teardown_setresult_race() -> AsyncIterator[None]:
 
 @pytest.mark.anyio
 async def test_supervisor_relays_a_resident_sessions_events(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # One resident session daemon; the supervisor attaches a relay and forwards its
     # curated events to the sink with the namespaced change context.
     cid = "live-one"
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
@@ -95,16 +100,12 @@ async def test_supervisor_relays_a_resident_sessions_events(
 
 @pytest.mark.anyio
 async def test_supervisor_multiplexes_two_resident_sessions(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # Two resident session daemons; the supervisor runs a relay per change, so both
     # changes' events reach the one sink, each carrying its OWN per-change title.
-    infos = [
-        ChangeInfo(id="a", title="A", status="running", step="plan"),
-        ChangeInfo(id="b", title="B", status="running", step="plan"),
-    ]
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes", lambda _cr: infos)
+    _make_home(tmp_path, "a")
+    _make_home(tmp_path, "b")
     sock_a = SessionSocket(str(session_socket_path(tmp_path, "a")))
     sock_b = SessionSocket(str(session_socket_path(tmp_path, "b")))
     await sock_a.open()
@@ -134,14 +135,12 @@ async def test_supervisor_multiplexes_two_resident_sessions(
 
 @pytest.mark.anyio
 async def test_supervisor_reattaches_after_relay_exits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # When a relay exits naturally (socket closed), the supervisor must clear the
     # running set and re-attach on the next poll — falsifies the discard() call.
     cid = "exiting-one"
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
@@ -172,16 +171,14 @@ async def test_supervisor_reattaches_after_relay_exits(
 
 @pytest.mark.anyio
 async def test_supervisor_does_not_reattach_across_a_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # The relay detaches at the awaiting_user_input gate so the session can
     # hibernate (subscription does not pin residency). Even while the socket stays
     # live, the supervisor must NOT re-attach across that gate — re-attaching would
     # pin the change resident and it could never hibernate.
     cid = "gated-one"
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
@@ -210,21 +207,14 @@ async def test_supervisor_does_not_reattach_across_a_gate(
 
 @pytest.mark.anyio
 async def test_supervisor_reattaches_after_rehydration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # After a gate detach the change hibernates (drops out of the directory); a later
     # reply rehydrates it (reappears). Gate avoidance suppresses re-attach only WHILE
     # the change stays continuously resident — once it goes non-resident the latch
     # clears, so the supervisor re-attaches on rehydration.
     cid = "rehydrated-one"
-    visible = {"resident": True}
-
-    def _list(_cr: Any) -> list[ChangeInfo]:
-        if visible["resident"]:
-            return [ChangeInfo(id=cid, title="T", status="running", step="plan")]
-        return []
-
-    monkeypatch.setattr("imp.remote.daemon.directory.list_changes", _list)
+    _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
     await sock.open()
     sink: list[dict[str, Any]] = []
@@ -242,11 +232,12 @@ async def test_supervisor_reattaches_after_rehydration(
         with anyio.fail_after(5):
             while sock.attached_count != 0:
                 await anyio.sleep(0.02)
-        # Hibernate: the change leaves the directory, clearing the gate latch.
-        visible["resident"] = False
+        # Hibernate: remove the change home so it leaves the directory, clearing
+        # the gate latch (the session socket stays live throughout).
+        shutil.rmtree(tmp_path / ".imp" / "changes" / cid)
         await anyio.sleep(0.1)
-        # Rehydrate: it reappears → the supervisor re-attaches.
-        visible["resident"] = True
+        # Rehydrate: recreate the home → it reappears → the supervisor re-attaches.
+        _make_home(tmp_path, cid)
         with anyio.fail_after(5):
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
@@ -256,14 +247,12 @@ async def test_supervisor_reattaches_after_rehydration(
 
 @pytest.mark.anyio
 async def test_supervisor_leases_only_subscribed_changes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from imp.remote.daemon.subscriptions import Subscriptions
 
     cid = "subbed"
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=cid, title="T", status="running", step="plan")])
+    _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
     await sock.open()
     subs = Subscriptions()

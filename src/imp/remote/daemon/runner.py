@@ -15,6 +15,7 @@ from typing import Any
 
 import anyio
 
+from imp.engine.archive import maintenance as archive_maintenance
 from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
@@ -476,6 +477,8 @@ async def run_daemon(
         spath.unlink()   # clear a stale socket file (guard already proved not live)
     try:
         write_pid(control_root)
+        reaped = archive_maintenance.reap_archived_homes(control_root)
+        _log.info("reaped %d archived-terminal change home(s) at startup", reaped)
         await hub.open()
         # Daemon threads are not joined at interpreter shutdown, so a worker parked
         # in a blocking long-poll syscall is reaped at process exit rather than

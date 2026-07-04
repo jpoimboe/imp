@@ -480,7 +480,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         change_json_path=change.change_dir / "change.json",
         state_json_path=change.state_dir / "state.json",
     )
-    shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
+    shutil.rmtree(change.change_dir, ignore_errors=True)
     return RunResult.COMPLETED
 
 

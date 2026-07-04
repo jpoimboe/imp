@@ -190,3 +190,83 @@ def test_completed_rows_reads_denormalized_last_event_ts(tmp_path: Path) -> None
             "Alpha", "2026-06-01T00:00:00+00:00", None)]
     finally:
         conn.close()
+
+
+def test_most_recent_id_orders_by_last_event_ts_desc(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.executemany(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, ?)",
+            [("older", "2026-06-01T00:00:00+00:00"),
+             ("newer", "2026-06-02T00:00:00+00:00")])
+        conn.commit()
+        assert index.most_recent_id(conn) == "newer"
+    finally:
+        conn.close()
+
+
+def test_most_recent_id_ignores_null_last_event_ts(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.executemany(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, ?)",
+            [("has-ts", "2026-06-01T00:00:00+00:00"), ("no-ts", None)])
+        conn.commit()
+        assert index.most_recent_id(conn) == "has-ts"
+    finally:
+        conn.close()
+
+
+def test_most_recent_id_none_when_no_timestamped_rows(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, NULL)", ("only",))
+        conn.commit()
+        assert index.most_recent_id(conn) is None
+    finally:
+        conn.close()
+
+
+def test_most_recent_id_breaks_tie_on_highest_id(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.executemany(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, ?)",
+            [("aaa", "2026-06-01T00:00:00+00:00"),
+             ("zzz", "2026-06-01T00:00:00+00:00")])
+        conn.commit()
+        assert index.most_recent_id(conn) == "zzz"
+    finally:
+        conn.close()
+
+
+def test_last_event_ts_returns_denormalized_value(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, ?)",
+            ("alpha", "2026-06-01T09:00:00+00:00"))
+        conn.commit()
+        assert index.last_event_ts(conn, "alpha") == "2026-06-01T09:00:00+00:00"
+    finally:
+        conn.close()
+
+
+def test_last_event_ts_none_when_id_absent(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        assert index.last_event_ts(conn, "ghost") is None
+    finally:
+        conn.close()
+
+
+def test_last_event_ts_none_when_column_null(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        conn.execute(
+            "INSERT INTO changes (id, last_event_ts) VALUES (?, NULL)", ("alpha",))
+        conn.commit()
+        assert index.last_event_ts(conn, "alpha") is None
+    finally:
+        conn.close()

@@ -72,6 +72,30 @@ def search_archive(
         conn.close()
 
 
+def most_recent_archived_id(control_root: Path) -> str | None:
+    ensure_current(control_root)
+    db = index_path(control_root)
+    if not db.exists():
+        return None
+    conn = index.connect(db)
+    try:
+        return index.most_recent_id(conn)
+    finally:
+        conn.close()
+
+
+def last_event_ts(control_root: Path, change_id: str) -> str | None:
+    ensure_current(control_root)
+    db = index_path(control_root)
+    if not db.exists():
+        return None
+    conn = index.connect(db)
+    try:
+        return index.last_event_ts(conn, change_id)
+    finally:
+        conn.close()
+
+
 def read_events(control_root: Path, change_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), change_id)
     if rec is None:
@@ -170,20 +194,6 @@ def rehydrate_change(control_root: Path, change_id: str) -> Path:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(blob)
     return change_dir
-
-
-def last_event_iso(control_root: Path, change_id: str) -> str | None:
-    raw = read_events(control_root, change_id)
-    if raw is None:
-        return None
-    stripped = raw.rstrip()
-    if not stripped:
-        return None
-    line = stripped[stripped.rfind(b"\n") + 1:].decode("utf-8", errors="replace")
-    try:
-        return str(json.loads(line)["timestamp"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
 
 
 def status_of(control_root: Path, change_id: str) -> str | None:

@@ -38,10 +38,9 @@ async def test_e2e_chat_commands_round_trip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    monkeypatch.setattr(
-        "imp.remote.daemon.directory.list_changes",
-        lambda _cr: [ChangeInfo(id=CHANGE, title="Dark mode",
-                                status="running", step="plan")])
+    home = tmp_path / ".imp" / "changes" / CHANGE
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "change.json").write_text("{}")
     monkeypatch.setattr(
         "imp.remote.daemon.discover.snapshot",
         lambda _cr, c: ("running", "plan", "Dark mode") if c == CHANGE else None)
