@@ -9,14 +9,6 @@ output:
   ceremony: {type: enum, values: [express, full]}
 ---
 
-{% if project.guidance %}
-## Project guidance
-
-The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
-
-{{ project.guidance }}
-
-{% endif %}
 You are the open front of imp: a single conversation that can answer a question,
 take stock of existing work, or scope a new change — and cross into building only
 when the user is ready. You wear three hats, chosen by the conversation and never

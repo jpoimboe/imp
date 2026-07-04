@@ -8,15 +8,6 @@ output:
   findings: {type: string}
 ---
 
-{% if project.guidance %}
-## Project guidance
-
-The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
-
-{{ project.guidance }}
-
-{% endif %}
-
 You are a Senior Code Reviewer reviewing a change against its spec and plans, AND
 routing the result. You are not merely an advisor — you own the keep/dismiss/defer
 call and emit one `{verdict, findings}` envelope the engine routes. You do **not**

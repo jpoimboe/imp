@@ -1376,13 +1376,37 @@ def _first_user_message(events: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _first_genuine_human_turn(events: list[dict[str, Any]]) -> str | None:
+    """First user_message a human actually typed: one that answers an
+    awaiting_user_input solicitation, or one tagged by an immediately following
+    user_interjected event. The composed task prompt -- a synthetic user_message
+    that is neither solicited nor interjected -- is skipped. Mirrors the
+    genuine-turn test narrative.py applies statefully while rendering."""
+    awaiting = False
+    for i, ev in enumerate(events):
+        etype = ev.get("type")
+        if etype == "awaiting_user_input":
+            awaiting = True
+            continue
+        if etype != "user_message":
+            continue
+        nxt = events[i + 1] if i + 1 < len(events) else None
+        interjected = nxt is not None and nxt.get("type") == "user_interjected"
+        if awaiting or interjected:
+            text = _user_message_text(ev.get("payload") or {}).strip()
+            if text:
+                return text
+        awaiting = False
+    return None
+
+
 def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     for ev in events:
         if ev.get("type") == "opening_intent":
             text = ((ev.get("payload") or {}).get("text") or "").strip()
             if text:
                 return text
-    return _first_user_message(events)
+    return _first_genuine_human_turn(events)
 
 
 def _latest_phase(events: list[dict[str, Any]]) -> str | None:
@@ -1409,12 +1433,31 @@ def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _is_backlog_home(
+    meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
+) -> bool:
+    """Shared zone predicate. A live change home is Backlog iff it is
+    un-materialized, has a non-draft origin, has never been conversed (no
+    user_message event), and is not lock-live. The detail card
+    (`_unstarted_backlog_meta`) and both overview zone builders (`_status_rows`,
+    `_backlog_rows`) classify through this one helper, so a resumed/lock-live
+    seed leaves Backlog and the three classifiers cannot drift."""
+    return (
+        not meta.get("materialized", True)
+        and meta.get("origin", "draft") != "draft"
+        and not conversed
+        and not lock_live()
+    )
+
+
 def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | None:
-    """change.json of a LIVE un-materialized, never-conversed Backlog home (idea or
-    followup) — sourced from the worktree home only, never the archive: an abandoned
-    home leaves an archived materialized:false change.json that would otherwise render
-    as a queued `status: backlog` brief instead of a History item. None for any
-    archived-only, materialized, or already-conversed id."""
+    """change.json of a LIVE un-materialized, non-draft-origin, never-conversed,
+    unlocked Backlog home (idea or followup) — sourced from the worktree home
+    only, never the archive: an abandoned home leaves an archived
+    materialized:false change.json that would otherwise render as a queued
+    `status: backlog` brief instead of a History item. None for any archived-only
+    id or any home the shared backlog predicate rejects (materialized,
+    draft-origin, already-conversed, or lock-live)."""
     cdir = _change_home(control, change_id)
     cj = cdir / "change.json"
     if not cj.exists():
@@ -1424,12 +1467,14 @@ def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | N
     except json.JSONDecodeError:
         return None
     if meta.get("materialized", True):
-        return None
+        return None  # materialized homes are never Backlog; skip the event-log read
     try:
         change = Change.load(control, change_id)
     except (LoadError, LoadErrors):
         return None
-    if _first_user_message(list(change.event_log().read())) is not None:
+    conversed = _first_user_message(list(change.event_log().read())) is not None
+    if not _is_backlog_home(meta, conversed=conversed,
+                            lock_live=lambda: lock_is_live(cdir / "lock")):
         return None
     return meta
 
@@ -1480,7 +1525,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         lines.append(f"base_branch:   {meta['base_branch']}")
     if meta.get("depends_on"):
         lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
-    opening = _first_user_message(events)
+    opening = _resolve_intent(events)
     if opening:
         lines.append("")
         lines.append(opening)
@@ -1937,12 +1982,35 @@ class _HomeScan(NamedTuple):
 
     change_json/state_json are the raw bytes (state_json is None when a home has
     no state.json yet); meta is the parsed change.json (homes whose change.json
-    is missing or malformed are dropped from the scan, so meta is always valid)."""
+    is missing or malformed are dropped from the scan, so meta is always valid);
+    has_user_message records whether events.jsonl holds any user_message event,
+    the conversed signal the shared backlog predicate consumes."""
     change_id: str
     change_json: bytes
     state_json: bytes | None
     meta: dict[str, Any]
     last_iso: str
+    has_user_message: bool
+
+
+def _events_have_user_message(events_path: Path) -> bool:
+    """True iff events.jsonl holds at least one user_message event. Read line by
+    line and short-circuit so a long log isn't fully parsed just to classify."""
+    try:
+        with events_path.open("rb") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if ev.get("type") == "user_message":
+                    return True
+    except FileNotFoundError:
+        return False
+    return False
 
 
 def _scan_change_homes(control: Path) -> list[_HomeScan]:
@@ -1961,7 +2029,9 @@ def _scan_change_homes(control: Path) -> list[_HomeScan]:
         except FileNotFoundError:
             state_json = None
         last_iso = _last_event_iso(cdir / "events.jsonl") or ""
-        scanned.append(_HomeScan(change_id, change_json, state_json, meta, last_iso))
+        has_um = _events_have_user_message(cdir / "events.jsonl")
+        scanned.append(
+            _HomeScan(change_id, change_json, state_json, meta, last_iso, has_um))
     return scanned
 
 
@@ -2019,12 +2089,13 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
     for h in homes:
         if h.state_json is None:
             continue
-        if h.meta.get("materialized", True) is False and h.meta.get("origin", "draft") != "draft":
-            continue  # un-materialized ideas/follow-ups belong to the Backlog zone
+        cdir = _change_home(control, h.change_id)
+        if _is_backlog_home(h.meta, conversed=h.has_user_message,
+                            lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
+            continue  # un-materialized, never-conversed, unlocked seed -> Backlog
         row = _status_row(h.change_id, h.state_json, h.change_json, h.last_iso)
         if row is None:
             continue
-        cdir = _change_home(control, h.change_id)
         status = resolve_display_status(
             row[1], cdir, materialized=h.meta.get("materialized", True))
         row = (row[0], status, *row[2:])
@@ -2274,11 +2345,11 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
-        if meta.get("materialized", True):
-            continue  # materialized homes are Active, not Backlog
+        cdir = _change_home(control, h.change_id)
+        if not _is_backlog_home(meta, conversed=h.has_user_message,
+                                lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
+            continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
-        if origin == "draft":
-            continue  # un-materialized drafts are Active, not Backlog
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"

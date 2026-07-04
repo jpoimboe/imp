@@ -90,7 +90,7 @@ def test_front_door_split_off_is_unconditional_and_rekeyed(tmp_path) -> None:
 
     attended = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "## Splitting off a separate change" in attended
     assert "ending your turn to yield** before calling `create_change`" in attended
@@ -98,7 +98,7 @@ def test_front_door_split_off_is_unconditional_and_rekeyed(tmp_path) -> None:
     autonomous = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", autonomous=True,
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "## Splitting off a separate change" in autonomous
     # Split-off no longer branches on autonomy — it always confirms by yielding.
@@ -115,7 +115,7 @@ def test_front_door_has_no_headless_branch(tmp_path) -> None:
         out = render_prompt(body, build_context(
             change_title="t", event_log=log, change_id="abc",
             change_home=".imp/changes/abc", autonomous=autonomous,
-            project_facts={}, guidance=""),
+            project_facts={}),
             workflow_dir=bundled_workflow_dir("imp")).lower()
         assert "the ceremony is predetermined" not in out
         assert 'ceremony="full"' not in out
@@ -133,7 +133,7 @@ def test_front_door_renders_full_brainstorm_depth(tmp_path) -> None:
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
     # dialogue conduct expanded from brainstorm-dialogue
@@ -161,7 +161,7 @@ def test_front_door_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "spec-writer" not in out
     assert "spec-finalizer" in out
@@ -174,7 +174,7 @@ def test_front_door_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}, guidance=""),
+        change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
     assert "do not read any files, do not explore the codebase" not in low
@@ -233,6 +233,6 @@ def test_front_door_live_gate_conventions_relocated_to_partial(tmp_path) -> None
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc",
-        project_facts={}, guidance=""),
+        project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "no co-equal dangling alternative" in out

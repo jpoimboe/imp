@@ -97,6 +97,8 @@ def test_cmd_status_shows_intent_for_empty_title(tmp_path: Path, capsys) -> None
 def test_cmd_status_intent_falls_back_to_user_message(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="", change_id="alpha", base_branch="main")
+    ch.event_log().append(agent_id=None, type="awaiting_user_input",
+                          payload={"prompt": ""})
     ch.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user",
@@ -104,6 +106,51 @@ def test_cmd_status_intent_falls_back_to_user_message(tmp_path: Path, capsys) ->
     _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert "fix the flaky test" in out
+
+
+def test_resolve_intent_prefers_opening_intent() -> None:
+    events = [
+        {"type": "opening_intent", "payload": {"text": "seeded goal"}},
+        {"type": "awaiting_user_input", "payload": {"prompt": ""}},
+        {"type": "user_message",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "a solicited reply"}]}},
+    ]
+    assert m._resolve_intent(events) == "seeded goal"
+
+
+def test_resolve_intent_falls_back_to_solicited_reply() -> None:
+    events = [
+        {"type": "awaiting_user_input", "payload": {"prompt": "what next?"}},
+        {"type": "user_message",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
+    ]
+    assert m._resolve_intent(events) == "add a dark mode toggle"
+
+
+def test_resolve_intent_returns_interjected_message() -> None:
+    events = [
+        {"type": "user_message",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "wait, use postgres"}]}},
+        {"type": "user_interjected", "payload": {"text": "wait, use postgres"}},
+    ]
+    assert m._resolve_intent(events) == "wait, use postgres"
+
+
+def test_resolve_intent_skips_synthetic_task_prompt() -> None:
+    # A composed task prompt is a user_message that is neither solicited by an
+    # awaiting_user_input nor tagged by a following user_interjected, so it is
+    # not a genuine human turn -> intent resolves to None (card omits opening).
+    events = [
+        {"type": "user_message",
+         "payload": {"role": "user",
+                     "content": [{"type": "text",
+                                  "text": "## Task\nyou are a coder, do X"}]}},
+        {"type": "step_started", "payload": {"step": "coder", "phase": "implement"}},
+    ]
+    assert m._resolve_intent(events) is None
 
 
 def test_cmd_status_named_row_skips_events_load(

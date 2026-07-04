@@ -6,7 +6,7 @@ Five namespaces (spec §7.5):
       missing steps render as empty (lenient-within)
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
       because the dict is passed directly under StrictUndefined (strict-within)
-  project.<fact> — project facts + guidance; missing key raises (strict-within)
+  project.<fact> — project facts; missing key raises (strict-within)
   run.autonomous — whether the run may auto-take recommendations at
       recommendation-bearing gates (bool); a missing attr under run raises
       (strict-within), like change/project
@@ -130,10 +130,10 @@ def build_context(
     *, change_id: str = "", change_home: str = "",
     cur_base_head: str = "", orig_base_head: str = "",
     vars: dict[str, Any] | None = None,
-    project_facts: dict[str, str] | None = None, guidance: str = "",
+    project_facts: dict[str, str] | None = None,
     autonomous: bool = False, opening: str = "",
 ) -> PromptContext:
-    facts = {**(project_facts or {}), "guidance": guidance}
+    facts = dict(project_facts or {})
     return PromptContext(
         change=_ChangeNamespace(id=change_id, title=change_title,
                                 home=change_home, cur_base_head=cur_base_head,

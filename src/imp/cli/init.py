@@ -120,8 +120,9 @@ def _build_user_config(
 def _facts_hint() -> str:
     return (
         "\n# Project facts: human-authored values any agent prompt can read via\n"
-        "# {{ project.<key> }} (and the freeform {{ project.guidance }}). All\n"
-        "# commented out -- uncomment and edit to expose facts to your agents.\n"
+        "# {{ project.<key> }}. All commented out -- uncomment and edit to expose\n"
+        "# facts to your agents. The freeform 'guidance:' below is delivered to\n"
+        "# agents automatically by the engine (not via a template var).\n"
         "# facts:\n"
         "#   test_command: make test\n"
         "#   stack: python 3.12, pytest\n"

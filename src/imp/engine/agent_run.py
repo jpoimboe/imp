@@ -450,6 +450,21 @@ def with_outcome_field(agent_def: AgentDef) -> AgentDef:
     return replace(agent_def, output_schema=new_schema)
 
 
+_GUIDANCE_HEAD = (
+    "## Project guidance\n\n"
+    "The project maintainer set this guidance for this codebase — follow it "
+    "unless it conflicts with a hard correctness or safety requirement:"
+)
+
+
+def _compose_guidance_section(guidance: str) -> str:
+    """Engine-owned project-guidance block; empty/absent guidance -> no section."""
+    text = (guidance or "").strip()
+    if not text:
+        return ""
+    return f"{_GUIDANCE_HEAD}\n\n{text}\n\n"
+
+
 def build_agent_invocation(
     *,
     agent_def: AgentDef,
@@ -510,6 +525,8 @@ def build_agent_invocation(
         # first user message replays from its logged user_message event.
         system_prompt = system_prompt_override
     else:
+        guidance_section = _compose_guidance_section(change_context.guidance)
+        body_source = f"{guidance_section}{rendered_system_prompt}"
         persona = rendered_persona.strip("\n")
         if persona:
             base = f"{_CORE_HEAD}\n\n{persona}\n\n{_CORE_TAIL}"
@@ -517,7 +534,7 @@ def build_agent_invocation(
             base = f"{_CORE_HEAD}\n\n{_CORE_TAIL}"
         date_note = _CURRENT_DATE_NOTE.format(date=date.today().isoformat())
         if is_subagent:
-            body = f"{base}\n\n{rendered_system_prompt}"
+            body = f"{base}\n\n{body_source}"
             if "bash" in agent_def.tools:
                 body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
             body = f"{body}\n\n{date_note}"
@@ -529,7 +546,7 @@ def build_agent_invocation(
                 header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
             header = f"{header}\n\n{date_note}"
             system_prompt = reflow_markdown(header)
-            task = f"{reflow_markdown(rendered_system_prompt)}\n\n{instruction}"
+            task = f"{reflow_markdown(body_source)}\n\n{instruction}"
             if feedback_lead:
                 task = f"{feedback_lead}\n\n{task}"
             messages = (Message(role="user", content=(TextBlock(text=task),)),)

@@ -11,15 +11,6 @@ output:
   complexity: {type: enum, values: [trivial, standard]}
 ---
 
-{% if project.guidance %}
-## Project guidance
-
-The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
-
-{{ project.guidance }}
-
-{% endif %}
-
 You are finalizing a draft specification the front-door conversation produced.
 
 How you open depends on your **opening message**:
