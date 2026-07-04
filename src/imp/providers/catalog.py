@@ -26,6 +26,7 @@ class ModelInfo:
     betas: tuple[str, ...] = ()
     cli_model: str | None = None
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    supports_vision: bool = True
 
 
 # NOTE on two window surfaces: the structured catalogs below carry the
@@ -69,6 +70,23 @@ def model_info(catalog: dict[str, ModelInfo], alias: str) -> ModelInfo:
     """Resolve an alias in a provider catalog, falling back to a conservative
     default (200k window, no betas, no cli_model override) for unknown aliases."""
     return catalog.get(alias, _DEFAULT)
+
+
+# `codex` runs OpenAI models, so it shares OPENAI.
+_CATALOGS: dict[str, dict[str, ModelInfo]] = {
+    "anthropic": ANTHROPIC,
+    "claude_code": CLAUDE_CODE,
+    "openai": OPENAI,
+    "codex": OPENAI,
+}
+
+
+def model_supports_vision(provider_name: str, model_name: str) -> bool:
+    """True unless the model is flagged supports_vision=False; unknown provider/alias -> True."""
+    catalog = _CATALOGS.get(provider_name)
+    if catalog is None:
+        return True
+    return model_info(catalog, model_name).supports_vision
 
 
 # Provider-agnostic substring fallback for the renderer: an arbitrary model id
