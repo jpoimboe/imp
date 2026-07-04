@@ -22,8 +22,21 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class RecoveryInfo:
+    """Metadata for a fired fold-recovery: the container field whose value was
+    over-read and the field names un-folded out of it. Read by the
+    output_recovered event."""
+    container: str
+    fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Ok:
-    """complete_step args validated; the provider yields agent_output unchanged."""
+    """complete_step args validated (possibly after fold-recovery); the provider
+    yields `payload`. `recovered` is None on a clean pass-through, non-None when a
+    repair fired."""
+    payload: dict[str, Any]
+    recovered: RecoveryInfo | None = None
 
 
 @dataclass(frozen=True)
@@ -70,7 +83,7 @@ def validate_output_or_nudge(
             reason=reason,
             attempt=guard.noprogress_streak,
         )
-    return Ok()
+    return Ok(payload=args, recovered=None)
 
 
 class NudgeEvent(TypedDict):

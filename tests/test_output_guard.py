@@ -115,3 +115,12 @@ def test_make_nudge_event_carries_reason_and_attempt() -> None:
         "message": "missing required field 'blocking'",
         "attempt": 2,
     }
+
+
+def test_valid_args_returns_ok_with_payload_and_no_recovery() -> None:
+    g = LoopGuard()
+    args = {"status": "Success", "blocking": True}
+    res = validate_output_or_nudge(args, _schema(), g)
+    assert isinstance(res, Ok)
+    assert res.payload == args
+    assert res.recovered is None
