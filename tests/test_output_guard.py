@@ -210,3 +210,99 @@ def test_validate_partial_recovery_is_discarded_whole() -> None:
     res = validate_output_or_nudge({"summary": folded}, schema, g)
     assert isinstance(res, Nudge)  # 'note' still missing -> atomic discard -> nudge
     assert g.noprogress_streak == 1
+
+
+def _gili38_schema():
+    # task-lead schema (with_outcome_field applied): every field required.
+    raw = {
+        "status": {"type": "enum", "values": ["Success", "Error"]},
+        "verify_tolerated": {"type": "bool"},
+        "summary": {"type": "string"},
+        "outcome": {"type": "string"},
+    }
+    return parse_output_schema(raw, source=SourceLoc(file=Path("a.yaml"), line=1))
+
+
+def _reviewer_schema():
+    # patent-reviewer schema (with_outcome_field applied): every field required.
+    raw = {
+        "status": {"type": "enum", "values": ["Success", "Error"]},
+        "findings": {"type": "string"},
+        "blocking": {"type": "bool"},
+        "has_minor_findings": {"type": "bool"},
+        "outcome": {"type": "string"},
+    }
+    return parse_output_schema(raw, source=SourceLoc(file=Path("a.yaml"), line=1))
+
+
+def test_recover_gili38_flat_routing_field_fold() -> None:
+    # Real gili38 task-lead fold: the required enum `status` was folded into the
+    # tail of `outcome`, which mirror-closes `</outcome>` then carries an
+    # unclosed `<parameter name="status">Success` running to end-of-string.
+    g = LoopGuard()
+    args = {
+        "outcome": (
+            "Completed all 4 tasks of plan-3. Proceeding to verify gate."
+            '</outcome>\n<parameter name="status">Success'
+        ),
+        "verify_tolerated": False,
+        "summary": "Implemented Plan 3 end to end; tree clean.",
+    }
+    res = validate_output_or_nudge(args, _gili38_schema(), g)
+    assert isinstance(res, Ok)
+    assert res.payload["status"] == "Success"
+    assert res.payload["outcome"] == (
+        "Completed all 4 tasks of plan-3. Proceeding to verify gate."
+    )
+    assert res.recovered is not None
+    assert res.recovered.container == "outcome"
+    assert res.recovered.fields == ("status",)
+    assert g.noprogress_streak == 0
+
+
+def test_recover_kibe87_findings_folds_outcome_mirror_close() -> None:
+    # Dominant real reviewer shape: `findings` mirror-closes `</findings>` then
+    # folds a `<parameter name="outcome">...</outcome>` block (mirror close).
+    g = LoopGuard()
+    args = {
+        "status": "Success",
+        "findings": (
+            "No blocking issues; the design is sound."
+            '</findings>\n<parameter name="outcome">reviewed clean, minors '
+            "noted</outcome>\n</invoke>"
+        ),
+        "blocking": False,
+        "has_minor_findings": True,
+    }
+    res = validate_output_or_nudge(args, _reviewer_schema(), g)
+    assert isinstance(res, Ok)
+    assert res.payload["findings"] == "No blocking issues; the design is sound."
+    assert res.payload["outcome"] == "reviewed clean, minors noted"
+    assert res.recovered is not None
+    assert res.recovered.container == "findings"
+    assert res.recovered.fields == ("outcome",)
+    assert g.noprogress_streak == 0
+
+
+def test_recover_kibe87_findings_folds_blocking_and_outcome() -> None:
+    # Multi-field fold: `findings` folds BOTH a `blocking` bool and an `outcome`
+    # string; both are recovered and `blocking` is type-coerced "false" -> False.
+    g = LoopGuard()
+    args = {
+        "status": "Success",
+        "findings": (
+            "Two majors and a minor."
+            '</findings>\n<parameter name="blocking">false</parameter>\n'
+            '<parameter name="outcome">sent back for rework</outcome>\n</invoke>'
+        ),
+        "has_minor_findings": True,
+    }
+    res = validate_output_or_nudge(args, _reviewer_schema(), g)
+    assert isinstance(res, Ok)
+    assert res.payload["findings"] == "Two majors and a minor."
+    assert res.payload["blocking"] is False
+    assert res.payload["outcome"] == "sent back for rework"
+    assert res.recovered is not None
+    assert res.recovered.container == "findings"
+    assert res.recovered.fields == ("blocking", "outcome")
+    assert g.noprogress_streak == 0
