@@ -385,3 +385,47 @@ def test_write_file_allowed_after_image_read(tmp_path: Path) -> None:
     _read_file(ctx, path="shot.png")
     _write_file(ctx, path="shot.png", content="replaced")
     assert (tmp_path / "shot.png").read_text() == "replaced"
+
+
+def test_read_file_image_degrades_for_nonvision_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.providers.catalog as catalog
+    monkeypatch.setitem(catalog.ANTHROPIC, "text-only", catalog.ModelInfo(supports_vision=False))
+    (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
+    ctx = _vision_ctx(tmp_path)
+    ctx.model_name = "text-only"
+    result = _read_file(ctx, path="shot.png")
+
+    assert isinstance(result, str)
+    assert "300×200" in result
+    assert "PNG" in result
+    assert "can't display images" in result
+    assert not (ctx.change_home / "blobs").exists()
+
+
+def test_write_file_allowed_after_image_degrade_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.providers.catalog as catalog
+    monkeypatch.setitem(catalog.ANTHROPIC, "text-only", catalog.ModelInfo(supports_vision=False))
+    (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
+    ctx = _vision_ctx(tmp_path)
+    ctx.model_name = "text-only"
+    _read_file(ctx, path="shot.png")
+    _write_file(ctx, path="shot.png", content="replaced")
+    assert (tmp_path / "shot.png").read_text() == "replaced"
+
+
+def test_image_read_denied_under_secret_dir(tmp_path: Path) -> None:
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "shot.png").write_bytes(_png_bytes(8, 8))
+    ctx = _vision_ctx(tmp_path)
+    ctx.sandbox_policy = SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(str(secret),), secret_files=(), setenv=(), network=True, note="",
+    )
+    with pytest.raises(PermissionDenied):
+        _read_file(ctx, path="secret/shot.png")

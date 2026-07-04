@@ -155,13 +155,10 @@ def _media_label(media_type: str) -> str:
 async def _read_image(
     ctx: ToolContext, resolved: Path, path: str, data: bytes, read_truncated: bool,
     *, coordinator: object | None, deadline: float,
-) -> list[ContentPart]:
-    """Vision branch: re-read to the image cap if the text-cap read truncated
-    (failing loudly if still over cap), store the image as a blob, return the
-    text summary plus the image part."""
-    if ctx.change_home is None:
-        raise ValueError(
-            f"cannot read image {path}: no change home is set for blob storage")
+) -> str | list[ContentPart]:
+    """Re-read to the image cap if the text-cap read truncated (failing loudly if
+    still over cap). For non-vision models returns a text placeholder; for vision
+    models stores the image as a blob and returns the summary plus image part."""
     if read_truncated:
         data, img_truncated = await read_bytes_capped(
             resolved, coordinator=coordinator, deadline=deadline,
@@ -172,15 +169,27 @@ async def _read_image(
                 f"{path} is larger than the ~{cap_mb} MB image read cap; "
                 f"read_file will not truncate binary image data")
     await tool_checkpoint(coordinator, deadline)
-    part = image_tools.store_image(data, ctx.change_home / "blobs")
-    summary = TextPart(
-        text=f"{Path(path).name} — {part.width}×{part.height} {_media_label(part.media_type)}")
     with contextlib.suppress(OSError):
         ctx.read_state[resolved] = ReadRecord(
             mtime=resolved.stat().st_mtime,
             content_sha256=hashlib.sha256(data).hexdigest(),
             full=True,
         )
+    from imp.providers.catalog import model_supports_vision
+
+    if not model_supports_vision(ctx.provider_name, ctx.model_name):
+        media_type, width, height = image_tools.probe_image(data)
+        kb = max(1, round(len(data) / 1024))
+        return (
+            f"[image: {Path(path).name} — {width}×{height} "
+            f"{_media_label(media_type)}, {kb} KB. "
+            f"The active model can't display images.]")
+    if ctx.change_home is None:
+        raise ValueError(
+            f"cannot read image {path}: no change home is set for blob storage")
+    part = image_tools.store_image(data, ctx.change_home / "blobs")
+    summary = TextPart(
+        text=f"{Path(path).name} — {part.width}×{part.height} {_media_label(part.media_type)}")
     return [summary, part]
 
 
