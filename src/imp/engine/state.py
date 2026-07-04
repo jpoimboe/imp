@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 import filelock
 
 from imp.engine.errors import StateDecodeError
+from imp.engine.pagecache import drop_page_cache
 
 Status = Literal[
     "new", "paused", "merge_blocked", "completed", "saved", "abandoned"
@@ -55,22 +56,6 @@ def _read_state_bytes(path: Path) -> bytes:
     """Single seam for every state.json read (initial + retries) so the
     transient-fault recovery path is exercisable in tests."""
     return path.read_bytes()
-
-
-def _drop_page_cache(path: Path) -> None:
-    """Best-effort POSIX_FADV_DONTNEED: ask the kernel to drop this file's cached
-    pages so the next read re-fetches the extent from disk rather than serving
-    the (possibly mis-decompressed) cached copy that just failed to parse."""
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-    except (OSError, AttributeError, ValueError):
-        pass
-    finally:
-        os.close(fd)
 
 
 def _write_transient_marker(
@@ -115,7 +100,7 @@ def _recover_or_raise(
     dict if a re-read succeeds, else preserve the corrupt bytes and raise."""
     for attempt in range(1, _STATE_READ_RETRIES + 1):
         time.sleep(0.002 * attempt)       # let the transient settle; rare path
-        _drop_page_cache(state_path)
+        drop_page_cache(state_path)
         try:
             retry_raw = _read_state_bytes(state_path)
             data: dict[str, Any] = json.loads(retry_raw.decode("utf-8"))

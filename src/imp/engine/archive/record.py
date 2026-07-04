@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, cast
+
+from imp.engine.pagecache import drop_page_cache
 
 
 def build_record(
@@ -26,17 +32,64 @@ def build_record(
 
 
 def write_record(records_dir: Path, record: dict[str, Any]) -> Path:
+    """Atomic write (tmp -> fsync -> os.replace), mirroring State.save: the
+    record is the archive's source of truth with no git recovery, and readers
+    (status fallback, imp log, rebuild_index) race this write — they must only
+    ever see a complete record, never a truncate-then-write torn state."""
     records_dir.mkdir(parents=True, exist_ok=True)
     path = records_dir / f"{record['id']}.json"
-    path.write_text(json.dumps(record, indent=2, sort_keys=True))
+    fd, tmp_name = tempfile.mkstemp(prefix=".record-", dir=records_dir)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(record, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
     return path
+
+
+def _read_record_bytes(path: Path) -> bytes:
+    """Single seam for every record read (initial + retries) so the transient
+    recovery path is exercisable in tests. Sibling: state._read_state_bytes."""
+    return path.read_bytes()
+
+
+# Same rationale as state._STATE_READ_RETRIES: the write path is atomic, so a
+# parse failure on a file that is valid on disk is a transient read-path fault
+# (btrfs+zstd head-drop); a cold re-read recovers. If every retry fails the
+# bytes are genuinely bad — the original error is raised and the record file
+# itself remains on disk as the forensic evidence (records are written once,
+# never overwritten by a later run).
+_RECORD_READ_RETRIES = 4
+
+
+def _reread_or_raise(
+        path: Path, err: json.JSONDecodeError | UnicodeDecodeError) -> dict[str, Any]:
+    for attempt in range(1, _RECORD_READ_RETRIES + 1):
+        time.sleep(0.002 * attempt)       # let the transient settle; rare path
+        drop_page_cache(path)
+        try:
+            return cast(
+                dict[str, Any],
+                json.loads(_read_record_bytes(path).decode("utf-8")))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            continue
+    raise err
 
 
 def read_record(records_dir: Path, change_id: str) -> dict[str, Any] | None:
     path = records_dir / f"{change_id}.json"
     if not path.exists():
         return None
-    return cast(dict[str, Any], json.loads(path.read_text()))
+    raw = _read_record_bytes(path)
+    try:
+        return cast(dict[str, Any], json.loads(raw.decode("utf-8")))
+    except (json.JSONDecodeError, UnicodeDecodeError) as err:
+        return _reread_or_raise(path, err)
 
 
 def list_record_ids(records_dir: Path) -> list[str]:
