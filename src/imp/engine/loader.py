@@ -150,6 +150,13 @@ def parse_agent_file(path: Path) -> AgentDef:
             source,
         )
 
+    iw_raw = fm.get("isolated_worktree", False)
+    if not isinstance(iw_raw, bool):
+        raise LoadError(
+            f"'isolated_worktree' must be a boolean; got {iw_raw!r}",
+            source,
+        )
+
     tier_raw = fm.get("tier")
     tier = str(tier_raw) if tier_raw is not None else None
 
@@ -172,6 +179,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         deny_tools=deny_tools,
         drivers=drivers,
         label=label_raw,
+        isolated_worktree=iw_raw,
     )
 
 

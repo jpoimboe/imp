@@ -149,6 +149,7 @@ class AgentDef:
     deny_tools: frozenset[str] = frozenset()
     drivers: frozenset[str] = frozenset()
     label: str | None = None
+    isolated_worktree: bool = False
 
 
 # ── Steps & phases ────────────────────────────────────────────────────────────

@@ -1758,3 +1758,38 @@ def test_interruptible_on_branch_step_is_load_error(tmp_path) -> None:
         """)
     with pytest.raises(LoadError, match="interruptible"):
         load_workflow(wf)
+
+
+def test_parse_agent_isolated_worktree_absent_defaults_false(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "iw.md",
+        frontmatter=(
+            "name: iw\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"),
+    )
+    agent = parse_agent_file(p)
+    assert agent.isolated_worktree is False
+
+
+def test_parse_agent_isolated_worktree_true(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "iw.md",
+        frontmatter=(
+            "name: iw\n"
+            "isolated_worktree: true\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"),
+    )
+    agent = parse_agent_file(p)
+    assert agent.isolated_worktree is True
+
+
+def test_parse_agent_isolated_worktree_non_bool_raises(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "iw.md",
+        frontmatter=(
+            "name: iw\n"
+            "isolated_worktree: sometimes\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"),
+    )
+    with pytest.raises(LoadError, match="isolated_worktree"):
+        parse_agent_file(p)
