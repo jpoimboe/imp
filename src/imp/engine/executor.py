@@ -46,6 +46,7 @@ from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError
 from imp.engine.feedback import (
     apply_completion_backstop,
+    format_clean_tree_feedback,
     format_script_feedback,
     render_output_fields,
     summarize_transition_reason,
@@ -925,6 +926,47 @@ async def _route_merge_and_exit_worktree(
     return _finish(log, step, change, match, state)
 
 
+def _enforce_clean_tree(
+    step: Step, change: Change, state: State, log: EventLog,
+) -> tuple[Action, str | None, dict[str, object]] | None:
+    """Post-step clean-tree invariant: None to proceed to rules, else a
+    bounce-or-pause (action, feedback, muts) tuple."""
+    from imp.engine import worktree
+
+    key = f"step:{step.phase}/{step.name}"
+    # Opt-out, or no dedicated git worktree at project_root (draft: == control
+    # root; or a project_root that is not a real checkout, e.g. a fake/flipped
+    # test root) => the invariant does not apply. The is_worktree guard also
+    # keeps the hook from raising `git status` on a non-repo path.
+    if (not step.clean_tree
+            or change.project_root == change.control_root
+            or not worktree.is_worktree(change.project_root)):
+        state.clean_tree_bounces.pop(key, None)
+        return None
+    paths = worktree.uncommitted_paths(change.project_root)
+    if not paths:
+        state.clean_tree_bounces.pop(key, None)
+        return None
+    if state.clean_tree_bounce_count(key) >= state.max_clean_tree_bounces:
+        pause = Pause(reason="clean_tree", kind="dirty_worktree_cap")
+        _emit(log, "step_completed",
+              {"step": step.name, "kind": "agent",
+               "action": _action_payload(pause), "var_mutations": {}})
+        return pause, None, {}
+    state.bump_clean_tree_bounce(key)
+    state.current_step = None
+    action = Goto(target=step.name, resume=True)
+    # Journal the bounce: navigation emits step_transition only for a strictly
+    # backward target, and this self-goto (target == current step) bypasses
+    # _finish, so without this the bounce leaves no event between the two
+    # step_started records. Mirror the cap-pause branch's step_completed emit.
+    _emit(log, "step_completed",
+          {"step": step.name, "kind": "agent",
+           "action": _action_payload(action), "var_mutations": {}})
+    state.save(change.state_dir)
+    return action, format_clean_tree_feedback(paths), {}
+
+
 async def _route_agent(
     step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *,
@@ -1141,6 +1183,9 @@ async def _route_agent(
 
     state.step_attempt = 0
     _record_outcome(state, step.name, result.output)
+    bounce = _enforce_clean_tree(step, change, state, log)
+    if bounce is not None:
+        return bounce
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
     state.vars.update(match.var_mutations)
     state.current_step = None
