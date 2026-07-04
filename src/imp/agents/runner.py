@@ -59,6 +59,32 @@ class ThinkingBlock:
     type: Literal["thinking"] = "thinking"
 
 
+@dataclass(frozen=True, slots=True)
+class TextPart:
+    text: str
+    type: Literal["text"] = "text"
+
+
+@dataclass(frozen=True, slots=True)
+class ImagePart:
+    # Structured image content part. `data` is the base64 of the PROCESSED
+    # bytes (the on-wire/in-memory payload). `blob` is the content-addressed
+    # filename "<sha256>.<ext>" under the change's blobs/ dir; `nbytes` is the
+    # processed raw byte count. Together (blob, media_type, width, height,
+    # nbytes) are exactly the lean reference persisted to events.jsonl (Part 5),
+    # with the base64 `data` filtered out on write and rebuilt from the blob on
+    # resume.
+    media_type: str
+    data: str
+    width: int
+    height: int
+    blob: str
+    nbytes: int
+    type: Literal["image"] = "image"
+
+
+ContentPart = TextPart | ImagePart
+
 ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
 
 
