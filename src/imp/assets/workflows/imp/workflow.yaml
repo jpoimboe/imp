@@ -13,8 +13,8 @@ description: |
 # converge-verify (slow, on the change's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, and ends at the human gate (summarizer -> finalize) so
-# the human blesses the locked, rebased, slow-tested state. cleanup.sh is
-# self-bounding (it derives its own boundary; no review_base argument).
+# the human blesses the locked, rebased, slow-tested state. cleanup.sh folds
+# fixups and stamps the Change: trailer once, over cur_base_head..HEAD.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -307,7 +307,6 @@ phases:
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
           - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: reconciler}
           - {else: true, pause: true}
 
       - name: autosquash-resolve-merge
@@ -315,6 +314,8 @@ phases:
         tier: high
         label: resolving merge fixups
         max_loops: 6
+        clean_tree: false   # operates on an in-progress autosquash rebase whose
+                            # legitimate completion may still be mid-rebase
         rules:
           - {else: true, goto: cleanup-merge}
 
