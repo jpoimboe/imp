@@ -636,6 +636,22 @@ def test_writable_cache_wins_over_readonly_overlay():
     assert p.allows_write(Path("/wt/cache/pip")) is True   # cache punches through
 
 
+def test_sandbox_config_from_raw_maps_fields_and_defaults() -> None:
+    from imp.engine.sandbox import sandbox_config_from_raw
+
+    cfg = sandbox_config_from_raw(
+        {"network": False, "extra_env": ["FOO", "BAR"], "allow_unsandboxed": True})
+    assert cfg.network is False
+    assert cfg.extra_env == ("FOO", "BAR")
+    assert cfg.allow_unsandboxed is True
+    # fields absent from the raw mapping fall back to the code defaults:
+    assert cfg.enabled is True
+    assert cfg.secret_paths == ()
+    assert cfg.writable_caches == ()
+    assert cfg.extra_readable == ()
+    assert cfg.extra_writable == ()
+
+
 def test_argv_binds_match_bind_plan_with_readonly_overlay():
     p = _policy(
         worktree="/wt", git_common_dir="/ctl/.git",

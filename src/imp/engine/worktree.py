@@ -164,6 +164,35 @@ def destroy_worktree(control_root: Path, change_id: str) -> None:
         _git(control_root, "branch", "-D", branch)
 
 
+def create_spike_worktree(
+    control_root: Path, change_id: str, discriminator: int, base: str,
+) -> Path:
+    """Disposable worktree on branch imp/spike-<id>-<n>, cut from base's tip."""
+    name = f"spike-{change_id}-{discriminator}"
+    rel = Path(".imp") / "worktrees" / name
+    branch = f"imp/{name}"
+    with RepoGitLock(control_root).acquire():
+        proc = _git(control_root, "worktree", "add", "-b", branch, str(rel), base)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"git worktree add (spike) failed: {proc.stderr.strip()}")
+    return (control_root / rel).resolve()
+
+
+def destroy_spike_worktree(
+    control_root: Path, change_id: str, discriminator: int,
+) -> None:
+    """Full best-effort teardown of a spike worktree and its branch, crash-tolerant."""
+    name = f"spike-{change_id}-{discriminator}"
+    rel = Path(".imp") / "worktrees" / name
+    branch = f"imp/{name}"
+    with RepoGitLock(control_root).acquire():
+        _git(control_root, "worktree", "remove", "--force", str(rel))
+        shutil.rmtree(control_root / rel, ignore_errors=True)
+        _git(control_root, "worktree", "prune")
+        _git(control_root, "branch", "-D", branch)
+
+
 class RepoGitLock:
     """Short-held file lock in the control root, acquired around every
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""

@@ -75,7 +75,7 @@ def test_delegate_partial_included_in_explore_heavy_steps() -> None:
 
 def test_task_lead_declares_research_subagents() -> None:
     a = _wf().agents["task-lead"]
-    assert set(a.subagents) == {"coder", "code-reviewer", "explorer", "researcher"}
+    assert set(a.subagents) == {"coder", "code-reviewer", "explorer", "researcher", "spiker"}
     assert "sub_agent" in a.tools
 
 

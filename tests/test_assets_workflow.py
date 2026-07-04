@@ -48,7 +48,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
                             "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"sub_agent"}
     subagents = {
-        "coder", "code-reviewer",
+        "coder", "code-reviewer", "spiker",
     }
     dispatchers = {"task-lead", "deferred-sweep",
                    "plan-writer", "spec-finalizer", "front-door", "finalize"}
@@ -1018,5 +1018,71 @@ def test_no_legacy_verify_surface_under_src_imp() -> None:
         for p in root.rglob("*")
         if p.suffix in {".py", ".md", ".yaml", ".yml", ".sh", ".toml"}
         and pattern.search(p.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
+def test_spiker_is_isolated_dispatchable_subagent() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import BASE_CAPS
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    spiker = wf.agents["spiker"]
+    # opts into the Part-1 isolation primitive
+    assert spiker.isolated_worktree is True
+    # dispatchable by BOTH front-door and task-lead
+    assert "spiker" in wf.agents["front-door"].subagents
+    assert "spiker" in wf.agents["task-lead"].subagents
+    # full default grant: write + exec + network, but no dispatch/rename caps
+    assert spiker.tools == BASE_CAPS
+    assert {"write_file", "edit_file", "bash", "web_fetch"} <= spiker.tools
+    assert "sub_agent" not in spiker.tools
+    assert "rename_change" not in spiker.tools
+    # spiker must have a label
+    assert spiker.label
+
+
+def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
+    from imp.assets import bundled_workflow_dir
+    text = (bundled_workflow_dir("imp") / "agents" / "spiker.md").read_text()
+    low = text.lower()
+    assert "name: spiker" in text
+    assert "isolated_worktree: true" in text
+    # empirical: writes and runs throwaway code, installs deps, reaches network
+    assert "throwaway" in low
+    assert "install" in low
+    assert "network" in low
+    # deliverable is findings; never commits / never ships code
+    assert "findings" in low
+    assert "never commit" in low
+    assert "never ship" in low
+    # parks a durable copy under the change-home spike dir (survives teardown)
+    assert "{{ change.home }}/artifacts/spike/" in text
+
+
+def test_front_door_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
+    from imp.assets import bundled_workflow_dir
+    low = (bundled_workflow_dir("imp") / "agents" / "front-door.md").read_text().lower()
+    assert "spiker" in low
+    assert "spec-shaping" in low
+    assert "before finalizing" in low
+    assert "empiric" in low
+
+
+def test_task_lead_prose_allows_implementation_local_spikes() -> None:
+    from imp.assets import bundled_workflow_dir
+    low = (bundled_workflow_dir("imp") / "agents" / "task-lead.md").read_text().lower()
+    assert "spiker" in low
+    assert "implementation-local" in low
+    assert "spike" in low
+
+
+def test_engine_and_agents_code_never_names_spiker() -> None:
+    # AC#4: the isolated_worktree primitive is generic — no engine/dispatch code
+    # references the role name. Only workflow assets (.md) may name it.
+    offenders = [
+        str(p)
+        for d in ("src/imp/engine", "src/imp/agents")
+        for p in Path(d).rglob("*.py")
+        if "spiker" in p.read_text()
     ]
     assert offenders == []
