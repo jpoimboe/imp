@@ -1760,6 +1760,68 @@ def test_interruptible_on_branch_step_is_load_error(tmp_path) -> None:
         load_workflow(wf)
 
 
+def test_clean_tree_absent_defaults_true_on_agent(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].clean_tree is True
+
+
+def test_clean_tree_false_on_agent_parses(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: merge
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                clean_tree: false
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].clean_tree is False
+
+
+def test_clean_tree_on_script_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: implement
+            steps:
+              - name: verify
+                command: ./scripts/run-verify.sh fast
+                clean_tree: false
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="clean_tree"):
+        load_workflow(wf)
+
+
+def test_clean_tree_on_branch_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: route
+                clean_tree: false
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="clean_tree"):
+        load_workflow(wf)
+
+
 def test_parse_agent_isolated_worktree_absent_defaults_false(tmp_path: Path) -> None:
     p = write_agent_md(
         tmp_path / "iw.md",

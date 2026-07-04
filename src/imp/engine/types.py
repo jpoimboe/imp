@@ -190,6 +190,7 @@ class Step:
     phase_show_label: bool = True  # owning phase's show_label, stamped at load (like phase_label)
     output_schema: OutputSchema | None = None  # script-only typed $IMP_OUTPUT contract
     interruptible: bool = False  # script-only: gate is safe to kill mid-run on interrupt
+    clean_tree: bool = True  # agent-only: bounce the step if the worktree is left dirty
 
 
 @dataclass(frozen=True, slots=True)
