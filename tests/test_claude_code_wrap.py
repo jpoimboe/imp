@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import ChangeContext, ImagePart, TextPart
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -712,3 +712,74 @@ async def test_wrap_plain_tool_capture_failure_preserves_success(tmp_path: Path)
     assert out.get("isError") is not True            # success preserved
     assert "hello" in out["content"][0]["text"]
     assert state.runtime_errors == []                # no error recorded
+
+
+def _image_tool() -> Tool:
+    parts = [
+        TextPart(text="shot.png — 8×8 PNG"),
+        ImagePart(media_type="image/png", data="aGVsbG8=", width=8, height=8,
+                  blob="ab12.png", nbytes=5),
+    ]
+
+    def _fn(ctx):  # type: ignore[no-untyped-def]
+        return parts
+
+    return Tool(name="read_file", description="read",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+
+@pytest.mark.anyio
+async def test_wrap_list_content_returns_mcp_image_content(tmp_path: Path) -> None:
+    state = _RunState()
+    wrapped = _wrap_one(
+        "read_file", _image_tool(), _ctx(tmp_path), state, _passthrough_decorator)
+    out = await wrapped({})
+    assert out["content"][0] == {"type": "text", "text": "shot.png — 8×8 PNG"}
+    assert out["content"][1] == {
+        "type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
+    assert "isError" not in out
+
+
+def _plain_list_tool() -> Tool:
+    def _fn(ctx):  # type: ignore[no-untyped-def]
+        return [1, 2, 3]
+
+    return Tool(name="nums", description="nums",
+                input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+
+@pytest.mark.anyio
+async def test_wrap_plain_list_still_json_flattens(tmp_path: Path) -> None:
+    state = _RunState()
+    wrapped = _wrap_one(
+        "nums", _plain_list_tool(), _ctx(tmp_path), state, _passthrough_decorator)
+    out = await wrapped({})
+    # An ordinary list keeps the json.dumps text-response path unchanged.
+    assert out["content"] == [{"type": "text", "text": "[1, 2, 3]"}]
+
+
+@pytest.mark.anyio
+async def test_wrap_list_content_captures_caption_to_parent_transcript(tmp_path: Path) -> None:
+    """Image-result path captures the joined TextPart caption to the sidecar when
+    parent_transcript_dir is set, while still returning structured MCP image content."""
+    state = _RunState()
+    ctx = _ctx(tmp_path)
+    ctx.parent_transcript_dir = tmp_path
+
+    wrapped = _wrap_one(
+        "read_file", _image_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({})
+
+    assert out["content"][0] == {"type": "text", "text": "shot.png — 8×8 PNG"}
+    assert out["content"][1] == {
+        "type": "image", "data": "aGVsbG8=", "mimeType": "image/png"}
+    assert "isError" not in out
+
+    sidecar = tmp_path / "captured_tool_results.jsonl"
+    lines = sidecar.read_text().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["name"] == "read_file"
+    assert entry["input"] == {}
+    assert entry["is_error"] is False
+    assert entry["content"] == "shot.png — 8×8 PNG"
