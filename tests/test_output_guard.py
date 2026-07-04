@@ -9,6 +9,7 @@ from imp.agents.output_guard import (
     Nudge,
     Ok,
     build_nudge_message,
+    recover_folded_fields,
     validate_output_or_nudge,
 )
 from imp.engine.schema import parse_output_schema
@@ -124,3 +125,35 @@ def test_valid_args_returns_ok_with_payload_and_no_recovery() -> None:
     assert isinstance(res, Ok)
     assert res.payload == args
     assert res.recovered is None
+
+
+def _recovery_schema():
+    raw = {
+        "summary": {"type": "string"},
+        "outcome": {"type": "string"},
+    }
+    return parse_output_schema(raw, source=SourceLoc(file=Path("a.yaml"), line=1))
+
+
+def test_recover_folded_fields_recovers_mirror_closed_outcome() -> None:
+    folded = (
+        "SUMMARY BODY</summary>\n"
+        '<parameter name="outcome">wrote plan-1</outcome>\n</invoke>'
+    )
+    repaired = recover_folded_fields({"summary": folded}, _recovery_schema())
+    assert repaired == {"summary": "SUMMARY BODY", "outcome": "wrote plan-1"}
+
+
+def test_recover_folded_fields_recovers_parameter_closed_outcome() -> None:
+    folded = (
+        "SUMMARY BODY</summary>\n"
+        '<parameter name="outcome">wrote plan-1</parameter>\n</invoke>'
+    )
+    repaired = recover_folded_fields({"summary": folded}, _recovery_schema())
+    assert repaired == {"summary": "SUMMARY BODY", "outcome": "wrote plan-1"}
+
+
+def test_recover_folded_fields_ignores_lone_mirror_tag() -> None:
+    args = {"summary": "we compared </summary> semantics; nothing folded here"}
+    repaired = recover_folded_fields(args, _recovery_schema())
+    assert repaired == args
