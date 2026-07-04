@@ -477,18 +477,19 @@ def test_task_lead_declares_verify_tolerated_output() -> None:
     assert "verify_tolerated" in wf.agents["task-lead"].output_schema.field_names()
 
 
-def test_task_lead_tolerated_routes_to_cleanup() -> None:
+def test_task_lead_tolerated_routes_to_check_next_plan() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["task-lead"].rules
     # All current failures tolerated: task-lead made NO change and routes straight to
-    # cleanup-implement, skipping the verify gate; it carries no var.
+    # check-next-plan, skipping the verify gate; it carries no var. Fold+stamp is
+    # deferred to cleanup-merge.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
         output={"status": "Success", "verify_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "cleanup-implement" and m.action.resume is False
+    assert m.action.target == "check-next-plan" and m.action.resume is False
     assert m.var_mutations == {}
 
 

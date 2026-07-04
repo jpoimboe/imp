@@ -145,7 +145,7 @@ phases:
         tier: high
         label: "task 1/{{ vars.task_total }}"
         rules:
-          - {if: {verify_tolerated: true}, goto: cleanup-implement}
+          - {if: {verify_tolerated: true}, goto: check-next-plan}
           - {else: true, continue: true}
 
       - name: verify
@@ -158,26 +158,6 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
           - {else: true, resume: task-lead}
-
-      # Fold this plan's fixup chains into one commit per task and stamp the Change:
-      # trailer over the self-derived boundary..HEAD. No code review here — the single
-      # change-wide review runs once in converge. exit 2 falls into the resolver.
-      - name: cleanup-implement
-        show_label: false
-        command: ./scripts/cleanup.sh
-        rules:
-          - {if: {exit: 0}, goto: check-next-plan}
-          - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: task-lead}
-          - {else: true, pause: true}
-
-      - name: autosquash-resolve-implement
-        file: agents/autosquash-resolve.md
-        tier: high
-        label: resolving task fixups
-        max_loops: 6
-        rules:
-          - {else: true, goto: cleanup-implement}
 
       # Routing-only branch. After a plan's tasks settle:
       #  - a converge/finalize rework (coverage_settled latched) -> change-review (re-review, never re-gap-check);

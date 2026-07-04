@@ -8,7 +8,7 @@ _QUIET = {
     # spec/plan/implement plumbing
     "spec-verify-commit", "plan-verify-commit",
     # per-batch fold+stamp + diff-base pinning (mechanical git, no narrative)
-    "cleanup-implement", "cleanup-sweep", "cleanup-merge", "check-next-plan",
+    "cleanup-sweep", "cleanup-merge", "check-next-plan",
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "assert-stamped",
     "integrate-rebase",
@@ -28,7 +28,7 @@ def test_substantive_steps_stay_loud() -> None:
     # agents and the consequential merge step carry real narrative — never quiet.
     for name in ("spec-finalizer", "plan-writer", "task-lead", "spec-reviewer",
                  "verify", "change-review", "deferred-sweep", "converge-verify",
-                 "autosquash-resolve-implement", "autosquash-resolve-sweep",
+                 "autosquash-resolve-sweep",
                  "autosquash-resolve-merge",
                  "reconciler", "integration-reviewer",
                  "finalize", "merge-to-base",

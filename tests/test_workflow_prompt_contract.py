@@ -546,11 +546,11 @@ NO_FIXUP_RULE_AGENTS = ["task-lead.md", "deferred-sweep.md", "reconciler.md"]
 @pytest.mark.parametrize("name", NO_FIXUP_RULE_AGENTS)
 def test_committing_agents_carry_no_fixup_outside_change_rule(name: str) -> None:
     # The standing rule: never --fixup/--squash a commit the change does not own; a
-    # base-traced failure is fixed forward; a bounced surviving directive becomes a
-    # standalone or new forward commit.
+    # base-traced failure is fixed forward as a new commit. (The surviving-directive
+    # bounce is retired: the single end-of-change cleanup pauses on an unfoldable
+    # directive rather than bouncing it back to a committing agent.)
     low = _read(name).lower()
     assert "does not own" in low
-    assert "surviving directive" in low
     assert "forward" in low
 
 

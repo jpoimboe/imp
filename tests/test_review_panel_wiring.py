@@ -40,8 +40,7 @@ def test_implement_phase_is_the_per_batch_loop() -> None:
     wf = _wf()
     impl = next(p for p in wf.phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
-        "task-lead", "verify", "cleanup-implement",
-        "autosquash-resolve-implement", "check-next-plan",
+        "task-lead", "verify", "check-next-plan",
     ]
 
 
@@ -175,8 +174,6 @@ def test_gap_check_routes_coverage_at_change_end() -> None:
 
 def test_check_next_plan_routes_settled_batch_to_change_review() -> None:
     wf = _wf()
-    ci = evaluate_rules(_steps(wf)["cleanup-implement"].rules, vars={}, output={"exit": 0})
-    assert isinstance(ci.action, Goto) and ci.action.target == "check-next-plan"
     cnp = _steps(wf)["check-next-plan"].rules
     corrective = evaluate_rules(cnp, vars={**_BASE_VARS, "coverage_settled": True,
                                            "plan_index": 1, "plan_total": 1}, output={})
