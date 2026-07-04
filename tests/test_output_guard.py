@@ -157,3 +157,42 @@ def test_recover_folded_fields_ignores_lone_mirror_tag() -> None:
     args = {"summary": "we compared </summary> semantics; nothing folded here"}
     repaired = recover_folded_fields(args, _recovery_schema())
     assert repaired == args
+
+
+def test_validate_recovers_mirror_fold_returns_ok_with_metadata() -> None:
+    g = LoopGuard()
+    folded = (
+        "BODY</summary>\n"
+        '<parameter name="outcome">did the thing</outcome>\n</invoke>'
+    )
+    res = validate_output_or_nudge({"summary": folded}, _recovery_schema(), g)
+    assert isinstance(res, Ok)
+    assert res.payload == {"summary": "BODY", "outcome": "did the thing"}
+    assert res.recovered is not None
+    assert res.recovered.container == "summary"
+    assert res.recovered.fields == ("outcome",)
+    assert g.noprogress_streak == 0
+
+
+def test_validate_lone_mirror_tag_still_nudges() -> None:
+    g = LoopGuard()
+    args = {"summary": "text </summary> more text, no param opener"}
+    res = validate_output_or_nudge(args, _recovery_schema(), g)
+    assert isinstance(res, Nudge)
+    assert "outcome" in res.reason
+
+
+def test_validate_partial_recovery_is_discarded_whole() -> None:
+    schema = parse_output_schema(
+        {
+            "summary": {"type": "string"},
+            "outcome": {"type": "string"},
+            "note": {"type": "string"},
+        },
+        source=SourceLoc(file=Path("a.yaml"), line=1),
+    )
+    g = LoopGuard()
+    folded = "BODY</summary>\n<parameter name=\"outcome\">x</outcome>\n</invoke>"
+    res = validate_output_or_nudge({"summary": folded}, schema, g)
+    assert isinstance(res, Nudge)  # 'note' still missing -> atomic discard -> nudge
+    assert g.noprogress_streak == 1

@@ -156,6 +156,17 @@ def recover_folded_fields(
     return repaired
 
 
+def _recovery_info(original: dict[str, Any], repaired: dict[str, Any]) -> RecoveryInfo:
+    container = next(
+        k for k, v in original.items() if k in repaired and repaired[k] != v
+    )
+    fields = tuple(
+        k for k in repaired
+        if original.get(k) is None and repaired.get(k) is not None
+    )
+    return RecoveryInfo(container=container, fields=fields)
+
+
 def validate_output_or_nudge(
     args: dict[str, Any],
     schema: OutputSchema,
@@ -166,6 +177,18 @@ def validate_output_or_nudge(
     try:
         validate_agent_output(args, schema)
     except LoadError as e:
+        if any(f.required and f.name not in args for f in schema.fields):
+            repaired = recover_folded_fields(args, schema)
+            if repaired != args:
+                try:
+                    validate_agent_output(repaired, schema)
+                except LoadError:
+                    pass
+                else:
+                    return Ok(
+                        payload=repaired,
+                        recovered=_recovery_info(args, repaired),
+                    )
         reason = e.message
         record = TurnRecord(
             assistant_text="",
