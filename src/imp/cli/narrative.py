@@ -1067,6 +1067,22 @@ NarrativeBuilder._HANDLERS["step_started"] = _h_step_started
 NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
 
+def _h_step_transition(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # Backward transition (engine-declared): the source step was already popped,
+    # so _append lands the marker in the open phase (or root) — the bounce point.
+    self._flush_burst()
+    frm = p.get("from_step", "?")
+    to = p.get("target_step", "?")
+    reason = p.get("reason")
+    text = f"↩ {frm} → {to}"
+    if reason:
+        text += f"  ({reason})"
+    self._append(LiteralTextNode(text=text, color_role="lifecycle"))
+
+
+NarrativeBuilder._HANDLERS["step_transition"] = _h_step_transition
+
+
 def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # EVERY pause is a pause, not an error — a resumable stop. Live frames them all
     # the same way (_emit_paused_summary prints a dim `paused`),
