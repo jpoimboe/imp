@@ -59,10 +59,10 @@ from imp.engine.gates import (
 from imp.engine.loader import load_workflow
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
-    SandboxConfig,
     SandboxUnavailable,
     resolve_policy,
     sandbox_available,
+    sandbox_config_from_raw,
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
@@ -1334,17 +1334,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
     change-stable, but project_root can flip on go-live, triggering a rebuild).
     Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
     run stops rather than silently running bare."""
-    raw = config.sandbox or {}
-    cfg = SandboxConfig(
-        enabled=raw.get("enabled", True),
-        allow_unsandboxed=raw.get("allow_unsandboxed", False),
-        network=raw.get("network", True),
-        secret_paths=tuple(raw.get("secret_paths", ())),
-        writable_caches=tuple(raw.get("writable_caches", ())),
-        extra_readable=tuple(raw.get("extra_readable", ())),
-        extra_writable=tuple(raw.get("extra_writable", ())),
-        extra_env=tuple(raw.get("extra_env", ())),
-    )
+    cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,

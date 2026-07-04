@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +227,20 @@ def sandbox_available() -> bool:
 
 def _existing(paths: list[str]) -> tuple[str, ...]:
     return tuple(p for p in paths if Path(p).exists())
+
+
+def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
+    """Build a SandboxConfig from a raw ``sandbox:`` mapping, applying resolve_policy defaults."""
+    return SandboxConfig(
+        enabled=raw.get("enabled", True),
+        allow_unsandboxed=raw.get("allow_unsandboxed", False),
+        network=raw.get("network", True),
+        secret_paths=tuple(raw.get("secret_paths", ())),
+        writable_caches=tuple(raw.get("writable_caches", ())),
+        extra_readable=tuple(raw.get("extra_readable", ())),
+        extra_writable=tuple(raw.get("extra_writable", ())),
+        extra_env=tuple(raw.get("extra_env", ())),
+    )
 
 
 def resolve_policy(
