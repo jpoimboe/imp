@@ -490,3 +490,79 @@ def test_is_worktree_true_in_repo_false_on_bare_dir(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "--bare", str(truly_bare)], check=True, capture_output=True)
     assert wt.is_worktree(truly_bare) is False        # bare repo: rev-parse says "false"
 
+
+def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
+    tmp_path: Path,
+) -> None:
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    spec = stage / "spec.md"
+
+    # First snapshot -> root commit; a healthy path fires no warning.
+    spec.write_text("# v1\n")
+    warnings1: list[str] = []
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec},
+        message="artifact: v1", warn=warnings1.append) is True
+    assert warnings1 == []
+    first = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
+
+    # A normal second commit is still parented (lineage unchanged, no warning).
+    spec.write_text("# v2\n")
+    warnings2: list[str] = []
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec},
+        message="artifact: v2", warn=warnings2.append) is True
+    assert warnings2 == []
+    second = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
+    assert _git(tmp_path, "rev-parse",
+                "refs/imp/artifacts/feat~1").stdout.strip() == first
+
+    # Corrupt the tip: truncate its loose object file to 0 bytes, exactly like
+    # the bonu10 host-crash incident.
+    obj = tmp_path / ".git" / "objects" / second[:2] / second[2:]
+    assert obj.exists()
+    obj.chmod(0o644)
+    obj.write_bytes(b"")
+
+    # The peel probe now fails on the unreadable parent: the next snapshot
+    # commits PARENTLESS, updates the ref, and warns exactly once.
+    spec.write_text("# v3\n")
+    warnings3: list[str] = []
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec},
+        message="artifact: v3", warn=warnings3.append) is True
+    assert warnings3 == [
+        "artifact ref refs/imp/artifacts/feat unreadable; "
+        "starting new artifact lineage"
+    ]
+    new_tip = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
+    assert new_tip != second
+    # Parentless: there is no ~1.
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/artifacts/feat~1").returncode != 0
+    # The new tip carries the fresh snapshot content.
+    assert _git(tmp_path, "show",
+                "refs/imp/artifacts/feat:spec/feat.md").stdout == "# v3\n"
+
+
+def test_artifact_commit_warn_defaults_to_none(tmp_path: Path) -> None:
+    # warn is optional: omitting it on the corrupt-parent path must not raise.
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    spec = stage / "spec.md"
+    spec.write_text("# a\n")
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: a") is True
+    tip = _git(tmp_path, "rev-parse", "refs/imp/artifacts/feat").stdout.strip()
+    obj = tmp_path / ".git" / "objects" / tip[:2] / tip[2:]
+    obj.chmod(0o644)
+    obj.write_bytes(b"")
+    spec.write_text("# b\n")
+    assert wt.artifact_commit(
+        tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: b") is True
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/artifacts/feat~1").returncode != 0
+

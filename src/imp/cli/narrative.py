@@ -1682,6 +1682,13 @@ def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     self._append(ErrorNode(message=message, is_warning=True))
 
 
+def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # Non-terminal: does NOT flush the burst (same invariant as _h_runner_warning).
+    message = str(p.get("message", "?"))
+    self._warnings.append(message)
+    self._append(ErrorNode(message=message, is_warning=True))
+
+
 def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Non-terminal: a transient error was retried with backoff. Render inline so
     # a self-healed network/rate_limit blip doesn't look like a failure.
@@ -1742,6 +1749,7 @@ def _h_engine_continuation(
 
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
+NarrativeBuilder._HANDLERS["warning"] = _h_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["output_validation_nudge"] = _h_output_validation_nudge
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked

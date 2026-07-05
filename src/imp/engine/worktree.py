@@ -9,7 +9,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -364,15 +364,30 @@ def _temp_index(control_root: Path):  # type: ignore[no-untyped-def]
         Path(index_file).unlink(missing_ok=True)
 
 
+def _force_update_ref(control_root: Path, ref: str, commit: str) -> None:
+    """Point ref at commit with no CAS; delete-then-write when git refuses a corrupt old oid."""
+    wrote = _git(control_root, "update-ref", ref, commit)
+    if wrote.returncode != 0:
+        _git(control_root, "update-ref", "-d", ref)
+        subprocess.run(
+            ["git", "update-ref", ref, commit],
+            cwd=control_root, check=True, capture_output=True, text=True)
+
+
 def artifact_commit(
     control_root: Path, change_id: str, files: Mapping[str, Path], *, message: str,
+    warn: Callable[[str], None] | None = None,
 ) -> bool:
     """Snapshot a change's artifacts to refs/imp/artifacts/<id> as a FULL tree.
 
     The committed tree is exactly `files`, flat at the tree root (e.g.
     spec/<id>.md, plans/<id>-plan-N.md) — a file dropped from `files` is gone at
-    the tip. Each commit is parented on the prior tip, preserving lineage. Built
-    with pure git plumbing under the repo lock, never checking out the ref.
+    the tip. Each commit is parented on the prior tip, preserving lineage. When
+    the ref's tip object is unreadable (corrupt/truncated) the parent probe's
+    `^{commit}` peel fails, so the snapshot commits parentless — starting a new
+    lineage rather than poisoning `commit-tree -p` — and `warn` (if given) fires
+    once. Built with pure git plumbing under the repo lock, never checking out
+    the ref.
 
     Returns True iff a commit was written. Empty `files`, or a snapshot identical
     to the current tip, is a no-op that returns False and leaves the ref untouched.
@@ -392,23 +407,32 @@ def artifact_commit(
                 cwd=control_root, env=env, check=True, capture_output=True, text=True)
         tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
                               check=True, capture_output=True, text=True).stdout.strip()
-        parent = _git(control_root, "rev-parse", "--verify", "--quiet", ref)
-        have_parent = parent.returncode == 0
+        ref_exists = _git(
+            control_root, "rev-parse", "--verify", "--quiet", ref,
+        ).returncode == 0
+        peeled = _git(
+            control_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}",
+        )
+        have_parent = peeled.returncode == 0
         if have_parent:
             prior_tree = _git(
                 control_root, "rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}",
             ).stdout.strip()
             if prior_tree == tree:
                 return False
+        elif ref_exists and warn is not None:
+            warn(f"artifact ref {ref} unreadable; starting new artifact lineage")
         args = ["git", "commit-tree", tree, "-m", message]
         if have_parent:
-            args += ["-p", ref]
+            args += ["-p", peeled.stdout.strip()]
         commit = subprocess.run(args, cwd=control_root, env=env, check=True,
                                 capture_output=True, text=True).stdout.strip()
-        cas = ["git", "update-ref", ref, commit]
-        cas += [parent.stdout.strip()] if have_parent else []
-        subprocess.run(cas, cwd=control_root, check=True,
-                       capture_output=True, text=True)
+        if have_parent:
+            subprocess.run(
+                ["git", "update-ref", ref, commit, peeled.stdout.strip()],
+                cwd=control_root, check=True, capture_output=True, text=True)
+        else:
+            _force_update_ref(control_root, ref, commit)
     return True
 
 

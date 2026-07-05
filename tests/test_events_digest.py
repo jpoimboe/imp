@@ -167,3 +167,43 @@ def test_full_line_redacts_step_context_secrets() -> None:
     assert "SECRET_SYSTEM_PROMPT_BODY" not in line
     assert "SECRET_TOOL_SCHEMA" not in line
     assert "claude-x" in line
+
+
+def test_warning_digest_shows_message() -> None:
+    ev = {
+        "id": "e9", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:08+00:00", "type": "warning",
+        "payload": {
+            "source": "artifact_harvest",
+            "message": "artifact ref refs/imp/artifacts/x unreadable",
+            "detail": {},
+        },
+    }
+    line = digest_event(ev)
+    assert "warning: artifact ref refs/imp/artifacts/x unreadable" in line
+    assert "\n" not in line
+
+
+def test_warning_digest_clips_long_message() -> None:
+    long_msg = "x" * 500
+    ev = {
+        "id": "e10", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:09+00:00", "type": "warning",
+        "payload": {"message": long_msg},
+    }
+    line = digest_event(ev)
+    assert line.startswith("2026-07-01T00:00:09+00:00 warning")
+    assert "warning: " in line
+    assert "\n" not in line
+    assert len(line) < len(long_msg)
+
+
+def test_warning_digest_missing_message_key() -> None:
+    ev = {
+        "id": "e11", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:10+00:00", "type": "warning",
+        "payload": {"source": "some_source"},
+    }
+    line = digest_event(ev)
+    assert "warning: " in line
+    assert "\n" not in line
