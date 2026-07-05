@@ -157,3 +157,64 @@ def test_pause_reason_bare_reason_when_error_has_no_cause_fields() -> None:
         ev("2", "workflow_paused", reason="internal_error", kind="ValueError"),
     ])
     assert reason == "internal_error"
+
+
+def test_pause_reason_resumed_after_paused_returns_stale_sentinel() -> None:
+    from imp.cli.main import _pause_reason, _PauseBanner
+
+    # A pause, then a resume with no new pause in the latest segment: the stored
+    # reason is a fossil and must not be replayed as the headline.
+    reason = _pause_reason([
+        ev("1", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("2", "workflow_resumed"),
+    ])
+    assert reason is _PauseBanner.STALE
+
+
+def test_pause_reason_paused_after_resumed_returns_real_reason() -> None:
+    from imp.cli.main import _pause_reason
+
+    # Pause -> resume -> pause again: the latest segment DID end with a pause,
+    # so its real reason is the headline (not the stale sentinel).
+    reason = _pause_reason([
+        ev("1", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("2", "workflow_resumed"),
+        ev("3", "workflow_paused", reason="interrupt", interrupt_reason="interrupt"),
+    ])
+    assert reason == "interrupt"
+
+
+def test_pause_reason_resumed_before_any_pause_is_not_stale() -> None:
+    from imp.cli.main import _pause_reason
+
+    # A resume that precedes every pause must not mark a later pause stale.
+    reason = _pause_reason([
+        ev("1", "workflow_resumed"),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+    ])
+    assert reason == "terminated"
+
+
+def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Path) -> None:
+    import json
+
+    from imp.cli.main import _pause_facts
+    from imp.engine.change import Change
+
+    change_dir = tmp_path / ".imp" / "changes" / "mona44"
+    change_dir.mkdir(parents=True)
+    events = [
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("3", "workflow_resumed"),
+    ]
+    (change_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n")
+    change = Change(id="mona44", title="", base_branch="main",
+                    control_root=tmp_path, project_root=tmp_path,
+                    change_dir=change_dir)
+    name, phase, token, reason = _pause_facts(change)
+    assert name == "mona44"
+    assert phase == "converge"
+    assert token == "mona44"
+    assert reason == "ended unexpectedly — see .imp/changes/mona44/daemon.stderr"
