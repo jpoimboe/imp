@@ -103,6 +103,10 @@ def _generic(payload: dict[str, Any]) -> str:
     return _clip(" ".join(parts), _TEXT_CAP)
 
 
+def _h_warning(payload: dict[str, Any]) -> str:
+    return f"warning: {_clip(str(payload.get('message', '')), _TEXT_CAP)}"
+
+
 _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "user_message": _h_user,
     "user_interjected": _h_user,
@@ -112,6 +116,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "tool_result": _h_tool_result,
     "agent_output": _h_agent_output,
     "step_context": _h_step_context,
+    "warning": _h_warning,
 }
 
 
