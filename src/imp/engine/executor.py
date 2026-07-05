@@ -45,7 +45,7 @@ from imp.engine.backoff import (
 from imp.engine.change import Change
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, summarize_exception
 from imp.engine.feedback import (
     apply_completion_backstop,
     format_clean_tree_feedback,
@@ -430,14 +430,17 @@ async def run_change(
         tb = traceback.format_exc()
         try:
             kind = type(exc).__name__
-            message = (str(exc).splitlines() or [""])[0]
+            message, extras = summarize_exception(exc)
             log.append(
                 agent_id=None, type="error",
                 payload={
                     "category": "internal",
                     "kind": kind,
                     "message": message,
-                    "detail": {"traceback_tail": "\n".join(tb.splitlines()[-15:])},
+                    "detail": {
+                        "traceback_tail": "\n".join(tb.splitlines()[-15:]),
+                        **extras,
+                    },
                 },
             )
             _emit_paused_event(log, "internal_error", kind=kind)

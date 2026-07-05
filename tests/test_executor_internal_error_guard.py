@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -134,3 +135,35 @@ async def test_cancellation_propagates_uncaught(
     assert not any(
         e["type"] == "workflow_paused" and e["payload"].get("reason") == "internal_error"
         for e in events)
+
+
+@pytest.mark.anyio
+async def test_internal_error_surfaces_subprocess_stderr(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path)
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: object())
+
+    async def _boom(*_a: Any, **_k: Any) -> Any:
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "commit-tree"],
+            stderr="fatal: bad object refs/imp/artifacts/bonu10\n",
+        )
+
+    monkeypatch.setattr("imp.engine.executor._dispatch_step", _boom)
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+
+    err = next(
+        e["payload"] for e in events
+        if e["type"] == "error" and e["payload"].get("category") == "internal"
+    )
+    assert err["kind"] == "CalledProcessError"
+    assert err["message"].endswith(
+        " — fatal: bad object refs/imp/artifacts/bonu10")
+    assert "fatal: bad object" in err["detail"]["stderr_tail"]
+    assert err["detail"]["traceback_tail"].strip() != ""
