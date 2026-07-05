@@ -1081,3 +1081,10 @@ def test_engine_and_agents_code_never_names_spiker() -> None:
         if "spiker" in p.read_text()
     ]
     assert offenders == []
+
+
+def test_imp_flat_is_not_bundled() -> None:
+    from imp.assets import bundled_workflow_names
+    names = bundled_workflow_names()
+    assert "imp-flat" not in names
+    assert "imp" in names        # the surviving default workflow still discovers
