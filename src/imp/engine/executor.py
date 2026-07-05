@@ -1036,7 +1036,14 @@ async def _route_agent(
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
-            initial_messages=initial, is_resume=is_resume,
+            # is_resume=keep, not the entry's lifecycle bit: the stored-prompt
+            # restore (system_prompt_override) suppresses first-user-message
+            # composition on the assumption a kept transcript replays it. A
+            # restart (empty transcript, e.g. a watchdog kill before the
+            # provider's result-boundary flush) has a stored step_context but
+            # nothing to replay — restoring would stream no messages at all and
+            # the spawn hangs silently until the next watchdog kill.
+            initial_messages=initial, is_resume=keep,
             test_gates=test_gates, non_interactive=non_interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,

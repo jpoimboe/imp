@@ -144,6 +144,50 @@ async def test_resume_truncated_autonomous_replays_and_advances(
 
 
 @pytest.mark.anyio
+async def test_resume_empty_transcript_with_stored_context_runs_fresh(
+        tmp_path: Path, provider_registry) -> None:
+    # The watchdog-kill shape: the step RAN before, so the log holds a
+    # step_context with its system prompt — but the provider never flushed a
+    # transcript (claude_code flushes only at the end-of-run result boundary),
+    # so the restart finds an empty one. The stored-prompt restore must not win
+    # over the fresh re-render: system_prompt_override suppresses first-user-
+    # message composition, so the runner would get initial_messages=() with no
+    # transcript to replay and the spawn streams nothing — a silent stall loop.
+    change = _seed_single_agent(tmp_path)
+    state = State.load(change.state_dir)
+    state.resume_pending = state.step
+    state.save(change.state_dir)
+    tdir = change.change_dir / "steps" / "only" / "w"
+    tdir.mkdir(parents=True, exist_ok=True)
+    change.event_log().append(
+        agent_id="step:only/w", type="step_context",
+        payload={"system_prompt": "stored from the killed run"})
+
+    seen_initial_nonempty: list[bool] = []
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            seen_initial_nonempty.append(len(inv.initial_messages) > 0)
+            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_change(change)
+    assert result is RunResult.COMPLETED          # advanced, not wedged
+    assert seen_initial_nonempty == [True]        # fresh seed, not an empty replay
+    assert State.load(change.state_dir).status == "completed"
+
+
+@pytest.mark.anyio
 async def test_resume_empty_transcript_seeds_fresh_and_advances(
         tmp_path: Path, provider_registry) -> None:
     # A `resume:` edge into a step that never ran (empty transcript). This is the
