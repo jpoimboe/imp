@@ -7,6 +7,7 @@ inside `run()`. Transcripts on disk are JSONL of these types.
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -258,21 +259,32 @@ def message_to_json(msg: Message) -> str:
 def _content_part_to_dict(part: ContentPart) -> dict[str, Any]:
     if isinstance(part, TextPart):
         return {"type": "text", "text": part.text}
+    # Persist a blob reference only; the base64 `data` is rebuilt from the blob on load.
     return {
-        "type": "image", "media_type": part.media_type, "data": part.data,
+        "type": "image", "media_type": part.media_type,
         "width": part.width, "height": part.height,
         "blob": part.blob, "nbytes": part.nbytes,
     }
 
 
-def _content_part_from_dict(raw: dict[str, Any]) -> ContentPart:
+def _content_part_from_dict(
+    raw: dict[str, Any], blobs_dir: Path | None
+) -> ContentPart:
     if raw["type"] == "text":
         return TextPart(text=raw["text"])
-    return ImagePart(
-        media_type=raw["media_type"], data=raw["data"],
-        width=raw["width"], height=raw["height"],
-        blob=raw["blob"], nbytes=raw["nbytes"],
-    )
+    blob = raw["blob"]
+    if blobs_dir is not None:
+        blob_path = blobs_dir / blob
+        if blob_path.exists():
+            data = base64.b64encode(blob_path.read_bytes()).decode("ascii")
+            return ImagePart(
+                media_type=raw["media_type"], data=data,
+                width=raw["width"], height=raw["height"],
+                blob=blob, nbytes=raw["nbytes"],
+            )
+    # Blob gone or no blobs dir: degrade to a text note keyed by the content sha.
+    sha = blob.rsplit(".", 1)[0]
+    return TextPart(text=f"[image {sha} no longer available]")
 
 
 def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
@@ -291,7 +303,7 @@ def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
     }
 
 
-def message_from_json(data: dict[str, Any]) -> Message:
+def message_from_json(data: dict[str, Any], blobs_dir: Path | None = None) -> Message:
     blocks: list[ContentBlock] = []
     for raw in data["content"]:
         kind = raw["type"]
@@ -302,7 +314,8 @@ def message_from_json(data: dict[str, Any]) -> Message:
         elif kind == "tool_result":
             raw_content = raw["content"]
             content = (raw_content if isinstance(raw_content, str)
-                       else [_content_part_from_dict(p) for p in raw_content])
+                       else [_content_part_from_dict(p, blobs_dir)
+                             for p in raw_content])
             blocks.append(ToolResultBlock(
                 tool_use_id=raw["tool_use_id"],
                 content=content,

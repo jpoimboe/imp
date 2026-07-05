@@ -1,6 +1,7 @@
 # tests/test_runner_types.py
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -195,30 +196,55 @@ def test_round_trip_redacted_thinking_block() -> None:
     assert back.content[0].thinking == ""
 
 
-def test_round_trip_tool_result_list_content_is_lossless() -> None:
+def test_round_trip_tool_result_image_rebuilds_from_blob(tmp_path) -> None:
+    blobs = tmp_path / "blobs"
+    blobs.mkdir()
+    (blobs / "deadbeef.png").write_bytes(b"hello")  # sha-named blob on disk
     parts = [
         TextPart(text="login.png — 1200×800 PNG"),
         ImagePart(
-            media_type="image/png", data="aGVsbG8=", width=1200, height=800,
-            blob="deadbeef.png", nbytes=340_000,
+            media_type="image/png",
+            data=base64.b64encode(b"hello").decode("ascii"),
+            width=1200, height=800, blob="deadbeef.png", nbytes=5,
         ),
     ]
     msg = Message(
         role="user",
         content=(ToolResultBlock(tool_use_id="t1", content=parts),),
     )
-    back = message_from_json(json.loads(message_to_json(msg)))
+    raw = message_to_json(msg)
+    # The persisted transcript carries a blob reference, NOT the base64 payload.
+    assert '"data"' not in raw
+    assert "deadbeef.png" in raw
+
+    back = message_from_json(json.loads(raw), blobs_dir=blobs)
     block = back.content[0]
     assert isinstance(block, ToolResultBlock)
-    # The list survived as a list of reconstructed parts (not a JSON string).
     assert isinstance(block.content, list)
+    # data rebuilt from the blob bytes -> an ImagePart identical to the original.
     assert block.content == parts
-    # The base64 payload and image metadata survive the round-trip.
     img = block.content[1]
     assert isinstance(img, ImagePart)
-    assert img.data == "aGVsbG8="
-    assert (img.width, img.height, img.blob, img.nbytes) == (
-        1200, 800, "deadbeef.png", 340_000)
+    assert base64.b64decode(img.data) == b"hello"
+
+
+def test_round_trip_tool_result_missing_blob_degrades_to_text_note(tmp_path) -> None:
+    parts = [
+        ImagePart(
+            media_type="image/png",
+            data=base64.b64encode(b"hi").decode("ascii"),
+            width=10, height=10, blob="cafef00d.png", nbytes=2,
+        ),
+    ]
+    msg = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t1", content=parts),),
+    )
+    # blobs dir exists but the blob file is absent -> degrade to a text note.
+    back = message_from_json(json.loads(message_to_json(msg)), blobs_dir=tmp_path)
+    note = back.content[0].content[0]
+    assert isinstance(note, TextPart)
+    assert note.text == "[image cafef00d no longer available]"
 
 
 def test_round_trip_tool_result_str_content_unchanged() -> None:
