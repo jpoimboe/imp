@@ -619,7 +619,9 @@ def _emit_started(
                  agent_id=None)
 
 
-def _harvest_artifacts(change: Change, step: Step) -> None:
+def _harvest_artifacts(
+    change: Change, step: Step, warn: Callable[[str], None] | None = None
+) -> None:
     """Journal change_dir/artifacts/** to the change's artifact ref (no-op if none)."""
     from imp.engine import worktree
     art_root = change.change_dir / "artifacts"
@@ -630,13 +632,23 @@ def _harvest_artifacts(change: Change, step: Step) -> None:
         for p in sorted(art_root.rglob("*")) if p.is_file()
     }
     worktree.artifact_commit(
-        change.control_root, change.id, files, message=f"artifact: {step.name}")
+        change.control_root, change.id, files,
+        message=f"artifact: {step.name}", warn=warn)
 
 
 def _finish(
     log: EventLog, step: Step, change: Change, match: Any, state: State
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _harvest_artifacts(change, step)
+    def _warn(msg: str) -> None:
+        _emit(log, "warning",
+              {"source": "artifact_harvest", "message": msg, "detail": {}})
+    # except Exception, not BaseException: lets CancelledError / Ctrl-C propagate.
+    try:
+        _harvest_artifacts(change, step, warn=_warn)
+    except Exception as e:
+        msg, extras = summarize_exception(e)
+        _emit(log, "warning",
+              {"source": "artifact_harvest", "message": msg, "detail": extras})
     _emit(log, "step_completed", {
         "step": step.name, "kind": step.kind,
         "action": _action_payload(match.action),
