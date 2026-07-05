@@ -737,8 +737,7 @@ def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
 
 
 def test_no_prompt_references_transport_non_interactive() -> None:
-    roots = [Path("src/imp/assets/workflows/imp"),
-             Path("src/imp/assets/workflows/imp-flat")]
+    roots = [Path("src/imp/assets/workflows/imp")]
     offenders = [str(p) for root in roots for p in root.rglob("*.md")
                  if "run.non_interactive" in p.read_text()]
     assert offenders == [], offenders
@@ -759,7 +758,7 @@ def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
     assert "final message reports\n`NEEDS_CONTEXT` or `BLOCKED`" in text
 
 
-@pytest.mark.parametrize("tree", ["imp", "imp-flat", "patent"])
+@pytest.mark.parametrize("tree", ["imp", "patent"])
 def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None:
     wf = load_workflow(bundled_workflow_dir(tree))
     dispatchable: set[str] = set()
@@ -785,7 +784,7 @@ def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None
 def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    for tree in ("imp", "imp-flat"):
+    for tree in ("imp",):
         wdir = bundled_workflow_dir(tree)
         body = (wdir / "agents" / "finalize.md").read_text()
         assert "run.non_interactive" not in body   # transport flag never leaks

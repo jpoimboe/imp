@@ -74,7 +74,7 @@ def test_plan_verify_fails_when_no_plan_present(tmp_path: Path) -> None:
 
 def test_plan_verify_passes_large_plan_no_task_cap(tmp_path: Path) -> None:
     # No task-count ceiling: a 20-task plan passes, and the success line carries
-    # no "(N tasks)" suffix. Both workflow copies stay byte-identical and capless.
+    # no "(N tasks)" suffix. The script stays capless.
     home = tmp_path / "home"
     body = "# plan 1\n\n" + "".join(
         f"## Task {i}: t{i}\n\nbody\n\n" for i in range(1, 21))   # 20 tasks
@@ -83,10 +83,7 @@ def test_plan_verify_passes_large_plan_no_task_cap(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert "tasks)" not in proc.stdout
     imp = (SCRIPTS / "plan-commit-verify.sh").read_text()
-    flat = (bundled_workflow_dir("imp-flat") / "scripts"
-            / "plan-commit-verify.sh").read_text()
-    assert "CEILING" not in imp and "CEILING" not in flat
-    assert imp == flat
+    assert "CEILING" not in imp
 
 
 def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
@@ -108,10 +105,3 @@ def test_plan_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
     _write(home, "plans/id1-plan-1.md", "# plan 1\n")
     proc = _run_capture("plan-commit-verify.sh", root, home, "id1")
     assert proc.returncode == 0, proc.stderr
-
-
-def test_both_spec_gate_copies_are_byte_identical() -> None:
-    imp = (SCRIPTS / "spec-commit-verify.sh").read_text()
-    flat = (bundled_workflow_dir("imp-flat") / "scripts"
-            / "spec-commit-verify.sh").read_text()
-    assert imp == flat

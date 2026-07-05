@@ -339,9 +339,3 @@ def test_run_verify_success_summary_is_silent(tmp_path: Path) -> None:
     assert "ran-ok" in proc.stdout
     assert "gate ceiling" not in proc.stdout
     assert "gate failed" not in proc.stdout
-
-
-def test_imp_and_imp_flat_run_verify_identical() -> None:
-    imp = (bundled_workflow_dir("imp") / "scripts" / "run-verify.sh").read_text()
-    flat = (bundled_workflow_dir("imp-flat") / "scripts" / "run-verify.sh").read_text()
-    assert imp == flat

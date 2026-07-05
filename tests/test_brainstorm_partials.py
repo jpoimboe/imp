@@ -118,21 +118,3 @@ def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
     assert "add a dark-mode toggle" not in unseeded
     assert "Open by asking" in unseeded                # bare-open elicit branch
 
-
-def test_brainstorm_dialogue_imp_flat_renders_seeded_vs_unseeded_branch() -> None:
-    from imp.agents.prompts import build_context, render_prompt
-    from imp.engine.state import InMemoryEventLog
-    flat = Path("src/imp/assets/workflows/imp-flat/partials")
-    src = (flat / "brainstorm-dialogue.md").read_text()
-    wf = flat.parent  # workflow_dir so {% include %} resolves
-
-    seeded = render_prompt(src, build_context(
-        change_title="t", event_log=InMemoryEventLog(),
-        opening="add a dark-mode toggle"), workflow_dir=wf)
-    assert "add a dark-mode toggle" in seeded          # intent rendered inline
-    assert "Open by asking" not in seeded              # not the bare-open branch
-
-    unseeded = render_prompt(src, build_context(
-        change_title="t", event_log=InMemoryEventLog()), workflow_dir=wf)
-    assert "add a dark-mode toggle" not in unseeded
-    assert "Open by asking" in unseeded                # bare-open elicit branch

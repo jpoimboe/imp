@@ -643,8 +643,6 @@ def test_load_workflow_step_tier_defaults_to_medium(tmp_path):
     assert wf.flat_steps()[0].tier == "medium"
 
 
-
-
 def test_feedback_string_parsed_and_bool_rejected(tmp_path: Path) -> None:
     """§6: feedback: string is parsed; bare → None; bool form raises LoadError."""
     wf = _write(tmp_path, """\
@@ -1689,11 +1687,6 @@ def test_verify_gates_acquire_test_lane() -> None:
            for s in ph.steps}
     for gate in ("verify", "sweep-verify", "converge-verify", "integration-verify"):
         assert imp[gate].acquire == "test-lane", gate
-
-    flat = {s.name: s for ph in load_workflow(bundled_workflow_dir("imp-flat")).phases
-            for s in ph.steps}
-    for gate in ("verify", "integration-verify"):
-        assert flat[gate].acquire == "test-lane", gate
 
 
 def test_interruptible_true_on_script_parses(tmp_path) -> None:

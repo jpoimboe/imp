@@ -395,7 +395,6 @@ def test_plan_writer_prompt_has_minors_integration_branch() -> None:
     assert "without changing the file" in body.lower()
 
 
-
 def test_no_goto_spec_finalizer_edge() -> None:
     from pathlib import Path
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
@@ -643,7 +642,6 @@ def test_sweep_verify_red_resumes_deferred_sweep() -> None:
     assert m.action.target == "deferred-sweep" and m.action.resume is True
 
 
-
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
@@ -837,7 +835,7 @@ def test_no_wait_for_user_in_workflow_prompts() -> None:
 
 
 def test_explorer_nudges_symbol_outline_in_both_copies() -> None:
-    for wf in ("imp", "imp-flat"):
+    for wf in ("imp",):
         text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
         assert "symbol_outline" in text
         assert "before reading full bodies" in text
@@ -1003,14 +1001,6 @@ def test_imp_gate_steps_pass_tier_arg() -> None:
     assert steps["sweep-verify"].command == "./scripts/run-verify.sh fast"
     assert steps["converge-verify"].command == "./scripts/run-verify.sh slow"
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
-
-
-def test_imp_flat_gate_steps_pass_tier_arg() -> None:
-    from imp.assets import bundled_workflow_dir
-    steps = _steps(load_workflow(bundled_workflow_dir("imp-flat")))
-    assert steps["verify"].command == "./scripts/run-verify.sh fast"
-    assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
-    assert "sweep-verify" not in steps   # imp-flat has no sweep-verify gate
 
 
 def test_no_legacy_verify_surface_under_src_imp() -> None:
