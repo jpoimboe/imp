@@ -255,7 +255,8 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | None:
 
     The last workflow_paused reason (interrupt_reason wins, mirroring
     _h_workflow_paused), plus a one-line cause from the error that drove that
-    pause. The event log is cumulative across resume, so each error is paired
+    pause (the error's detail.last_agent_text, else its message, first line
+    only). The event log is cumulative across resume, so each error is paired
     with the workflow_paused that immediately follows it; only an error in the
     terminal pause's own segment contributes a cause. An interrupt pause with no
     error in its segment renders the bare reason, even when an earlier segment
@@ -282,6 +283,9 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | None:
         if isinstance(d, dict) and d.get("last_agent_text"):
             text = str(d["last_agent_text"]).strip()
             cause = text.splitlines()[0].strip() if text else None
+        if cause is None and paused_error.get("message"):
+            msg = str(paused_error["message"]).strip()
+            cause = msg.splitlines()[0].strip() if msg else None
     return f"{base}: {cause}" if cause else str(base)
 
 

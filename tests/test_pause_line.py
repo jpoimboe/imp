@@ -120,3 +120,40 @@ def test_pause_reason_none_when_no_pause_event() -> None:
     from imp.cli.main import _pause_reason
 
     assert _pause_reason([ev("1", "change_created", change_id=1, title="x")]) is None
+
+
+def test_pause_reason_internal_error_falls_back_to_message_first_line() -> None:
+    from imp.cli.main import _pause_reason
+
+    # An internal-error pause has no last_agent_text; the cause must come from
+    # the error payload's message (first line only).
+    reason = _pause_reason([
+        ev("1", "error", category="internal", kind="PromptRenderError",
+           message="project has no fact 'guidance'\n  at line 3 of template"),
+        ev("2", "workflow_paused", reason="internal_error", kind="PromptRenderError"),
+    ])
+    assert reason == "internal_error: project has no fact 'guidance'"
+
+
+def test_pause_reason_last_agent_text_wins_over_message() -> None:
+    from imp.cli.main import _pause_reason
+
+    # When both are present, detail.last_agent_text takes precedence.
+    reason = _pause_reason([
+        ev("1", "error", category="terminated",
+           message="internal fallback message",
+           detail={"last_agent_text": "API Error 400 — tool use concurrency"}),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+    ])
+    assert reason == "terminated: API Error 400 — tool use concurrency"
+
+
+def test_pause_reason_bare_reason_when_error_has_no_cause_fields() -> None:
+    from imp.cli.main import _pause_reason
+
+    # An error with neither last_agent_text nor message yields the bare reason.
+    reason = _pause_reason([
+        ev("1", "error", category="internal", kind="ValueError"),
+        ev("2", "workflow_paused", reason="internal_error", kind="ValueError"),
+    ])
+    assert reason == "internal_error"
