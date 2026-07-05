@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from imp.engine.types import SourceLoc
 
@@ -87,3 +89,33 @@ class StateDecodeError(LoadError):
             hint="restore a good state.json from backup, or "
                  "abandon-and-restart this change.",
         )
+
+
+def _decode_stream(stream: object) -> str:
+    """Normalize a subprocess stream (bytes / str / None) to text."""
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode(errors="replace")
+    return str(stream)
+
+
+def summarize_exception(e: BaseException) -> tuple[str, dict[str, Any]]:
+    """Return (message, detail) for an engine error.
+
+    Default: (first line of str(e), {}). For a subprocess.CalledProcessError,
+    append the last non-empty stderr line to the message and put a capped tail
+    of that stream in detail["stderr_tail"]; when stderr is empty/absent, fall
+    back to stdout the same way (still under the stderr_tail key).
+    """
+    first = (str(e).splitlines() or [""])[0]
+    if not isinstance(e, subprocess.CalledProcessError):
+        return first, {}
+    for stream in (e.stderr, e.stdout):
+        text = _decode_stream(stream)
+        all_lines = text.splitlines()
+        nonempty = [ln for ln in all_lines if ln.strip()]
+        if nonempty:
+            tail = "\n".join(all_lines[-15:])[-2048:]
+            return f"{first} — {nonempty[-1]}", {"stderr_tail": tail}
+    return first, {}
