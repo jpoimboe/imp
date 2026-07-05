@@ -303,6 +303,21 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _tool_result_content_for_event(content: Any) -> Any:
+    """Project a tool_result's content for events.jsonl: lean blob refs, no base64."""
+    if isinstance(content, str):
+        return content
+    out: list[dict[str, Any]] = []
+    for p in content:
+        if getattr(p, "type", None) == "image":
+            out.append({"type": "image", "blob": p.blob,
+                        "media_type": p.media_type,
+                        "w": p.width, "h": p.height, "bytes": p.nbytes})
+        else:
+            out.append({"type": "text", "text": p.text})
+    return out
+
+
 def _block_to_dict(b: Any) -> dict[str, Any]:
     """Serialize a content block by duck-typing on .type (avoids importing the
     runner block classes into state.py — keeps the module dependency-free)."""
@@ -313,7 +328,8 @@ def _block_to_dict(b: Any) -> dict[str, Any]:
         return {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
     if bt == "tool_result":
         return {"type": "tool_result", "tool_use_id": b.tool_use_id,
-                "content": b.content, "is_error": b.is_error}
+                "content": _tool_result_content_for_event(b.content),
+                "is_error": b.is_error}
     return {"type": str(bt)}
 
 
@@ -522,7 +538,8 @@ class _BaseEventLog:
                            duration_ms: float | None = None,
                            ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "id": block.tool_use_id, "content": block.content,
+            "id": block.tool_use_id,
+            "content": _tool_result_content_for_event(block.content),
             "error": block.is_error}
         # Optional, web-only enrichment. Absent on every non-web result so the
         # `tool_result` shape and _REQUIRED_KEYS stay unchanged. Empty list is
