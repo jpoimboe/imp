@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import enum
 import functools
 import json
 import logging
@@ -250,29 +251,45 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
     return phase
 
 
-def _pause_reason(events: list[dict[str, Any]]) -> str | None:
+class _PauseBanner(enum.Enum):
+    """Sentinel: latest segment ended without a pause; its reason is stale."""
+    STALE = enum.auto()
+
+
+def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     """The terminal pause's reason line for the headline.
 
     The last workflow_paused reason (interrupt_reason wins, mirroring
     _h_workflow_paused), plus a one-line cause from the error that drove that
-    pause. The event log is cumulative across resume, so each error is paired
+    pause (the error's detail.last_agent_text, else its message, first line
+    only). The event log is cumulative across resume, so each error is paired
     with the workflow_paused that immediately follows it; only an error in the
     terminal pause's own segment contributes a cause. An interrupt pause with no
     error in its segment renders the bare reason, even when an earlier segment
-    terminated. Builds only from existing event fields — no hardcoded kind."""
+    terminated. Returns _PauseBanner.STALE when the latest segment ended without
+    its own pause event (a resume follows the last pause), so the stored reason
+    is a fossil that _pause_facts renders as the unexpected-death banner rather
+    than replaying. Builds only from existing event fields — no hardcoded kind."""
     paused: dict[str, Any] | None = None
     paused_error: dict[str, Any] | None = None
     pending_error: dict[str, Any] | None = None
+    resumed_after_paused = False
     for e in events:
         t = e.get("type")
         if t == "workflow_paused":
             paused = e.get("payload") or {}
             paused_error = pending_error
             pending_error = None
+            resumed_after_paused = False
+        elif t == "workflow_resumed":
+            if paused is not None:
+                resumed_after_paused = True
         elif t == "error":
             pending_error = e.get("payload") or {}
     if paused is None:
         return None
+    if resumed_after_paused:
+        return _PauseBanner.STALE
     base = paused.get("interrupt_reason") or paused.get("reason")
     if not base:
         return None
@@ -282,6 +299,9 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | None:
         if isinstance(d, dict) and d.get("last_agent_text"):
             text = str(d["last_agent_text"]).strip()
             cause = text.splitlines()[0].strip() if text else None
+        if cause is None and paused_error.get("message"):
+            msg = str(paused_error["message"]).strip()
+            cause = msg.splitlines()[0].strip() if msg else None
     return f"{base}: {cause}" if cause else str(base)
 
 
@@ -304,7 +324,12 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str, str | None]:
     name = change.id
     events = list(change.event_log().read())
     phase = _phase_from_events(events)
-    reason = _pause_reason(events)
+    reason_val = _pause_reason(events)
+    if reason_val is _PauseBanner.STALE:
+        reason: str | None = (
+            f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
+    else:
+        reason = reason_val
     return name, phase, change.id, reason
 
 

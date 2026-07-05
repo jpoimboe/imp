@@ -58,7 +58,8 @@ def test_spawn_session_daemon_launches_detached_module_entry(
     assert kw["start_new_session"] is True
     assert kw["stdin"] == subprocess.DEVNULL
     assert kw["stdout"] == subprocess.DEVNULL
-    assert kw["stderr"] == subprocess.DEVNULL
+    assert kw["stderr"] is not subprocess.DEVNULL
+    assert Path(kw["stderr"].name) == change.change_dir / "daemon.stderr"
     assert "IMP_TEST_CMD_FAST" not in kw["env"]
     assert "IMP_REMOTE_CONTROL_SOCK" not in kw["env"]
 
@@ -383,3 +384,46 @@ async def test_deliver_session_reply_attaches_lease_less(tmp_path: Path) -> None
         assert seen and seen[0].lease is False
         await server.close()
         tg.cancel_scope.cancel()
+
+
+def test_spawn_session_daemon_captures_child_stderr_to_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-err")
+
+    def fake_popen(argv: list[str], *, stderr: Any, **kw: Any) -> object:
+        stderr.write(b"Traceback (most recent call last):\nBoom\n")
+        stderr.flush()
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(change)
+
+    captured = (change.change_dir / "daemon.stderr").read_bytes()
+    assert b"Traceback (most recent call last):" in captured
+    assert b"Boom" in captured
+
+
+def test_spawn_session_daemon_truncates_stderr_file_on_respawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-trunc")
+
+    def first(argv: list[str], *, stderr: Any, **kw: Any) -> object:
+        stderr.write(b"first-segment-crash\n")
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", first)
+    spawn_session_daemon(change)
+
+    def second(argv: list[str], *, stderr: Any, **kw: Any) -> object:
+        stderr.write(b"second\n")
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", second)
+    spawn_session_daemon(change)
+
+    captured = (change.change_dir / "daemon.stderr").read_bytes()
+    assert captured == b"second\n"          # truncated ("wb"), not appended
+    assert b"first-segment-crash" not in captured

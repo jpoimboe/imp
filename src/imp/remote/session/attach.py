@@ -36,15 +36,17 @@ def spawn_session_daemon(
         argv.append("--autonomous")
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
-    subprocess.Popen(
-        argv,
-        env=env,
-        cwd=str(change.control_root),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    change.change_dir.mkdir(parents=True, exist_ok=True)
+    with open(change.change_dir / "daemon.stderr", "wb") as stderr_file:
+        subprocess.Popen(
+            argv,
+            env=env,
+            cwd=str(change.control_root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            start_new_session=True,
+        )
 
 
 async def attach_or_spawn(
