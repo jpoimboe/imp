@@ -429,3 +429,19 @@ def test_image_read_denied_under_secret_dir(tmp_path: Path) -> None:
     )
     with pytest.raises(PermissionDenied):
         _read_file(ctx, path="secret/shot.png")
+
+
+def test_read_file_same_image_twice_dedups_to_one_blob(tmp_path: Path) -> None:
+    (tmp_path / "shot.png").write_bytes(_png_bytes(120, 90))
+    ctx = _vision_ctx(tmp_path)
+
+    r1 = _read_file(ctx, path="shot.png")
+    r2 = _read_file(ctx, path="shot.png")
+
+    # Same content -> same content-addressed blob name (shared sha).
+    assert r1[1].blob == r2[1].blob
+    blobs = ctx.change_home / "blobs"
+    # Exactly one blob on disk despite two reads.
+    assert [p.name for p in blobs.iterdir()] == [r1[1].blob]
+    # Blob lives under the change home, so per-change cleanup/archival removes it.
+    assert (ctx.change_home / "blobs" / r1[1].blob).exists()
