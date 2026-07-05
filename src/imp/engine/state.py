@@ -157,6 +157,9 @@ class State:
     # (agent_id-keyed) proactive-handoff counter; the loop guard caps it.
     max_reincarnations: int = 2  # per-session reincarnation cap (the loop guard);
     # set from config.context_max_reincarnations() at run start.
+    clean_tree_bounces: dict[str, int] = field(default_factory=dict)  # per-step
+    # (step-keyed) dirty-worktree bounce counter; the enforcement hook caps it.
+    max_clean_tree_bounces: int = 3  # dirty-worktree bounce cap before pausing.
     # Transient: NOT written to state.json (so no LAYOUT_VERSION bump). Re-set
     # from config.context_checkpoint_threshold() on every run_change entry and
     # carried onto each AgentInvocation for the Tier A proactive-handoff watch.
@@ -249,6 +252,8 @@ class State:
             "completion_pending": self.completion_pending,
             "reincarnations": self.reincarnations,
             "max_reincarnations": self.max_reincarnations,
+            "clean_tree_bounces": self.clean_tree_bounces,
+            "max_clean_tree_bounces": self.max_clean_tree_bounces,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:
@@ -274,6 +279,14 @@ class State:
     def bump_reincarnation(self, key: str) -> int:
         n = self.reincarnations.get(key, 0) + 1
         self.reincarnations[key] = n
+        return n
+
+    def clean_tree_bounce_count(self, key: str) -> int:
+        return self.clean_tree_bounces.get(key, 0)
+
+    def bump_clean_tree_bounce(self, key: str) -> int:
+        n = self.clean_tree_bounces.get(key, 0) + 1
+        self.clean_tree_bounces[key] = n
         return n
 
 

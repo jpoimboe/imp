@@ -126,9 +126,7 @@ coder to make a NEW commit per item:
 `fixup!`/`squash!` may only target a commit your change created (above its fork);
 never one at or below the fork — a base commit or already-reviewed history. A
 failure that traces to a base commit is fixed **forward** as a new commit, never
-folded into base. If the `cleanup-sweep` gate bounces back a **surviving directive**,
-convert that directive into a standalone commit (drop the `fixup! ` prefix) or
-replace it with a new forward commit — never rewrite reviewed history.
+folded into base — never rewrite reviewed history.
 
 ## Record each disposition — append-only `deferred.md`, bounded `progress.md`
 
@@ -185,8 +183,8 @@ list, just adjudicate the failures.
 **Detect which gate resumed you — this selects the source label and the output flag.** Two
 verify gates resume you, and the injected feedback names which:
 - the **fast** gate — feedback containing `(sweep-verify)` — is source **`sweep-verify`**; a
-  toleration emits `sweep_tolerated: true` (the workflow then folds via `cleanup-sweep`, and
-  the slow `converge-verify` gate still runs afterward).
+  toleration emits `sweep_tolerated: true` (the workflow then advances to the slow
+  `converge-verify` gate; fold+stamp is deferred to the end-of-change `cleanup-merge`).
 - the **slow** gate — feedback containing `(converge-verify)` — is source **`converge-verify`**;
   a toleration emits `converge_verify_tolerated: true`, which routes **forward to
   `wait-for-head`** (the slow gate never re-runs — the forward escape).
@@ -216,17 +214,17 @@ The `<source>` label is the discriminator the convergence check greps for.
   convergence check by grepping `## Deferred Followups` for **both** `DEFERRED sweep-verify:`
   and `DEFERRED converge-verify:` lines and matching each line's embedded failure signature
   against the current failure output. The workflow forward-advances past the gate instead of
-  re-looping — `sweep-verify` advances to `cleanup-sweep`; `converge-verify` escapes forward to
+  re-looping — `sweep-verify` advances to `converge-verify`; `converge-verify` escapes forward to
   `wait-for-head` and never re-runs. A toleration born `— needs-decision:` is inert to the list
   drain via the pass-through rule above. A toleration is **visibility, not reproduction**: it
   changes nothing about the merge — `finalize` surfaces it to a human before merge.
 - **A failure attributable to the diff** → fix it via the coder and return **both**
   `sweep_tolerated: false` and `converge_verify_tolerated: false` (the loop re-runs the fast
-  `sweep-verify` → `cleanup-sweep` → slow `converge-verify`, confirming the fix on both gates).
+  `sweep-verify` → slow `converge-verify`, confirming the fix on both gates).
   Tell the coder to make a **plain new commit** — `git add <files> && git commit -m "<type>: <fix summary>"` — NOT
   `git commit --fixup=HEAD`: a sweep fix resolves its own deferred item and lands as its own
-  commit in the batch (which `cleanup-sweep` then stamps), not an amendment to the last task's
-  commit. This matches the "Commit granularity" discipline above.
+  commit in the batch (which the end-of-change `cleanup-merge` later folds and stamps), not an
+  amendment to the last task's commit. This matches the "Commit granularity" discipline above.
 
 Emit a toleration flag (`sweep_tolerated: true` XOR `converge_verify_tolerated: true`) ONLY on
 the all-tolerated case above, matched to the resuming gate. On EVERY other return — a fresh

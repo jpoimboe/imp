@@ -146,14 +146,12 @@ def test_every_shown_step_has_its_label() -> None:
         "plan-finalized": "finalizing plan",
         "task-lead": "task 1/{{ vars.task_total }}",
         "verify": "running tests",
-        "autosquash-resolve-implement": "resolving task fixups",
         "autosquash-resolve-merge": "resolving merge fixups",
         "gap-check": "checking plan coverage",
         "change-review": "reviewing change",
         "deferred-sweep": "sweeping deferred tasks",
         "sweep-verify": "running tests",
         "converge-verify": "running tests",
-        "autosquash-resolve-sweep": "resolving sweep fixups",
         "summarizer": "summarizing change",
         "finalize": "finalizing",
         "wait-for-head": "waiting in merge queue",
@@ -166,7 +164,7 @@ def test_every_shown_step_has_its_label() -> None:
         assert by[name].label == label, name
     # Quiet plumbing steps stay label-free.
     for name in ("spec-verify-commit", "plan-verify-commit",
-                 "cleanup-implement", "cleanup-sweep", "cleanup-merge", "check-next-plan",
+                 "cleanup-merge", "check-next-plan",
                  "assert-stamped", "integrate-rebase"):
         assert by[name].label is None, name
 

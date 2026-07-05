@@ -16,6 +16,7 @@ project_root
 title
 workflow
 [state.json]
+clean_tree_bounces
 completion_pending
 current_step
 guidance
@@ -24,6 +25,7 @@ held_lane
 id
 interrupt_pending
 loop_counts
+max_clean_tree_bounces
 max_reincarnations
 merge_commit
 outcome_history

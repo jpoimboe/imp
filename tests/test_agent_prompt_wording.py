@@ -147,7 +147,7 @@ def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
 
 
 def test_no_workflow_prompt_invokes_artifact_commit() -> None:
-    for wf_name in ("imp", "imp-flat"):
+    for wf_name in ("imp",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name, agent in wf.agents.items():
             body = agent.prompt_template_source
@@ -173,7 +173,7 @@ def test_plan_code_reviewer_description_is_whole_diff() -> None:
 
 
 def test_query_events_references_frame_provenance_not_current_state() -> None:
-    for wf_name in ("imp", "imp-flat"):
+    for wf_name in ("imp",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name in ("summarizer", "spec-reviewer", "plan-reviewer"):
             body = wf.agents[name].prompt_template_source
@@ -204,14 +204,10 @@ def test_patent_writer_resume_prose_finishes_with_complete_step() -> None:
 
 
 def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
-    # Regression guard: imp `reconciler` and imp-flat `coder` are named in the AC
-    # but already end firmly on complete_step with no "re-emit"/handoff resume
-    # sentence. Lock that so a future edit cannot reintroduce the pattern.
+    # Regression guard: imp `reconciler` is named in the AC but already ends
+    # firmly on complete_step with no "re-emit"/handoff resume sentence. Lock
+    # that so a future edit cannot reintroduce the pattern.
     imp_reconciler = pathlib.Path(
         "src/imp/assets/workflows/imp/agents/reconciler.md").read_text()
-    flat_coder = pathlib.Path(
-        "src/imp/assets/workflows/imp-flat/agents/coder.md").read_text()
     assert "re-emit" not in imp_reconciler
     assert "complete_step" in imp_reconciler
-    assert "re-emit" not in flat_coder
-    assert "a turn that ends in prose instead of a tool call is a failure" in flat_coder

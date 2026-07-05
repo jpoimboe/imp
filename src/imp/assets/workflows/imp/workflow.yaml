@@ -10,11 +10,11 @@ description: |
 # sole coverage backstop; latches coverage_settled) -> change-review (the single
 # change-wide code review, reusing agents/plan-code-reviewer.md) -> deferred-sweep
 # (drains the whole change's Deferred list once) -> sweep-verify (fast) ->
-# cleanup-sweep -> converge-verify (slow, on the change's own base). integrate then
+# converge-verify (slow, on the change's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, and ends at the human gate (summarizer -> finalize) so
-# the human blesses the locked, rebased, slow-tested state. cleanup.sh is
-# self-bounding (it derives its own boundary; no review_base argument).
+# the human blesses the locked, rebased, slow-tested state. cleanup.sh folds
+# fixups and stamps the Change: trailer once, over cur_base_head..HEAD.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -145,7 +145,7 @@ phases:
         tier: high
         label: "task 1/{{ vars.task_total }}"
         rules:
-          - {if: {verify_tolerated: true}, goto: cleanup-implement}
+          - {if: {verify_tolerated: true}, goto: check-next-plan}
           - {else: true, continue: true}
 
       - name: verify
@@ -158,26 +158,6 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
           - {else: true, resume: task-lead}
-
-      # Fold this plan's fixup chains into one commit per task and stamp the Change:
-      # trailer over the self-derived boundary..HEAD. No code review here — the single
-      # change-wide review runs once in converge. exit 2 falls into the resolver.
-      - name: cleanup-implement
-        show_label: false
-        command: ./scripts/cleanup.sh
-        rules:
-          - {if: {exit: 0}, goto: check-next-plan}
-          - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: task-lead}
-          - {else: true, pause: true}
-
-      - name: autosquash-resolve-implement
-        file: agents/autosquash-resolve.md
-        tier: high
-        label: resolving task fixups
-        max_loops: 6
-        rules:
-          - {else: true, goto: cleanup-implement}
 
       # Routing-only branch. After a plan's tasks settle:
       #  - a converge/finalize rework (coverage_settled latched) -> change-review (re-review, never re-gap-check);
@@ -225,7 +205,7 @@ phases:
         label: sweeping deferred tasks
         rules:
           - {if: {converge_verify_tolerated: true}, goto: wait-for-head}
-          - {if: {sweep_tolerated: true}, goto: cleanup-sweep}
+          - {if: {sweep_tolerated: true}, goto: converge-verify}
           - {else: true, continue: true}
 
       - name: sweep-verify
@@ -239,26 +219,9 @@ phases:
           - {if: {exit: 124}, pause: true}
           - {else: true, resume: deferred-sweep, feedback: "The fast verify gate (sweep-verify) failed on your sweep fix commits. Triage fix-vs-tolerate:"}
 
-      - name: cleanup-sweep
-        show_label: false
-        command: ./scripts/cleanup.sh
-        rules:
-          - {if: {exit: 0}, goto: converge-verify}
-          - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: deferred-sweep}
-          - {else: true, pause: true}
-
-      - name: autosquash-resolve-sweep
-        file: agents/autosquash-resolve.md
-        tier: high
-        label: resolving sweep fixups
-        max_loops: 6
-        rules:
-          - {else: true, goto: cleanup-sweep}
-
       # Slow tests on the change's own base (off-lock). Clean -> enter integrate. A failure
       # resumes deferred-sweep in slow-gate triage: a fix loops back through sweep-verify ->
-      # cleanup-sweep -> converge-verify; a "not ours" toleration emits converge_verify_tolerated
+      # converge-verify; a "not ours" toleration emits converge_verify_tolerated
       # -> wait-for-head (forward escape; this gate never re-runs).
       - name: converge-verify
         command: ./scripts/run-verify.sh slow
@@ -344,7 +307,6 @@ phases:
         rules:
           - {if: {exit: 0}, goto: assert-stamped}
           - {if: {exit: 2}, continue: true}
-          - {if: {exit: 3}, resume: reconciler}
           - {else: true, pause: true}
 
       - name: autosquash-resolve-merge
@@ -352,6 +314,8 @@ phases:
         tier: high
         label: resolving merge fixups
         max_loops: 6
+        clean_tree: false   # operates on an in-progress autosquash rebase whose
+                            # legitimate completion may still be mid-rebase
         rules:
           - {else: true, goto: cleanup-merge}
 

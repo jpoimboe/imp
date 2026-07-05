@@ -3,15 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 IMP = Path("src/imp/assets/workflows/imp/agents")
-FLAT = Path("src/imp/assets/workflows/imp-flat/agents")
 
 
 def _imp(name: str) -> str:
     return (IMP / name).read_text()
-
-
-def _flat(name: str) -> str:
-    return (FLAT / name).read_text()
 
 
 def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
@@ -97,68 +92,6 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
     assert "does **not** live in" in tl
 
 
-def test_flat_producers_file_deferred_items_to_deferred_md() -> None:
-    pw = _flat("plan-writer.md")
-    assert "open item in `{{ change.home }}/deferred.md` (the reader" in pw
-    assert (
-        "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading"
-        " if absent)"
-    ) in pw
-
-    cd = _flat("coder.md")
-    # The verify-triage toleration and needs-decision append both target deferred.md.
-    assert (
-        "Record a toleration as a normal `## Deferred Followups` entry in\n"
-        "`{{ change.home }}/deferred.md`"
-    ) in cd
-    assert (
-        "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading"
-        " if absent)"
-    ) in cd
-    # progress.md is still read for completed plans only.
-    assert "`{{ change.home }}/progress.md` if it exists — completed plans." in cd
-
-    cr = _flat("code-reviewer.md")
-    assert "**Deferred ledger:** `{{ change.home }}/deferred.md`" in cr
-    assert (
-        "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading"
-        " if absent),"
-    ) in cr
-    assert "`{{ change.home }}/deferred.md` (the Deferred Followups append above)" in cr
-
-    rec = _flat("reconciler.md")
-    assert (
-        "`{{ change.home }}/deferred.md` in reader form (create the file/heading"
-        " if absent):"
-    ) in rec
-
-    sf = _flat("spec-finalizer.md")
-    assert "in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if" in sf
-
-    prv = _flat("plan-reviewer.md")
-    assert "Deferred Followup open item in `{{ change.home }}/deferred.md`:" in prv
-
-
-def test_flat_consumers_read_ledger_from_deferred_md() -> None:
-    fin = _flat("finalize.md")
-    assert "recorded `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`, and" in fin
-    assert "step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the" in fin
-    assert "the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`" in fin
-    assert "leave its `deferred.md` line `needs-decision`" in fin
-    assert "other than the `deferred.md` line rewrites above" in fin
-
-    gc = _flat("gap-check.md")
-    # gap-check reads the needs-decision items (the backstop-suppression source) from deferred.md,
-    # added to its read list alongside progress.md.
-    assert (
-        "`{{ change.home }}/progress.md`, `{{ change.home }}/deferred.md`,"
-        " and the committed code"
-    ) in gc
-
-    ir = _flat("integration-review.md")
-    assert "`{{ change.home }}/deferred.md` carries any `## Deferred Followups`" in ir
-
-
 def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     fin = _imp("finalize.md")
     # The closed-set needs-decision read is from deferred.md.
@@ -184,7 +117,7 @@ def test_imp_consumers_read_ledger_from_deferred_md() -> None:
 def test_no_prompt_overwrites_deferred_md_wholesale() -> None:
     # deferred.md is append-only: no prompt may instruct a write_file of it,
     # even with the path split across lines.
-    for base in (IMP, FLAT):
+    for base in (IMP,):
         for p in sorted(base.parent.glob("**/*.md")):
             lines = p.read_text().splitlines()
             for i, line in enumerate(lines):

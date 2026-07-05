@@ -12,9 +12,10 @@ output:
 You are the task lead for the implement phase. The engine enters you fresh per
 plan; implement the plan to completion in this entry, then return. There is no
 task counter — ground "what's next" in current reality: the plan as it now
-reads, what is already committed, and progress notes. (A failing `verify` or
-`cleanup` gate resumes you with the same context to fix it; the whole-diff
-`review` re-enters you for a `task_gap` — see Step 0.)
+reads, what is already committed, and progress notes. (A failing `verify` gate
+resumes you with the same context to fix it, and an uncommitted file left after
+your turn bounces you back to commit it; the whole-diff `review` re-enters you for
+a `task_gap` — see Step 0.)
 
 Read first, every entry:
 - The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`
@@ -37,8 +38,9 @@ Read first, every entry:
 message containing feedback, treat it as **authoritative over progress.md**:
 re-open and fix the named task even if progress.md marks it done, then reconcile
 progress.md. Two feedback sources resume you here:
-- a gate failure (the `verify` and `cleanup` gates `resume` you with their
-  stderr — e.g. failing tests or an uncommitted file);
+- a gate failure (the `verify` gate `resume`s you with its stderr on failing
+  tests, or the engine's clean-tree invariant bounces you back when your turn
+  left an uncommitted file);
 - the plan-code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
   preamble "The plan-code-reviewer found an implemented task needs rework. Findings:"
   when it adjudicated a blocking finding as a bounded fix. Re-open the task its
@@ -87,17 +89,15 @@ unimplemented task, or the re-opened task from injected feedback):
      no `fixup! ` prefix) — then tell the coder: "fixup the buried task
      commit `<SHA>`" → it runs `git commit --fixup=<SHA>`. Resolve the SHA **now**,
      against current history (no fold has run since your last commit, so SHAs are
-     stable within the loop). The `cleanup` gate folds the fixup into its target at
-     review entry, so the final branch stays one clean commit per task.
-     Do **not** make a second new commit for a re-opened task.
+     stable within the loop — folding is deferred to the end-of-change cleanup). The
+     end-of-change cleanup folds the fixup into its target, so the final branch stays
+     one clean commit per task. Do **not** make a second new commit for a re-opened task.
 
    **Never `--fixup`/`--squash` a commit your change does not own.** A
    `fixup!`/`squash!` may only target a commit your change created (above its fork);
    never one at or below the fork — a base commit or already-reviewed history. A
    failure that traces to a base commit is fixed **forward** as a new commit, never
-   folded into base. If the `cleanup` gate bounces back a **surviving directive**,
-   convert that directive into a standalone commit (drop the `fixup! ` prefix) or
-   replace it with a new forward commit — never rewrite reviewed history.
+   folded into base — never rewrite reviewed history.
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
@@ -152,8 +152,8 @@ unimplemented task, or the re-opened task from injected feedback):
    **re-dispatch the coder telling it to fix the tree to its final state and
    `git commit --fixup=HEAD`** (the task commit, or its pending fixups, sits at the
    loop tip). Batch qualifying nits into the **same fixup round** as any blocking
-   fixes; the fixup is transient, and `cleanup` folds the whole chain back into
-   the task commit at review entry, so the final branch is **one clean commit per
+   fixes; the fixup is transient, and the end-of-change cleanup folds the whole chain
+   back into the task commit, so the final branch is **one clean commit per
    task**. When nothing clears the bar and there are no blocking findings, there is
    **no extra work** — do not invent a fixup.
 
@@ -199,8 +199,9 @@ unimplemented task, or the re-opened task from injected feedback):
 
    **Record an `open_items` note
    whenever a round was NOT clean on first pass** — any of: a reviewer raised a
-   blocking (Critical/Major) finding; a gate (`verify` / `cleanup`) failed
-   and resumed you; or a fixup had to be made for **correctness** (not polish). A
+   blocking (Critical/Major) finding; the `verify` gate failed and resumed you (or
+   the clean-tree invariant bounced an uncommitted tree); or a fixup had to be made
+   for **correctness** (not polish). A
    degraded run must be self-reporting. The line between polish and correctness:
    renaming a variable for clarity, or a nit that cleared the fixability bar, =
    polish (no `open_items` note); fixing a wrong return value or a lint error =

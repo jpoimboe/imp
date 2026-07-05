@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.engine.feedback import (
     COMPLETION_BACKSTOP,
     apply_completion_backstop,
+    format_clean_tree_feedback,
     format_script_feedback,
     render_output_fields,
     summarize_transition_reason,
@@ -112,3 +113,21 @@ def test_summarize_transition_reason_truncates_long_line() -> None:
     assert len(reason) <= 80
     assert reason.endswith("…")
     assert reason.startswith("x")
+
+
+def test_clean_tree_feedback_frames_paths_and_commit_instruction() -> None:
+    out = format_clean_tree_feedback(" M src/foo.py\n?? scratch.txt")
+    assert out.startswith(_WRAPPER_HEAD)                # reuses the resume frame
+    assert "src/foo.py" in out                          # dirty paths listed
+    assert "scratch.txt" in out
+    assert "Commit all of your work" in out             # actionable instruction
+    assert "merge or rebase" in out                     # resolution-in-progress path
+
+
+def test_clean_tree_feedback_truncates_a_huge_path_list() -> None:
+    body = "\n".join(f"?? file{i}.txt" for i in range(2000))  # well over 4000 chars
+    out = format_clean_tree_feedback(body)
+    assert len(out) < len(body)
+    assert "file0.txt" in out       # head kept
+    assert "file1999.txt" in out    # tail kept
+    assert "truncated" in out       # marker present

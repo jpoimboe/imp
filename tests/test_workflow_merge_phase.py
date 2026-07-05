@@ -15,7 +15,7 @@ def _rules(wf, name):
     return next(s for s in wf.flat_steps() if s.name == name).rules
 
 
-def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
+def test_integrate_phase_step_ordering_and_layering() -> None:
     wf = load_workflow(WF)
     names = [s.name for s in _phase(wf, "integrate").steps]
     assert names == [
@@ -120,16 +120,25 @@ def test_cleanup_merge_routes_by_exit_code() -> None:
     assert isinstance(m0.action, Goto) and m0.action.target == "assert-stamped"
     m2 = evaluate_rules(r, vars={}, output={"exit": 2})
     assert isinstance(m2.action, Continue)
-    m3 = evaluate_rules(r, vars={}, output={"exit": 3})
-    assert isinstance(m3.action, Goto) and m3.action.target == "reconciler"
-    assert m3.action.resume is True
     m1 = evaluate_rules(r, vars={}, output={"exit": 1})
     assert isinstance(m1.action, Pause)
+    # exit 3 is retired: the simplified cleanup.sh never returns it, so no rule
+    # matches exit 3 and it falls to the else->pause.
+    m3 = evaluate_rules(r, vars={}, output={"exit": 3})
+    assert isinstance(m3.action, Pause)
     resolver = next(s for s in wf.flat_steps() if s.name == "autosquash-resolve-merge")
     assert resolver.kind == "agent" and resolver.tier == "high"
     assert resolver.file is not None and resolver.file.name == "autosquash-resolve.md"
     assert resolver.rules[-1].action.target == "cleanup-merge"
     assert resolver.max_loops == 6
+    assert resolver.clean_tree is False        # sole clean_tree opt-out
+
+
+def test_autosquash_resolve_merge_is_sole_clean_tree_optout() -> None:
+    wf = load_workflow(WF)
+    optouts = [s.name for s in wf.flat_steps()
+               if s.kind == "agent" and s.clean_tree is False]
+    assert optouts == ["autosquash-resolve-merge"]
 
 
 def test_assert_stamped_is_readonly_gate_before_merge() -> None:

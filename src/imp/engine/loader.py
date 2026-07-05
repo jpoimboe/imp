@@ -648,6 +648,10 @@ def _parse_step(
     if _interruptible_raw is not None and kind != "script":
         raise LoadError("interruptible: only valid on a script step", source)
     interruptible = _interruptible_raw if _interruptible_raw is not None else False
+    _clean_tree_raw = _parse_optional_bool_flag(raw, "clean_tree", source)
+    if _clean_tree_raw is not None and kind != "agent":
+        raise LoadError("clean_tree: only valid on an agent step", source)
+    clean_tree = _clean_tree_raw if _clean_tree_raw is not None else True
     output_schema = None
     if "output" in raw:
         if kind != "script":
@@ -717,6 +721,7 @@ def _parse_step(
             show_label=show_label,
             show_output=show_output,
             interruptible=interruptible,
+            clean_tree=clean_tree,
         )
     elif kind == "script":
         step = Step(

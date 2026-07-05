@@ -437,3 +437,29 @@ def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -
         pass
     leftovers = [f.name for f in tmp_path.iterdir() if f.name.startswith(".state-")]
     assert leftovers == []
+
+
+def test_clean_tree_bounce_counter_bumps_and_reads_per_step() -> None:
+    s = State(id="c1", step="task-lead", step_attempt=0, status="new")
+    assert s.clean_tree_bounce_count("step:implement/task-lead") == 0
+    assert s.bump_clean_tree_bounce("step:implement/task-lead") == 1
+    assert s.bump_clean_tree_bounce("step:implement/task-lead") == 2
+    # A different step keeps its own count.
+    assert s.bump_clean_tree_bounce("step:converge/deferred-sweep") == 1
+    assert s.clean_tree_bounce_count("step:implement/task-lead") == 2
+
+
+def test_clean_tree_bounces_round_trip(tmp_path: Path) -> None:
+    s = State(id="c1", step="task-lead", step_attempt=0, status="new")
+    s.bump_clean_tree_bounce("step:implement/task-lead")
+    s.save(tmp_path)
+    back = State.load(tmp_path)
+    assert back.clean_tree_bounces == {"step:implement/task-lead": 1}
+    assert back.clean_tree_bounce_count("step:implement/task-lead") == 1
+
+
+def test_max_clean_tree_bounces_defaults_to_three(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    assert s.max_clean_tree_bounces == 3
+    s.save(tmp_path)
+    assert State.load(tmp_path).max_clean_tree_bounces == 3

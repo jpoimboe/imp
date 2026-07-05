@@ -470,14 +470,14 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "injected feedback" in low
     assert "triage only" in low
     # A real regression is fixed with a PLAIN commit, never a --fixup: a sweep fix is its
-    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped by
-    # cleanup-sweep.
+    # own logical unit (a deferred item), so it lands as its own commit, folded/stamped
+    # later by the end-of-change cleanup-merge.
     assert 'git commit -m' in text
     assert "--fixup=HEAD" in text
     # The max_loops pause meaning is documented (non-converging triage).
     assert "max_loops" in text
     assert "non-converging" in low
-    assert "cleanup-sweep" in text                  # the sweep's cleanup gate
+    assert "cleanup-merge" in text                  # fold/stamp deferred to the end-of-change gate
     assert "consume the budget" not in low          # the carry-era budget wording is gone
 
 
@@ -546,11 +546,11 @@ NO_FIXUP_RULE_AGENTS = ["task-lead.md", "deferred-sweep.md", "reconciler.md"]
 @pytest.mark.parametrize("name", NO_FIXUP_RULE_AGENTS)
 def test_committing_agents_carry_no_fixup_outside_change_rule(name: str) -> None:
     # The standing rule: never --fixup/--squash a commit the change does not own; a
-    # base-traced failure is fixed forward; a bounced surviving directive becomes a
-    # standalone or new forward commit.
+    # base-traced failure is fixed forward as a new commit. (The surviving-directive
+    # bounce is retired: the single end-of-change cleanup pauses on an unfoldable
+    # directive rather than bouncing it back to a committing agent.)
     low = _read(name).lower()
     assert "does not own" in low
-    assert "surviving directive" in low
     assert "forward" in low
 
 
@@ -737,8 +737,7 @@ def test_no_agent_carries_standalone_observable_behavior_trigger() -> None:
 
 
 def test_no_prompt_references_transport_non_interactive() -> None:
-    roots = [Path("src/imp/assets/workflows/imp"),
-             Path("src/imp/assets/workflows/imp-flat")]
+    roots = [Path("src/imp/assets/workflows/imp")]
     offenders = [str(p) for root in roots for p in root.rglob("*.md")
                  if "run.non_interactive" in p.read_text()]
     assert offenders == [], offenders
@@ -759,7 +758,7 @@ def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
     assert "final message reports\n`NEEDS_CONTEXT` or `BLOCKED`" in text
 
 
-@pytest.mark.parametrize("tree", ["imp", "imp-flat", "patent"])
+@pytest.mark.parametrize("tree", ["imp", "patent"])
 def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None:
     wf = load_workflow(bundled_workflow_dir(tree))
     dispatchable: set[str] = set()
@@ -785,7 +784,7 @@ def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None
 def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    for tree in ("imp", "imp-flat"):
+    for tree in ("imp",):
         wdir = bundled_workflow_dir(tree)
         body = (wdir / "agents" / "finalize.md").read_text()
         assert "run.non_interactive" not in body   # transport flag never leaks

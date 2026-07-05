@@ -395,7 +395,6 @@ def test_plan_writer_prompt_has_minors_integration_branch() -> None:
     assert "without changing the file" in body.lower()
 
 
-
 def test_no_goto_spec_finalizer_edge() -> None:
     from pathlib import Path
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
@@ -477,18 +476,19 @@ def test_task_lead_declares_verify_tolerated_output() -> None:
     assert "verify_tolerated" in wf.agents["task-lead"].output_schema.field_names()
 
 
-def test_task_lead_tolerated_routes_to_cleanup() -> None:
+def test_task_lead_tolerated_routes_to_check_next_plan() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["task-lead"].rules
     # All current failures tolerated: task-lead made NO change and routes straight to
-    # cleanup-implement, skipping the verify gate; it carries no var.
+    # check-next-plan, skipping the verify gate; it carries no var. Fold+stamp is
+    # deferred to cleanup-merge.
     m = evaluate_rules(
         rules, vars=_BASE_VARS,
         output={"status": "Success", "verify_tolerated": True, "summary": "tolerated"},
     )
     assert isinstance(m.action, Goto)
-    assert m.action.target == "cleanup-implement" and m.action.resume is False
+    assert m.action.target == "check-next-plan" and m.action.resume is False
     assert m.var_mutations == {}
 
 
@@ -589,17 +589,17 @@ def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
     assert "converge_verify_tolerated" in fields
 
 
-def test_deferred_sweep_tolerated_routes_to_cleanup() -> None:
+def test_deferred_sweep_tolerated_routes_to_converge_verify() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["deferred-sweep"].rules
     # All sweep failures tolerated: deferred-sweep made NO fix and routes straight to
-    # cleanup-sweep, skipping the sweep-verify gate; it carries no var.
+    # converge-verify, skipping the sweep-verify gate; it carries no var.
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "sweep_tolerated": True,
                                "converge_verify_tolerated": False})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "cleanup-sweep" and m.action.resume is False
+    assert m.action.target == "converge-verify" and m.action.resume is False
     assert m.var_mutations == {}
 
 
@@ -640,7 +640,6 @@ def test_sweep_verify_red_resumes_deferred_sweep() -> None:
                        output={"exit": 1, "stdout": "", "stderr": ""})
     assert isinstance(m.action, Goto)
     assert m.action.target == "deferred-sweep" and m.action.resume is True
-
 
 
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:
@@ -836,7 +835,7 @@ def test_no_wait_for_user_in_workflow_prompts() -> None:
 
 
 def test_explorer_nudges_symbol_outline_in_both_copies() -> None:
-    for wf in ("imp", "imp-flat"):
+    for wf in ("imp",):
         text = Path(f"src/imp/assets/workflows/{wf}/agents/explorer.md").read_text()
         assert "symbol_outline" in text
         assert "before reading full bodies" in text
@@ -1004,14 +1003,6 @@ def test_imp_gate_steps_pass_tier_arg() -> None:
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
 
 
-def test_imp_flat_gate_steps_pass_tier_arg() -> None:
-    from imp.assets import bundled_workflow_dir
-    steps = _steps(load_workflow(bundled_workflow_dir("imp-flat")))
-    assert steps["verify"].command == "./scripts/run-verify.sh fast"
-    assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
-    assert "sweep-verify" not in steps   # imp-flat has no sweep-verify gate
-
-
 def test_no_legacy_verify_surface_under_src_imp() -> None:
     # The verify_command/verify_timeout/IMP_VERIFY_* surface is fully removed;
     # guard production code AND bundled workflow assets against its return.
@@ -1090,3 +1081,10 @@ def test_engine_and_agents_code_never_names_spiker() -> None:
         if "spiker" in p.read_text()
     ]
     assert offenders == []
+
+
+def test_imp_flat_is_not_bundled() -> None:
+    from imp.assets import bundled_workflow_names
+    names = bundled_workflow_names()
+    assert "imp-flat" not in names
+    assert "imp" in names        # the surviving default workflow still discovers

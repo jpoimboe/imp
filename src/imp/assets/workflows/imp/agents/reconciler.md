@@ -68,9 +68,7 @@ base — the change's diff is always carried forward on the rebased history.
 `fixup!`/`squash!` may only target a commit your change created (above its fork);
 never one at or below the fork — a base commit or already-reviewed history. A
 failure that traces to a base commit is fixed **forward** as a new commit, never
-folded into base. If the cleanup gate bounces back a **surviving directive**,
-convert that directive into a standalone commit (drop the `fixup! ` prefix) or
-replace it with a new forward commit — never rewrite reviewed history.
+folded into base — never rewrite reviewed history.
 
 ## Surface your work — `{{ change.home }}/progress.md`
 
