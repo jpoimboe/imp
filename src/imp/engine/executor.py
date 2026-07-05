@@ -16,7 +16,9 @@ import functools
 import json
 import os
 import shutil
+import sys
 import tempfile
+import traceback
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from pathlib import Path
@@ -422,6 +424,33 @@ async def run_change(
                     log, "interrupt", interrupt_reason=coordinator.pause_reason)
                 return RunResult.PAUSED
             state.save(change.state_dir)
+    except Exception as exc:
+        # Last-resort guard: except Exception (not BaseException) pauses resumably on an
+        # engine bug, letting anyio cancellation / Ctrl-C propagate.
+        tb = traceback.format_exc()
+        try:
+            kind = type(exc).__name__
+            message = (str(exc).splitlines() or [""])[0]
+            log.append(
+                agent_id=None, type="error",
+                payload={
+                    "category": "internal",
+                    "kind": kind,
+                    "message": message,
+                    "detail": {"traceback_tail": "\n".join(tb.splitlines()[-15:])},
+                },
+            )
+            _emit_paused_event(log, "internal_error", kind=kind)
+            state.resume_pending = state.step
+            state.status = "paused"
+            state.save(change.state_dir)
+        except Exception:
+            # Best-effort: if the emit/save fails (or log/state was never bound), re-raise
+            # the original (from None) so daemon.stderr surfaces it, not a spurious
+            # UnboundLocalError.
+            raise exc from None
+        print(tb, file=sys.stderr)
+        return RunResult.PAUSED
     finally:
         # prev_cwd may have been removed (e.g. resume from inside a worktree this
         # run merged + tore down). Don't let the restore mask the result/exception.
