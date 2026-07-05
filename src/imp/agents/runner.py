@@ -35,7 +35,7 @@ class ToolUseBlock:
 @dataclass(frozen=True, slots=True)
 class ToolResultBlock:
     tool_use_id: str
-    content: str | list[ContentPart]
+    content: str | list[ContentPart] | list[dict[str, Any]]
     is_error: bool = False
     type: Literal["tool_result"] = "tool_result"
 
@@ -295,8 +295,12 @@ def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
     if isinstance(b, ThinkingBlock):
         return {"type": "thinking", "thinking": b.thinking,
                 "signature": b.signature, "redacted_thinking": b.redacted_thinking}
-    content = (b.content if isinstance(b.content, str)
-               else [_content_part_to_dict(p) for p in b.content])
+    if isinstance(b.content, str):
+        content: Any = b.content
+    elif b.content and all(isinstance(p, (TextPart, ImagePart)) for p in b.content):
+        content = [_content_part_to_dict(p) for p in b.content]  # type: ignore[arg-type]
+    else:
+        content = b.content  # native Claude SDK list[dict]; persist verbatim
     return {
         "type": "tool_result", "tool_use_id": b.tool_use_id,
         "content": content, "is_error": b.is_error,
@@ -313,9 +317,13 @@ def message_from_json(data: dict[str, Any], blobs_dir: Path | None = None) -> Me
             blocks.append(ToolUseBlock(id=raw["id"], name=raw["name"], input=raw["input"]))
         elif kind == "tool_result":
             raw_content = raw["content"]
-            content = (raw_content if isinstance(raw_content, str)
-                       else [_content_part_from_dict(p, blobs_dir)
-                             for p in raw_content])
+            if isinstance(raw_content, str):
+                content: Any = raw_content
+            elif any(isinstance(p, dict) and p.get("type") == "image" and "blob" in p
+                     for p in raw_content):
+                content = [_content_part_from_dict(p, blobs_dir) for p in raw_content]
+            else:
+                content = raw_content  # native Claude SDK list[dict]; keep verbatim
             blocks.append(ToolResultBlock(
                 tool_use_id=raw["tool_use_id"],
                 content=content,

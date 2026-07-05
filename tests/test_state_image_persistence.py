@@ -48,3 +48,11 @@ def test_user_message_image_tool_result_serializes_lean() -> None:
     assert part == {"type": "image", "blob": "ab12.png",
                     "media_type": "image/png", "w": 800, "h": 600, "bytes": 1234}
     assert "data" not in part
+
+
+def test_block_to_dict_native_list_dict_content_verbatim() -> None:
+    from imp.engine.state import _block_to_dict
+    native = [{"type": "text", "text": "hi"}]
+    block = ToolResultBlock(tool_use_id="t1", content=native)
+    result = _block_to_dict(block)
+    assert result["content"] == native

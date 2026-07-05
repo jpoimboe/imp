@@ -221,7 +221,7 @@ def _message_to_anthropic(msg: Message) -> dict[str, Any]:
             content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
         elif isinstance(b, ToolResultBlock):
             tr_content = (b.content if isinstance(b.content, str)
-                          else _content_parts_to_anthropic(b.content))
+                          else _content_parts_to_anthropic(b.content))  # type: ignore[arg-type]
             content.append({
                 "type": "tool_result", "tool_use_id": b.tool_use_id,
                 "content": tr_content, "is_error": b.is_error,

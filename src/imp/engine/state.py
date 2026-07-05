@@ -309,7 +309,9 @@ def _tool_result_content_for_event(content: Any) -> Any:
         return content
     out: list[dict[str, Any]] = []
     for p in content:
-        if getattr(p, "type", None) == "image":
+        if isinstance(p, dict):
+            out.append(p)  # native Claude SDK content block; verbatim
+        elif getattr(p, "type", None) == "image":
             out.append({"type": "image", "blob": p.blob,
                         "media_type": p.media_type,
                         "w": p.width, "h": p.height, "bytes": p.nbytes})

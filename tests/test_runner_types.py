@@ -257,3 +257,20 @@ def test_round_trip_tool_result_str_content_unchanged() -> None:
     assert block.content == "contents"
     assert isinstance(block.content, str)
     assert block.is_error is True
+
+
+def test_round_trip_native_list_dict_tool_result_verbatim() -> None:
+    native = [{"type": "text", "text": "hi"}]
+    msg = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t1", content=native),),
+    )
+    raw = message_to_json(msg)
+    back = message_from_json(json.loads(raw))
+    block = back.content[0]
+    # Content must survive the round-trip unchanged as a list of plain dicts.
+    assert block.content == native
+    assert isinstance(block.content, list)
+    assert isinstance(block.content[0], dict)
+    # Must NOT have been converted to a TextPart.
+    assert not isinstance(block.content[0], TextPart)

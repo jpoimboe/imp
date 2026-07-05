@@ -232,7 +232,7 @@ def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
                 if isinstance(tr.content, list):
                     out.append({"type": "function_call_output",
                                 "call_id": tr.tool_use_id,
-                                "output": _content_parts_to_responses(tr.content)})
+                                "output": _content_parts_to_responses(tr.content)})  # type: ignore[arg-type]
                     continue
                 output = tr.content
                 if tr.is_error:
