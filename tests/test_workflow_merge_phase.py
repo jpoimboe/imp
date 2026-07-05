@@ -15,7 +15,7 @@ def _rules(wf, name):
     return next(s for s in wf.flat_steps() if s.name == name).rules
 
 
-def test_merge_phase_layers_reconciler_loop_on_cleanup_gate() -> None:
+def test_integrate_phase_step_ordering_and_layering() -> None:
     wf = load_workflow(WF)
     names = [s.name for s in _phase(wf, "integrate").steps]
     assert names == [
