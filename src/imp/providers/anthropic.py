@@ -30,10 +30,13 @@ from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_pr
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
+    ContentPart,
     Diagnostics,
     Event,
+    ImagePart,
     Message,
     TextBlock,
+    TextPart,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -190,6 +193,18 @@ def _anthropic_tool_schema(t: Tool) -> dict[str, Any]:
     return {"name": t.name, "description": t.description, "input_schema": t.input_schema}
 
 
+def _content_parts_to_anthropic(parts: list[ContentPart]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for p in parts:
+        if isinstance(p, TextPart):
+            blocks.append({"type": "text", "text": p.text})
+        else:
+            assert isinstance(p, ImagePart)
+            blocks.append({"type": "image", "source": {
+                "type": "base64", "media_type": p.media_type, "data": p.data}})
+    return blocks
+
+
 def _message_to_anthropic(msg: Message) -> dict[str, Any]:
     content: list[dict[str, Any]] = []
     for b in msg.content:
@@ -205,9 +220,11 @@ def _message_to_anthropic(msg: Message) -> dict[str, Any]:
         elif isinstance(b, ToolUseBlock):
             content.append({"type": "tool_use", "id": b.id, "name": b.name, "input": b.input})
         elif isinstance(b, ToolResultBlock):
+            tr_content = (b.content if isinstance(b.content, str)
+                          else _content_parts_to_anthropic(b.content))  # type: ignore[arg-type]
             content.append({
                 "type": "tool_result", "tool_use_id": b.tool_use_id,
-                "content": b.content, "is_error": b.is_error,
+                "content": tr_content, "is_error": b.is_error,
             })
     return {"role": msg.role, "content": content}
 
@@ -522,7 +539,8 @@ class AnthropicAgentRunner:
             ctx.user_input_fn = self._user_input_fn
         self._ctx = ctx
 
-        existing = transcript.load()
+        existing = transcript.load(
+            ctx.change_home / "blobs" if ctx.change_home is not None else None)
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history

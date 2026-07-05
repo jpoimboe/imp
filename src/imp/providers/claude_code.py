@@ -60,10 +60,13 @@ from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
+    ContentPart,
     Diagnostics,
     Event,
+    ImagePart,
     Message,
     TextBlock,
+    TextPart,
     ToolResultBlock,
     ToolUseBlock,
     canonicalize_tool_name,
@@ -758,6 +761,13 @@ def _wrap_one(
             dur_ms = (time.perf_counter() - start) * 1000.0
             if tuid:
                 state.tool_durations[tuid] = dur_ms
+            if (isinstance(raw, list) and raw
+                    and all(isinstance(p, (TextPart, ImagePart)) for p in raw)):
+                if ctx.parent_transcript_dir is not None:
+                    caption = " ".join(p.text for p in raw if isinstance(p, TextPart))
+                    _append_captured_tool_result(
+                        ctx.parent_transcript_dir, name, clean_args, caption)
+                return _tool_response_parts(raw)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             if name == "bash":
                 try:
@@ -836,6 +846,16 @@ def _tool_response(text: str, *, is_error: bool) -> dict[str, Any]:
     if is_error:
         body["isError"] = True
     return body
+
+
+def _tool_response_parts(parts: list[ContentPart]) -> dict[str, Any]:
+    content: list[dict[str, Any]] = []
+    for p in parts:
+        if isinstance(p, TextPart):
+            content.append({"type": "text", "text": p.text})
+        else:
+            content.append({"type": "image", "data": p.data, "mimeType": p.media_type})
+    return {"content": content}
 
 
 # ── History replay stream ────────────────────────────────────────────────────
@@ -1441,7 +1461,8 @@ class ClaudeCodeAgentRunner:
         # and still resumes natively (the no-store branch).
         # resume= and session_id are mutually exclusive in the SDK: native resume
         # passes resume= and leaves session_id unset.
-        existing = transcript.load()
+        existing = transcript.load(
+            ctx.change_home / "blobs" if ctx.change_home is not None else None)
         is_fresh = not existing
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step), complementing _tail_has_complete_step's top-level

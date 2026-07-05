@@ -15,6 +15,8 @@ from pathlib import Path
 
 import anyio
 
+import imp.agents.tools.image as image_tools
+from imp.agents.runner import ContentPart, TextPart
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ReadRecord, ToolContext
 from imp.agents.tools.limits import (
@@ -30,15 +32,16 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
 @imp_tool(
     name="read_file",
     description=(
-        "Read a text file with 1-based line numbers, `cat -n` style: each "
-        "output line is `{lineno}<TAB>{content}`. `offset` (default 1) is the "
-        "first line to show; `limit` (default 2000) caps the lines returned; "
-        "a trailing [notice] says how to continue when more lines remain "
-        "(output is also bounded at 50 KB, and only the first 5 MB of a file "
-        "is readable). Paths are relative to the project root (e.g. "
-        "src/foo.py); absolute and out-of-worktree paths are also accepted, "
-        "bounded by the sandbox like bash. IMPORTANT: the line-number prefix "
-        "is display-only — "
+        "Read a file — text or image (PNG/JPEG/GIF/WebP detected by content, "
+        "regardless of extension). Images return a viewable image part plus a "
+        "short caption; text files return 1-based line numbers (`cat -n` style). "
+        "For text: `offset` (default 1) is the first line to show; `limit` "
+        "(default 2000) caps the lines returned; a trailing [notice] says how "
+        "to continue when more lines remain (output is also bounded at 50 KB, "
+        "and only the first 5 MB of a file is readable). Paths are relative to "
+        "the project root (e.g. src/foo.py); absolute and out-of-worktree paths "
+        "are also accepted, bounded by the sandbox like bash. IMPORTANT: the "
+        "line-number prefix is display-only — "
         "never copy it into any write path (edit_file's `old`, write_file's "
         "`content`, or a bash heredoc); doing so writes numbered garbage and "
         "nothing errors. Two more display artifacts are not file content: "
@@ -51,7 +54,9 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
     ),
     read_only=True,
 )
-async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int = 2000) -> str:
+async def read_file(
+    ctx: ToolContext, path: str, *, offset: int = 1, limit: int = 2000
+) -> str | list[ContentPart]:
     if type(offset) is not int or offset < 1:
         raise ValueError(f"offset must be an integer >= 1, got {offset!r}")
     if type(limit) is not int or limit < 1:
@@ -70,6 +75,10 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
         raise FileNotFoundError(f"no such file: {path}") from None
     except IsADirectoryError:
         raise IsADirectoryError(f"is a directory: {path}") from None
+    if image_tools.is_image(data):
+        return await _read_image(
+            ctx, resolved, path, data, read_truncated,
+            coordinator=coordinator, deadline=deadline)
     # st_size sampled AFTER the read (growth during the read must classify as
     # cap-truncated; a before-read sample would fabricate a final line).
     cap_truncated = file_is_cap_truncated(read_truncated, resolved)
@@ -137,6 +146,51 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
 
     body = "\n".join(rendered)
     return f"{body}\n{notice}" if notice else body
+
+
+def _media_label(media_type: str) -> str:
+    return media_type.removeprefix("image/").upper()
+
+
+async def _read_image(
+    ctx: ToolContext, resolved: Path, path: str, data: bytes, read_truncated: bool,
+    *, coordinator: object | None, deadline: float,
+) -> str | list[ContentPart]:
+    """Re-read to the image cap if the text-cap read truncated (failing loudly if
+    still over cap). For non-vision models returns a text placeholder; for vision
+    models stores the image as a blob and returns the summary plus image part."""
+    if read_truncated:
+        data, img_truncated = await read_bytes_capped(
+            resolved, coordinator=coordinator, deadline=deadline,
+            cap_bytes=image_tools.IMAGE_READ_CAP_BYTES)
+        if img_truncated:
+            cap_mb = image_tools.IMAGE_READ_CAP_BYTES // 1_000_000
+            raise ValueError(
+                f"{path} is larger than the ~{cap_mb} MB image read cap; "
+                f"read_file will not truncate binary image data")
+    await tool_checkpoint(coordinator, deadline)
+    with contextlib.suppress(OSError):
+        ctx.read_state[resolved] = ReadRecord(
+            mtime=resolved.stat().st_mtime,
+            content_sha256=hashlib.sha256(data).hexdigest(),
+            full=True,
+        )
+    from imp.providers.catalog import model_supports_vision
+
+    if not model_supports_vision(ctx.provider_name, ctx.model_name):
+        media_type, width, height = image_tools.probe_image(data)
+        kb = max(1, round(len(data) / 1024))
+        return (
+            f"[image: {Path(path).name} — {width}×{height} "
+            f"{_media_label(media_type)}, {kb} KB. "
+            f"The active model can't display images.]")
+    if ctx.change_home is None:
+        raise ValueError(
+            f"cannot read image {path}: no change home is set for blob storage")
+    part = image_tools.store_image(data, ctx.change_home / "blobs")
+    summary = TextPart(
+        text=f"{Path(path).name} — {part.width}×{part.height} {_media_label(part.media_type)}")
+    return [summary, part]
 
 
 def _hash_file_capped(resolved: Path) -> str | None:

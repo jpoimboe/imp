@@ -7,6 +7,7 @@ inside `run()`. Transcripts on disk are JSONL of these types.
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -34,7 +35,7 @@ class ToolUseBlock:
 @dataclass(frozen=True, slots=True)
 class ToolResultBlock:
     tool_use_id: str
-    content: str
+    content: str | list[ContentPart] | list[dict[str, Any]]
     is_error: bool = False
     type: Literal["tool_result"] = "tool_result"
 
@@ -58,6 +59,32 @@ class ThinkingBlock:
     redacted_thinking: str | None = None
     type: Literal["thinking"] = "thinking"
 
+
+@dataclass(frozen=True, slots=True)
+class TextPart:
+    text: str
+    type: Literal["text"] = "text"
+
+
+@dataclass(frozen=True, slots=True)
+class ImagePart:
+    # Structured image content part. `data` is the base64 of the PROCESSED
+    # bytes (the on-wire/in-memory payload). `blob` is the content-addressed
+    # filename "<sha256>.<ext>" under the change's blobs/ dir; `nbytes` is the
+    # processed raw byte count. Together (blob, media_type, width, height,
+    # nbytes) are exactly the lean reference persisted to events.jsonl (Part 5),
+    # with the base64 `data` filtered out on write and rebuilt from the blob on
+    # resume.
+    media_type: str
+    data: str
+    width: int
+    height: int
+    blob: str
+    nbytes: int
+    type: Literal["image"] = "image"
+
+
+ContentPart = TextPart | ImagePart
 
 ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock
 
@@ -229,6 +256,37 @@ def message_to_json(msg: Message) -> str:
     return json.dumps(payload, separators=(",", ":"))
 
 
+def _content_part_to_dict(part: ContentPart) -> dict[str, Any]:
+    if isinstance(part, TextPart):
+        return {"type": "text", "text": part.text}
+    # Persist a blob reference only; the base64 `data` is rebuilt from the blob on load.
+    return {
+        "type": "image", "media_type": part.media_type,
+        "width": part.width, "height": part.height,
+        "blob": part.blob, "nbytes": part.nbytes,
+    }
+
+
+def _content_part_from_dict(
+    raw: dict[str, Any], blobs_dir: Path | None
+) -> ContentPart:
+    if raw["type"] == "text":
+        return TextPart(text=raw["text"])
+    blob = raw["blob"]
+    if blobs_dir is not None:
+        blob_path = blobs_dir / blob
+        if blob_path.exists():
+            data = base64.b64encode(blob_path.read_bytes()).decode("ascii")
+            return ImagePart(
+                media_type=raw["media_type"], data=data,
+                width=raw["width"], height=raw["height"],
+                blob=blob, nbytes=raw["nbytes"],
+            )
+    # Blob gone or no blobs dir: degrade to a text note keyed by the content sha.
+    sha = blob.rsplit(".", 1)[0]
+    return TextPart(text=f"[image {sha} no longer available]")
+
+
 def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
     if isinstance(b, TextBlock):
         return {"type": "text", "text": b.text}
@@ -237,13 +295,19 @@ def _block_to_dict(b: ContentBlock) -> dict[str, Any]:
     if isinstance(b, ThinkingBlock):
         return {"type": "thinking", "thinking": b.thinking,
                 "signature": b.signature, "redacted_thinking": b.redacted_thinking}
+    if isinstance(b.content, str):
+        content: Any = b.content
+    elif b.content and all(isinstance(p, (TextPart, ImagePart)) for p in b.content):
+        content = [_content_part_to_dict(p) for p in b.content]  # type: ignore[arg-type]
+    else:
+        content = b.content  # native Claude SDK list[dict]; persist verbatim
     return {
         "type": "tool_result", "tool_use_id": b.tool_use_id,
-        "content": b.content, "is_error": b.is_error,
+        "content": content, "is_error": b.is_error,
     }
 
 
-def message_from_json(data: dict[str, Any]) -> Message:
+def message_from_json(data: dict[str, Any], blobs_dir: Path | None = None) -> Message:
     blocks: list[ContentBlock] = []
     for raw in data["content"]:
         kind = raw["type"]
@@ -252,9 +316,17 @@ def message_from_json(data: dict[str, Any]) -> Message:
         elif kind == "tool_use":
             blocks.append(ToolUseBlock(id=raw["id"], name=raw["name"], input=raw["input"]))
         elif kind == "tool_result":
+            raw_content = raw["content"]
+            if isinstance(raw_content, str):
+                content: Any = raw_content
+            elif any(isinstance(p, dict) and p.get("type") == "image" and "blob" in p
+                     for p in raw_content):
+                content = [_content_part_from_dict(p, blobs_dir) for p in raw_content]
+            else:
+                content = raw_content  # native Claude SDK list[dict]; keep verbatim
             blocks.append(ToolResultBlock(
                 tool_use_id=raw["tool_use_id"],
-                content=raw["content"],
+                content=content,
                 is_error=raw.get("is_error", False),
             ))
         elif kind == "thinking":

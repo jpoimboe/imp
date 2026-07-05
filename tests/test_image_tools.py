@@ -1,0 +1,203 @@
+import base64
+import dataclasses
+import hashlib
+import io
+import os
+
+import pytest
+from PIL import Image
+
+from imp.agents.runner import ContentPart, ImagePart, TextPart
+from imp.agents.tools import image as imgmod
+
+
+def test_text_part_defaults_type_and_holds_text():
+    part = TextPart(text="login.png — 1200×800 PNG")
+    assert part.type == "text"
+    assert part.text == "login.png — 1200×800 PNG"
+
+
+def test_image_part_carries_wire_and_persistence_fields():
+    part = ImagePart(
+        media_type="image/png",
+        data="aGVsbG8=",
+        width=1200,
+        height=800,
+        blob="deadbeef.png",
+        nbytes=340_000,
+    )
+    assert part.type == "image"
+    assert part.media_type == "image/png"
+    assert part.data == "aGVsbG8="
+    assert (part.width, part.height) == (1200, 800)
+    assert part.blob == "deadbeef.png"
+    assert part.nbytes == 340_000
+
+
+def test_image_part_is_frozen():
+    part = ImagePart(
+        media_type="image/jpeg",
+        data="Zm9v",
+        width=10,
+        height=10,
+        blob="cafe.jpg",
+        nbytes=3,
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        part.data = "changed"  # type: ignore[misc]
+
+
+def test_text_part_is_frozen():
+    part = TextPart(text="hi")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        part.text = "changed"  # type: ignore[misc]
+
+
+def test_content_part_union_admits_both():
+    parts: list[ContentPart] = [TextPart(text="hi"), ImagePart(
+        media_type="image/png", data="Zm9v", width=1, height=1,
+        blob="a.png", nbytes=3,
+    )]
+    assert [p.type for p in parts] == ["text", "image"]
+
+
+def _png_bytes(w: int, h: int, color=(10, 20, 200)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _noise_png_bytes(w: int, h: int) -> bytes:
+    # os.urandom pixels: incompressible, so PNG blows past the 3.75 MB raw
+    # budget and forces the JPEG ladder.
+    im = Image.frombytes("RGB", (w, h), os.urandom(w * h * 3))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _img_bytes(fmt: str, w: int, h: int, mode="RGB", color=(10, 20, 200)) -> bytes:
+    buf = io.BytesIO()
+    Image.new(mode, (w, h), color).save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def test_small_png_passes_through_unchanged():
+    raw = _png_bytes(4, 4)
+    out = imgmod.process_image(raw)
+    assert out.media_type == "image/png"
+    assert out.data == raw  # byte-identical: not re-encoded
+    assert (out.width, out.height) == (4, 4)
+
+
+def test_small_jpeg_passes_through_unchanged():
+    raw = _img_bytes("JPEG", 8, 8)
+    out = imgmod.process_image(raw)
+    assert out.media_type == "image/jpeg"
+    assert out.data == raw  # byte-identical: not re-encoded
+    assert (out.width, out.height) == (8, 8)
+
+
+def test_small_gif_passes_through_unchanged():
+    raw = _img_bytes("GIF", 8, 8, mode="P")
+    out = imgmod.process_image(raw)
+    assert out.media_type == "image/gif"
+    assert out.data == raw  # byte-identical: not re-encoded
+    assert (out.width, out.height) == (8, 8)
+
+
+def test_small_webp_passes_through_unchanged():
+    raw = _img_bytes("WEBP", 8, 8)
+    out = imgmod.process_image(raw)
+    assert out.media_type == "image/webp"
+    assert out.data == raw  # byte-identical: not re-encoded
+    assert (out.width, out.height) == (8, 8)
+
+
+def test_oversized_image_downscales_preserving_aspect():
+    raw = _png_bytes(3000, 1000, color=(0, 128, 0))
+    out = imgmod.process_image(raw)
+    assert max(out.width, out.height) == 2000
+    # 3000x1000 -> 2000x667 (aspect preserved, longest side capped at 2000)
+    assert out.width == 2000
+    assert out.height == 667
+
+
+def test_incompressible_oversized_image_walks_jpeg_ladder_and_fits():
+    raw = _noise_png_bytes(2500, 2500)
+    out = imgmod.process_image(raw)
+    assert out.media_type == "image/jpeg"          # PNG rejected -> JPEG
+    assert (out.width, out.height) == (2000, 2000)  # also downscaled
+    assert len(out.data) < len(raw)                 # genuinely smaller
+    assert len(out.data) <= imgmod.RAW_TARGET_BYTES
+    assert len(base64.b64encode(out.data)) <= imgmod.BASE64_TARGET_BYTES
+
+
+def test_write_blob_names_by_sha_and_writes_bytes(tmp_path):
+    blobs = tmp_path / "blobs"
+    name = imgmod.write_blob(blobs, b"hello-bytes", "png")
+    sha = hashlib.sha256(b"hello-bytes").hexdigest()
+    assert name == f"{sha}.png"
+    assert (blobs / name).read_bytes() == b"hello-bytes"
+
+
+def test_write_blob_dedups_identical_bytes_to_one_file(tmp_path):
+    blobs = tmp_path / "blobs"
+    n1 = imgmod.write_blob(blobs, b"same", "jpg")
+    n2 = imgmod.write_blob(blobs, b"same", "jpg")
+    assert n1 == n2
+    assert [p.name for p in blobs.iterdir()] == [n1]  # exactly one blob
+
+
+def test_store_image_returns_populated_image_part_and_blob(tmp_path):
+    raw = _png_bytes(4, 4)
+    blobs = tmp_path / "blobs"
+    part = imgmod.store_image(raw, blobs)
+
+    assert part.type == "image"
+    assert part.media_type == "image/png"
+    assert (part.width, part.height) == (4, 4)
+    assert part.blob.endswith(".png")
+    assert part.nbytes == len(raw)  # small PNG passthrough: processed == raw
+    # `data` is base64 of the processed bytes, and decodes to the blob content.
+    assert base64.b64decode(part.data) == (blobs / part.blob).read_bytes()
+    assert base64.b64decode(part.data) == raw
+
+
+def _jpeg_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 30, 30)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _gif_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("P", (w, h)).save(buf, format="GIF")
+    return buf.getvalue()
+
+
+def _webp_bytes(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), (30, 200, 30)).save(buf, format="WEBP")
+    return buf.getvalue()
+
+
+def test_is_image_detects_each_supported_format():
+    assert imgmod.is_image(_png_bytes(4, 4)) is True
+    assert imgmod.is_image(_jpeg_bytes(4, 4)) is True
+    assert imgmod.is_image(_gif_bytes(4, 4)) is True
+    assert imgmod.is_image(_webp_bytes(4, 4)) is True
+
+
+def test_is_image_rejects_text_and_empty():
+    assert imgmod.is_image(b"hello, this is plain text\n") is False
+    assert imgmod.is_image(b"") is False
+    # A RIFF container that is not WEBP (e.g. a WAV) is not an image.
+    assert imgmod.is_image(b"RIFF\x00\x00\x00\x00WAVEfmt ") is False
+
+
+def test_probe_image_reports_media_type_and_source_dimensions():
+    assert imgmod.probe_image(_png_bytes(300, 200)) == ("image/png", 300, 200)
+    assert imgmod.probe_image(_jpeg_bytes(64, 48)) == ("image/jpeg", 64, 48)
+    assert imgmod.probe_image(_gif_bytes(10, 8)) == ("image/gif", 10, 8)
+    assert imgmod.probe_image(_webp_bytes(10, 8)) == ("image/webp", 10, 8)

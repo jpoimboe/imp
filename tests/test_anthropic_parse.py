@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from imp.agents.runner import Message, TextBlock, ThinkingBlock, ToolUseBlock
+from imp.agents.runner import (
+    ImagePart,
+    Message,
+    TextBlock,
+    TextPart,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from imp.providers.anthropic import (
     _extract_anthropic_diagnostics,
     _message_to_anthropic,
@@ -121,3 +129,33 @@ def test_message_to_anthropic_tolerates_no_thinking_block() -> None:
     ))
     wire = _message_to_anthropic(msg)["content"]
     assert [b["type"] for b in wire] == ["text", "tool_use"]
+
+
+def test_message_to_anthropic_list_content_emits_image_block() -> None:
+    parts = [
+        TextPart(text="shot.png — 300×200 PNG"),
+        ImagePart(media_type="image/png", data="aGVsbG8=", width=300,
+                  height=200, blob="ab12.png", nbytes=5),
+    ]
+    msg = Message(role="user",
+                  content=(ToolResultBlock(tool_use_id="t1", content=parts),))
+    out = _message_to_anthropic(msg)
+    tr = out["content"][0]
+    assert tr["type"] == "tool_result"
+    assert tr["tool_use_id"] == "t1"
+    assert isinstance(tr["content"], list)
+    assert tr["content"][0] == {"type": "text", "text": "shot.png — 300×200 PNG"}
+    assert tr["content"][1] == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="},
+    }
+
+
+def test_message_to_anthropic_str_content_unchanged() -> None:
+    msg = Message(role="user",
+                  content=(ToolResultBlock(tool_use_id="t1", content="plain text",
+                                           is_error=True),))
+    out = _message_to_anthropic(msg)
+    tr = out["content"][0]
+    assert tr["content"] == "plain text"
+    assert tr["is_error"] is True

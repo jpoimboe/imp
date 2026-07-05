@@ -10,6 +10,7 @@ from imp.providers.catalog import (
     checkpoint_fraction,
     context_tokens_from_usage,
     model_info,
+    model_supports_vision,
     window_for_model,
 )
 
@@ -186,3 +187,27 @@ def test_dated_anthropic_id_falls_to_default_max_output_tokens() -> None:
     # _DEFAULT to the sonnet/haiku-class 32000, never an unspecified or zero value.
     assert model_info(ANTHROPIC, "claude-opus-4-8").max_output_tokens == 32_000
     assert model_info(ANTHROPIC, "claude-sonnet-4-6").max_output_tokens == 32_000
+
+
+def test_model_info_defaults_to_vision_capable() -> None:
+    assert ModelInfo().supports_vision is True
+
+
+def test_known_models_are_vision_capable() -> None:
+    assert model_supports_vision("anthropic", "opus") is True
+    assert model_supports_vision("claude_code", "sonnet") is True
+    assert model_supports_vision("openai", "gpt-5") is True
+    assert model_supports_vision("codex", "gpt-5.3-codex") is True
+
+
+def test_unknown_provider_or_model_is_vision_capable() -> None:
+    # Unknown provider name → no catalog → assume vision (True).
+    assert model_supports_vision("mystery", "opus") is True
+    # Known provider, unknown alias → model_info default → True.
+    assert model_supports_vision("anthropic", "no-such-model") is True
+
+
+def test_text_only_flag_forces_no_vision(monkeypatch) -> None:
+    # A model explicitly flagged supports_vision=False resolves to False.
+    monkeypatch.setitem(ANTHROPIC, "text-only", ModelInfo(supports_vision=False))
+    assert model_supports_vision("anthropic", "text-only") is False

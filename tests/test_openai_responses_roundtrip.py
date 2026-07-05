@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+from imp.agents.runner import (
+    ImagePart,
+    Message,
+    TextBlock,
+    TextPart,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from imp.agents.tools import Tool
 from imp.providers.openai import (
     _extract_responses_diagnostics,
@@ -124,3 +131,35 @@ def test_responses_diagnostics_warn_on_bad_function_args() -> None:
         resp_function_call("c1", "bash", "{not json}")).model_dump(mode="json")
     warns = _extract_responses_diagnostics(raw).block_warnings
     assert any("not JSON" in w for w in warns)
+
+
+def test_responses_input_list_content_emits_input_image() -> None:
+    parts = [
+        TextPart(text="shot.png — 64×48 JPEG"),
+        ImagePart(media_type="image/jpeg", data="aGVsbG8=", width=64,
+                  height=48, blob="cd34.jpg", nbytes=5),
+    ]
+    msg = Message(role="user",
+                  content=(ToolResultBlock(tool_use_id="c1", content=parts),))
+    out = _imp_to_responses_input([msg])
+    fco = [it for it in out if it["type"] == "function_call_output"]
+    assert len(fco) == 1
+    assert fco[0]["call_id"] == "c1"
+    output = fco[0]["output"]
+    assert isinstance(output, list)
+    assert output[0] == {"type": "input_text", "text": "shot.png — 64×48 JPEG"}
+    assert output[1] == {
+        "type": "input_image",
+        "image_url": "data:image/jpeg;base64,aGVsbG8=",
+        "detail": "auto",
+    }
+
+
+def test_responses_input_str_content_unchanged() -> None:
+    msg = Message(role="user",
+                  content=(ToolResultBlock(tool_use_id="c1", content="boom",
+                                           is_error=True),))
+    out = _imp_to_responses_input([msg])
+    fco = [it for it in out if it["type"] == "function_call_output"]
+    # Bare-str content stays a string; the [error] prefix is unchanged.
+    assert fco[0]["output"] == "[error] boom"
