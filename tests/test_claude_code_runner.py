@@ -621,6 +621,39 @@ def test_classify_agent_text_login_required() -> None:
     assert isinstance(out, perr.AuthError)
 
 
+def test_classify_agent_text_login_required_unbackticked_anchored() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    # The mona44 mid-run logout message carries no backticks; anchored
+    # (default) mode must still classify it as auth.
+    out = cc._classify_agent_text("Not logged in · Please run /login")
+    assert isinstance(out, perr.AuthError)
+
+
+def test_classify_agent_text_login_required_unbackticked_unanchored() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    # Full-text mode (used by _termination_from_result on erroring turns)
+    # must match the unbackticked string even buried below the first line.
+    out = cc._classify_agent_text(
+        "Session ended abnormally.\nNot logged in · Please run /login",
+        anchored=False,
+    )
+    assert isinstance(out, perr.AuthError)
+
+
+def test_classify_agent_text_login_required_backticked_still_auth() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    # Regression: the pre-existing backticked variant must still classify
+    # as auth after the tuple is broadened.
+    out = cc._classify_agent_text("Please run `/login` first.")
+    assert isinstance(out, perr.AuthError)
+
+
 def test_classify_agent_text_quota_usage_limit() -> None:
     from imp.providers import claude_code as cc
     from imp.providers import errors as perr

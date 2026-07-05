@@ -135,6 +135,7 @@ if TYPE_CHECKING:
 _AUTH_PATTERNS = (
     "Invalid API key",
     "Please run `/login`",
+    "Please run /login",
     "Invalid authentication credentials",
     "Failed to authenticate",
 )
