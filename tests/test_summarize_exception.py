@@ -68,3 +68,28 @@ def test_generic_exception_returns_first_line_and_empty_detail() -> None:
     msg, detail = summarize_exception(ValueError("boom\nsecond line"))
     assert msg == "boom"
     assert detail == {}
+
+
+def test_trailing_blank_lines_not_in_tail() -> None:
+    err = subprocess.CalledProcessError(
+        returncode=1,
+        cmd=["git", "x"],
+        stderr="real error\n" + "\n" * 20,
+    )
+    msg, detail = summarize_exception(err)
+    assert msg.endswith(" — real error")
+    assert "real error" in detail["stderr_tail"]
+
+
+def test_oversized_line_not_fragmented_in_tail() -> None:
+    err = subprocess.CalledProcessError(
+        returncode=1,
+        cmd=["git", "x"],
+        stderr="G" * 5000 + "\nline b\nline c\nfatal: end\n",
+    )
+    _, detail = summarize_exception(err)
+    assert "GGGG" not in detail["stderr_tail"]
+    assert "line b" in detail["stderr_tail"]
+    assert "line c" in detail["stderr_tail"]
+    assert "fatal: end" in detail["stderr_tail"]
+    assert len(detail["stderr_tail"]) <= 2048

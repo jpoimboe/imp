@@ -100,6 +100,23 @@ def _decode_stream(stream: object) -> str:
     return str(stream)
 
 
+def _stream_tail(lines: list[str], *, max_lines: int = 15,
+                 max_chars: int = 2048) -> str:
+    trimmed = list(lines)
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+    window = trimmed[-max_lines:]
+    kept: list[str] = []
+    total = 0
+    for ln in reversed(window):
+        added = len(ln) + (1 if kept else 0)
+        if kept and total + added > max_chars:
+            break
+        kept.append(ln)
+        total += added
+    return "\n".join(reversed(kept))[-max_chars:]
+
+
 def summarize_exception(e: BaseException) -> tuple[str, dict[str, Any]]:
     """Return (message, detail) for an engine error.
 
@@ -116,6 +133,8 @@ def summarize_exception(e: BaseException) -> tuple[str, dict[str, Any]]:
         all_lines = text.splitlines()
         nonempty = [ln for ln in all_lines if ln.strip()]
         if nonempty:
-            tail = "\n".join(all_lines[-15:])[-2048:]
-            return f"{first} — {nonempty[-1]}", {"stderr_tail": tail}
+            return (
+                f"{first} — {nonempty[-1]}",
+                {"stderr_tail": _stream_tail(all_lines)},
+            )
     return first, {}
