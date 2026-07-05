@@ -534,7 +534,8 @@ class OpenAIAgentRunner:
             ctx.user_input_fn = self._user_input_fn
         self._ctx = ctx
 
-        existing = transcript.load()
+        existing = transcript.load(
+            ctx.change_home / "blobs" if ctx.change_home is not None else None)
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history

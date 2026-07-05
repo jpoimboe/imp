@@ -1447,7 +1447,8 @@ class ClaudeCodeAgentRunner:
         # and still resumes natively (the no-store branch).
         # resume= and session_id are mutually exclusive in the SDK: native resume
         # passes resume= and leaves session_id unset.
-        existing = transcript.load()
+        existing = transcript.load(
+            ctx.change_home / "blobs" if ctx.change_home is not None else None)
         is_fresh = not existing
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step), complementing _tail_has_complete_step's top-level

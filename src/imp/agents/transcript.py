@@ -134,7 +134,7 @@ class Transcript:
     def exists_and_nonempty(self) -> bool:
         return self._path.exists() and self._path.stat().st_size > 0
 
-    def load(self) -> list[Message]:
+    def load(self, blobs_dir: Path | None = None) -> list[Message]:
         if not self._path.exists():
             return []
         out: list[Message] = []
@@ -142,7 +142,7 @@ class Transcript:
             line = line.strip()
             if not line:
                 continue
-            out.append(message_from_json(json.loads(line)))
+            out.append(message_from_json(json.loads(line), blobs_dir))
         return out
 
     def append(self, msg: Message) -> None:
