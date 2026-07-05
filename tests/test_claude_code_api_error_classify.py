@@ -234,6 +234,59 @@ def test_400_tool_use_concurrency_emdash_classifies_network_not_terminated() -> 
     assert term.detail["api_error_status"] == 400
 
 
+def test_pattern_quoted_past_first_line_is_not_classified() -> None:
+    # The redu99 regression: a subagent report *about* the auth patterns quotes
+    # them mid-document. Classification is anchored to the first line, so a
+    # prose opener means no match — the report must survive as agent output.
+    report = (
+        "Here are the verified findings, all cited to exact line numbers:\n"
+        "\n"
+        "## 1. `_AUTH_PATTERNS` contents\n"
+        "- `Invalid API key`\n"
+        "- `Please run `/login``\n"
+        "- a colon-form example: API Error: 400 bad request\n"
+        "- quota: You have reached your usage limit\n"
+    )
+    assert _classify_agent_text(report) is None
+
+
+def test_whole_message_error_with_situation_prefix_still_auth() -> None:
+    # Genuine CLI shape: `<situation> · <remedy>` as the entire message (mona44
+    # was `Not logged in · Please run /login`). The fragment sits mid-line, so
+    # first-line anchoring must not require a match at offset 0.
+    exc = _classify_agent_text("Invalid API key \u00b7 Please run `/login`")
+    assert isinstance(exc, perr.AuthError)
+
+
+def test_first_line_error_with_trailing_lines_still_classified() -> None:
+    err = _classify_agent_text(
+        "API Error: 529 Overloaded\nThe request can be retried shortly.")
+    assert isinstance(err, perr.NetworkError)
+
+
+def test_leading_blank_lines_before_error_still_classified() -> None:
+    exc = _classify_agent_text("\n\n  Invalid API key \u00b7 Please run `/login`")
+    assert isinstance(exc, perr.AuthError)
+
+
+def test_unanchored_mode_matches_past_first_line() -> None:
+    # anchored=False keeps the historical full-text scan for callers that
+    # already hold an out-of-band error signal (_termination_from_result).
+    text = "the turn ended abnormally\nYou have reached your usage limit"
+    assert _classify_agent_text(text) is None
+    assert isinstance(
+        _classify_agent_text(text, anchored=False), perr.QuotaError)
+
+
+def test_termination_labels_pattern_past_first_line() -> None:
+    # _termination_from_result is gated on is_error, so its substring labeler
+    # scans the full text: a quota phrase past line one must still label.
+    sdk = result(is_error=True, api_error_status=None)
+    term = _termination_from_result(
+        sdk, "the CLI reported:\nYou have reached your usage limit", {})
+    assert isinstance(term, perr.QuotaError)
+
+
 def test_400_tool_use_concurrency_colon_form_wins_over_api_error_label() -> None:
     # Colon form: _classify_agent_text labels this a terminal ApiError(http_400).
     # The 400/concurrency rule must override that classification → NetworkError.

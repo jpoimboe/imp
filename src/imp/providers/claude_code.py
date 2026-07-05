@@ -149,7 +149,9 @@ _QUOTA_PATTERNS = (
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
 
-def _classify_agent_text(text: str) -> perr.ProviderError | None:
+def _classify_agent_text(
+    text: str, *, anchored: bool = True,
+) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
 
     The CLI catches its own errors and returns them as a text response
@@ -158,21 +160,33 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     retry behavior; false positives would convert recoverable agent
     confusion into fatal pause.
 
+    When `anchored` (the default), patterns must match within the first line
+    of the text: every known genuine CLI error is a terse message that leads
+    with the error, while an agent that merely *quotes* a pattern buries it
+    mid-document behind a prose opener (the redu99 false positive — a
+    subagent report about _AUTH_PATTERNS was reclassified as AuthError, its
+    successful turn rolled back, and the retry returned an empty stub).
+    Callers that already hold an out-of-band error signal
+    (_termination_from_result) pass anchored=False: there the substring only
+    picks the error category, and a miss degrades to TerminatedError, not a
+    false pause.
+
     Auth/quota patterns are checked first so they win when both substrings
     appear. The API-error regex matches "API Error: <code>":
     401/403 → AuthError with kind="http_<code>"; 408 → NetworkError (transient
     timeout); 429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
     5xx → NetworkError (network category → RetryWithBackoff; §10).
     """
+    scan = text.lstrip().split("\n", 1)[0] if anchored else text
     for pat in _AUTH_PATTERNS:
-        if pat in text:
+        if pat in scan:
             return perr.AuthError(f"claude CLI: {pat}")
     for pat in _QUOTA_PATTERNS:
-        if pat in text:
+        if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
-    if _SESSION_LIMIT_RE.search(text):
+    if _SESSION_LIMIT_RE.search(scan):
         return perr.RateLimitError(f"claude CLI: {text[:200]}")
-    m = _API_ERROR_RE.search(text)
+    m = _API_ERROR_RE.search(scan)
     if m:
         code = int(m.group(1))
         if code == 429:
@@ -194,7 +208,7 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
             # `network` category, which maps to RetryWithBackoff (same routing the
             # SDK providers use for an InternalServerError).
             return perr.NetworkError(f"claude CLI: {text[:200]}")
-    elif "API Error:" in text:
+    elif "API Error:" in scan:
         # A statusless `API Error:` — no routable HTTP code — means the request
         # never reached the server (ConnectionRefused, reset, EOF, transport
         # timeout). Broad transport stance: transient -> retry, not pause. A
@@ -260,7 +274,7 @@ def _termination_from_result(
         "stderr_tail": diag.get("stderr_tail"),
         "errors": getattr(sdk_msg, "errors", None),
     }
-    labeled = _classify_agent_text(last_text)
+    labeled = _classify_agent_text(last_text, anchored=False)
     status = detail["api_error_status"]
     if (isinstance(status, int) and status == 400
             and "tool use concurrency" in last_text.lower()):
