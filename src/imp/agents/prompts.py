@@ -1,6 +1,6 @@
 """Prompt template rendering for agent .md bodies.
 
-Five namespaces (spec §7.5):
+Six namespaces (spec §7.5):
   change.id — stable identity; change.title — human title
   events.<step-name>.<field> — validated agent_output of prior step;
       missing steps render as empty (lenient-within)
@@ -10,6 +10,8 @@ Five namespaces (spec §7.5):
   run.autonomous — whether the run may auto-take recommendations at
       recommendation-bearing gates (bool); a missing attr under run raises
       (strict-within), like change/project
+  step.lap — this step's 1-based lap number (1 = first forward pass);
+      step.prior_laps — retained {lap, outcome, head} entries of prior laps
 
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
@@ -90,6 +92,12 @@ class _RunNamespace:
     opening: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class _StepNamespace:
+    lap: int
+    prior_laps: tuple[dict[str, Any], ...]
+
+
 class _ProjectNamespace:
     """Strict project-facts namespace: raises UndefinedError on a missing key,
     AttributeError for dunder/leading-underscore names."""
@@ -123,6 +131,7 @@ class PromptContext:
     vars: dict[str, Any]
     project: _ProjectNamespace
     run: _RunNamespace
+    step: _StepNamespace
 
 
 def build_context(
@@ -132,8 +141,11 @@ def build_context(
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None,
     autonomous: bool = False, opening: str = "",
+    prior_laps: list[dict[str, Any]] | None = None,
 ) -> PromptContext:
     facts = dict(project_facts or {})
+    laps = tuple(prior_laps or ())
+    # lap from the stored lap, not len: history truncates to OUTCOME_HISTORY_K so len saturates.
     return PromptContext(
         change=_ChangeNamespace(id=change_id, title=change_title,
                                 home=change_home, cur_base_head=cur_base_head,
@@ -142,6 +154,8 @@ def build_context(
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),
         run=_RunNamespace(autonomous=autonomous, opening=opening),
+        step=_StepNamespace(
+            lap=(laps[-1]["lap"] + 1 if laps else 1), prior_laps=laps),
     )
 
 
@@ -202,7 +216,7 @@ def render_prompt(
     try:
         return _env_for(workflow_dir).from_string(template_source).render(
             change=ctx.change, events=ctx.events, vars=ctx.vars,
-            project=ctx.project, run=ctx.run,
+            project=ctx.project, run=ctx.run, step=ctx.step,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e
