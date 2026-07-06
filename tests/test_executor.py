@@ -2123,6 +2123,81 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_step_lap_render_var_increments_across_bounce(tmp_path: Path) -> None:
+    # writer emits `lap={{ step.lap }}` in its rendered prompt body; reviewer votes
+    # `rework` on the first lap only, bouncing back to writer. The writer's
+    # rendered lap must read 1 on the first pass and 2 on the re-entry.
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "lap={{ step.lap }}\n")
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n")
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: low\n"
+        "        max_loops: 3\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer}\n"
+        "          - {else: true, continue: true}\n")
+    _write_fake_config(tmp_path)
+    change = _make_change(tmp_path)
+
+    writer_prompts: list[str] = []
+    review_count = [0]
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "writer":
+                writer_prompts.append(
+                    invocation.initial_messages[0].content[0].text)
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "outcome": "wrote"}}
+            else:
+                verdict = "rework" if review_count[0] == 0 else "approve"
+                review_count[0] += 1
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "outcome": "reviewed",
+                                   "verdict": verdict}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    # Writer ran twice: the fresh entry (lap 1) and the post-bounce re-entry (lap 2).
+    assert len(writer_prompts) == 2
+    assert "lap=1" in writer_prompts[0]
+    assert "lap=2" in writer_prompts[1]
+
+
+@pytest.mark.anyio
 async def test_step_completed_payload_carries_rule_label(tmp_path: Path) -> None:
     """A rule-matched (branch goto) completion emits the rule's label verbatim."""
     wf = tmp_path / "imp" / "workflows" / "imp"

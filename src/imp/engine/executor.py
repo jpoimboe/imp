@@ -1330,6 +1330,7 @@ async def _run_agent_invocation(
             event_log=log, vars=state.vars,
             project_facts=project_facts,
             autonomous=autonomous, opening=opening,
+            prior_laps=state.outcome_history.get(step_name, []),
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,
