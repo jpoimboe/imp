@@ -1848,3 +1848,65 @@ def test_parse_agent_isolated_worktree_non_bool_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(LoadError, match="isolated_worktree"):
         parse_agent_file(p)
+
+
+def test_dialogue_absent_defaults_false_on_agent(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].dialogue is False
+
+
+def test_dialogue_true_on_agent_parses(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                dialogue: true
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["spec-writer"].dialogue is True
+
+
+def test_dialogue_on_script_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: implement
+            steps:
+              - name: verify
+                command: ./scripts/run-verify.sh fast
+                dialogue: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="dialogue"):
+        load_workflow(wf)
+
+
+def test_dialogue_on_branch_step_is_load_error(tmp_path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: route
+                dialogue: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises(LoadError, match="dialogue"):
+        load_workflow(wf)
