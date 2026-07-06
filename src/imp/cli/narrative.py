@@ -1717,6 +1717,15 @@ def _h_output_validation_nudge(
         is_warning=True))
 
 
+def _h_completion_nudge(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # A nudged bare turn-end is a recoverable prompt, not a failure — render dim.
+    self._append(ErrorNode(
+        message="bare turn-end — nudged to complete or confirm waiting",
+        is_warning=True))
+
+
 def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     step = str(p.get("step", "?"))
@@ -1752,6 +1761,7 @@ NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["warning"] = _h_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["output_validation_nudge"] = _h_output_validation_nudge
+NarrativeBuilder._HANDLERS["completion_nudge"] = _h_completion_nudge
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
 NarrativeBuilder._HANDLERS["engine_continuation"] = _h_engine_continuation
