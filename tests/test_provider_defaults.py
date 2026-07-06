@@ -53,7 +53,7 @@ def test_iter_provider_defaults_includes_builtins() -> None:
     assert {"anthropic", "openai", "claude_code", "codex"} <= set(defaults)
     anthropic_tiers = defaults["anthropic"].tier_defaults
     assert anthropic_tiers is not None
-    assert anthropic_tiers["high"] == "opus"
+    assert anthropic_tiers["high"] == "claude-opus-4-8[1m]"
     assert defaults["openai"].env_var == "OPENAI_API_KEY"
     assert defaults["claude_code"].env_var is None
 

@@ -16,12 +16,23 @@ from imp.providers.catalog import (
 
 
 def test_claude_code_catalog_opus_1m_entry() -> None:
-    info = model_info(CLAUDE_CODE, "opus-1m")
+    info = model_info(CLAUDE_CODE, "claude-opus-4-8[1m]")
     assert info.window == 1_000_000
-    # The bracketed model-id requests 1M under both subscription and API-key
-    # auth; no custom beta (which subscription auth silently drops).
+    # The bracketed alias IS the CLI model id: it requests 1M under both
+    # subscription and API-key auth; no custom beta (which subscription auth
+    # silently drops) and no cli_model indirection.
     assert info.betas == ()
-    assert info.cli_model == "claude-opus-4-8[1m]"
+    assert info.cli_model is None
+
+
+def test_anthropic_catalog_opus_1m_entry() -> None:
+    info = model_info(ANTHROPIC, "claude-opus-4-8[1m]")
+    assert info.window == 1_000_000
+    assert info.max_output_tokens == 64_000
+    # The raw API rejects the bracketed form: cli_model strips it and the
+    # context-1m beta header requests the 1M window.
+    assert info.cli_model == "claude-opus-4-8"
+    assert info.betas == ("context-1m-2025-08-07",)
 
 
 def test_claude_code_catalog_opus_entry_is_plain_200k() -> None:
@@ -44,8 +55,8 @@ def test_other_providers_seed_their_windows() -> None:
 
 
 def test_window_for_model_substring_fallback() -> None:
-    # opus-1m must win over opus despite "opus" being a substring of "opus-1m".
-    assert window_for_model("opus-1m") == 1_000_000
+    # The "[1m]" marker must win over the base-model token it accompanies.
+    assert window_for_model("claude-opus-4-8[1m]") == 1_000_000
     assert window_for_model("opus") == 200_000
     assert window_for_model("haiku") == 200_000
     assert window_for_model("claude-opus-4-1") == 200_000
@@ -185,8 +196,11 @@ def test_default_max_output_tokens_constant_is_32000() -> None:
 def test_dated_anthropic_id_falls_to_default_max_output_tokens() -> None:
     # An operator-pinned dated id misses the alias table and resolves through
     # _DEFAULT to the sonnet/haiku-class 32000, never an unspecified or zero value.
-    assert model_info(ANTHROPIC, "claude-opus-4-8").max_output_tokens == 32_000
-    assert model_info(ANTHROPIC, "claude-sonnet-4-6").max_output_tokens == 32_000
+    assert model_info(ANTHROPIC, "claude-opus-4-8-20260601").max_output_tokens == 32_000
+    assert model_info(ANTHROPIC, "claude-sonnet-4-6-20260601").max_output_tokens == 32_000
+    # The undated major.minor ids (the tier-floor pins) ARE in the table, so
+    # opus keeps its 64k there.
+    assert model_info(ANTHROPIC, "claude-opus-4-8").max_output_tokens == 64_000
 
 
 def test_model_info_defaults_to_vision_capable() -> None:

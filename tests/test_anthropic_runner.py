@@ -93,6 +93,42 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_1m_alias_sends_stripped_model_and_beta_header(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        text("done"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-opus-4-8[1m]",
+                                  client_factory=lambda: fake)
+    async for _ev in runner.run(_inv(tmp_path, event_log=InMemoryEventLog())):
+        pass
+
+    call = fake.messages.calls[0]
+    # The raw API rejects the bracketed alias: cli_model strips it to the wire
+    # id and the context-1m beta header requests the 1M window.
+    assert call["model"] == "claude-opus-4-8"
+    assert call["extra_headers"]["anthropic-beta"] == "context-1m-2025-08-07"
+
+
+@pytest.mark.anyio
+async def test_plain_model_sends_no_beta_header(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        text("done"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ev in runner.run(_inv(tmp_path, event_log=InMemoryEventLog())):
+        pass
+
+    call = fake.messages.calls[0]
+    assert call["model"] == "claude-sonnet-4-6"
+    assert "extra_headers" not in call
+
+
+@pytest.mark.anyio
 async def test_dispatches_read_file_then_completes(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     (tmp_path / "data.txt").write_text("payload")

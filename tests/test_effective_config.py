@@ -17,7 +17,7 @@ def test_floor_only_populates_all_tiers(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
     eff = load_effective_config(project_root=None, control_root=None)
     cfg = eff.config
-    assert cfg.tiers["high"]["anthropic"] == "opus"
+    assert cfg.tiers["high"]["anthropic"] == "claude-opus-4-8[1m]"
     assert cfg.tiers["high"]["openai"] == "gpt-5.5"
     # Floor provenance points at provider code.
     assert "provider code" in str(eff.provenance[("tiers", "high", "anthropic")].file)

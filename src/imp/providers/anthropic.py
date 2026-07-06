@@ -507,7 +507,11 @@ class AnthropicAgentRunner:
         from imp.engine.state import JsonlEventLog
         elog = invocation.event_log or JsonlEventLog(invocation.events_path)
         aid = invocation.agent_id or "step:unnamed"
-        max_output_tokens = model_info(ANTHROPIC, self.model).max_output_tokens
+        minfo = model_info(ANTHROPIC, self.model)
+        max_output_tokens = minfo.max_output_tokens
+        # The wire model id: catalog aliases like "claude-opus-4-8[1m]" carry a
+        # cli_model that strips the bracket (the raw API rejects that form).
+        wire_model = minfo.cli_model or self.model
 
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
@@ -653,6 +657,11 @@ class AnthropicAgentRunner:
 
         web_specs = anthropic_web_tool_specs(invocation.agent_def)
         web_headers = anthropic_beta_headers(invocation.agent_def)
+        # Catalog beta opt-ins (e.g. context-1m) join any web-tool beta header.
+        if minfo.betas:
+            prior = web_headers.get("anthropic-beta")
+            joined = ",".join(minfo.betas)
+            web_headers["anthropic-beta"] = f"{prior},{joined}" if prior else joined
 
         # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
         # None until the threshold crosses, then "instruction_sent" for the one
@@ -670,7 +679,7 @@ class AnthropicAgentRunner:
             anthropic_tools.extend(web_specs)
             client = self._get_client()
             create_kwargs: dict[str, Any] = dict(
-                model=self.model,
+                model=wire_model,
                 system=invocation.system_prompt,
                 tools=anthropic_tools,
                 messages=[
@@ -944,10 +953,15 @@ class AnthropicProvider:
         )
 
 
-# Tier→model floor (spec 2026-06-08-config-file-split §2). Bare aliases track
-# "latest" so the floor never goes stale; an operator can pin a dated model via
-# any config layer.
-TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus"}
+# Tier→model floor (spec 2026-06-08-config-file-split §2). Pinned to undated
+# major.minor ids: they track dated snapshots of that minor but never jump to a
+# new major/minor release (a bare "sonnet" alias would silently upgrade). An
+# operator can still override per tier via any config layer.
+TIER_DEFAULTS: dict[str, str] = {
+    "low": "claude-haiku-4-5",
+    "medium": "claude-sonnet-4-6",
+    "high": "claude-opus-4-8[1m]",
+}
 ENV_VAR: str | None = "ANTHROPIC_API_KEY"
 
 

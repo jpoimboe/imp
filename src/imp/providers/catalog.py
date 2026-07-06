@@ -4,10 +4,10 @@ Each provider owns its own alias→metadata table here (kept in the providers
 layer, never the renderer — see docs/imp-invariants.md "Layering invariants").
 `window` is a static fallback; for Claude Code the live SDK `rawMaxTokens`
 supersedes it once a turn completes. `cli_model` overrides the alias passed to
-the CLI/SDK when the alias is not a real model id (e.g. `opus-1m` →
-`claude-opus-4-8[1m]`, the bracketed model-id that enables the 1M context
-window under both subscription and API-key auth).
-`betas` remains as a generic per-model opt-in field, currently unused.
+the CLI/SDK when the alias is not the wire model id (e.g. the raw Anthropic API
+rejects the bracketed `claude-opus-4-8[1m]` form, so its entry sends
+`claude-opus-4-8` and requests the 1M window via `betas`, the anthropic-beta
+header opt-ins).
 
 Hand-maintained: no provider exposes context-window size via an endpoint.
 """
@@ -35,21 +35,35 @@ class ModelInfo:
 # fallback uses the separate `_WINDOW_TOKENS` substring map further down. Keep
 # the two in agreement when editing window values.
 CLAUDE_CODE: dict[str, ModelInfo] = {
+    # Undated major.minor ids used by TIER_DEFAULTS; the bare aliases below
+    # remain resolvable for operator config layers that still use them.
+    "claude-haiku-4-5": ModelInfo(window=200_000),
+    "claude-sonnet-4-6": ModelInfo(window=200_000),
+    "claude-opus-4-8": ModelInfo(window=200_000),
+    # The bracketed model-id form is a real CLI model id that requests the 1M
+    # window under both subscription (OAuth) and API-key auth. A `betas` opt-in
+    # would only work for API-key auth: under subscription auth claude-p
+    # silently drops the beta (window falls back to 200k) and warns to stderr
+    # every request ("Custom betas are only available for API key users").
+    "claude-opus-4-8[1m]": ModelInfo(window=1_000_000),
     "haiku": ModelInfo(window=200_000),
     "sonnet": ModelInfo(window=200_000),
     "opus": ModelInfo(window=200_000),
-    # opus-1m requests the 1M window via the bracketed model-id form, which
-    # both subscription (OAuth) and API-key auth honor. The earlier `betas`
-    # opt-in only worked for API-key auth: under subscription auth claude-p
-    # silently dropped the beta (window fell back to 200k) and warned to stderr
-    # every request ("Custom betas are only available for API key users").
-    "opus-1m": ModelInfo(
-        window=1_000_000,
-        cli_model="claude-opus-4-8[1m]",
-    ),
 }
 
 ANTHROPIC: dict[str, ModelInfo] = {
+    # The raw API rejects the bracketed form, so cli_model strips it and the
+    # context-1m beta header requests the 1M window instead (this provider is
+    # API-key-only, where custom betas are honored — unlike claude_code above).
+    "claude-opus-4-8[1m]": ModelInfo(
+        window=1_000_000,
+        max_output_tokens=64_000,
+        cli_model="claude-opus-4-8",
+        betas=("context-1m-2025-08-07",),
+    ),
+    "claude-haiku-4-5": ModelInfo(window=200_000, max_output_tokens=32_000),
+    "claude-sonnet-4-6": ModelInfo(window=200_000, max_output_tokens=32_000),
+    "claude-opus-4-8": ModelInfo(window=200_000, max_output_tokens=64_000),
     "haiku": ModelInfo(window=200_000, max_output_tokens=32_000),
     "sonnet": ModelInfo(window=200_000, max_output_tokens=32_000),
     "opus": ModelInfo(window=200_000, max_output_tokens=64_000),
@@ -90,11 +104,11 @@ def model_supports_vision(provider_name: str, model_name: str) -> bool:
 
 
 # Provider-agnostic substring fallback for the renderer: an arbitrary model id
-# string (alias or dated id) maps to a window. Ordered longest-token-first so
-# "opus-1m" matches before "opus". This is the renderer's ONLY window source
-# (the old _CONTEXT_WINDOWS dict that used to live in live_driver.py).
+# string (alias or dated id) maps to a window. Ordered so the "[1m]" marker
+# wins over the base-model tokens it always accompanies. This is the renderer's
+# ONLY window source (the old _CONTEXT_WINDOWS dict from live_driver.py).
 _WINDOW_TOKENS: tuple[tuple[str, int], ...] = (
-    ("opus-1m", 1_000_000),
+    ("[1m]", 1_000_000),
     ("haiku", 200_000),
     ("sonnet", 200_000),
     ("opus", 200_000),

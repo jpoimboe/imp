@@ -2618,7 +2618,13 @@ class ClaudeCodeProvider:
         )
 
 
-TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus-1m"}
+# Pinned to undated major.minor ids: they track dated snapshots of that minor
+# but never jump to a new major/minor release (a bare "sonnet" alias would).
+TIER_DEFAULTS: dict[str, str] = {
+    "low": "claude-haiku-4-5",
+    "medium": "claude-sonnet-4-6",
+    "high": "claude-opus-4-8[1m]",
+}
 ENV_VAR: str | None = None  # CLI-authenticated (claude login); no env var
 
 

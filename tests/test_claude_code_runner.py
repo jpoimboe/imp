@@ -2810,7 +2810,7 @@ async def test_fresh_run_cleans_config_dir_on_interrupt(
 
 
 def test_build_options_requests_1m_via_model_id_for_opus_1m(tmp_path: Path) -> None:
-    runner = ClaudeCodeAgentRunner(model_name="opus-1m")
+    runner = ClaudeCodeAgentRunner(model_name="claude-opus-4-8[1m]")
     opts = runner._build_options(_inv(tmp_path), mcp_server=object(), tool_names=[])
     # No custom beta (subscription auth drops it + warns); the 1M window is
     # requested via the bracketed model-id, which both auth modes honor.
@@ -2827,7 +2827,7 @@ def test_build_options_plain_opus_has_no_betas(tmp_path: Path) -> None:
 
 def test_high_tier_floor_defaults_to_opus_1m() -> None:
     from imp.providers.claude_code import TIER_DEFAULTS
-    assert TIER_DEFAULTS["high"] == "opus-1m"
+    assert TIER_DEFAULTS["high"] == "claude-opus-4-8[1m]"
 
 
 @pytest.mark.anyio
@@ -2851,7 +2851,8 @@ async def test_llm_response_enriched_with_context_usage(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(model_name="opus-1m", client_factory=factory)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-opus-4-8[1m]", client_factory=factory)
     async for _ev in runner.run(inv):
         pass
 
@@ -2877,7 +2878,8 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    runner = ClaudeCodeAgentRunner(model_name="opus-1m", client_factory=factory)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-opus-4-8[1m]", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
     assert [e["type"] for e in events] == ["agent_output"]
