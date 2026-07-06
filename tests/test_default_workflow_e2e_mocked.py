@@ -512,10 +512,12 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
 
 @pytest.mark.anyio
 async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None:
-    """finalize solicits the human by ending its turn with a bare question (no
-    complete_step, no tool); the attended handler delivers the reply as the next
-    user message, then it completes with decision=merge. Positioned directly at
-    finalize so only the finalize -> merge path runs."""
+    """finalize ends its turn with a bare question (no complete_step, no tool).
+    The FIRST bare turn-end is nudged (finalize is schema-bearing, dialogue:false);
+    a WAITING reply bare-ends again and the attended handler then solicits,
+    delivering the human reply as the next user message, after which it completes
+    with decision=merge. Positioned directly at finalize so only the finalize ->
+    merge path runs."""
     change = _seed_default_workflow(tmp_path)
     st = State.load(change.state_dir)
     st.step = "finalize"
@@ -526,6 +528,10 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
         text("Summary: stub change. Merge or rework?"),
         stop_reason="end_turn",
     )
+    waiting_response = response(
+        text("WAITING"),
+        stop_reason="end_turn",
+    )
     merge_response = response(
         tool_use("c1", "complete_step", {
             "outcome": "ok", "status": "Success", "decision": "merge", "comments": "user approved",
@@ -534,7 +540,8 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
         stop_reason="tool_use",
     )
     fake = FakeAsyncAnthropic(
-        [solicit_response, merge_response], default_response=_anthropic_step_aware)
+        [solicit_response, waiting_response, merge_response],
+        default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "anthropic", env_check=lambda: True,

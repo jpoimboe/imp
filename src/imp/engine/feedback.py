@@ -19,6 +19,14 @@ COMPLETION_BACKSTOP = (
     "in."
 )
 
+# Bare-turn-end nudge; WAITING offered first so an uncertain model isn't tilted to complete early.
+COMPLETION_NUDGE = (
+    "Your turn ended without `complete_step`. If you are waiting on the human to "
+    "reply, respond with only the word `WAITING`. If the step is done, call "
+    "`complete_step` now with your structured result. Do not repeat or restate "
+    "anything you have already said."
+)
+
 
 def apply_completion_backstop(feedback: str | None, *, has_schema: bool) -> str | None:
     """Append the backstop when feedback is truthy and has_schema, else return it unchanged."""

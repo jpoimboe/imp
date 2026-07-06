@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imp.engine.feedback import (
     COMPLETION_BACKSTOP,
+    COMPLETION_NUDGE,
     apply_completion_backstop,
     format_clean_tree_feedback,
     format_script_feedback,
@@ -131,3 +132,12 @@ def test_clean_tree_feedback_truncates_a_huge_path_list() -> None:
     assert "file0.txt" in out       # head kept
     assert "file1999.txt" in out    # tail kept
     assert "truncated" in out       # marker present
+
+
+def test_completion_nudge_wording_is_waiting_first_and_names_the_tool() -> None:
+    text = COMPLETION_NUDGE
+    assert "WAITING" in text
+    assert "`complete_step`" in text
+    # rindex skips the "ended without `complete_step`" preamble, targeting the option clause.
+    assert text.index("WAITING") < text.rindex("`complete_step`")
+    assert "restate" in text.lower() or "repeat" in text.lower()

@@ -12,6 +12,7 @@ from imp.engine.completion import (
     build_inline_solicit,
     completion_instruction,
 )
+from imp.engine.feedback import COMPLETION_NUDGE
 from imp.engine.types import OutputField, OutputSchema, SourceLoc
 
 
@@ -225,3 +226,170 @@ async def test_inline_bare_turn_end_does_not_restamp_gate(
     with pytest.raises(AwaitingUserInput) as exc_info:
         await inline("still prose")
     assert exc_info.value.interrupt is False
+
+
+def test_build_continuation_fn_has_dialogue_and_has_schema_params() -> None:
+    params = inspect.signature(build_continuation_fn).parameters
+    assert "dialogue" in params
+    assert "has_schema" in params
+
+
+def test_dialogue_and_has_schema_do_not_change_headless_park() -> None:
+    # dialogue/has_schema do not alter turn-end behavior on their own:
+    # a headless top-level bare turn-end still parks carrying the last text.
+    fn = build_continuation_fn(dialogue=True, has_schema=True)
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("the final question")
+    assert exc_info.value.prompt == "the final question"
+
+
+def test_first_bare_turn_end_returns_the_nudge_string() -> None:
+    # A schema-bearing, non-dialogue bare turn-end returns the single-sourced
+    # nudge (re-queried by the provider) instead of parking. Without the nudge
+    # arm this call would RAISE AwaitingUserInput, so the return itself is the
+    # falsifiable consequence.
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        event_log=log, agent_id="a1", has_schema=True, dialogue=False)
+    assert fn("the real question") == COMPLETION_NUDGE
+
+
+def test_nudge_emits_completion_nudge_event_with_message() -> None:
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        event_log=log, agent_id="a1", has_schema=True, dialogue=False)
+    fn("prose without complete_step")
+    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    assert len(nudges) == 1
+    assert nudges[0]["agent_id"] == "a1"
+    assert nudges[0]["payload"] == {"message": COMPLETION_NUDGE}
+
+
+def test_second_bare_turn_end_falls_through_to_park_no_second_nudge() -> None:
+    # After one nudge, a non-completion reply (another bare turn-end) is NOT
+    # re-nudged: it parks (headless, no channel) exactly as today.
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        event_log=log, agent_id="a1", has_schema=True, dialogue=False)
+    assert fn("the real question") == COMPLETION_NUDGE
+    with pytest.raises(AwaitingUserInput):
+        fn("WAITING")
+    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    assert len(nudges) == 1
+
+
+def test_park_after_nudge_carries_pre_nudge_text_not_reply() -> None:
+    # Park fidelity: the human at the gate must see the ORIGINAL question, not
+    # the post-nudge reply. Without the stash, the prompt would be "WAITING".
+    fn = build_continuation_fn(has_schema=True, dialogue=False)
+    assert fn("the real question") == COMPLETION_NUDGE
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("WAITING")
+    assert exc_info.value.prompt == "the real question"
+
+
+def test_dialogue_true_never_nudges_and_parks_immediately() -> None:
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        event_log=log, agent_id="a1", has_schema=True, dialogue=True)
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("a question")
+    assert exc_info.value.prompt == "a question"
+    assert not any(e["type"] == "completion_nudge" for e in log.events)
+
+
+def test_no_schema_never_nudges_and_parks_immediately() -> None:
+    # has_schema=False is the guard that keeps subagents / degenerate schema-less
+    # top-level agents untouched: no nudge, park carrying the last text.
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        event_log=log, agent_id="a1", has_schema=False, dialogue=False)
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("a question")
+    assert exc_info.value.prompt == "a question"
+    assert not any(e["type"] == "completion_nudge" for e in log.events)
+
+
+def test_pending_interject_wins_over_nudge() -> None:
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("stop and reconsider")
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        coordinator=coord, event_log=log, agent_id="a1",
+        has_schema=True, dialogue=False)
+    assert fn("which database?") == "stop and reconsider"
+    assert not any(e["type"] == "completion_nudge" for e in log.events)
+
+
+@pytest.mark.anyio
+async def test_attended_first_yield_nudges_then_solicits(
+    anyio_backend: str,
+) -> None:
+    # Attended, schema-bearing, non-dialogue: Part 2 replaces the old
+    # "attended NEVER nudges" contract with a one-shot nudge. The FIRST bare
+    # turn-end returns the nudge string (not an immediate inline solicit); a
+    # subsequent bare turn-end then solicits the attended human exactly as today.
+    log = _RecordingLog()
+
+    async def reply_fn(_q: str) -> str:
+        return "use postgres"
+
+    fn = build_continuation_fn(
+        user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
+        event_log=log, agent_id="a1", non_interactive=False,
+        has_schema=True, dialogue=False)
+    assert fn("which database?") == COMPLETION_NUDGE   # nudge, not a solicit
+    out = fn("WAITING")                                # now solicits inline
+    assert inspect.isawaitable(out)
+    assert await out == "use postgres"
+    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    assert len(nudges) == 1
+
+
+@pytest.mark.anyio
+async def test_two_consecutive_yields_each_get_exactly_one_nudge(
+    anyio_backend: str,
+) -> None:
+    # question -> nudge -> channel reply (run continues) -> later question ->
+    # a FRESH nudge. Without clearing the nudged bit after the solicited reply,
+    # the second yield would solicit instead of returning the nudge string.
+    log = _RecordingLog()
+
+    async def channel(_q: str) -> str:
+        return "carry on"
+
+    fn = build_continuation_fn(
+        user_input_fn=channel, coordinator=InterruptCoordinator(),
+        event_log=log, agent_id="a1", non_interactive=True,
+        has_schema=True, dialogue=False)
+    # Yield 1
+    assert fn("question one") == COMPLETION_NUDGE
+    out = fn("WAITING")            # falls through to channel solicit
+    assert inspect.isawaitable(out)
+    assert await out == "carry on"
+    # Yield 2 — a later, separate bare turn-end
+    assert fn("question two") == COMPLETION_NUDGE
+    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    assert len(nudges) == 2
+
+
+def test_interject_after_nudge_clears_bit_so_later_yield_re_nudges() -> None:
+    # An interject that arrives AFTER a nudge has fired must clear the one-shot
+    # bit, so a later separate yield gets its OWN fresh nudge. Without the
+    # `nudged = False` on the interject arm, yield 2 would fall through to a park
+    # carrying the stale pre-nudge text instead of re-nudging.
+    coord = InterruptCoordinator()
+    log = _RecordingLog()
+    fn = build_continuation_fn(
+        coordinator=coord, event_log=log, agent_id="a1",
+        has_schema=True, dialogue=False)
+    # Yield 1: nudge fires.
+    assert fn("question one") == COMPLETION_NUDGE
+    # A human types a mid-run interject; the next bare turn-end returns it and
+    # clears the nudged bit.
+    coord.enqueue_interject("actually, do X instead")
+    assert fn("WAITING") == "actually, do X instead"
+    # Yield 2: a later separate bare turn-end must get a FRESH nudge, not a park.
+    assert fn("question two") == COMPLETION_NUDGE
+    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    assert len(nudges) == 2

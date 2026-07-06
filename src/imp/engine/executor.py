@@ -1089,6 +1089,7 @@ async def _route_agent(
             # the spawn hangs silently until the next watchdog kill.
             initial_messages=initial, is_resume=keep,
             test_gates=test_gates, non_interactive=non_interactive,
+            dialogue=step.dialogue,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
             project_facts=project_facts, guidance=guidance,
@@ -1280,6 +1281,7 @@ async def _run_agent_invocation(
     balance_on_resume: bool = False,
     test_gates: TestGates | None = None,
     non_interactive: bool = False,
+    dialogue: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
     project_facts: dict[str, str] | None = None,
@@ -1391,6 +1393,7 @@ async def _run_agent_invocation(
         log=log,
         test_gates=test_gates,
         non_interactive=non_interactive,
+        dialogue=dialogue,
         sandbox_policy=sandbox_policy,
         checkpoint_threshold=state.checkpoint_threshold,
         inject_outcome_field=True,

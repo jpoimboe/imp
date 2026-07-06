@@ -1088,3 +1088,18 @@ def test_imp_flat_is_not_bundled() -> None:
     names = bundled_workflow_names()
     assert "imp-flat" not in names
     assert "imp" in names        # the surviving default workflow still discovers
+
+
+def test_front_door_declares_dialogue_and_no_other_step_does() -> None:
+    from imp.assets import bundled_workflow_dir, bundled_workflow_names
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["front-door"].dialogue is True
+    # front-door is the ONLY step across ALL bundled workflows that opts in.
+    all_steps = [
+        s
+        for name in bundled_workflow_names()
+        for s in load_workflow(bundled_workflow_dir(name)).flat_steps()
+    ]
+    others = [s.name for s in all_steps if s.name != "front-door" and s.dialogue]
+    assert others == []
