@@ -136,10 +136,16 @@ async def test_relay_replayed_gate_does_not_touch_lease(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         socket.broadcast({"type": "awaiting_user_input",
                           "payload": {"prompt": "old"}, "_replay": True})
-        await anyio.sleep(0.1)             # several poll gaps
+        # Event-driven: wait until the replayed frame reaches the sink (proves the
+        # relay ingested it, so _awaiting is finalized), then give the poll loop
+        # several gaps in which a wrongly-set _awaiting would drop the lease.
+        with anyio.fail_after(5):
+            while not any(
+                    s.get("payload", {}).get("prompt") == "old" for s in sink):
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.1)             # several poll gaps for any wrong lease-drop
         assert socket.leased_count == 1    # lease untouched
         assert socket.attached_count == 1
-        assert any(s.get("payload", {}).get("prompt") == "old" for s in sink)
         tg.cancel_scope.cancel()
     await socket.close()
 
