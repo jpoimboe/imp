@@ -1014,8 +1014,11 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         assert token in task_msg, token
     assert inv.continuation_fn is not None
     from imp.engine.awaiting_user_input import AwaitingUserInput
-    # Headless top-level step: the bare turn-end IS the yield, so it parks
-    # immediately (no nudge), not agent_incomplete.
+    from imp.engine.feedback import COMPLETION_NUDGE
+    # Headless top-level schema-bearing step: the FIRST bare turn-end is nudged
+    # once (asked to complete or confirm WAITING); a subsequent bare turn-end
+    # then parks via AwaitingUserInput carrying the original text.
+    assert inv.continuation_fn("prose") == COMPLETION_NUDGE
     with pytest.raises(AwaitingUserInput):
         inv.continuation_fn("prose")
 

@@ -11,6 +11,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from imp.engine.feedback import COMPLETION_NUDGE
 from imp.engine.types import OutputSchema
 
 
@@ -130,22 +131,30 @@ def build_continuation_fn(
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten
     complete_step is indistinguishable, so resolution turns on WHO can take the
-    yield, never on guessing intent:
+    yield and asks the agent ONCE, never on guessing intent:
 
       1. A pending interject (a line the human typed mid-run) satisfies the
-         yield — return it as the next user message.
-      2. Attended (user_input_fn present and not non_interactive): a human is
-         here, so SOLICIT inline and let them decide; the reply becomes the next
-         user message. NEVER nudges — the bare turn-end IS the yield. The
-         inactivity watchdog is frozen for the blocked await; a human who
-         detaches mid-turn is handled by the channel itself (it raises
-         AwaitingUserInput when no client is attached).
-      3. No live human (headless top-level): the bare turn-end IS the yield (a
-         question the human sees on attach/resume), indistinguishable from a
-         forgotten complete_step, so NEVER nudged: solicit the channel if
-         present (delivers a --message, else pauses via AwaitingUserInput from
-         the channel), or with no channel raise AwaitingUserInput carrying the
-         agent's last text to park the run.
+         yield — return it as the next user message (and clears the one-shot
+         nudge bit so a later yield gets its own nudge).
+      2. One-shot disambiguation nudge (schema-bearing, non-dialogue agents
+         only): the FIRST bare turn-end of a yield returns COMPLETION_NUDGE as
+         the next user message — asking the agent to call complete_step or reply
+         WAITING — and emits a completion_nudge event. Fires at most once per
+         yield; behavior keys only on whether the next turn calls complete_step.
+      3. Already nudged, or nudge not applicable (dialogue steps, or schema-less
+         agents — a true subagent's bare turn-end is its deliverable and never
+         reaches this handler): today's yield behavior, carrying the stashed pre-nudge
+         text so the human sees the original question, not the post-nudge reply:
+           a. Attended (user_input_fn present and not non_interactive): a human
+              is here, so SOLICIT inline and let them decide; the reply becomes
+              the next user message. The inactivity watchdog is frozen for the
+              blocked await; a human who detaches mid-turn is handled by the
+              channel itself (it raises AwaitingUserInput when no client is
+              attached).
+           b. No live human (headless top-level): solicit the channel if present
+              (delivers a --message, else pauses via AwaitingUserInput from the
+              channel), or with no channel raise AwaitingUserInput carrying the
+              text to park the run.
     """
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
@@ -158,22 +167,45 @@ def build_continuation_fn(
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
                              payload={"prompt": ""})
 
+    def _emit_nudge() -> None:
+        if event_log is not None:
+            event_log.append(agent_id=agent_id, type="completion_nudge",
+                             payload={"message": COMPLETION_NUDGE})
+
+    nudged = False
+    pre_nudge_text = ""
+
     def _cont(last_text: str) -> str | Awaitable[str]:
+        nonlocal nudged, pre_nudge_text
         if coordinator is not None:
             pending: str | None = coordinator.drain_interject()
             if pending is not None:
+                nudged = False
                 return pending
+        # One-shot disambiguation nudge: a schema-bearing, non-dialogue agent's
+        # bare turn-end is indistinguishable from a forgotten complete_step, so
+        # ask ONCE (WAITING or complete_step). Behavior keys only on whether the
+        # NEXT turn calls complete_step; the returned string is re-queried as the
+        # next user message and the marker event is emitted alongside it.
+        if has_schema and not dialogue and not nudged:
+            nudged = True
+            pre_nudge_text = last_text
+            _emit_nudge()
+            return COMPLETION_NUDGE
+        # Already nudged (or nudge not applicable): today's behavior. When we
+        # nudged, the human/park must see the ORIGINAL question, not the
+        # post-nudge reply, so pass the stashed pre-nudge text. Clear the bit so
+        # a later separate yield in this session gets its own single nudge.
+        park_text = pre_nudge_text if nudged else last_text
+        nudged = False
         if user_input_fn is not None and not non_interactive:
-            return inline(last_text)
-        # Headless top-level: a bare turn-end IS the yield — a question the human
-        # will see on attach/resume. imp cannot tell it from a forgotten
-        # complete_step, so it never nudges: solicit the channel if one is
-        # present, else park. Synchronous raise (not the async inline tail)
-        # because callers invoke _cont without awaiting and rely on the raise to
-        # pause the run.
+            return inline(park_text)
+        # Headless top-level: solicit the channel if present, else park.
+        # Synchronous raise (not the async inline tail) because callers invoke
+        # _cont without awaiting and rely on the raise to pause the run.
         if user_input_fn is not None:
-            return inline(last_text)
+            return inline(park_text)
         _emit_awaiting()
-        raise AwaitingUserInput(last_text)
+        raise AwaitingUserInput(park_text)
 
     return _cont
