@@ -124,6 +124,8 @@ def build_continuation_fn(
     event_log: Any = None,
     agent_id: str | None = None,
     non_interactive: bool = False,
+    dialogue: bool = False,
+    has_schema: bool = False,
 ) -> Callable[[str], str | Awaitable[str]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten

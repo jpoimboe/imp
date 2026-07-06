@@ -225,3 +225,18 @@ async def test_inline_bare_turn_end_does_not_restamp_gate(
     with pytest.raises(AwaitingUserInput) as exc_info:
         await inline("still prose")
     assert exc_info.value.interrupt is False
+
+
+def test_build_continuation_fn_has_dialogue_and_has_schema_params() -> None:
+    params = inspect.signature(build_continuation_fn).parameters
+    assert "dialogue" in params
+    assert "has_schema" in params
+
+
+def test_dialogue_and_has_schema_do_not_change_headless_park() -> None:
+    # dialogue/has_schema do not alter turn-end behavior on their own:
+    # a headless top-level bare turn-end still parks carrying the last text.
+    fn = build_continuation_fn(dialogue=True, has_schema=True)
+    with pytest.raises(AwaitingUserInput) as exc_info:
+        fn("the final question")
+    assert exc_info.value.prompt == "the final question"
