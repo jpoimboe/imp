@@ -35,7 +35,6 @@ class RelaySupervisor:
         self._poll_gap = poll_gap
         self._subscriptions = subscriptions
         self._running: set[str] = set()
-        self._gated: set[str] = set()
 
     async def run(self) -> None:
         """Poll the directory forever, running one relay per resident change. Cancel
@@ -45,13 +44,8 @@ class RelaySupervisor:
             while True:
                 try:
                     resident = resident_session_ids(self._control_root)
-                    # A gated change that has since hibernated (left the directory)
-                    # is eligible again, so a reply that rehydrates it re-attaches a
-                    # relay.
-                    self._gated &= resident
                     for change_id in resident:
-                        if (change_id not in self._running
-                                and change_id not in self._gated):
+                        if change_id not in self._running:
                             self._running.add(change_id)
                             tg.start_soon(self._relay_one, change_id)
                     failing = False
@@ -87,9 +81,4 @@ class RelaySupervisor:
         except OSError:
             pass
         finally:
-            # Latch and unregister run together with no await between them, so a
-            # re-attach poll cannot slip in before the latch is set. A latch on a
-            # socket-dropped (non-resident) change is harmless: run() prunes it.
-            if relay.gated:
-                self._gated.add(change_id)
             self._running.discard(change_id)
