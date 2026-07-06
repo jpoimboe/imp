@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -170,13 +169,9 @@ async def test_supervisor_reattaches_after_relay_exits(
 
 
 @pytest.mark.anyio
-async def test_supervisor_does_not_reattach_across_a_gate(
-    tmp_path: Path,
-) -> None:
-    # The relay detaches at the awaiting_user_input gate so the session can
-    # hibernate (subscription does not pin residency). Even while the socket stays
-    # live, the supervisor must NOT re-attach across that gate — re-attaching would
-    # pin the change resident and it could never hibernate.
+async def test_supervisor_keeps_relaying_across_a_gate(tmp_path: Path) -> None:
+    # No latch: after a gate event, a subsequent live event on a still-resident
+    # session still reaches the sink because the relay never detached.
     cid = "gated-one"
     _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
@@ -192,55 +187,48 @@ async def test_supervisor_does_not_reattach_across_a_gate(
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
         sock.broadcast(
-            {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
-        # Relay forwards the gate event then detaches → attached_count drops to 0.
+            {"id": "g1", "type": "awaiting_user_input", "payload": {"prompt": "?"}})
+        sock.broadcast(
+            {"id": "m1", "type": "user_message", "payload": {"text": "reply"}})
         with anyio.fail_after(5):
-            while sock.attached_count != 0:
+            while len(sink) < 2:
                 await anyio.sleep(0.02)
-        # Several poll cycles (0.2 s ≫ 0.02 s poll); the supervisor must NOT re-attach.
-        await anyio.sleep(0.2)
-        assert sock.attached_count == 0
+        assert sock.attached_count == 1   # never detached across the gate
         tg.cancel_scope.cancel()
     await sock.close()
-    assert sink[-1]["type"] == "awaiting_user_input"
+    assert [s["type"] for s in sink] == ["awaiting_user_input", "user_message"]
 
 
 @pytest.mark.anyio
-async def test_supervisor_reattaches_after_rehydration(
+async def test_supervisor_subscribed_session_drops_lease_at_gate(
     tmp_path: Path,
 ) -> None:
-    # After a gate detach the change hibernates (drops out of the directory); a later
-    # reply rehydrates it (reappears). Gate avoidance suppresses re-attach only WHILE
-    # the change stays continuously resident — once it goes non-resident the latch
-    # clears, so the supervisor re-attaches on rehydration.
-    cid = "rehydrated-one"
+    from imp.remote.daemon.subscriptions import Subscriptions
+
+    # A subscribed-only session still hibernates at the gate: the relay drops its
+    # lease (leased_count -> 0) so the server's unleased path would fire, while the
+    # relay stays attached for the session's residency.
+    cid = "subbed-gate"
     _make_home(tmp_path, cid)
     sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
     await sock.open()
-    sink: list[dict[str, Any]] = []
+    subs = Subscriptions()
+    subs.add(cid)
     sup = RelaySupervisor(
-        control_root=tmp_path, sink=sink.append, events=("all",),
-        title_for=lambda _cid: "T", poll_gap=0.02)
+        control_root=tmp_path, sink=lambda _e: None, events=("all",),
+        title_for=lambda _c: "T", poll_gap=0.02, subscriptions=subs)
     async with anyio.create_task_group() as tg:
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
         with anyio.fail_after(5):
-            while sock.attached_count == 0:
+            while sock.leased_count == 0:
                 await anyio.sleep(0.02)
         sock.broadcast(
-            {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+            {"type": "awaiting_user_input", "payload": {"prompt": "?"}})
         with anyio.fail_after(5):
-            while sock.attached_count != 0:
+            while sock.leased_count != 0:
                 await anyio.sleep(0.02)
-        # Hibernate: remove the change home so it leaves the directory, clearing
-        # the gate latch (the session socket stays live throughout).
-        shutil.rmtree(tmp_path / ".imp" / "changes" / cid)
-        await anyio.sleep(0.1)
-        # Rehydrate: recreate the home → it reappears → the supervisor re-attaches.
-        _make_home(tmp_path, cid)
-        with anyio.fail_after(5):
-            while sock.attached_count == 0:
-                await anyio.sleep(0.02)
+        assert sock.attached_count == 1   # dropped its lease, kept its attachment
         tg.cancel_scope.cancel()
     await sock.close()
 

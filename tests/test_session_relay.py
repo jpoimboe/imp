@@ -46,74 +46,102 @@ async def test_relay_forwards_curated_events_with_change_context(
 
 
 @pytest.mark.anyio
-async def test_relay_detaches_at_gate_so_session_can_hibernate(
-    tmp_path: Path,
-) -> None:
+async def test_relay_stays_attached_at_gate_and_drops_lease(tmp_path: Path) -> None:
+    # A live gate drops the lease but NOT the attachment: the relay stays attached
+    # for the session's whole residency and reflects awaiting-ness in its lease.
     sock = str(tmp_path / "s.sock")
     socket = SessionSocket(sock)
     await socket.open()
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title="T",
-        events=("all",), sink=sink.append)
+        socket_path=sock, change_id="cid", title="T", events=("all",),
+        sink=sink.append, is_subscribed=lambda: True, lease_poll_gap=0.02)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
-
-        async def _emit_gate_once_attached() -> None:
-            with anyio.fail_after(5):
-                while socket.attached_count == 0:
-                    await anyio.sleep(0.02)
-            socket.broadcast(
-                {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
-
-        tg.start_soon(_emit_gate_once_attached)
-        # run() returns when the relay forwards the gate event and detaches; a relay
-        # that pinned residency would never return and this would time out.
+        tg.start_soon(relay.run)
         with anyio.fail_after(5):
-            await relay.run()
-        assert sink[-1]["type"] == "awaiting_user_input"
-        # Detached → the socket sees zero clients, so a subscribed change is not
-        # pinned resident and can hibernate at its gate.
-        with anyio.fail_after(5):
-            while socket.attached_count != 0:
+            while socket.leased_count == 0:
                 await anyio.sleep(0.02)
+        assert socket.attached_count == 1
+        socket.broadcast(
+            {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+        # Gate drops the lease within one poll gap.
+        with anyio.fail_after(5):
+            while socket.leased_count != 0:
+                await anyio.sleep(0.02)
+        # ...but the relay is still attached (would have been 0 under detach-at-gate).
+        assert socket.attached_count == 1
+        assert sink[-1]["type"] == "awaiting_user_input"
         tg.cancel_scope.cancel()
     await socket.close()
 
 
 @pytest.mark.anyio
-async def test_relay_does_not_detach_on_replayed_gate(tmp_path: Path) -> None:
+async def test_relay_awaiting_then_live_events_reach_sink_and_toggle_lease(
+    tmp_path: Path,
+) -> None:
+    # Incident regression: a live gate followed by two live events all reach the
+    # sink, and a set-lease false / set-lease true pair crosses the wire
+    # (leased_count 1 -> 0 -> 1).
     sock = str(tmp_path / "s.sock")
     socket = SessionSocket(sock)
     await socket.open()
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title="T",
-        events=("all",), sink=sink.append)
+        socket_path=sock, change_id="cid", title="T", events=("all",),
+        sink=sink.append, is_subscribed=lambda: True, lease_poll_gap=0.02)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-
         with anyio.fail_after(5):
-            while socket.attached_count == 0:
+            while socket.leased_count == 0:
                 await anyio.sleep(0.02)
-        # Replayed (marked) gate: relay must NOT detach on it.
-        socket.broadcast({"type": "awaiting_user_input",
-                          "payload": {"prompt": "old"}, "_replay": True})
-        await anyio.sleep(0.1)
-        assert any(s.get("payload", {}).get("prompt") == "old" for s in sink)
-        assert socket.attached_count == 1   # still attached
-        assert relay.gated is False
-        # Live (unmarked) gate detaches the relay.
-        socket.broadcast({"type": "awaiting_user_input",
-                          "payload": {"prompt": "live"}})
+        socket.broadcast(
+            {"id": "g1", "type": "awaiting_user_input", "payload": {"prompt": "?"}})
+        with anyio.fail_after(5):          # set-lease false crosses the wire
+            while socket.leased_count != 0:
+                await anyio.sleep(0.02)
+        socket.broadcast(
+            {"id": "u1", "type": "user_message", "payload": {"text": "reply"}})
+        with anyio.fail_after(5):          # set-lease true crosses the wire
+            while socket.leased_count != 1:
+                await anyio.sleep(0.02)
+        socket.broadcast(
+            {"id": "r1", "type": "llm_response", "payload": {"text": "ok"}})
         with anyio.fail_after(5):
-            while socket.attached_count != 0:
+            while len(sink) < 3:
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await socket.close()
-    assert relay.gated is True
-    assert sink[-1]["type"] == "awaiting_user_input"
+    assert [s["type"] for s in sink] == [
+        "awaiting_user_input", "user_message", "llm_response"]
+
+
+@pytest.mark.anyio
+async def test_relay_replayed_gate_does_not_touch_lease(tmp_path: Path) -> None:
+    # A replayed (marked) gate must not set _awaiting: the lease stays held and the
+    # frame still reaches the sink.
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    sink: list[dict[str, Any]] = []
+    relay = SessionRelay(
+        socket_path=sock, change_id="cid", title="T", events=("all",),
+        sink=sink.append, is_subscribed=lambda: True, lease_poll_gap=0.02)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        tg.start_soon(relay.run)
+        with anyio.fail_after(5):
+            while socket.leased_count == 0:
+                await anyio.sleep(0.02)
+        socket.broadcast({"type": "awaiting_user_input",
+                          "payload": {"prompt": "old"}, "_replay": True})
+        await anyio.sleep(0.1)             # several poll gaps
+        assert socket.leased_count == 1    # lease untouched
+        assert socket.attached_count == 1
+        assert any(s.get("payload", {}).get("prompt") == "old" for s in sink)
+        tg.cancel_scope.cancel()
+    await socket.close()
 
 
 @pytest.mark.anyio
