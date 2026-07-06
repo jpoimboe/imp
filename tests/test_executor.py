@@ -1975,13 +1975,15 @@ def test_record_outcome_appends_and_bounds_to_k() -> None:
 
     state = State(id="c1", step="writer", step_attempt=0, status="running")
     for i in range(6):
-        _record_outcome(state, "writer", {"outcome": f"lap{i}"})
+        _record_outcome(state, "writer", {"outcome": f"lap{i}"}, head=f"sha{i}")
     hist = state.outcome_history["writer"]
     assert OUTCOME_HISTORY_K == 4
     assert len(hist) == 4
     # Oldest two evicted; laps stay monotonic across eviction.
     assert [e["lap"] for e in hist] == [3, 4, 5, 6]
     assert [e["outcome"] for e in hist] == ["lap2", "lap3", "lap4", "lap5"]
+    # Each entry carries the worktree HEAD sha recorded at completion.
+    assert [e["head"] for e in hist] == ["sha2", "sha3", "sha4", "sha5"]
 
 
 @pytest.mark.anyio
@@ -1993,7 +1995,8 @@ async def test_run_change_records_step_outcome(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     state = State.load(change.state_dir)
-    assert state.outcome_history["w"] == [{"lap": 1, "outcome": "did the thing"}]
+    assert state.outcome_history["w"] == [
+        {"lap": 1, "outcome": "did the thing", "head": ""}]
     # outcome is never promoted into the rule-evaluation var environment.
     assert "outcome" not in state.vars
 

@@ -87,13 +87,22 @@ EventCallback = Callable[[dict[str, Any]], None]
 OUTCOME_HISTORY_K = 4
 
 
-def _record_outcome(state: State, step_name: str, output: dict[str, Any]) -> None:
+def _record_outcome(
+    state: State, step_name: str, output: dict[str, Any], head: str,
+) -> None:
     outcome = output.get("outcome")
     assert isinstance(outcome, str), f"outcome must be str; got {outcome!r}"
     hist = state.outcome_history.setdefault(step_name, [])
     next_lap = hist[-1]["lap"] + 1 if hist else 1
-    hist.append({"lap": next_lap, "outcome": outcome})
+    hist.append({"lap": next_lap, "outcome": outcome, "head": head})
     del hist[:-OUTCOME_HISTORY_K]
+
+
+def _worktree_head(change: Change) -> str:
+    """Worktree HEAD sha, or "" when HEAD is absent/unborn (like change._imp_commit)."""
+    from imp.engine import worktree
+    proc = worktree._git(change.project_root, "rev-parse", "HEAD")
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
 def _render_prior_attempts(step_name: str, entries: list[dict[str, Any]]) -> str:
@@ -1234,7 +1243,7 @@ async def _route_agent(
                                   project_facts=project_facts, guidance=guidance)
 
     state.step_attempt = 0
-    _record_outcome(state, step.name, result.output)
+    _record_outcome(state, step.name, result.output, _worktree_head(change))
     bounce = _enforce_clean_tree(step, change, state, log)
     if bounce is not None:
         return bounce
