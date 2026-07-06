@@ -1337,3 +1337,59 @@ async def test_resolve_wait_reply_no_flag_solicits_empty() -> None:
     assert coord.events == ["begin", "end"]  # the solicit watchdog bracket ran
     # The gate emit fires exactly once, right before soliciting.
     assert [e["type"] for e in log.read()].count("awaiting_user_input") == 1
+
+
+def _capture_continuation(monkeypatch) -> dict:
+    import imp.engine.agent_run as ar
+    captured: dict = {}
+
+    def _fake_build_continuation_fn(**kw):
+        captured.update(kw)
+        return lambda t: t
+
+    monkeypatch.setattr(ar, "build_continuation_fn", _fake_build_continuation_fn)
+    return captured
+
+
+def _fieldless_agent() -> AgentDef:
+    return AgentDef(
+        name="x", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(), source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="body", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1), max_tool_calls=None)
+
+
+def test_build_agent_invocation_threads_dialogue(tmp_path: Path, monkeypatch) -> None:
+    cap_true = _capture_continuation(monkeypatch)
+    _build_inv(tmp_path, dialogue=True)
+    assert cap_true["dialogue"] is True
+
+    cap_default = _capture_continuation(monkeypatch)
+    _build_inv(tmp_path)  # no dialogue kwarg
+    assert cap_default["dialogue"] is False
+
+
+def test_build_agent_invocation_derives_has_schema_true_when_fields(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    captured = _capture_continuation(monkeypatch)
+    _build_inv(tmp_path)  # _agent() carries a non-empty output schema
+    assert captured["has_schema"] is True
+
+
+def test_build_agent_invocation_derives_has_schema_false_when_fieldless(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+    captured = _capture_continuation(monkeypatch)
+    build_agent_invocation(
+        agent_def=_fieldless_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path, events_path=tmp_path / "e",
+        subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
+        event_log=None, change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None)
+    assert captured["has_schema"] is False

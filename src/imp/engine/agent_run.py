@@ -497,6 +497,7 @@ def build_agent_invocation(
     log: Any = None,
     test_gates: TestGates | None = None,
     non_interactive: bool = False,
+    dialogue: bool = False,
     sandbox_policy: Any = None,
     checkpoint_threshold: float | int | None = None,
     inject_outcome_field: bool = False,
@@ -517,8 +518,9 @@ def build_agent_invocation(
     if inject_outcome_field:
         agent_def = with_outcome_field(agent_def)
     is_subagent = subagent_depth > 0
-    instruction = "" if is_subagent else completion_instruction(
-        agent_def.output_schema)
+    has_schema = bool(agent_def.output_schema.fields)
+    instruction = "" if is_subagent else (
+        completion_instruction(agent_def.output_schema) if has_schema else "")
     messages = initial_messages
     if system_prompt_override is not None:
         # Resume-replay: the override IS the stored role-only system prompt; the
@@ -556,6 +558,8 @@ def build_agent_invocation(
         event_log=event_log,
         agent_id=agent_id,
         non_interactive=non_interactive,
+        dialogue=dialogue,
+        has_schema=has_schema,
     )
     return AgentInvocation(
         agent_def=agent_def,
