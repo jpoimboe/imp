@@ -5,7 +5,10 @@ from __future__ import annotations
 import zoneinfo
 from datetime import datetime
 
+import imp.providers.claude_code as cc
+from imp.providers import errors as perr
 from imp.providers.claude_code import _reset_hint_seconds
+from tests.cc_fakes import result
 
 _LA = zoneinfo.ZoneInfo("America/Los_Angeles")
 
@@ -97,3 +100,41 @@ def test_hour_thirteen_with_ampm_returns_none() -> None:
 def test_minute_out_of_range_returns_none() -> None:
     now = _epoch(2026, 1, 15, 1, 0)
     assert _reset_hint_seconds("resets 4:60 (America/Los_Angeles)", now) is None
+
+
+def test_session_limit_branch_attaches_hint(monkeypatch) -> None:
+    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 7200.0)
+    exc = cc._classify_agent_text(
+        "You've hit your session limit · resets 4am (America/Los_Angeles)")
+    assert isinstance(exc, perr.RateLimitError)
+    assert exc.detail["retry_after_seconds"] == 7200.0
+
+
+def test_429_branch_attaches_hint(monkeypatch) -> None:
+    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 5400.0)
+    exc = cc._classify_agent_text("API Error: 429 rate limited")
+    assert isinstance(exc, perr.RateLimitError)
+    assert exc.detail["retry_after_seconds"] == 5400.0
+
+
+def test_no_hint_attaches_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: None)
+    exc = cc._classify_agent_text(
+        "You've hit your session limit · resets 4am (America/Los_Angeles)")
+    assert isinstance(exc, perr.RateLimitError)
+    assert "retry_after_seconds" not in exc.detail
+
+
+def test_hint_survives_termination_merge(monkeypatch) -> None:
+    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 9000.0)
+    sdk = result(is_error=True, api_error_status=None)
+    term = cc._termination_from_result(
+        sdk,
+        "You've hit your session limit · resets 4am (America/Los_Angeles)",
+        {},
+    )
+    assert isinstance(term, perr.RateLimitError)
+    # the hint set at classification survives labeled.detail.update(diagnostic)...
+    assert term.detail["retry_after_seconds"] == 9000.0
+    # ...and the disjoint diagnostic keys are merged in alongside it.
+    assert term.detail["is_error"] is True

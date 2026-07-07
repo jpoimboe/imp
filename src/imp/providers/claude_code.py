@@ -202,6 +202,18 @@ def _reset_hint_seconds(text: str, now: float) -> float | None:
     return delta + _RESET_MARGIN_SECONDS
 
 
+def _rate_limit_with_reset_hint(text: str) -> perr.RateLimitError:
+    """Build the session-limit RateLimitError, attaching the parsed reset time as
+    detail={"retry_after_seconds": <hint>} when one is available. The key is
+    disjoint from every diagnostic key _termination_from_result later merges via
+    labeled.detail.update(...), so a hint set here survives that merge."""
+    hint = _reset_hint_seconds(text, time.time())
+    detail: dict[str, object] | None = (
+        {"retry_after_seconds": hint} if hint is not None else None
+    )
+    return perr.RateLimitError(f"claude CLI: {text[:200]}", detail=detail)
+
+
 def _classify_agent_text(
     text: str, *, anchored: bool = True,
 ) -> perr.ProviderError | None:
@@ -238,12 +250,12 @@ def _classify_agent_text(
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
     if _SESSION_LIMIT_RE.search(scan):
-        return perr.RateLimitError(f"claude CLI: {text[:200]}")
+        return _rate_limit_with_reset_hint(text)
     m = _API_ERROR_RE.search(scan)
     if m:
         code = int(m.group(1))
         if code == 429:
-            return perr.RateLimitError(f"claude CLI: {text[:200]}")
+            return _rate_limit_with_reset_hint(text)
         if code in (401, 403):
             auth_exc = perr.AuthError(f"claude CLI: {text[:200]}")
             auth_exc.kind = f"http_{code}"  # type: ignore[attr-defined]
