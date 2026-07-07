@@ -178,6 +178,34 @@ def parse_default_workflow(path: Path) -> str:
     return name
 
 
+def parse_default_base(path: Path) -> str | None:
+    """Read imp/project.yaml `default-base:` field — the integration branch a
+    change is based on. Absent file or missing key → None (the runtime
+    auto-detect fallback covers it). Read directly from the project layer, not
+    merged into the layered Config. A branch name may contain '/', so it is not
+    validated as a single path segment — only that, when present, it is a
+    non-blank string."""
+    if not path.exists():
+        return None
+    try:
+        raw: Any = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise LoadError(
+            f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
+        ) from e
+    if not isinstance(raw, dict):
+        raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
+    base = raw.get("default-base")
+    if base is None:
+        return None
+    if not isinstance(base, str) or not base.strip():
+        raise LoadError(
+            "'default-base' must be a non-blank branch name",
+            SourceLoc(file=path, line=1),
+        )
+    return base
+
+
 def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     """Parse ONE config-layer file into a dict of only the keys it sets (spec §2
     merge). Returns None if the file is absent. Tiers/providers may be omitted —

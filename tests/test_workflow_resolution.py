@@ -9,7 +9,7 @@ import pytest
 from imp.assets import bundled_workflow_dir, is_bundled_workflow
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
-from imp.providers.config import parse_default_workflow
+from imp.providers.config import parse_default_base, parse_default_workflow
 from tests.conftest import _git, _seed_control
 
 
@@ -115,6 +115,42 @@ def test_resolve_workflow_dir_rejects_invalid_name(tmp_path: Path) -> None:
         resolve_workflow_dir(tmp_path, "../evil")
     with pytest.raises(LoadError):
         resolve_workflow_dir(tmp_path, "bad/name")
+
+
+def test_parse_default_base_absent_file_is_none(tmp_path: Path) -> None:
+    assert parse_default_base(tmp_path / "absent.yaml") is None
+
+
+def test_parse_default_base_missing_key_is_none(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-workflow: imp\n")
+    assert parse_default_base(p) is None
+
+
+def test_parse_default_base_reads_field(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-base: master\n")
+    assert parse_default_base(p) == "master"
+
+
+def test_parse_default_base_allows_slashes(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-base: release/2026\n")
+    assert parse_default_base(p) == "release/2026"
+
+
+def test_parse_default_base_blank_value_raises(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-base: '   '\n")
+    with pytest.raises(LoadError):
+        parse_default_base(p)
+
+
+def test_parse_default_base_non_string_raises(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-base: [a, b]\n")
+    with pytest.raises(LoadError):
+        parse_default_base(p)
 
 
 def test_available_workflow_names_unions_bundled_and_committed(tmp_path: Path) -> None:
