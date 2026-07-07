@@ -1158,6 +1158,7 @@ async def _route_agent(
 
     backoff = 0
     cumulative_backoff = 0.0
+    hint_exempt_sleeps = 0
     while True:
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
@@ -1194,17 +1195,23 @@ async def _route_agent(
         # delay is non-None only for RetryWithBackoff categories, which always
         # carry a budget, so budget is non-None here.
         category = result.error.category if result.error else "unknown"
-        budget = budget_for(category)
-        if budget is not None and cumulative_backoff + result.delay > budget:
-            # Auth exhaustion is actionable: the human must re-authenticate, not wait out a
-            # generic ceiling.
-            reason = "reauth_needed" if category == "auth" else "retry_ceiling"
-            pause = Pause(reason=reason,
-                          kind=result.error.kind if result.error else None)
-            _emit(log, "step_completed",
-                  {"step": step.name, "kind": "agent",
-                   "action": _action_payload(pause), "var_mutations": {}})
-            return pause, None, {}
+        # A hinted delay is an ANNOUNCED wait (a parsed reset time > 60s), not
+        # blind retrying: exempt it from the budget and don't accrue it. Capped at
+        # 3 such sleeps per loop so a pathological hint stream still terminates —
+        # the 4th hinted delay is budgeted like any other.
+        hinted = result.delay_hinted and hint_exempt_sleeps < 3
+        if not hinted:
+            budget = budget_for(category)
+            if budget is not None and cumulative_backoff + result.delay > budget:
+                # Auth exhaustion is actionable: the human must re-authenticate, not wait out a
+                # generic ceiling.
+                reason = "reauth_needed" if category == "auth" else "retry_ceiling"
+                pause = Pause(reason=reason,
+                              kind=result.error.kind if result.error else None)
+                _emit(log, "step_completed",
+                      {"step": step.name, "kind": "agent",
+                       "action": _action_payload(pause), "var_mutations": {}})
+                return pause, None, {}
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
         state.retry_continue_pending = True
@@ -1212,13 +1219,19 @@ async def _route_agent(
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
         # failure. category comes from the plumbed ErrorInfo.
-        _emit(log, "agent_retry", {
+        retry_payload = {
             "category": category,
             "attempt": backoff,
             "backoff_seconds": result.delay,
-        }, agent_id=None)
+        }
+        if hinted:
+            retry_payload["hinted"] = True
+        _emit(log, "agent_retry", retry_payload, agent_id=None)
         await _interruptible_sleep(result.delay, coordinator)
-        cumulative_backoff += result.delay
+        if hinted:
+            hint_exempt_sleeps += 1
+        else:
+            cumulative_backoff += result.delay
         if coordinator.should_pause:
             return Pause(), None, {}
 
