@@ -331,6 +331,9 @@ async def run_change(
             if seed_opening:
                 _emit(log, "opening_intent", {"text": seed_opening},
                       agent_id=None)
+        elif workflow_refreshed:
+            if _reconcile_resolved_run(state, workflow, config):
+                state.save(change.state_dir)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}

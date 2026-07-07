@@ -305,3 +305,55 @@ async def test_reconcile_adds_missing_step_override(tmp_path: Path) -> None:
     assert "w2" not in state.resolved_steps
     assert _reconcile_resolved_run(state, workflow, config) is True
     assert "w2" in state.resolved_steps
+
+
+@pytest.mark.anyio
+async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) -> None:
+    """A refreshed workflow that adds a new differ_from step → reconcile fills in
+    resolved_steps and leaves a pre-pinned tier entry untouched. A new *tier* key
+    is integration-unrealizable (config.tiers is always low/medium/high), so the
+    tier-merge half is unit-tested instead."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change, on_event=lambda _e: None)   # resolves {low,medium,high}
+
+    # Pin low to a sentinel so we can prove reconcile never overwrites it.
+    state = State.load(change.state_dir)
+    state.resolved_tiers["low"] = ProviderModel(provider="fake", model="pinned-low")
+    state.save(change.state_dir)
+
+    # The workflow gains a new differ_from step w2 (legal tier: high).
+    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf.write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+        "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
+    )
+
+    await run_change(change, on_event=lambda _e: None)   # resume: refresh + reconcile
+
+    state = State.load(change.state_dir)
+    assert "w2" in state.resolved_steps                        # new step override merged
+    assert state.resolved_tiers["low"].model == "pinned-low"   # pinned entry preserved
+
+
+@pytest.mark.anyio
+async def test_unchanged_workflow_resume_skips_reconcile(tmp_path: Path) -> None:
+    """Reconciliation is gated on an actual content refresh: an unchanged-workflow
+    resume does not re-run resolve_run, so a tier removed from the persisted map
+    is NOT silently re-added (no churn on the common resume path)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change, on_event=lambda _e: None)
+
+    state = State.load(change.state_dir)
+    del state.resolved_tiers["high"]
+    state.save(change.state_dir)
+
+    await run_change(change, on_event=lambda _e: None)   # workflow byte-identical
+    state = State.load(change.state_dir)
+    assert "high" not in state.resolved_tiers
