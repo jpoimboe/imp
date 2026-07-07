@@ -154,3 +154,22 @@ def test_interrupt_leave_control_round_trips() -> None:
     line = encode_control(CONTROL_INTERRUPT_LEAVE)
     assert parse_client_message(line) == Control(CONTROL_INTERRUPT_LEAVE)
     assert CONTROL_INTERRUPT_LEAVE != CONTROL_INTERRUPT  # distinct from plain interrupt
+
+
+def test_control_reason_round_trips_with_and_without_reason() -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+
+    # With a reason: it survives the round trip as a distinct field.
+    line = encode_control(CONTROL_INTERRUPT_LEAVE, "sigterm")
+    assert "\n" not in line
+    assert parse_client_message(line) == Control(CONTROL_INTERRUPT_LEAVE, "sigterm")
+
+    # Without a reason: default None, and the wire omits the key (the omission is
+    # action-agnostic — every reasonless control frame is byte-identical to before).
+    line2 = encode_control(CONTROL_INTERRUPT_LEAVE)
+    assert "reason" not in json.loads(line2)
+    assert parse_client_message(line2) == Control(CONTROL_INTERRUPT_LEAVE, None)
+
+    # Unknown reason strings are display/journal data, not dispatch: accepted verbatim.
+    line3 = encode_control(CONTROL_INTERRUPT_LEAVE, "future-trigger")
+    assert parse_client_message(line3).reason == "future-trigger"

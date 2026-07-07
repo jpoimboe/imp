@@ -64,11 +64,12 @@ class SessionClient:
                 raise RuntimeError("call connect() before send_input()")
             await self._stream.send((encode_input(text) + "\n").encode("utf-8"))
 
-    async def send_control(self, action: str) -> None:
+    async def send_control(self, action: str, reason: str | None = None) -> None:
         async with self._send_lock:
             if self._stream is None:
                 raise RuntimeError("call connect() before send_control()")
-            await self._stream.send((encode_control(action) + "\n").encode("utf-8"))
+            await self._stream.send(
+                (encode_control(action, reason) + "\n").encode("utf-8"))
 
     async def send_set_lease(self, value: bool) -> None:
         async with self._send_lock:
