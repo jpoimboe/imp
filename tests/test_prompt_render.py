@@ -339,6 +339,50 @@ def test_run_opening_defaults_empty_and_selects_bare_branch(tmp_path: Path) -> N
         "{% if run.opening %}SEED{% else %}BARE{% endif %}", ctx) == "BARE"
 
 
+def test_step_namespace_defaults_to_lap_one(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_title="t", event_log=log)
+    assert render_prompt("{{ step.lap }}", ctx) == "1"
+    assert render_prompt("{{ step.prior_laps | length }}", ctx) == "0"
+
+
+def test_step_namespace_lap_is_last_recorded_plus_one(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(
+        change_title="t", event_log=log,
+        prior_laps=[
+            {"lap": 2, "outcome": "first draft", "head": "cafe1234"},
+            {"lap": 3, "outcome": "reworked", "head": "beef5678"},
+        ],
+    )
+    # lap is last-recorded + 1 (3 + 1 = 4), NOT len + 1 (which would be 3).
+    assert render_prompt("{{ step.lap }}", ctx) == "4"
+    # prior_laps carries the recorded entries; templates can read the last head.
+    assert render_prompt("{{ step.prior_laps[-1].head }}", ctx) == "beef5678"
+    assert render_prompt("{{ step.prior_laps[-1].outcome }}", ctx) == "reworked"
+    assert render_prompt("{{ step.prior_laps | length }}", ctx) == "2"
+
+
+def test_step_namespace_lap_tracks_recorded_lap_not_list_length(tmp_path: Path) -> None:
+    # The recorded history is bounded to the last OUTCOME_HISTORY_K (=4) laps, so
+    # after many re-entries the list length saturates while the stored `lap` keeps
+    # climbing. step.lap must follow the recorded lap, not len(prior_laps): here a
+    # 4-entry truncated history whose last recorded lap is 6 -> this render is lap 7
+    # (len-based derivation would wrongly yield 5).
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(
+        change_title="t", event_log=log,
+        prior_laps=[
+            {"lap": 3, "outcome": "l3", "head": "aaa3"},
+            {"lap": 4, "outcome": "l4", "head": "aaa4"},
+            {"lap": 5, "outcome": "l5", "head": "aaa5"},
+            {"lap": 6, "outcome": "l6", "head": "aaa6"},
+        ],
+    )
+    assert render_prompt("{{ step.lap }}", ctx) == "7"
+    assert render_prompt("{{ step.prior_laps | length }}", ctx) == "4"
+
+
 def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     src = Path(
         "src/imp/assets/workflows/imp/partials/brainstorm-dialogue.md"
