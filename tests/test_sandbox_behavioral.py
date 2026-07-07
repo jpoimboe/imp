@@ -770,3 +770,68 @@ def test_change_and_spike_branch_writes_succeed() -> None:
         with contextlib.suppress(Exception):
             wt.remove_worktree(control, "esc1", force=True)
         shutil.rmtree(control, ignore_errors=True)
+
+
+def test_imp_own_git_writes_unaffected_by_ref_masks() -> None:
+    """Regression: the guard must not touch imp's own in-sandbox .git writes.
+    refs/imp/* and .git/imp/ are writable inside a real sandbox, and the real
+    artifact_commit lands refs/imp/artifacts/<id>. The policy mirror agrees each
+    artifact_commit path is writable while the masked crown jewels deny.
+
+    Falsifiability: if a mask accidentally covered refs/imp or .git/imp, the
+    in-sandbox probes would fail (rc!=0) and the host ref/file would be absent;
+    the allows_write assertions on refs/imp/artifacts and .git/imp/repo.lock
+    would flip to False.
+    """
+    control, wt_path = _refprot_repo("imp-test-artifact-")
+    try:
+        # Pre-create refs/stash so the existence-gated stash mask is actually
+        # applied (a fresh repo has none → it would be dropped and stay writable,
+        # making the allows_write(refs/stash) assertion below read True).
+        _seed_stash(control)
+        ctx, pol = _refprot_ctx(control, wt_path)
+        head = _git(control, "rev-parse", "HEAD").stdout.strip()
+
+        # refs/imp/* is NOT masked → update-ref succeeds in-sandbox and lands on host.
+        r1 = _bash(
+            ctx,
+            f"git -C {control} update-ref refs/imp/probe {head} 2>&1; echo rc=$?")
+        assert "rc=0" in r1["stdout"], (
+            f"update-ref refs/imp/probe failed — refs/imp wrongly masked: {r1}")
+        assert _git(
+            control, "rev-parse", "--verify", "--quiet",
+            "refs/imp/probe").stdout.strip() == head, "refs/imp/probe not written on host"
+
+        # .git/imp scratch (RepoGitLock + artifact_commit's temp index) is writable.
+        r2 = _bash(
+            ctx,
+            f"mkdir -p {control}/.git/imp && "
+            f"echo x > {control}/.git/imp/probe.lock 2>&1; echo rc=$?")
+        assert "rc=0" in r2["stdout"], (
+            f"write under .git/imp failed — .git/imp wrongly masked: {r2}")
+        assert (control / ".git" / "imp" / "probe.lock").exists(), (
+            ".git/imp/probe.lock not written on host")
+
+        # The real artifact_commit writes refs/imp/artifacts/esc1 (full-tree snapshot).
+        art = wt_path / "artifact.md"
+        art.write_text("hello\n")
+        wrote = wt.artifact_commit(
+            control, "esc1", {"spec/esc1.md": art}, message="snap")
+        assert wrote is True
+        assert _git(
+            control, "rev-parse", "--verify", "--quiet",
+            "refs/imp/artifacts/esc1").returncode == 0, "artifact ref not created"
+
+        # Policy mirror: every artifact_commit write path is writable; the three
+        # masked crown jewels deny.
+        git = control / ".git"
+        assert pol.allows_write(git / "refs" / "imp" / "artifacts" / "esc1") is True
+        assert pol.allows_write(git / "imp" / "repo.lock") is True
+        assert pol.allows_write(git / "objects" / "ab" / "cdef") is True
+        assert pol.allows_write(git / "refs" / "heads" / "main") is False
+        assert pol.allows_write(git / "refs" / "stash") is False
+        assert pol.allows_write(git / "index") is False
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
