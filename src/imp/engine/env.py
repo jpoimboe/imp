@@ -43,6 +43,21 @@ class TestGates:
         )
 
 
+# Headless overrides forced into every engine-spawned subprocess so no git/tool
+# invocation blocks on an interactive child. GIT_EDITOR beats core.editor and
+# $VISUAL/$EDITOR and accepts the prepared message file unchanged (exit 0);
+# GIT_TERMINAL_PROMPT=0 makes git fail fast instead of reading /dev/tty; EDITOR
+# and VISUAL cover non-git tools. Emitted unconditionally by engine_env and, via
+# ENGINE_ENV_VARS membership, stripped-then-overridden by overlay_engine_env so a
+# user's ambient EDITOR=vim never reaches an agent child. The keys are also the
+# sandbox allowlist's non-IMP_ headless exception (imp.engine.sandbox).
+HEADLESS_ENV = {
+    "GIT_EDITOR": "true",
+    "GIT_TERMINAL_PROMPT": "0",
+    "EDITOR": "true",
+    "VISUAL": "true",
+}
+
 # Every env var this module manages. `engine_env` is the AUTHORITY for these: a
 # subprocess must see exactly what `engine_env` produces, never an inherited copy.
 # `IMP_TEST_CMD_FAST` is conditionally present (absent => no fast gate), so
@@ -59,6 +74,7 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_TEST_CMD_SLOW",
     "IMP_TEST_CMD_FAST_TIMEOUT",
     "IMP_TEST_CMD_SLOW_TIMEOUT",
+    *HEADLESS_ENV,
 })
 
 
@@ -135,6 +151,7 @@ def engine_env(
         "IMP_PROJECT_ROOT": str(project_root),
         "IMP_CHANGE_ID": change_id,
         "IMP_CHANGE_TITLE": change_title,
+        **HEADLESS_ENV,
     }
     if change_dir is not None:
         env["IMP_CHANGE_DIR"] = str(change_dir)
