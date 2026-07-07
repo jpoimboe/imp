@@ -211,3 +211,13 @@ def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
         "src/imp/assets/workflows/imp/agents/reconciler.md").read_text()
     assert "re-emit" not in imp_reconciler
     assert "complete_step" in imp_reconciler
+
+
+def test_front_door_renames_early_on_design_formation() -> None:
+    body = _agent_prompt("front-door")
+    # Rename fires as soon as a design forms, not deferred to go-live.
+    assert "as soon as a design has formed" in body
+    # Pure concierge/scout conversations are explicitly excluded from renaming.
+    assert "so they never rename" in body
+    # The go-live rename survives as a fallback for straight-to-build.
+    assert "a fallback for when you went" in body

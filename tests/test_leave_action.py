@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from imp.cli.leave import _had_exchange, leave_control_action, resolve_leave_action
+from imp.cli.leave import (
+    _had_exchange,
+    _was_renamed,
+    leave_control_action,
+    resolve_leave_action,
+)
 from imp.engine.change import Change
 from tests.conftest import _seed_control
 
@@ -150,3 +155,42 @@ def test_had_exchange_true_for_a_seed_opening_intent() -> None:
 
 def test_had_exchange_true_for_user_interjected() -> None:
     assert _had_exchange(_Log([{"type": "user_interjected"}])) is True
+
+
+def test_renamed_chat_leave_saves(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = _draft(tmp_path, "rn1", exchange=True)
+    ch.event_log().append(
+        agent_id=None, type="change_renamed",
+        payload={"id": "rn1", "old_title": "D", "new_title": "Real design"})
+    assert leave_control_action(ch, "chat", None) == "save"
+
+
+def test_renamed_chat_with_clear_still_archives(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = _draft(tmp_path, "rn2", exchange=True)
+    ch.event_log().append(
+        agent_id=None, type="change_renamed",
+        payload={"id": "rn2", "old_title": "D", "new_title": "Real design"})
+    assert leave_control_action(ch, "chat", "clear") == "archive"
+
+
+def test_was_renamed_true_for_change_renamed_event() -> None:
+    assert _was_renamed(_Log([{"type": "change_renamed"}])) is True
+
+
+def test_zero_exchange_renamed_chat_discards(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = _draft(tmp_path, "rn3", exchange=False)
+    ch.event_log().append(
+        agent_id=None, type="change_renamed",
+        payload={"id": "rn3", "old_title": "D", "new_title": "Real design"})
+    assert leave_control_action(ch, "chat", None) == "discard"
+
+
+def test_was_renamed_false_without_change_renamed_event() -> None:
+    log = _Log([
+        {"type": "opening_intent"},
+        {"type": "user_message"},
+    ])
+    assert _was_renamed(log) is False

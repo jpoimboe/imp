@@ -25,6 +25,11 @@ def _had_exchange(log: object) -> bool:
     return False
 
 
+def _was_renamed(log: object) -> bool:
+    """True if the change was renamed during the conversation (a design formed)."""
+    return any(ev.get("type") == "change_renamed" for ev in log.read())  # type: ignore[attr-defined]
+
+
 def leave_control_action(
     change: Change, leave_mode: str | None, intent: str | None,
 ) -> str | None:
@@ -49,6 +54,8 @@ def leave_control_action(
     if is_clear:
         return CONTROL_ARCHIVE
     if leave_mode == "new":
+        return CONTROL_SAVE
+    if _was_renamed(change.event_log()):
         return CONTROL_SAVE
     return CONTROL_ARCHIVE
 
