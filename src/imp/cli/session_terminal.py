@@ -52,12 +52,18 @@ async def run_terminal_client(
     def _on_event(event: dict[str, Any]) -> None:
         driver.on_event(event)
         replay = bool(event.get("_replay"))
-        if event.get("type") == "awaiting_user_input" and not replay:
+        etype = event.get("type")
+        if title is not None:
+            if etype == "lane_acquired":
+                title.set_hold_glyph((event.get("payload") or {}).get("glyph"))
+            elif etype in ("lane_released", "lane_evicted"):
+                title.set_hold_glyph(None)
+        if etype == "awaiting_user_input" and not replay:
             prompt = (event.get("payload") or {}).get("prompt") or ""
             gate_send.send_nowait(prompt)
             if title is not None:
                 title.waiting()
-        elif event.get("type") == "change_renamed" and not replay:
+        elif etype == "change_renamed" and not replay:
             if title is not None:
                 title.update_name((event.get("payload") or {})["new_title"])
         elif title is not None and not replay:
