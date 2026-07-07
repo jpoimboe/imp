@@ -222,7 +222,7 @@ def test_pause_reason_conversation_saved_after_resume_is_not_stale() -> None:
     assert reason is None
 
 
-def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Path) -> None:
+def test_pause_facts_stale_segment_with_daemon_stderr_shows_pointer(tmp_path: Path) -> None:
     import json
 
     from imp.cli.main import _pause_facts
@@ -237,6 +237,7 @@ def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Pat
     ]
     (change_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
+    (change_dir / "daemon.stderr").write_text("Traceback (most recent call last):\n")
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
@@ -245,6 +246,58 @@ def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Pat
     assert phase == "converge"
     assert token == "mona44"
     assert reason == "ended unexpectedly — see .imp/changes/mona44/daemon.stderr"
+
+
+def test_pause_facts_stale_segment_without_daemon_stderr_omits_pointer(tmp_path: Path) -> None:
+    import json
+
+    from imp.cli.main import _pause_facts
+    from imp.engine.change import Change
+
+    # Same STALE log, but no daemon.stderr on disk: the pointer is a dead end and
+    # must be omitted — the bare "ended unexpectedly" remains.
+    change_dir = tmp_path / ".imp" / "changes" / "mona44"
+    change_dir.mkdir(parents=True)
+    events = [
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("3", "workflow_resumed"),
+    ]
+    (change_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n")
+    change = Change(id="mona44", title="", base_branch="main",
+                    control_root=tmp_path, project_root=tmp_path,
+                    change_dir=change_dir)
+    *_, reason = _pause_facts(change)
+    assert reason == "ended unexpectedly"
+    assert "daemon.stderr" not in reason
+
+
+def test_pause_facts_stale_segment_with_empty_daemon_stderr_omits_pointer(tmp_path: Path) -> None:
+    import json
+
+    from imp.cli.main import _pause_facts
+    from imp.engine.change import Change
+
+    # daemon.stderr present but EMPTY (0 bytes): the pointer is still a dead end
+    # and must be omitted — this exercises the st_size > 0 gate, distinct from the
+    # missing-file (OSError) path.
+    change_dir = tmp_path / ".imp" / "changes" / "mona44"
+    change_dir.mkdir(parents=True)
+    events = [
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("3", "workflow_resumed"),
+    ]
+    (change_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n")
+    (change_dir / "daemon.stderr").write_bytes(b"")
+    change = Change(id="mona44", title="", base_branch="main",
+                    control_root=tmp_path, project_root=tmp_path,
+                    change_dir=change_dir)
+    *_, reason = _pause_facts(change)
+    assert reason == "ended unexpectedly"
+    assert "daemon.stderr" not in reason
 
 
 def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path) -> None:

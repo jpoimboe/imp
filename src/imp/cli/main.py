@@ -336,6 +336,17 @@ def _leave_trigger(coord: Any) -> str | None:
     return None
 
 
+def _unexpected_death_reason(change: Change) -> str:
+    """The daemon-death banner; daemon.stderr pointer only when that file is non-empty."""
+    try:
+        has_detail = (change.change_dir / "daemon.stderr").stat().st_size > 0
+    except OSError:
+        has_detail = False
+    if has_detail:
+        return f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr"
+    return "ended unexpectedly"
+
+
 def _pause_facts(
     change: Change, leave_trigger: str | None = None,
 ) -> tuple[str, str | None, str, str | None]:
@@ -347,8 +358,7 @@ def _pause_facts(
         return name, phase, change.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        reason: str | None = (
-            f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
+        reason: str | None = _unexpected_death_reason(change)
     else:
         reason = reason_val
     return name, phase, change.id, reason
