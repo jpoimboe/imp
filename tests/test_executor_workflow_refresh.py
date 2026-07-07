@@ -218,9 +218,10 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
 
 
 @pytest.mark.anyio
-async def test_self_edit_picked_up_on_resume(tmp_path: Path) -> None:
+async def test_self_edit_picked_up_on_reentry(tmp_path: Path) -> None:
     """A change whose live workflow source was edited (self-edit) sees that edit
-    in its snapshot on the next resume, with one workflow_refreshed event."""
+    in its snapshot on the next re-entry (the completed change is re-entered,
+    not resumed from a pause), with one workflow_refreshed event."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_change(change, on_event=lambda _e: None)   # snapshot v1
@@ -229,7 +230,7 @@ async def test_self_edit_picked_up_on_resume(tmp_path: Path) -> None:
     writer.write_text(writer.read_text() + "\nedited-by-self\n")
 
     events: list[dict] = []
-    await run_change(change, on_event=events.append)      # resume re-snapshots
+    await run_change(change, on_event=events.append)      # re-entry re-snapshots
     snap_writer = change.change_dir / "workflow" / "agents" / "writer.md"
     assert "edited-by-self" in snap_writer.read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
