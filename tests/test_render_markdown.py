@@ -449,3 +449,13 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
     assert "| ↳ explorer (map repo) | 45s | 200 | $0.05 |" in out
     assert "**Tokens:** 12.5k" in out    # 12345 step + 200 subagent = 12545 → 12.5k
     assert "**Cost:** $0.39" in out       # 0.34 step + 0.05 subagent
+
+
+def test_summary_markdown_open_step_reflects_paused_status() -> None:
+    hdr = SummaryHeader(workflow="feature", change_id="abc",
+                        status="paused", total_seconds=100.0)
+    rows = [StepRow(phase="implement", step="task-lead",
+                    start_ts="2026-01-01T00:00:00+00:00", end_ts=None)]
+    out = render_summary_markdown(rows, header=hdr)
+    assert "| task-lead | paused |" in out
+    assert "| task-lead | running |" not in out

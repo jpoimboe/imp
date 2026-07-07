@@ -144,9 +144,9 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     return rows
 
 
-def _dur_text(seconds: float | None) -> str:
-    """Duration text via the shared fmt_seconds; 'running' for an open span."""
-    return "running" if seconds is None else fmt_seconds(seconds)
+def _dur_text(seconds: float | None, open_label: str = "running") -> str:
+    """Duration text via the shared fmt_seconds; open_label for an open span."""
+    return open_label if seconds is None else fmt_seconds(seconds)
 
 
 def _tok_total(t: TokenTotals) -> int:
@@ -227,7 +227,7 @@ def _header_line(h: SummaryHeader, work_seconds: float | None,
             f"  ·  {total}  ·  {tok}  ·  {cst}")
 
 
-def _column_widths(summary: list[StepRow]) -> tuple[int, int, int, int]:
+def _column_widths(summary: list[StepRow], open_label: str) -> tuple[int, int, int, int]:
     """Column widths measured across every step AND subagent so numbers align."""
     names = [len(r.step) for r in summary]
     names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
@@ -235,7 +235,7 @@ def _column_widths(summary: list[StepRow]) -> tuple[int, int, int, int]:
     toks: list[int] = []
     costs: list[int] = []
     for r in summary:
-        durs.append(len(_dur_text(r.work_seconds)))
+        durs.append(len(_dur_text(r.work_seconds, open_label)))
         toks.append(len(_fmt_tokens(_tok_total(r.tokens))))
         costs.append(len(_fmt_cost(r.cost)))
         for s in r.subagents:
@@ -247,10 +247,10 @@ def _column_widths(summary: list[StepRow]) -> tuple[int, int, int, int]:
 
 
 def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
-               tok_w: int, cost_w: int, color: bool) -> str:
+               tok_w: int, cost_w: int, color: bool, open_label: str) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
-    dur = pal.ansi(f"{_dur_text(row.work_seconds):>{dur_w}}", *codes, enabled=color)
+    dur = pal.ansi(f"{_dur_text(row.work_seconds, open_label):>{dur_w}}", *codes, enabled=color)
     tok = f"{_fmt_tokens(_tok_total(row.tokens)):>{tok_w}}"
     cost = f"{_fmt_cost(row.cost):>{cost_w}}"
     return f"  {name}  {dur}  {tok}  {cost}"
@@ -270,7 +270,8 @@ def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
-    name_w, dur_w, tok_w, cost_w = _column_widths(summary)
+    open_label = header.status
+    name_w, dur_w, tok_w, cost_w = _column_widths(summary, open_label)
     work, tokens, cost = header_totals(summary, header.total_seconds)
     lines = [_header_line(header, work, tokens, cost, color=color)]
     cur_phase: str | None = None
@@ -285,7 +286,8 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1
         lines.append(_step_line(row, hue=hues[row.step], name_w=name_w,
-                                dur_w=dur_w, tok_w=tok_w, cost_w=cost_w, color=color))
+                                dur_w=dur_w, tok_w=tok_w, cost_w=cost_w, color=color,
+                                open_label=open_label))
         for sub in row.subagents:
             lines.append(_sub_line(sub, name_w=name_w, dur_w=dur_w,
                                    tok_w=tok_w, cost_w=cost_w, color=color))

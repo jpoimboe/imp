@@ -74,6 +74,36 @@ def test_summary_unknown_id_errors(tmp_path, monkeypatch, capsys):
     assert "no Change matches" in capsys.readouterr().err
 
 
+def test_summary_paused_open_step_reads_paused_not_running(tmp_path, monkeypatch, capsys):
+    from imp.engine.state import State
+
+    cid = "paused-open"
+    change_dir = tmp_path / ".imp" / "changes" / cid
+    (change_dir / "state").mkdir(parents=True)
+    (change_dir / "change.json").write_text(json.dumps(
+        {"id": cid, "title": cid, "base_branch": "main",
+         "created_at": "2026-01-01T00:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    events = [
+        {"type": "step_started", "timestamp": "2026-01-01T00:00:00+00:00",
+         "payload": {"step": "spec-writer", "phase": "spec"}},
+        {"type": "step_completed", "timestamp": "2026-01-01T00:01:30+00:00",
+         "payload": {"step": "spec-writer", "action": {"verb": "continue"}}},
+        {"type": "step_started", "timestamp": "2026-01-01T00:01:35+00:00",
+         "payload": {"step": "plan-writer", "phase": "plan"}},
+    ]
+    (change_dir / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in events))
+    State(id=cid, status="paused", step="plan", step_attempt=0).save(change_dir / "state")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    rc = main(["log", "-s", cid])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "  plan-writer  paused" in out
+    assert "plan-writer  running" not in out
+
+
 def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys):
     cid = "merged-id"
     events = [
