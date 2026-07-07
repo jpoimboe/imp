@@ -31,27 +31,36 @@ _SILENT = frozenset({
     "workflow_resumed", "change_abandoned",
 })
 
-# workflow_paused is curated by reason, not static membership. Every stop
-# emits exactly one workflow_paused; it is silent when a companion event already
-# buzzed the stop (merge_blocked / script_blocked / error companions) or the stop
-# was self-inflicted / self-resolving. Everything else — including any unknown or
-# future reason — buzzes, so a genuine companion-less stop is never missed.
+# workflow_paused is curated by reason, not static membership. A pause is silent
+# when a terminal error companion already buzzed the same stop (or the stop was
+# self-inflicted / self-resolving). Static members are ALWAYS silent regardless of
+# kind. context_window is intentionally absent: it is dual-source and handled
+# kind-aware by _pause_is_silent (reincarnation_cap is companion-less → buzzes).
+# Everything not silenced — including any unknown or future reason — buzzes, so a
+# genuine companion-less stop is never missed.
 _PAUSE_SILENT_REASONS = frozenset({
     "merge_blocked",         # merge_blocked companion buzzed
     "script_blocked",        # script_blocked companion buzzed
-    "stalled",               # error companion buzzed
     "agent_output_missing",  # error companion buzzed
     "awaiting_turn",         # merge-queue hibernation; self-resolving
     "interrupt",             # esc (self-inflicted) or awaiting-user bare-turn-end
+    "api",                   # terminal error companion buzzed
+    "quota",                 # terminal error companion buzzed
+    "content_filter",        # terminal error companion buzzed
+    "loop",                  # terminal error companion buzzed
+    "terminated",            # terminal error companion buzzed
+    "unknown",               # terminal error companion buzzed
+    "config",                # terminal config error companion buzzed
+    "internal_error",        # terminal internal error companion buzzed
+    "retry_ceiling",         # last-retry terminal error companion buzzed
+    "reauth_needed",         # terminal auth error companion buzzed
 })
 
 # imp-canon plain-speak bodies for a buzzing workflow_paused (companion-less
-# reasons only — companion-buzzed reasons are silenced upstream in curate()).
-# An unmapped reason falls back to `paused (<reason>)`.
+# reasons only — silenced reasons return "" from _pause_is_silent before this map
+# is consulted). An unmapped reason falls back to `paused (<reason>)`.
 _PAUSE_REASON_BODIES = {
-    "reauth_needed": "needs re-auth",
-    "retry_ceiling": "stopped after repeated errors",
-    "context_window": "hit the context limit",
+    "context_window": "hit the context limit",  # reincarnation-cap stop (companion-less)
     "max_loops": "stuck in a loop",
     "unknown_step": "workflow error",
 }
@@ -125,10 +134,16 @@ def header_line(event: Mapping[str, Any]) -> str:
 
 
 def _pause_is_silent(payload: Mapping[str, Any]) -> bool:
-    """A workflow_paused is silent when a companion event already buzzed the stop
-    (or the stop was self-inflicted / self-resolving). Sole source of truth for the
-    silence decision, shared by curate() and event_body()."""
-    return payload.get("reason") in _PAUSE_SILENT_REASONS
+    """A workflow_paused is silent when a terminal error companion already buzzed the
+    same stop (or the stop was self-inflicted / self-resolving). Sole source of truth
+    for the silence decision, shared by curate() and event_body(). context_window is
+    dual-source: the Tier B hard-window fatal (a provider kind) is silenced by its
+    terminal companion, but the companion-less reincarnation cap
+    (kind == "reincarnation_cap") must buzz."""
+    reason = payload.get("reason")
+    if reason in _PAUSE_SILENT_REASONS:
+        return True
+    return reason == "context_window" and payload.get("kind") != "reincarnation_cap"
 
 
 def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
