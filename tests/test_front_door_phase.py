@@ -30,7 +30,7 @@ def test_front_door_is_first_phase_with_show_label_false() -> None:
     assert step.name == "front-door"
     assert step.kind == "agent"
     assert step.show_label is False           # inherits the phase's show_label:false default
-    assert step.label == "<imp>"
+    assert step.label == "<random>"
 
 
 def test_front_door_express_routes_to_plan_writer_and_sets_fast_path() -> None:

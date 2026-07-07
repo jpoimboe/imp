@@ -171,7 +171,7 @@ def render_label(
         # No change/log context (the State.step_label seed path): render with no
         # template context. A label that needs vars/change raises UndefinedError
         # under StrictUndefined and falls back to the raw template text. (The
-        # "<imp>" sentinel is resolved above, before this template path.)
+        # "<random>" sentinel is resolved above, before this template path.)
         try:
             return _env_for(None).from_string(label).render()
         except jinja2.exceptions.TemplateError:

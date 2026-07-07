@@ -133,7 +133,7 @@ class StepNode:
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     route_label: str | None = None     # route reason (rule label) of the entering rule
-    rotate_phrase: bool = False        # opt-in (<imp>): rotate status phrase per work segment
+    rotate_phrase: bool = False        # opt-in (<random>): rotate status phrase per work segment
     rotated_phrase: str | None = None  # per-segment phrase; live status line only, never persisted
     closed: bool = False
     interrupted: bool = False
@@ -464,7 +464,7 @@ class NarrativeBuilder:
         # None on the streaming path.
         self._pending_reply_node: UserMessageNode | None = None
         self._first_step: StepNode | None = None
-        # <imp> rotation: work seen this segment, consumed at each prose/user-message boundary.
+        # <random> rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
 
     # -- public API -----------------------------------------------------------

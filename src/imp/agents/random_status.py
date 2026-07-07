@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import random
 
-STATUS_PHRASE_LABEL = "<imp>"
+STATUS_PHRASE_LABEL = "<random>"
 
 RANDOM_STATUS_PHRASES: tuple[str, ...] = (
     "scheming", "plotting", "brooding", "hatching plans", "laying groundwork",

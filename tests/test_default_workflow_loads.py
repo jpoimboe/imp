@@ -138,7 +138,7 @@ def test_every_shown_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "front-door": "<imp>",
+        "front-door": "<random>",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan",
