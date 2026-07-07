@@ -94,7 +94,7 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 
 | Trigger | `send` data | Path through imp |
 |---------|-------------|------------------|
-| **Ctrl-C** | `"\x03"` | **At a prompt** it is *intercepted and never raises* (`src/imp/cli/prompt.py`): a non-empty buffer is cleared in place, an empty buffer prints `press ctrl-d to pause & exit` once per session — it does **not** pause. **Mid-run** a real SIGINT (CLI/cooked mode) → `anyio.open_signal_receiver` → `InterruptCoordinator.signal_pause("ctrl-c")`. In **both** the **phase-0 chat** and a **materialized** Change it pauses the agent and stays **ATTACHED** (`alive=True`, does not exit) at an interactive prompt — steer (reply resumes the agent) or leave (a subsequent Ctrl-D detaches, rc 130, paused); the Ctrl-C **disposition** is identical across regimes, but the landing prompt **text** differs: **phase-0** → its chat `> type your reply` prompt; **materialized** → the resteer hold prompt `paused — type a message to redirect, or detach to leave it paused`. In TUI mode the app's key binding drives the same coordinator. |
+| **Ctrl-C** | `"\x03"` | **At a prompt** it is *intercepted and never raises* (`src/imp/cli/prompt.py`): a non-empty buffer is cleared in place, an empty buffer prints `press ctrl-d to pause & exit` once per session — it does **not** pause. **Mid-run** a real SIGINT (CLI/cooked mode) → the coordinator's loop signal handler (`InterruptCoordinator.run_signal_receiver`, re-armed after every prompt) → `signal_pause("ctrl-c")`. In **both** the **phase-0 chat** and a **materialized** Change it pauses the agent and stays **ATTACHED** (`alive=True`, does not exit) at an interactive prompt — steer (reply resumes the agent) or leave (a subsequent Ctrl-D detaches, rc 130, paused); the Ctrl-C **disposition** is identical across regimes, but the landing prompt **text** differs: **phase-0** → its chat `> type your reply` prompt; **materialized** → the resteer hold prompt `paused — type a message to redirect, or detach to leave it paused`. In TUI mode the app's key binding drives the same coordinator. |
 | **Ctrl-D** | `"\x04"` | **At a prompt** → **leave**. **Phase-0** (non-materialized) draft: at the opening prompt with no exchange → `imp: cancelled` (no Change); after an exchange → `imp: saved '<id>' to your Backlog` (`imp new`) / `conversation saved` (`imp chat`), resumable. **On a materialized Change at a prompt** (e.g. the resteer hold prompt after a Ctrl-C) → detaches (rc 130, resumable via `imp resume`); resume_target = "prompt" — `imp resume` lands back at the resteer hold prompt. **Mid-run** (both surfaces, delivered as `\x04` keystroke — see fidelity note above) → **suspend & detach**: tears down the in-flight request/tool/subagent (orphan check clean), emits `workflow_paused` with `interrupt_reason == "ctrl-d"`, rc 130, Change left paused; resume_target = "agent" — `imp resume` continues the agent (transcript replays, no intervening prompt). |
 
 > **ESC is a no-op.** A bare ESC byte (`"\x1b"`) never pauses imp: at a prompt prompt_toolkit
@@ -111,7 +111,7 @@ A correct imp does **all** of:
 
 - **Stops promptly on one interrupt** — no mashing, no multi-second hang.
 - **The interrupt outcome depends on whether the Change has *materialized*** — a real
-  worktree/branch created (`change.materialized`, `src/imp/cli/main.py`:433). Two regimes:
+  worktree/branch created (`change.materialized` in `src/imp/cli/main.py`). Two regimes:
   - **Phase 0 — the front-door interactive chat** (`imp new` / `imp chat` *before* the Change
     materializes; the conversational shaping phase):
     - **Ctrl-C mid-turn** pauses the turn and *returns to the chat* — it does **not** exit.
@@ -360,6 +360,10 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
 - `view(full=True)` → the whole run so far (scrolled-off history + current screen); the
   `paused (…)` line and the change id live here.
 - `snapshot()` → PNG; use it to *see* the pause line's color/glyph when judging clarity.
+- **Daemon-death triage.** If a pause banner reads `ended unexpectedly — see
+  .imp/changes/<id>/daemon.stderr`, the per-change session daemon died rather than pausing
+  cleanly — read that stderr file before judging. A daemon death *caused by* an interrupt is a
+  defect (record it); one from an unrelated crash is a separate bug, not an interrupt failure.
 
 ### **`INTERRUPT-AND-VERIFY(trigger, expected_reason)`** — the core check
 
@@ -460,6 +464,42 @@ These don't need to run at every point — fire each **at least once** somewhere
   opening buffer is ready. Nothing is running, so expect **no `interrupted` event**. Record
   whatever happens: clean handling is preferred (a neutered Ctrl-C hint, or a clean
   cancel/exit); a traceback, a hang, or an unkillable process is a bug.
+- **Steer after Ctrl-C (point B or C).** The pause-attached model's *other* half: after a
+  mid-run Ctrl-C pause, don't leave — type a short redirect at the landing prompt (e.g.
+  `stop that — just reply DONE`) and submit. Expect the agent to **resume in the same attached
+  session and visibly follow the redirect**; the run must **not** end `paused` (the inline
+  steer consumes the pause), and no duplicate re-run of the interrupted work. A steer that
+  dead-ends, is ignored, or leaves the Change paused anyway is a bug.
+- **Escalation force-quit (point C).** With a slow tool running, deliver Ctrl-C once (expect
+  the `stopping…` ack), wait **>1s** with the teardown still unwinding, then Ctrl-C again —
+  **CLI:** two `send_signal(2)` >1s apart; **TUI:** two `\x03` keystrokes. The second gesture
+  *past* the ~1s suppress window escalates to the leave path (the ack gains
+  `(interrupt again to force-quit)`): expect a clean detach (`alive=False`), Change paused and
+  resumable, orphan check clean — never a traceback or hang. (Contrast with the mashed-Ctrl-C
+  check above, which stays *within* the window and must be suppressed.)
+- **Ctrl-\ deliberate detach (CLI, once).** Mid-run, deliver SIGQUIT — `send_signal(3)` for
+  determinism (keystroke `send("\x1c", wait=False)` as a bonus check; same impty fidelity
+  caveat as mid-run Ctrl-C). imp traps SIGQUIT (replacing the core-dump default): expect the
+  same teardown as a force-quit — detach, Change paused, resumable, orphan-free. A
+  `Quit (core dumped)` or an unhandled-signal death is a bug.
+- **SIGHUP / closed terminal (once).** `send_signal(1)` mid-run. SIGHUP is a first-class
+  leave gesture (Intent B, same path as SIGTERM): expect detach, the Change paused (the
+  session daemon's lease rule decides, not the client), resumable, no orphans. This is the
+  "user closed the terminal tab" case.
+- **Out-of-band SIGINT at a prompt (CLI, once).** While parked at a prompt, fire
+  `send_signal(2)` — *not* the keystroke. Unlike typed Ctrl-C (neutered at a prompt), an
+  OS-level SIGINT at a prompt routes through the coordinator's **exit path**: expect a clean
+  detach/leave, not the `press ctrl-d…` hint and not a traceback. The keystroke and the signal
+  are *supposed* to diverge here — don't misfile the difference as a bug.
+- **Interrupt racing the finish.** Fire Ctrl-C or Ctrl-D as late as you can — while the
+  workflow is merging/finalizing after its last step. A terminal or blocked status
+  (`completed`, `saved`, `merge_blocked`, `abandoned`) must never be clobbered to `paused`:
+  expect either a clean pause before the merge or the completion winning — never a
+  half-merged tree or a completed Change that reports paused.
+- **Pause → resume → pause again (any point).** After a successful `RESUME-AND-VERIFY`,
+  interrupt the resumed run again. Expect a second clean pause — a fresh `workflow_paused`
+  appended *after* the `workflow_resumed` (the open-pause dedup must not swallow it) — and a
+  second resume that still works.
 
 ---
 
@@ -512,4 +552,7 @@ per point, headline defects (or "none"), report path.
 | **Ctrl-C** (mid-run, TUI) | `"\x03"` | — | app binding → coordinator → pause, stay attached (`alive=True`), never exit; landing prompt: phase-0 `> type your reply` / materialized resteer hold prompt |
 | **Ctrl-D** (at prompt / resteer hold) | `"\x04"` | — | `EOFError` → phase-0 leave (`cancelled` / Backlog / archive); **materialized at resteer hold → detach** (rc 130, resume-to-prompt) |
 | **Ctrl-D** (mid-run, both surfaces) | `"\x04"` | — | cbreak `/dev/tty` reader reads byte directly — no `send_signal` needed; suspend & detach (rc 130, `interrupt_reason == "ctrl-d"`, resume-to-agent) |
-| **SIGTERM** | — | `send_signal(15)` | coordinator |
+| **Ctrl-C ×2** (>1s apart, mid-teardown) | per surface | `send_signal(2)` ×2 | escalation → force-quit detach; ack shows `stopping… (interrupt again to force-quit)` |
+| **Ctrl-\** (mid-run, CLI) | `"\x1c"` (bonus) | `send_signal(3)` | SIGQUIT trap → deliberate detach; same teardown as force-quit (paused, resumable) |
+| **SIGTERM** | — | `send_signal(15)` | Intent-B leave → detach; daemon lease rule pauses (`paused (sigterm)`) |
+| **SIGHUP** | — | `send_signal(1)` | Intent-B leave (terminal closed) → detach; daemon lease rule pauses |
