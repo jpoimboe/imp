@@ -512,6 +512,19 @@ def test_duration_renders_in_step_hue():
     assert "\x1b[34m1m 30s\x1b[0m" in line   # first hue: step-blue on the duration
 
 
+def test_token_and_cost_columns_carry_no_color():
+    row = StepRow(phase="plan", step="plan-writer",
+                  start_ts="2026-01-01T00:00:00+00:00",
+                  end_ts="2026-01-01T00:01:30+00:00",
+                  tokens=TokenTotals(input=12000, output=345), cost=0.34)
+    out = render_summary([row], header=_HDR, color=True, width=80)
+    line = next(ln for ln in out if "plan-writer" in ln)
+    # Duration is hued for contrast, but the token/cost columns stay default
+    # foreground: the line ends with the plain "12.3k  $0.34" and no SGR reset.
+    assert line.endswith("  12.3k  $0.34")
+    assert "\x1b[34m1m 30s\x1b[0m" in line
+
+
 def test_errored_step_duration_follows_error_color():
     rows = [_row("implement", "task-lead", 10, errored=True)]
     out = render_summary(rows, header=_HDR, color=True, width=80)
