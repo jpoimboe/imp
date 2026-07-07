@@ -144,6 +144,61 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     return rows
 
 
+def _dur_text(seconds: float | None) -> str:
+    """Duration text via the shared fmt_seconds; 'running' for an open span."""
+    return "running" if seconds is None else fmt_seconds(seconds)
+
+
+def _tok_total(t: TokenTotals) -> int:
+    """A row's single token figure: input + output + both cache buckets."""
+    return t.input + t.output + t.cache_read + t.cache_creation
+
+
+def _fmt_tokens(total: int) -> str:
+    """Human-formatted token count: '—' for 0, bare int below 1k, then k / M."""
+    if total <= 0:
+        return "—"
+    if total < 1000:
+        return str(total)
+    if total < 1_000_000:
+        return f"{total / 1000:.1f}k"
+    return f"{total / 1_000_000:.1f}M"
+
+
+def _fmt_cost(cost: float) -> str:
+    """Dollar cost: '—' for none, '<$0.01' for a sub-cent figure, else $X.XX."""
+    if cost <= 0:
+        return "—"
+    if cost < 0.01:
+        return "<$0.01"
+    return f"${cost:.2f}"
+
+
+def _sub_body(sub: SubagentRow) -> str:
+    """The subagent's left-column label: '↳ name' plus ' (label)' when present."""
+    text = f"↳ {sub.name}"
+    if sub.label:
+        text += f" ({sub.label})"
+    return text
+
+
+def header_totals(
+    summary: list[StepRow], total_seconds: float | None
+) -> tuple[float | None, int, float]:
+    """Header rollup: work time (raw wall minus every step's human wait, floored
+    at 0; None when the run has no total yet) plus tokens and cost summed over
+    every step's own usage AND every subagent's own usage."""
+    if total_seconds is None:
+        work: float | None = None
+    else:
+        work = max(0.0, total_seconds - sum(r.wait_seconds for r in summary))
+    tokens = sum(_tok_total(r.tokens) for r in summary)
+    tokens += sum(_tok_total(s.tokens) for r in summary for s in r.subagents)
+    cost = sum((r.cost for r in summary), 0.0)
+    cost += sum(s.cost for r in summary for s in r.subagents)
+    return work, tokens, cost
+
+
 @dataclass
 class SummaryHeader:
     workflow: str

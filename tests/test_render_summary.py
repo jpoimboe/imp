@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import pytest
+
+from imp.cli.narrative import TokenTotals
 from imp.cli.render_summary import (
     StepRow,
     SubagentRow,
     SummaryHeader,
+    _dur_text,
+    _fmt_cost,
+    _fmt_tokens,
+    _sub_body,
+    _tok_total,
     build_summary,
+    header_totals,
     render_summary,
     summary_total,
 )
@@ -398,3 +407,76 @@ def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
     ])
     assert rows[0].tokens.input == 100
     assert rows[0].subagents[0].tokens.input == 200
+
+
+@pytest.mark.parametrize("n, expected", [
+    (-5, "—"),
+    (0, "—"),
+    (5, "5"),
+    (999, "999"),
+    (1000, "1.0k"),
+    (12345, "12.3k"),
+    (1_200_000, "1.2M"),
+])
+def test_fmt_tokens(n, expected):
+    assert _fmt_tokens(n) == expected
+
+
+@pytest.mark.parametrize("c, expected", [
+    (-1.0, "—"),
+    (0.0, "—"),
+    (0.004, "<$0.01"),
+    (0.01, "$0.01"),
+    (0.34, "$0.34"),
+    (12.5, "$12.50"),
+])
+def test_fmt_cost(c, expected):
+    assert _fmt_cost(c) == expected
+
+
+def test_tok_total_sums_all_four_buckets():
+    t = TokenTotals(input=1, output=2, cache_read=3, cache_creation=4)
+    assert _tok_total(t) == 10
+
+
+def test_dur_text_running_when_none_else_compact():
+    assert _dur_text(None) == "running"
+    assert _dur_text(90.0) == "1m 30s"
+
+
+def test_sub_body_with_and_without_label():
+    assert _sub_body(SubagentRow(name="explorer")) == "↳ explorer"
+    assert _sub_body(SubagentRow(name="explorer", label="map repo")) \
+        == "↳ explorer (map repo)"
+
+
+def test_header_totals_subtracts_wait_and_rolls_up_steps_and_subs():
+    rows = [
+        StepRow(phase="implement", step="task-lead",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:02:00+00:00",
+                wait_seconds=90.0,
+                tokens=TokenTotals(input=1000), cost=0.20,
+                subagents=[SubagentRow(name="coder",
+                                       tokens=TokenTotals(input=500),
+                                       cost=0.05)]),
+    ]
+    work, tokens, cost = header_totals(rows, 120.0)
+    assert work == 30.0                 # 120s total − 90s wait
+    assert tokens == 1500               # 1000 step + 500 subagent
+    assert cost == pytest.approx(0.25)  # 0.20 step + 0.05 subagent
+
+
+def test_header_totals_floors_work_at_zero():
+    rows = [StepRow(phase="p", step="s",
+                    start_ts="2026-01-01T00:00:00+00:00",
+                    end_ts="2026-01-01T00:00:10+00:00", wait_seconds=999.0)]
+    work, _, _ = header_totals(rows, 10.0)
+    assert work == 0.0
+
+
+def test_header_totals_none_total_gives_none_work():
+    work, tokens, cost = header_totals([], None)
+    assert work is None
+    assert tokens == 0
+    assert cost == 0.0
