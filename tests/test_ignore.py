@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import anyio
+import pytest
 
 from imp.agents.tools.ignore import (
     is_ignored,
@@ -112,7 +113,12 @@ def test_partition_ignored_empty_input_returns_empty_set(tmp_path: Path) -> None
     assert anyio.run(partition_ignored, tmp_path, set()) == set()
 
 
-def test_partition_ignored_none_when_not_a_repo(tmp_path: Path) -> None:
+def test_partition_ignored_none_when_not_a_repo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Hermetic not-a-repo: cap git's upward discovery walk at tmp_path, so a
+    # repo appearing in a shared ancestor (parallel-run basetemp) can't turn
+    # this directory into "inside a repository".
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert anyio.run(partition_ignored, tmp_path, {tmp_path / "x"}) is None
 
 

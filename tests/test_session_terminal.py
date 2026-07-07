@@ -1021,7 +1021,9 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
     captured: dict[str, Any] = {}
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        # Liveness backstop only; generous so a CPU-starved -n auto worker
+        # cannot lapse it (the coalescing asserts below are the real checks).
+        with anyio.fail_after(30):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         # The run blocks on ONE real gate here; the duplicate frames are fed
@@ -1046,7 +1048,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
         def finish(self) -> None: ...
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(60):       # whole-scenario liveness backstop
         async with anyio.create_task_group() as tg:
             await server.open()
 
@@ -1065,7 +1067,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
             # Feed several live (non-_replay) frames for the SAME gate back to
             # back. With max_buffer_size=1 the second send_nowait raised
             # anyio.WouldBlock here; without coalescing, solicit fires 3 times.
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):
                 while "on_event" not in captured:
                     await anyio.sleep(0.02)
             dup = {"type": "awaiting_user_input", "payload": {"prompt": "q1"}}

@@ -334,26 +334,30 @@ def test_run_to_completion_raises_when_child_never_exits() -> None:
 
 
 def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
-    # AC5: the OLD wait()-only path hangs on a flooding child (blocked in
-    # write() because nobody drains the master). The SAME still-blocked child is
-    # then driven by run_to_completion() on the SAME session, draining it.
+    # AC5: wait() times out on a child that still has output in flight, and
+    # run_to_completion() on the SAME session then drains and reaps it. The
+    # flood is gated behind a SECOND stdin line: the always-on background
+    # drainer means a flood started before wait() can fully drain (and the
+    # child exit) within the 0.5 s window under scheduler jitter — the gate
+    # pins the child alive at wait() without racing the drainer.
     prog = (
         "import sys\n"
-        "sys.stdin.readline()\n"  # wait for the send() below
+        "sys.stdin.readline()\n"  # wait for the first send() below
+        "sys.stdin.readline()\n"  # holds the child alive across wait(0.5)
         "sys.stdout.write('A' * 300000)\n"  # ≥ 256 KiB ≫ kernel tty buffer
         "sys.stdout.write('\\nDONE-5\\n')\n"
         "sys.stdout.flush()\n"
     )
     with TerminalSession([sys.executable, "-c", prog]) as s:
-        s.send("go\r")  # triggers the flood; NO wait_idle/drain before the foil
-        # `short` is deterministically safe: the child cannot have exited within
-        # 0.5 s — it is either still in readline() or blocked in write() (nobody
-        # drains the master, so the flood fills the tty buffer well before
-        # 300 KB). Either way the process is alive, so wait()'s proc.wait(0.5)
-        # raises TimeoutExpired (the old hang). The raise leaves it untouched.
+        s.send("go\r")
+        # Deterministic: the child is parked at the second readline(), so it
+        # cannot have exited — proc.wait(0.5) always raises (the old hang).
         with pytest.raises(subprocess.TimeoutExpired):
             s.wait(timeout=0.5)
-        rc = s.run_to_completion(hard=5.0)  # same blocked child, now drained
+        s.send("flood\r")  # NOW the 300 KB flood starts
+        # Generous hard budget: pyte chews the flood at ~1.5 s serial; a
+        # CPU-saturated -n auto box needs headroom (budget is liveness only).
+        rc = s.run_to_completion(hard=30.0)  # same child, drained + reaped
         assert rc == 0
         assert "DONE-5" in "\n".join(s.lines())
 
