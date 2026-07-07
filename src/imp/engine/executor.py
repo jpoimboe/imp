@@ -22,7 +22,7 @@ import traceback
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
@@ -81,6 +81,9 @@ from imp.engine.types import (
 )
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import provider_from_model, resolve_run
+
+if TYPE_CHECKING:
+    from imp.providers.config import Config
 
 EventCallback = Callable[[dict[str, Any]], None]
 
@@ -179,6 +182,87 @@ def _liveness_on_event(coordinator: Any, on_event: EventCallback) -> EventCallba
     return _composed
 
 
+def _trees_identical(a: Path, b: Path) -> bool:
+    """True iff both trees contain the same set of relative file paths with
+    byte-identical contents. Empty directories are ignored — the snapshot's
+    meaning is its files."""
+    files_a = {p.relative_to(a): p for p in a.rglob("*") if p.is_file()}
+    files_b = {p.relative_to(b): p for p in b.rglob("*") if p.is_file()}
+    if set(files_a) != set(files_b):
+        return False
+    return all(
+        files_a[rel].read_bytes() == files_b[rel].read_bytes()
+        for rel in files_a
+    )
+
+
+def _refresh_workflow_snapshot(change: Change) -> bool:
+    """Re-snapshot the live workflow into change_dir/workflow at a run_change
+    entry. Returns True only when an EXISTING snapshot's content was replaced
+    (a fresh change's initial copy returns False); best-effort and crash-safe."""
+    change_dir = change.change_dir
+    snapshot = change_dir / "workflow"
+    tmp = change_dir / "workflow.tmp"
+    old = change_dir / "workflow.old"
+
+    # 1. Recover crash artifacts from a prior interrupted swap.
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    if not snapshot.exists() and old.exists():
+        os.rename(old, snapshot)          # crash mid-swap: restore the snapshot
+    elif old.exists():
+        shutil.rmtree(old)                # leftover backup: drop it
+
+    had_snapshot = snapshot.is_dir()
+
+    # 2. Resolve the live source; best-effort — never introduce a new failure.
+    try:
+        live = change.live_workflow_dir
+    except Exception:
+        return False
+    if not live.is_dir():
+        return False
+
+    # 3. Build the candidate exactly as the initial snapshot does.
+    shutil.copytree(live, tmp)
+    overlay_project_skills(change.project_root, tmp / "skills" / "user")
+
+    # 4. No-op when the candidate matches the current snapshot.
+    if had_snapshot and _trees_identical(snapshot, tmp):
+        shutil.rmtree(tmp)
+        return False
+
+    # 5. Swap crash-safely (step 1 makes each intermediate state recoverable).
+    if had_snapshot:
+        os.rename(snapshot, old)
+        os.rename(tmp, snapshot)
+        shutil.rmtree(old)
+    else:
+        os.rename(tmp, snapshot)
+
+    return had_snapshot
+
+
+def _reconcile_resolved_run(
+    state: State, workflow: Workflow, config: Config,
+) -> bool:
+    """Merge into the persisted resolution maps only the tier/step keys the
+    refreshed workflow introduced (keys absent from the current maps), so a
+    pinned model survives; returns True iff a key was added (caller persists)."""
+    fresh_tiers, fresh_steps, _details = resolve_run(workflow, config)
+    assert state.resolved_tiers is not None and state.resolved_steps is not None
+    changed = False
+    for tier, pm in fresh_tiers.items():
+        if tier not in state.resolved_tiers:
+            state.resolved_tiers[tier] = pm
+            changed = True
+    for step_name, pm in fresh_steps.items():
+        if step_name not in state.resolved_steps:
+            state.resolved_steps[step_name] = pm
+            changed = True
+    return changed
+
+
 async def run_change(
     change: Change,
     *,
@@ -205,14 +289,7 @@ async def run_change(
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
-        snapshot = change.change_dir / "workflow"
-        if not snapshot.is_dir():
-            tmp = change.change_dir / "workflow.tmp"
-            if tmp.exists():
-                shutil.rmtree(tmp)
-            shutil.copytree(change.live_workflow_dir, tmp)
-            overlay_project_skills(change.project_root, tmp / "skills" / "user")
-            os.rename(tmp, snapshot)
+        workflow_refreshed = _refresh_workflow_snapshot(change)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
         ).config
@@ -233,6 +310,8 @@ async def run_change(
         )
         log: EventLog = JsonlEventLog(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
+        if workflow_refreshed:
+            _emit(log, "workflow_refreshed", {}, agent_id=None)
         sandbox_policy = _build_sandbox_policy(change, config, log)
         policy_root = change.project_root
 
@@ -252,6 +331,9 @@ async def run_change(
             if seed_opening:
                 _emit(log, "opening_intent", {"text": seed_opening},
                       agent_id=None)
+        elif workflow_refreshed:
+            if _reconcile_resolved_run(state, workflow, config):
+                state.save(change.state_dir)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
@@ -277,7 +359,7 @@ async def run_change(
                 return _complete(change, state, log)            # genuine completion
             if index_of.get(state.step) is None:
                 # The cursor names a step absent from the loaded workflow
-                # (corruption, or a future --refresh-workflow re-snapshot). Never
+                # (corruption, or a refresh that dropped this step). Never
                 # silent-merge: pause with an error instead of calling _complete.
                 state.status = "paused"
                 state.save(change.state_dir)
