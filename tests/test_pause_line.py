@@ -195,6 +195,33 @@ def test_pause_reason_resumed_before_any_pause_is_not_stale() -> None:
     assert reason == "terminated"
 
 
+def test_pause_reason_resumed_with_no_prior_pause_is_stale() -> None:
+    from imp.cli.main import _pause_reason, _PauseBanner
+
+    # A parked draft has conversation_saved but never workflow_paused. Its
+    # resume dying before any event (e.g. a workflow LoadError at daemon
+    # startup) must still read as an unexpected death, not a mute banner.
+    reason = _pause_reason([
+        ev("1", "awaiting_user_input", prompt=""),
+        ev("2", "conversation_saved"),
+        ev("3", "workflow_resumed"),
+    ])
+    assert reason is _PauseBanner.STALE
+
+
+def test_pause_reason_conversation_saved_after_resume_is_not_stale() -> None:
+    from imp.cli.main import _pause_reason
+
+    # A resumed draft that re-parks cleanly ends its segment with
+    # conversation_saved — that is a clean end, not an unexpected death.
+    reason = _pause_reason([
+        ev("1", "conversation_saved"),
+        ev("2", "workflow_resumed"),
+        ev("3", "conversation_saved"),
+    ])
+    assert reason is None
+
+
 def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Path) -> None:
     import json
 
@@ -218,3 +245,28 @@ def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Pat
     assert phase == "converge"
     assert token == "mona44"
     assert reason == "ended unexpectedly — see .imp/changes/mona44/daemon.stderr"
+
+
+def test_pause_facts_deliberate_leave_downgrades_stale_to_bare(tmp_path: Path) -> None:
+    import json
+
+    from imp.cli.main import _pause_facts
+    from imp.engine.change import Change
+
+    # The client itself chose to leave (Ctrl-D / /save / headless detach): the
+    # daemon writes its pause event only after the client is gone, so the
+    # resumed-without-pause log must render a bare banner, not a death notice.
+    change_dir = tmp_path / ".imp" / "changes" / "mona44"
+    change_dir.mkdir(parents=True)
+    events = [
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "workflow_paused", reason="terminated", kind="terminated"),
+        ev("3", "workflow_resumed"),
+    ]
+    (change_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n")
+    change = Change(id="mona44", title="", base_branch="main",
+                    control_root=tmp_path, project_root=tmp_path,
+                    change_dir=change_dir)
+    _name, _phase, _token, reason = _pause_facts(change, deliberate_leave=True)
+    assert reason is None

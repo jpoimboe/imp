@@ -172,6 +172,23 @@ async def test_run_inert_resume_launches_with_first_line(capsys) -> None:
 
 
 @pytest.mark.anyio
+async def test_run_inert_resume_blank_pads_the_question(capsys) -> None:
+    # The replayed question sits between the `<id> · resuming` header and the
+    # input prompt; a blank line on each side keeps it from fusing with either.
+    async def ask_line() -> str | None:
+        return None
+
+    async def launch(_line: str) -> int:
+        raise AssertionError("unreachable")
+
+    await run_inert_resume(
+        question="Pending Q?", ask_line=ask_line, launch=launch)
+
+    out = capsys.readouterr().out
+    assert out == "\nPending Q?\n\n"
+
+
+@pytest.mark.anyio
 async def test_run_inert_resume_reprompts_on_blank_line() -> None:
     lines = iter(["", "   ", "real answer"])
     launched: list[str] = []

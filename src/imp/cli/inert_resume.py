@@ -67,8 +67,11 @@ async def run_inert_resume(
     ask_line: Callable[[], Awaitable[str | None]],
     launch: Callable[[str], Awaitable[int]],
 ) -> int:
-    """Print the question; loop until a non-blank line (launch it) or None (return 0)."""
-    print(question)
+    """Print the question; loop until a non-blank line (launch it) or None (return 0).
+
+    The question is blank-padded on both sides so it neither fuses with the
+    `<id> · resuming` header above nor with the input prompt below."""
+    print(f"\n{question}\n")
     while True:
         line = await ask_line()
         if line is None:

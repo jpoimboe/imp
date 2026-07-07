@@ -267,29 +267,34 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     terminal pause's own segment contributes a cause. An interrupt pause with no
     error in its segment renders the bare reason, even when an earlier segment
     terminated. Returns _PauseBanner.STALE when the latest segment ended without
-    its own pause event (a resume follows the last pause), so the stored reason
-    is a fossil that _pause_facts renders as the unexpected-death banner rather
-    than replaying. Builds only from existing event fields — no hardcoded kind."""
+    its own segment-terminal event — a resume with no workflow_paused (or, for a
+    draft, conversation_saved) after it — so a run that died before writing
+    anything (e.g. a workflow LoadError at daemon startup) reads as an
+    unexpected death rather than a mute or fossil banner. A resumed draft that
+    never paused before parking has no workflow_paused at all; the resume alone
+    is enough to arm the check. Builds only from existing event fields — no
+    hardcoded kind."""
     paused: dict[str, Any] | None = None
     paused_error: dict[str, Any] | None = None
     pending_error: dict[str, Any] | None = None
-    resumed_after_paused = False
+    resume_pending = False
     for e in events:
         t = e.get("type")
         if t == "workflow_paused":
             paused = e.get("payload") or {}
             paused_error = pending_error
             pending_error = None
-            resumed_after_paused = False
+            resume_pending = False
         elif t == "workflow_resumed":
-            if paused is not None:
-                resumed_after_paused = True
+            resume_pending = True
+        elif t == "conversation_saved":
+            resume_pending = False
         elif t == "error":
             pending_error = e.get("payload") or {}
+    if resume_pending:
+        return _PauseBanner.STALE
     if paused is None:
         return None
-    if resumed_after_paused:
-        return _PauseBanner.STALE
     base = paused.get("interrupt_reason") or paused.get("reason")
     if not base:
         return None
@@ -320,23 +325,30 @@ def _pause_lines(
     ]
 
 
-def _pause_facts(change: Change) -> tuple[str, str | None, str, str | None]:
+def _pause_facts(
+    change: Change, *, deliberate_leave: bool = False,
+) -> tuple[str, str | None, str, str | None]:
+    """`deliberate_leave`: the client itself chose to leave (Ctrl-D / /save /
+    headless detach). The daemon writes its pause event only after the last
+    client detaches, so a resumed-without-pause log is expected there — render
+    a bare banner, not the unexpected-death notice."""
     name = change.id
     events = list(change.event_log().read())
     phase = _phase_from_events(events)
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        reason: str | None = (
+        reason: str | None = None if deliberate_leave else (
             f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
     else:
         reason = reason_val
     return name, phase, change.id, reason
 
 
-def _emit_paused_summary(change: Change) -> None:
+def _emit_paused_summary(change: Change, *, deliberate_leave: bool = False) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    name, phase, token, reason = _pause_facts(change)
+    name, phase, token, reason = _pause_facts(
+        change, deliberate_leave=deliberate_leave)
     for ln in _pause_lines(name, phase, token, reason=reason, color=color):
         print(ln)
 
@@ -454,7 +466,10 @@ def _handle_terminal_outcome(
                 payload.get("stderr", ""),
                 payload.get("stdout", ""),
             )
-    _emit_paused_summary(change)
+    escalated = getattr(coord, "escalation_event", None)
+    deliberate = bool(getattr(coord, "should_pause", False)) or bool(
+        escalated is not None and escalated.is_set())
+    _emit_paused_summary(change, deliberate_leave=deliberate)
     return 1
 
 
