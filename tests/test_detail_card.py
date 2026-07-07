@@ -31,6 +31,9 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
     assert "blocked on 2026-06-16-dep001" in card  # readiness from depends_on
     assert "depends_on:" in card
     assert "wire up OAuth login" in card  # seed_opening body
+    created_line = next(ln for ln in card.splitlines() if ln.startswith("created:"))
+    assert "+00:00" not in created_line               # tz offset trimmed on backlog cards too
+    assert "." not in created_line.split("(")[0]      # no microseconds in the timestamp part
 
 
 def _live_change(control: Path, change_id: str) -> None:
@@ -151,3 +154,22 @@ def test_detail_card_live_source(tmp_path: Path) -> None:
     assert "main" in card  # base_branch
     assert "2026-06-16-dep001" in card  # depends_on
     assert "build a widget please" in card  # originating prompt = first user_message
+
+
+def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "changes" / "2026-06-20-tsx001"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({
+        "id": "2026-06-20-tsx001", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00.123456+00:00",
+        "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-tsx001", status="paused", step="spec-writer",
+          step_attempt=0).save(cdir / "state")
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW))
+    created_line = next(ln for ln in card.splitlines() if ln.startswith("created:"))
+    assert "2026-06-20 11:00:00" in created_line   # trimmed to seconds, space-separated
+    assert ".123456" not in created_line            # microseconds dropped
+    assert "+00:00" not in created_line              # tz offset dropped
+    assert "(" in created_line and ")" in created_line   # friendly age still present

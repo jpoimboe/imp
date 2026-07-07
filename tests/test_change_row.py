@@ -220,3 +220,18 @@ def test_status_colors_have_new_and_no_errored() -> None:
     from imp.cli.change_row import STATUS_COLORS
     assert "new" in STATUS_COLORS
     assert "errored" not in STATUS_COLORS
+
+
+@pytest.mark.parametrize(
+    "iso, expected",
+    [
+        ("2026-06-20T11:00:00.123456+00:00", "2026-06-20 11:00:00"),  # micros + offset dropped
+        ("2026-06-20T11:00:00+00:00", "2026-06-20 11:00:00"),         # already second-precision
+        (None, "-"),
+        ("", "-"),
+        ("not-a-date", "-"),
+    ],
+)
+def test_format_timestamp_trims_to_seconds(iso, expected):
+    from imp.cli.change_row import format_timestamp
+    assert format_timestamp(iso) == expected

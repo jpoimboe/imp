@@ -1577,7 +1577,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
         "status:     backlog",
         f"provenance: {meta.get('origin', 'draft')}",
         f"readiness:  {readiness}",
-        f"created:    {created or '-'} ({change_row.relative_age(created, now=now)})",
+        f"created:    {change_row.format_timestamp(created)} "
+        f"({change_row.relative_age(created, now=now)})",
     ]
     if meta.get("depends_on"):
         lines.append(f"depends_on: {', '.join(meta['depends_on'])}")
@@ -1606,7 +1607,8 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         phase = _latest_phase(events)
         lines.append(f"step:          {step}" + (f" ({phase})" if phase else ""))
     lines.append(
-        f"created:       {created or '-'} ({change_row.relative_age(created, now=now)})")
+        f"created:       {change_row.format_timestamp(created)} "
+        f"({change_row.relative_age(created, now=now)})")
     lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
     meta = _change_meta(control, change_id) or {}
     if meta.get("base_branch"):

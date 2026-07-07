@@ -25,6 +25,15 @@ def relative_age(then_iso: str | None, *, now: datetime) -> str:
     return f"{hours // 24}d"
 
 
+def format_timestamp(iso: str | None) -> str:
+    if not iso:
+        return "-"
+    try:
+        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return "-"
+
+
 ID_W = 6        # bare 6-char Change id
 STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 4
