@@ -20,7 +20,7 @@ def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
     assert wf.name == "feature"
     assert [p.name for p in wf.phases] == [
-        "front-door", "spec", "plan", "implement", "converge", "integrate"
+        "threshold", "spec", "plan", "implement", "converge", "integrate"
     ]
 
 
@@ -138,7 +138,7 @@ def test_every_shown_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "front-door": "<random>",
+        "threshold": "<random>",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan",
@@ -197,7 +197,7 @@ def test_stateless_verify_gates_are_interruptible() -> None:
 
 def test_phase_labels_assigned() -> None:
     by = {p.name: p for p in _wf().phases}
-    assert by["front-door"].label is None
+    assert by["threshold"].label is None
     assert by["spec"].label == "spec phase"
     assert by["plan"].label == (
         "planning phase · plan {{ vars.plan_index }}/{{ vars.plan_total }}"

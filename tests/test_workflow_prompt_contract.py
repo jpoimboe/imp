@@ -16,7 +16,7 @@ AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 SUBAGENT_FILES = ["coder.md", "code-reviewer.md"]
 # Interactive STEPS: the executor wires their resume hooks, so a turn-ending
 # question is correct for them. Exempt from the no-bare-question rule.
-INTERACTIVE_STEP_FILES = ["front-door.md", "spec-finalizer.md", "finalize.md"]
+INTERACTIVE_STEP_FILES = ["threshold.md", "spec-finalizer.md", "finalize.md"]
 
 SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 
@@ -98,9 +98,9 @@ def test_subagent_prompt_forbids_turn_ending_question(name: str) -> None:
             f"{name}: subagents have no user channel — remove {banned!r}")
 
 
-def test_front_door_infers_intent_from_pasted_context(tmp_path) -> None:
+def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
-        "front-door"].prompt_template_source
+        "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -530,11 +530,11 @@ def test_no_agent_prompt_mentions_breakage_or_bypass_gate() -> None:
         assert "bypass gate" not in text, md.name
 
 
-def test_spec_writer_recognizes_front_door_handoff() -> None:
+def test_spec_writer_recognizes_threshold_handoff() -> None:
     body = _read("spec-finalizer.md")
     # The handoff opening and its adopt-with-light-review section are named.
     assert "Adopt the spec drafted with the user and finalize it:" in body
-    assert "Front-door handoff" in body
+    assert "Threshold handoff" in body
     # head_changed is re-derived from the two persisted heads, not the tool return.
     assert "change.cur_base_head" in body
     assert "change.orig_base_head" in body
@@ -653,9 +653,9 @@ def test_reconciler_sources_human_decision_bar() -> None:
     assert "asynchronous human triage" in text
 
 
-def test_front_door_adopts_discovered_work_by_default(tmp_path) -> None:
+def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
-        "front-door"].prompt_template_source
+        "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     attended = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -676,7 +676,7 @@ def test_front_door_adopts_discovered_work_by_default(tmp_path) -> None:
     assert "before calling `create_change`" not in attended
 
     # Autonomous runs omit the whole {% if not run.autonomous %} block; because
-    # create_change appears nowhere else in front-door.md, its absence proves the
+    # create_change appears nowhere else in threshold.md, its absence proves the
     # block was dropped.
     autonomous = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",

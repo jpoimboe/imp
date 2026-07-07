@@ -10,7 +10,7 @@ from imp.engine.types import Continue, SourceLoc, Step
 
 def _step(*, label: str | None) -> Step:
     return Step(
-        name="front-door", phase="front-door", kind="agent", rules=(),
+        name="threshold", phase="threshold", kind="agent", rules=(),
         on_max_retries=Continue(), max_loops=1,
         source=SourceLoc(file=Path("workflow.yaml"), line=1),
         label=label)

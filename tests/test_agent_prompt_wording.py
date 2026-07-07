@@ -46,7 +46,7 @@ def test_changed_files_carry_no_superpowers_provenance() -> None:
     import pathlib
     base = pathlib.Path("src/imp/assets/workflows/imp")
     touched = [
-        base / "agents" / "front-door.md",
+        base / "agents" / "threshold.md",
         base / "agents" / "spec-finalizer.md",
         base / "partials" / "spec-design-principles.md",
         base / "partials" / "brainstorm-dialogue.md",

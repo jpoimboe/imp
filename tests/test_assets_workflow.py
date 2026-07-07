@@ -51,7 +51,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
         "coder", "code-reviewer", "spiker",
     }
     dispatchers = {"task-lead", "deferred-sweep",
-                   "plan-writer", "spec-finalizer", "front-door", "finalize"}
+                   "plan-writer", "spec-finalizer", "threshold", "finalize"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -146,7 +146,7 @@ def test_spec_writer_declares_complexity_output() -> None:
     spec_finalizer = wf.agents["spec-finalizer"]
     assert "complexity" in spec_finalizer.output_schema.field_names()
     # complexity drives the thin-spec decision only; fast_path is owned by the
-    # front-door phase now, so a renamed value no longer silently breaks routing.
+    # threshold phase now, so a renamed value no longer silently breaks routing.
     field = next(f for f in spec_finalizer.output_schema.fields if f.name == "complexity")
     assert field.type == "enum"
     assert field.values == ("trivial", "standard")
@@ -230,10 +230,10 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     assert m.var_mutations == {"spec_minors_integrated": False}
 
 
-def test_front_door_sets_fast_path_from_ceremony() -> None:
+def test_threshold_sets_fast_path_from_ceremony() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["front-door"].rules
+    rules = _steps(wf)["threshold"].rules
     express = evaluate_rules(rules, vars=_BASE_VARS,
                              output={"status": "Success", "ceremony": "express"})
     assert express.var_mutations["fast_path"] is True
@@ -242,10 +242,10 @@ def test_front_door_sets_fast_path_from_ceremony() -> None:
     assert full.var_mutations["fast_path"] is False
 
 
-def test_front_door_authors_summary_on_express() -> None:
+def test_threshold_authors_summary_on_express() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["front-door"].prompt_template_source
+    body = wf.agents["threshold"].prompt_template_source
     assert "imp artifact-commit" not in body
     assert "{{ change.home }}/artifacts/summary/{{ change.id }}.md" in body
     low = body.lower()
@@ -400,8 +400,8 @@ def test_no_goto_spec_finalizer_edge() -> None:
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     # Rework edges back into spec-finalizer must be `resume:` (transcript kept), so a
     # resumed spec-finalizer always has its rename_change result in history. The one
-    # permitted `goto: spec-finalizer` is front-door's forward entry on the full path.
-    assert wf.count("goto: spec-finalizer") == 1  # only front-door's forward entry
+    # permitted `goto: spec-finalizer` is threshold's forward entry on the full path.
+    assert wf.count("goto: spec-finalizer") == 1  # only threshold's forward entry
     assert "goto: spec_finalizer" not in wf
 
 
@@ -762,7 +762,7 @@ def test_spec_finalizer_replaces_spec_writer() -> None:
     assert "## Build now or save for later" not in body
     assert "## Naming the Change" not in body
     # Its finalize core remains.
-    assert "Front-door handoff" in body
+    assert "Threshold handoff" in body
     assert "imp artifact-commit" not in body
     # Its self-tag in the deferred reader form is renamed.
     assert "DEFERRED spec-finalizer:" in body
@@ -774,7 +774,7 @@ def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     assert "spec-writer" not in wf
     assert "spec_writer" not in wf
-    assert wf.count("goto: spec-finalizer") == 1   # only front-door's forward entry
+    assert wf.count("goto: spec-finalizer") == 1   # only threshold's forward entry
 
 
 def test_summarizer_immediately_precedes_finalize():
@@ -1024,8 +1024,8 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     spiker = wf.agents["spiker"]
     # opts into the Part-1 isolation primitive
     assert spiker.isolated_worktree is True
-    # dispatchable by BOTH front-door and task-lead
-    assert "spiker" in wf.agents["front-door"].subagents
+    # dispatchable by BOTH threshold and task-lead
+    assert "spiker" in wf.agents["threshold"].subagents
     assert "spiker" in wf.agents["task-lead"].subagents
     # full default grant: write + exec + network, but no dispatch/rename caps
     assert spiker.tools == BASE_CAPS
@@ -1054,9 +1054,9 @@ def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
     assert "{{ change.home }}/artifacts/spike/" in text
 
 
-def test_front_door_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
+def test_threshold_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
     from imp.assets import bundled_workflow_dir
-    low = (bundled_workflow_dir("imp") / "agents" / "front-door.md").read_text().lower()
+    low = (bundled_workflow_dir("imp") / "agents" / "threshold.md").read_text().lower()
     assert "spiker" in low
     assert "spec-shaping" in low
     assert "before finalizing" in low
@@ -1101,7 +1101,7 @@ def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
                 interactive.add((name, s.name))
 
     assert interactive == {
-        ("imp", "front-door"),
+        ("imp", "threshold"),
         ("imp", "finalize"),
         ("patent", "invention-interviewer"),
         ("patent", "disclosure-gate"),

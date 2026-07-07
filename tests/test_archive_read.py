@@ -134,7 +134,7 @@ def test_read_change_json_prefers_stored_meta(tmp_path: Path) -> None:
         "project_root": str(tmp_path), "materialized": False,
         "orig_base_head": "deadbeef", "layout_version": 2}))
     state_json = tmp_path / "state.json"
-    state_json.write_text(json.dumps({"id": "conv", "status": "paused", "step": "front-door"}))
+    state_json.write_text(json.dumps({"id": "conv", "status": "paused", "step": "threshold"}))
 
     archive.archive_change(
         tmp_path, "conv", events_path=events,

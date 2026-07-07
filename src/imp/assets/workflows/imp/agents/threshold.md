@@ -1,5 +1,5 @@
 ---
-name: front-door
+name: threshold
 label: "<random>"
 description: An open conversation — answer questions about imp, scout existing work, or scope a build — that goes live only when the user is ready.
 subagents: [explorer, researcher, spiker]

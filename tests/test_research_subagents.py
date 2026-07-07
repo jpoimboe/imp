@@ -52,7 +52,7 @@ def test_spec_writer_declares_research_subagents() -> None:
 
 
 def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
-    body = _wf().agents["front-door"].prompt_template_source
+    body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -107,7 +107,7 @@ def test_brainstorm_dialogue_includes_partial_and_drops_inline_duplication() -> 
 
 
 def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
-    body = _wf().agents["front-door"].prompt_template_source
+    body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",

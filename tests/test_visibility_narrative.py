@@ -81,7 +81,7 @@ def test_payload_emits_phase_show_label_only_when_false() -> None:
 
     def _mk(psl: bool) -> dict:
         step = Step(
-            name="fd", phase="front-door", kind="agent", rules=(),
+            name="fd", phase="threshold", kind="agent", rules=(),
             on_max_retries=Continue(), max_loops=1,
             source=SourceLoc(file=Path("workflow.yaml"), line=1),
             phase_show_label=psl)
@@ -94,7 +94,7 @@ def test_payload_emits_phase_show_label_only_when_false() -> None:
 def test_phase_show_label_lands_on_phase_node() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="fd", kind="agent", phase="front-door",
+        ev("2", "step_started", step="fd", kind="agent", phase="threshold",
            model="m", provider="anthropic", phase_show_label=False),
         ev("3", "step_completed", step="fd", kind="agent",
            action={"verb": "continue"}, var_mutations={}),

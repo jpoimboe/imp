@@ -120,7 +120,7 @@ def test_resume_builtin_rehydrates_resumable_match(tmp_path: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
         "materialized": False}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "conv1", "status": "paused", "step": "front-door"}))
+    sj.write_text(json.dumps({"id": "conv1", "status": "paused", "step": "threshold"}))
     archive.archive_change(
         tmp_path, "conv1", events_path=events,
         change_json_path=cj, state_json_path=sj, resumable=True)

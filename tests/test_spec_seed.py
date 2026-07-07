@@ -193,9 +193,9 @@ def test_new_tui_delivers_seed(
     assert "--tui does not deliver" not in capsys.readouterr().err
 
 
-def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
+def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
-        "front-door"].prompt_template_source
+        "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -214,9 +214,9 @@ def test_front_door_opening_conditioned_on_message(tmp_path) -> None:
     assert "Open by asking" not in seeded
 
 
-def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
+def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
-        "front-door"].prompt_template_source
+        "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -233,14 +233,14 @@ def test_front_door_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         workflow_dir=bundled_workflow_dir("imp"))
     assert "verbatim opening intent" in seeded    # seeded branch carries the wording
     assert "wire up telemetry" in seeded          # ...and the verbatim intent
-    # No spec is inlined into the prompt; the user names a spec file front-door reads.
+    # No spec is inlined into the prompt; the user names a spec file threshold reads.
     assert "imp new <draft>" not in out
     assert "imp new <file>" not in out
 
 
-def test_front_door_prompt_has_read_and_verify_section(tmp_path) -> None:
+def test_threshold_prompt_has_read_and_verify_section(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
-        "front-door"].prompt_template_source
+        "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",

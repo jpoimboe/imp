@@ -42,7 +42,7 @@ draft is just a conversation and its artifacts on disk.
 
 - `imp new` — start a fresh change; a left draft stays in the active list, shown
   as a `draft` (not the Backlog), resumable later.
-- `imp chat` — open the front-door conversation.
+- `imp chat` — open the threshold conversation.
 - `imp resume <id>` — pick a parked or left Change back up.
 
 When a phase-0 conversation is left, its fate depends on what happened:
@@ -62,7 +62,7 @@ archived).
 
 - **spec** — what the change must accomplish.
 - **plan** — the step-by-step implementation a coder executes.
-- **phase** — a stage of the workflow (front-door, spec, plan, implement,
+- **phase** — a stage of the workflow (threshold, spec, plan, implement,
   integrate).
 - **step** — one agent or gate run inside a phase.
 - **lane** — a model tier a step runs at.
