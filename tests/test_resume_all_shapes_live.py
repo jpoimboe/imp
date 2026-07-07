@@ -186,6 +186,9 @@ async def test_send_to_llm_store_backed_native_resume(
     not opted_in("claude_code"),
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
+# Serialize the 3 crash-prone resume tests onto one worker (under --dist
+# loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
+@pytest.mark.xdist_group("live_claude_resume")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_dangling_tool_use_store_backed_native_resume(

@@ -148,6 +148,13 @@ def _read_paths(events_path: Path) -> list[str]:
     not opted_in("claude_code"),
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
+# Serialize the 3 crash-prone resume tests onto one worker (under --dist
+# loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
+@pytest.mark.xdist_group("live_claude_resume")
+# 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
+# 240s live-test backstop can't fire mid-subprocess before imp's own internal
+# timeouts do (which yield real diagnostics instead of a killed worker).
+@pytest.mark.timeout(600)
 def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     tmp_path: Path,
 ) -> None:
