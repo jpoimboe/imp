@@ -193,6 +193,53 @@ def _trees_identical(a: Path, b: Path) -> bool:
     )
 
 
+def _refresh_workflow_snapshot(change: Change) -> bool:
+    """Re-snapshot the live workflow into change_dir/workflow at a run_change
+    entry. Returns True only when an EXISTING snapshot's content was replaced
+    (a fresh change's initial copy returns False); best-effort and crash-safe."""
+    change_dir = change.change_dir
+    snapshot = change_dir / "workflow"
+    tmp = change_dir / "workflow.tmp"
+    old = change_dir / "workflow.old"
+
+    # 1. Recover crash artifacts from a prior interrupted swap.
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    if not snapshot.exists() and old.exists():
+        os.rename(old, snapshot)          # crash mid-swap: restore the snapshot
+    elif old.exists():
+        shutil.rmtree(old)                # leftover backup: drop it
+
+    had_snapshot = snapshot.is_dir()
+
+    # 2. Resolve the live source; best-effort — never introduce a new failure.
+    try:
+        live = change.live_workflow_dir
+    except Exception:
+        return False
+    if not live.is_dir():
+        return False
+
+    # 3. Build the candidate exactly as the initial snapshot does.
+    shutil.copytree(live, tmp)
+    overlay_project_skills(change.project_root, tmp / "skills" / "user")
+
+    # 4. No-op when the candidate matches the current snapshot.
+    if had_snapshot and _trees_identical(snapshot, tmp):
+        shutil.rmtree(tmp)
+        return False
+
+    # 5. Swap crash-safely (step 1 makes each intermediate state recoverable).
+    if had_snapshot:
+        os.rename(snapshot, old)
+        os.rename(tmp, snapshot)
+        shutil.rmtree(old)
+    else:
+        os.rename(tmp, snapshot)
+
+    return had_snapshot
+
+
 async def run_change(
     change: Change,
     *,
