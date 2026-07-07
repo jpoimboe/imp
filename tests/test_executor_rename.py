@@ -177,7 +177,7 @@ async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -
     events: list[dict[str, Any]] = []
     result = await run_change(
         ch, on_event=events.append,
-        seed_opening="Implement this spec X", non_interactive=True)
+        seed_opening="Implement this spec X", headless=True)
 
     assert result is RunResult.COMPLETED
     s1 = sink["step:p/s1"][0].content[0].text
@@ -201,7 +201,7 @@ async def test_run_change_none_seed_opening_has_empty_opening(
                        change_id="bbb222", base_branch="main")
 
     result = await run_change(
-        ch, on_event=lambda _e: None, seed_opening=None, non_interactive=True)
+        ch, on_event=lambda _e: None, seed_opening=None, headless=True)
 
     assert result is RunResult.COMPLETED
     s1 = sink["step:p/s1"][0].content[0].text
@@ -239,7 +239,7 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
     result = await run_change(
         ch, on_event=lambda _e: None,
         seed_opening="Implement this spec SHOULD NOT APPEAR",
-        non_interactive=True)
+        headless=True)
 
     assert result is RunResult.COMPLETED
     # On a resumed step the executor passes initial_messages=() — no seed injected

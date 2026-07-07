@@ -125,7 +125,7 @@ def test_pending_interject_satisfies_without_soliciting() -> None:
         return "should-not-be-used"
 
     fn = build_continuation_fn(
-        user_input_fn=reply_fn, coordinator=coord, non_interactive=False)
+        user_input_fn=reply_fn, coordinator=coord, headless=False)
     assert fn("which database?") == "actually, stop and reconsider"
     assert calls["n"] == 0
 
@@ -141,7 +141,7 @@ async def test_attended_human_reply_becomes_next_message(
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=False)
+        event_log=log, agent_id="a1", headless=False)
     out = fn("which database should I use?")
     assert inspect.isawaitable(out)
     assert await out == "use postgres"
@@ -162,7 +162,7 @@ async def test_headless_with_channel_solicits_immediately(
 
     fn = build_continuation_fn(
         user_input_fn=channel, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=True)
+        event_log=log, agent_id="a1", headless=True)
     # Headless top-level NEVER nudges: the first bare turn-end solicits the
     # channel and emits awaiting_user_input.
     out = fn("still prose")
@@ -228,36 +228,36 @@ async def test_inline_bare_turn_end_does_not_restamp_gate(
     assert exc_info.value.interrupt is False
 
 
-def test_build_continuation_fn_has_dialogue_and_has_schema_params() -> None:
+def test_build_continuation_fn_has_interactive_and_has_schema_params() -> None:
     params = inspect.signature(build_continuation_fn).parameters
-    assert "dialogue" in params
+    assert "interactive" in params
     assert "has_schema" in params
 
 
-def test_dialogue_and_has_schema_do_not_change_headless_park() -> None:
-    # dialogue/has_schema do not alter turn-end behavior on their own:
+def test_interactive_and_has_schema_do_not_change_headless_park() -> None:
+    # interactive/has_schema do not alter turn-end behavior on their own:
     # a headless top-level bare turn-end still parks carrying the last text.
-    fn = build_continuation_fn(dialogue=True, has_schema=True)
+    fn = build_continuation_fn(interactive=True, has_schema=True)
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("the final question")
     assert exc_info.value.prompt == "the final question"
 
 
 def test_first_bare_turn_end_returns_the_nudge_string() -> None:
-    # A schema-bearing, non-dialogue bare turn-end returns the single-sourced
+    # A schema-bearing, non-interactive-flag bare turn-end returns the single-sourced
     # nudge (re-queried by the provider) instead of parking. Without the nudge
     # arm this call would RAISE AwaitingUserInput, so the return itself is the
     # falsifiable consequence.
     log = _RecordingLog()
     fn = build_continuation_fn(
-        event_log=log, agent_id="a1", has_schema=True, dialogue=False)
+        event_log=log, agent_id="a1", has_schema=True, interactive=False)
     assert fn("the real question") == COMPLETION_NUDGE
 
 
 def test_nudge_emits_completion_nudge_event_with_message() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
-        event_log=log, agent_id="a1", has_schema=True, dialogue=False)
+        event_log=log, agent_id="a1", has_schema=True, interactive=False)
     fn("prose without complete_step")
     nudges = [e for e in log.events if e["type"] == "completion_nudge"]
     assert len(nudges) == 1
@@ -270,7 +270,7 @@ def test_second_bare_turn_end_falls_through_to_park_no_second_nudge() -> None:
     # re-nudged: it parks (headless, no channel) exactly as today.
     log = _RecordingLog()
     fn = build_continuation_fn(
-        event_log=log, agent_id="a1", has_schema=True, dialogue=False)
+        event_log=log, agent_id="a1", has_schema=True, interactive=False)
     assert fn("the real question") == COMPLETION_NUDGE
     with pytest.raises(AwaitingUserInput):
         fn("WAITING")
@@ -281,17 +281,17 @@ def test_second_bare_turn_end_falls_through_to_park_no_second_nudge() -> None:
 def test_park_after_nudge_carries_pre_nudge_text_not_reply() -> None:
     # Park fidelity: the human at the gate must see the ORIGINAL question, not
     # the post-nudge reply. Without the stash, the prompt would be "WAITING".
-    fn = build_continuation_fn(has_schema=True, dialogue=False)
+    fn = build_continuation_fn(has_schema=True, interactive=False)
     assert fn("the real question") == COMPLETION_NUDGE
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("WAITING")
     assert exc_info.value.prompt == "the real question"
 
 
-def test_dialogue_true_never_nudges_and_parks_immediately() -> None:
+def test_interactive_true_never_nudges_and_parks_immediately() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
-        event_log=log, agent_id="a1", has_schema=True, dialogue=True)
+        event_log=log, agent_id="a1", has_schema=True, interactive=True)
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("a question")
     assert exc_info.value.prompt == "a question"
@@ -303,7 +303,7 @@ def test_no_schema_never_nudges_and_parks_immediately() -> None:
     # top-level agents untouched: no nudge, park carrying the last text.
     log = _RecordingLog()
     fn = build_continuation_fn(
-        event_log=log, agent_id="a1", has_schema=False, dialogue=False)
+        event_log=log, agent_id="a1", has_schema=False, interactive=False)
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("a question")
     assert exc_info.value.prompt == "a question"
@@ -316,7 +316,7 @@ def test_pending_interject_wins_over_nudge() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
         coordinator=coord, event_log=log, agent_id="a1",
-        has_schema=True, dialogue=False)
+        has_schema=True, interactive=False)
     assert fn("which database?") == "stop and reconsider"
     assert not any(e["type"] == "completion_nudge" for e in log.events)
 
@@ -325,7 +325,7 @@ def test_pending_interject_wins_over_nudge() -> None:
 async def test_attended_first_yield_nudges_then_solicits(
     anyio_backend: str,
 ) -> None:
-    # Attended, schema-bearing, non-dialogue: Part 2 replaces the old
+    # Attended, schema-bearing, non-interactive-flag: Part 2 replaces the old
     # "attended NEVER nudges" contract with a one-shot nudge. The FIRST bare
     # turn-end returns the nudge string (not an immediate inline solicit); a
     # subsequent bare turn-end then solicits the attended human exactly as today.
@@ -336,8 +336,8 @@ async def test_attended_first_yield_nudges_then_solicits(
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=False,
-        has_schema=True, dialogue=False)
+        event_log=log, agent_id="a1", headless=False,
+        has_schema=True, interactive=False)
     assert fn("which database?") == COMPLETION_NUDGE   # nudge, not a solicit
     out = fn("WAITING")                                # now solicits inline
     assert inspect.isawaitable(out)
@@ -360,8 +360,8 @@ async def test_two_consecutive_yields_each_get_exactly_one_nudge(
 
     fn = build_continuation_fn(
         user_input_fn=channel, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=True,
-        has_schema=True, dialogue=False)
+        event_log=log, agent_id="a1", headless=True,
+        has_schema=True, interactive=False)
     # Yield 1
     assert fn("question one") == COMPLETION_NUDGE
     out = fn("WAITING")            # falls through to channel solicit
@@ -382,7 +382,7 @@ def test_interject_after_nudge_clears_bit_so_later_yield_re_nudges() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
         coordinator=coord, event_log=log, agent_id="a1",
-        has_schema=True, dialogue=False)
+        has_schema=True, interactive=False)
     # Yield 1: nudge fires.
     assert fn("question one") == COMPLETION_NUDGE
     # A human types a mid-run interject; the next bare turn-end returns it and

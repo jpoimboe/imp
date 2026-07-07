@@ -1355,7 +1355,7 @@ async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> 
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
 
-    await run_change(change, on_event=lambda _e: None, non_interactive=True)
+    await run_change(change, on_event=lambda _e: None, headless=True)
 
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2
@@ -3118,7 +3118,7 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
 
-    await run_change(change, on_event=lambda _e: None, non_interactive=True)
+    await run_change(change, on_event=lambda _e: None, headless=True)
 
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2

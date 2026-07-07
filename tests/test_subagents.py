@@ -781,7 +781,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
     ctx.non_interactive = True  # headless parent
 
     await dispatch_task(ctx, "helper", "do it")
-    assert capture["inv"].non_interactive is True
+    assert capture["inv"].headless is True
 
 
 @pytest.mark.anyio
@@ -803,7 +803,7 @@ async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> N
     ctx.non_interactive = False  # interactive parent
 
     await dispatch_task(ctx, "helper", "do it")
-    assert capture["inv"].non_interactive is False
+    assert capture["inv"].headless is False
 
 
 @pytest.mark.anyio

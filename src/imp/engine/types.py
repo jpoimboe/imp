@@ -191,7 +191,7 @@ class Step:
     output_schema: OutputSchema | None = None  # script-only typed $IMP_OUTPUT contract
     interruptible: bool = False  # script-only: gate is safe to kill mid-run on interrupt
     clean_tree: bool = True  # agent-only: bounce the step if the worktree is left dirty
-    dialogue: bool = False  # agent-only
+    interactive: bool = False  # agent-only
 
 
 @dataclass(frozen=True, slots=True)

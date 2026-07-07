@@ -106,7 +106,7 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
     # Nudge backstop, exactly as the engine wires it in production: a turn that
     # ends without complete_step is re-prompted rather than pausing for input.
     nudge = build_continuation_fn(
-        non_interactive=True,
+        headless=True,
     )
     ev_lines: list[str] = []
     tool_calls: list[Any] = []
@@ -209,7 +209,7 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
         # reliably calls glob then complete_step, tripping cap=1 on dispatch #2
         # (measured: 8/8 -> tool_call_ceiling_exceeded, vs 5/8 without).
         continuation_fn=build_continuation_fn(
-            non_interactive=True,
+            headless=True,
         ),
     )
     events = [ev async for ev in runner.run(inv)]

@@ -115,7 +115,7 @@ class ToolContext:
     sandbox_policy: Any = None
     # §10/§12: when True, the run is headless (no human at the keyboard). The
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
-    # forever. Copied from invocation.non_interactive by each provider.
+    # forever. Copied from invocation.headless by each provider.
     non_interactive: bool = False
     # Per-invocation task-dispatch width cap (design Decision 5). Lazily created
     # by get_parallel_limiter on first task dispatch; bounds one level's breadth.

@@ -456,6 +456,9 @@ class NarrativeBuilder:
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `> …`) rather than a synthetic engine prompt (dropped).
         self._awaiting_reply = False
+        # Armed by a completion_nudge; the next prose llm_response consumes it and
+        # drops a bare WAITING protocol reply (pure plumbing). Survives non-prose events.
+        self._completion_nudge_pending = False
         self._opening_intent_node: UserMessageNode | None = None
         # TUI-only optimistic reply echo: reconciled by the next user_message;
         # None on the streaming path.
@@ -1320,8 +1323,14 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # shared prose predicate.
     if not llm_response_has_prose(p):
         return
-    _rotate_status_phrase(self)
     node = AgentTextNode(payload=p)
+    # A prose turn after a completion_nudge clears the flag; a bare WAITING
+    # protocol reply (case-insensitive) is dropped before any side effect.
+    if self._completion_nudge_pending:
+        self._completion_nudge_pending = False
+        if node.text.strip().casefold() == "waiting":
+            return
+    _rotate_status_phrase(self)
     if self._current_burst is not None:
         self._current_burst.span_end_ts = event.get("timestamp")
     self._flush_burst()
@@ -1720,10 +1729,9 @@ def _h_output_validation_nudge(
 def _h_completion_nudge(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
-    # A nudged bare turn-end is a recoverable prompt, not a failure — render dim.
-    self._append(ErrorNode(
-        message="bare turn-end — nudged to complete or confirm waiting",
-        is_warning=True))
+    # Telemetry-only (events.jsonl keeps the forensic record; render nothing).
+    # Arm the flag so the next prose llm_response can drop a bare WAITING reply.
+    self._completion_nudge_pending = True
 
 
 def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

@@ -513,11 +513,10 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
 @pytest.mark.anyio
 async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None:
     """finalize ends its turn with a bare question (no complete_step, no tool).
-    The FIRST bare turn-end is nudged (finalize is schema-bearing, dialogue:false);
-    a WAITING reply bare-ends again and the attended handler then solicits,
-    delivering the human reply as the next user message, after which it completes
-    with decision=merge. Positioned directly at finalize so only the finalize ->
-    merge path runs."""
+    finalize is interactive:true, so the FIRST bare turn-end solicits the human
+    immediately — no completion_nudge, no WAITING round-trip. The human reply
+    becomes the next user message, after which finalize completes with
+    decision=merge. Positioned directly at finalize so only finalize -> merge runs."""
     change = _seed_default_workflow(tmp_path)
     st = State.load(change.state_dir)
     st.step = "finalize"
@@ -528,10 +527,6 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
         text("Summary: stub change. Merge or rework?"),
         stop_reason="end_turn",
     )
-    waiting_response = response(
-        text("WAITING"),
-        stop_reason="end_turn",
-    )
     merge_response = response(
         tool_use("c1", "complete_step", {
             "outcome": "ok", "status": "Success", "decision": "merge", "comments": "user approved",
@@ -540,7 +535,7 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
         stop_reason="tool_use",
     )
     fake = FakeAsyncAnthropic(
-        [solicit_response, waiting_response, merge_response],
+        [solicit_response, merge_response],
         default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -561,8 +556,10 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
     assert result is RunResult.COMPLETED, (
         f"expected COMPLETED, got {result!r}; events: {[e['type'] for e in events_seen]}"
     )
+    seen_types = [e["type"] for e in events_seen]
     assert len(human_replies) == 1, human_replies
-    assert "awaiting_user_input" in [e["type"] for e in events_seen]
+    assert "awaiting_user_input" in seen_types
+    assert "completion_nudge" not in seen_types, seen_types
 
 
 @pytest.mark.anyio
@@ -581,7 +578,7 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
@@ -616,7 +613,7 @@ async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
@@ -642,7 +639,7 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     types_seen = [e.get("type") for e in _run_events(change)]
     steps = [e["payload"].get("step") for e in _run_events(change)
@@ -671,7 +668,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.PAUSED
     final = State.load(change.state_dir)
     assert final.status == "merge_blocked"
@@ -692,7 +689,7 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started"]
@@ -723,7 +720,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
 
     events = _run_events(change)          # the same source `imp log` renders

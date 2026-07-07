@@ -43,7 +43,7 @@ phases:
         file: agents/front-door.md
         tier: high
         label: "<imp>"
-        dialogue: true
+        interactive: true
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
           - {else: true, set: {fast_path: false}, goto: spec-finalizer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
@@ -296,6 +296,7 @@ phases:
         file: agents/finalize.md
         tier: high
         label: finalizing
+        interactive: true
         max_loops: 20
         rules:
           - {if: {decision: merge},  goto: cleanup-merge, label: "preparing to merge"}
