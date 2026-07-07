@@ -2138,3 +2138,80 @@ def test_mid_session_nested_pause_emits_via_normal_walk() -> None:
         drv.on_event(e)
     # No finish(): the normal walk must already have emitted the nested pause.
     assert any("paused (interrupt)" in ln for ln in _body(out))
+
+
+def test_compose_activity_line_counts_down_when_countdown_total_set() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0)
+    line = compose_activity_line(activity=act, frame=0, elapsed=660.0, color=False)
+    assert line is not None
+    # 2940 - 660 = 2280s remaining -> _fmt_hm -> "38m"
+    assert "~38m left" in line
+    assert "waiting for limit reset" in line
+    # the count-up elapsed segment must NOT appear
+    assert "11m 0s" not in line
+
+
+def test_compose_activity_line_clamps_countdown_to_under_a_minute() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    # remaining reaches zero (reset moment passed before the agent produced an event)
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=100.0)
+    reached = compose_activity_line(activity=act, frame=0, elapsed=100.0, color=False)
+    assert "<1m left" in reached
+    # a positive-but-sub-minute remaining also clamps
+    partial = compose_activity_line(activity=act, frame=0, elapsed=70.0, color=False)
+    assert "<1m left" in partial
+    # never negative / never a stray minus sign in the tail
+    over = compose_activity_line(activity=act, frame=0, elapsed=500.0, color=False)
+    assert "<1m left" in over
+    assert "-" not in over
+
+
+def test_compose_activity_line_countdown_at_exact_minute_boundary() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    # remaining == 60.0 exactly -> >= 60 guard is True -> "~1m left", not "<1m left"
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=120.0)
+    line = compose_activity_line(activity=act, frame=0, elapsed=60.0, color=False)
+    assert "~1m left" in line
+    assert "<1m left" not in line
+
+
+def test_compose_activity_line_unchanged_when_no_countdown() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="coding", detail="bash pytest")
+    line = compose_activity_line(activity=act, frame=0, elapsed=14.0, color=False)
+    # existing count-up render is preserved exactly
+    assert "14s" in line
+    assert "left" not in line
+
+
+def test_status_span_restarts_on_hinted_agent_retry_only() -> None:
+    """The span restarts at wait entry (hinted flag OR backoff >= 120) so the
+    countdown baseline is zeroed; a short blind retry does not restart it."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),  # restart
+        ev("3", "agent_retry", category="rate_limit", attempt=1,
+           backoff_seconds=2940.0, hinted=True),  # restart (hinted flag)
+        ev("4", "agent_retry", category="rate_limit", attempt=2,
+           backoff_seconds=60.0),  # NO restart (short blind)
+        ev("5", "agent_retry", category="rate_limit", attempt=3,
+           backoff_seconds=7200.0),  # restart (>= 120)
+        ev("6", "agent_retry", category="stalled", attempt=4,
+           backoff_seconds=7200.0, hinted=True),  # NO restart (stalled)
+        ev("7", "agent_retry", category="rate_limit", attempt=5,
+           hinted=True),  # NO restart (non-numeric backoff)
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart", "restart", "restart"]

@@ -226,11 +226,18 @@ class Activity:
     verb: str | None = None
     detail: str | None = None
     model: str | None = None
+    countdown_total: float | None = None
 
 
 def _join(*parts: str | None) -> str | None:
     out = " · ".join(p for p in parts if p)
     return out or None
+
+
+@dataclass
+class ResetWait:
+    verb: str             # "waiting for limit reset" | "waiting to retry"
+    total_seconds: float  # backoff_seconds from the hinted agent_retry
 
 
 @dataclass
@@ -401,6 +408,11 @@ class NarrativeTree:
 # ── builder ──────────────────────────────────────────────────────────────────
 from collections.abc import Iterable  # noqa: E402  (kept near builder for clarity)
 
+_RESUMES_WAIT = frozenset({
+    "user_message", "llm_response", "thinking", "tool_call",
+    "agent_output", "step_started", "step_completed",
+})
+
 
 class NarrativeBuilder:
     """Per-agent_id state machine. add(event) routes one event into the tree.
@@ -431,6 +443,7 @@ class NarrativeBuilder:
         self._step_stack: list[StepNode] = []
         self._current_burst: ToolBurstFold | None = None
         self._span_start_ts: str | None = None
+        self._reset_wait: ResetWait | None = None
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
         # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
@@ -514,6 +527,14 @@ class NarrativeBuilder:
     def current_activity(self) -> Activity | None:
         """Current activity for the live status footer; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
+        if self._reset_wait is not None:
+            position = _join(top.phase_label, top.live_label or top.label) if top else None
+            return Activity(
+                position=position,
+                verb=self._reset_wait.verb,
+                model=top.model if top else None,
+                countdown_total=self._reset_wait.total_seconds,
+            )
         if top is not None:
             model = top.model
             if top.position_label:
@@ -540,6 +561,10 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 detail = _join(detail, f"+{extra} {noun}")
+            if nested is not None and nested.countdown_total is not None:
+                return Activity(position=position, verb=nested.verb,
+                                detail=detail, model=model,
+                                countdown_total=nested.countdown_total)
             return Activity(position=position, verb=verb, detail=detail, model=model)
 
         detail = None
@@ -644,6 +669,9 @@ class NarrativeBuilder:
 
         etype = event["type"]
         agent_id = event.get("agent_id")
+
+        if etype in _RESUMES_WAIT:
+            self._reset_wait = None
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
         #    into the change total. The context-bar value (_latest_prompt_tokens)
@@ -1757,6 +1785,8 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         self._append(ErrorNode(
             message=f"[{cat}] waiting for limit reset — retry {attempt} in {_fmt_hm(secs)}",
             category=cat, is_warning=True))
+        verb = "waiting for limit reset" if cat == "rate_limit" else "waiting to retry"
+        self._reset_wait = ResetWait(verb=verb, total_seconds=float(secs))
         return
     self._append(ErrorNode(
         message=f"[{cat}] retry {attempt} ({secs}s)", category=cat, is_warning=True))

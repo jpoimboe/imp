@@ -88,7 +88,12 @@ def compose_activity_line(*, activity: nv.Activity, elapsed: float,
         parts.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
     if activity.detail:
         parts.append(_paint(activity.detail, "gray", color=color, over_bg=False))
-    parts.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=False))
+    if activity.countdown_total is not None:
+        remaining = max(0.0, activity.countdown_total - elapsed)
+        tail = f"~{nv._fmt_hm(remaining)} left" if remaining >= 60 else "<1m left"
+    else:
+        tail = rt.fmt_seconds(elapsed)
+    parts.append(_paint(tail, "dim", color=color, over_bg=False))
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 
@@ -225,6 +230,19 @@ class LiveDriver:
                 payload = event.get("payload")
                 if (isinstance(payload, dict) and nv.llm_response_has_prose(payload)
                         and not self._builder.has_running_subagent):
+                    self._status.restart_span()
+            elif etype == "agent_retry":
+                # Zero the span at wait entry so compose_activity_line's countdown
+                # (countdown_total - elapsed) measures time-since-wait-start. Mirror
+                # the exact condition under which the builder's _h_agent_retry sets
+                # _reset_wait (skips stalled, requires numeric backoff), so the
+                # wait-verb and its baseline can never disagree.
+                payload = event.get("payload") or {}
+                secs = payload.get("backoff_seconds")
+                hinted = bool(payload.get("hinted")) or (
+                    isinstance(secs, (int, float)) and secs >= 120)
+                if (payload.get("category") != "stalled" and hinted
+                        and isinstance(secs, (int, float))):
                     self._status.restart_span()
         self._walk()
         self._maybe_reemit_header()
