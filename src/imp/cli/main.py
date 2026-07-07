@@ -2415,8 +2415,10 @@ def _cmd_edit(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    if args.title is not None:
+    if args.title is not None and args.title != change.title:
+        old_title = change.title
         change.rename(args.title, log=change.event_log())
+        print(f'title: "{old_title}" → "{args.title}"')
     if args.backlog:
         change.set_origin("idea")
     elif args.active:
