@@ -179,6 +179,20 @@ def _liveness_on_event(coordinator: Any, on_event: EventCallback) -> EventCallba
     return _composed
 
 
+def _trees_identical(a: Path, b: Path) -> bool:
+    """True iff both trees contain the same set of relative file paths with
+    byte-identical contents. Empty directories are ignored — the snapshot's
+    meaning is its files."""
+    files_a = {p.relative_to(a): p for p in a.rglob("*") if p.is_file()}
+    files_b = {p.relative_to(b): p for p in b.rglob("*") if p.is_file()}
+    if set(files_a) != set(files_b):
+        return False
+    return all(
+        files_a[rel].read_bytes() == files_b[rel].read_bytes()
+        for rel in files_a
+    )
+
+
 async def run_change(
     change: Change,
     *,
