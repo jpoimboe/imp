@@ -263,6 +263,18 @@ def _qr(agent_id: str, ts: str, cost: float) -> dict:
             "payload": {"total_cost_usd": cost}}
 
 
+def _subcall(event_id: str, block_id: str, agent_id: str, ts: str,
+             name: str, label: str | None = None) -> dict:
+    return {"type": "tool_call", "id": event_id, "agent_id": agent_id, "timestamp": ts,
+            "payload": {"name": "sub_agent", "id": block_id, "id_ns": "block",
+                        "label": label, "input": {"subagent_name": name}}}
+
+
+def _subresult(block_id: str, agent_id: str, ts: str, error: bool = False) -> dict:
+    return {"type": "tool_result", "agent_id": agent_id, "timestamp": ts,
+            "payload": {"id": block_id, "error": error}}
+
+
 def test_step_own_tokens_summed_from_matching_agent_id():
     rows = build_summary([
         _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
@@ -324,3 +336,65 @@ def test_sub_prefixed_agent_does_not_establish_step_mapping_or_tokens():
     ])
     assert rows[0].agent_id == "a1"
     assert rows[0].tokens.input == 10
+
+
+def test_subagent_captured_with_name_label_and_duration():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00",
+                 "explorer", label="map the repo"),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert len(rows[0].subagents) == 1
+    sub = rows[0].subagents[0]
+    assert sub.name == "explorer"
+    assert sub.label == "map the repo"
+    assert sub.wall_seconds == 45.0
+    assert sub.errored is False
+
+
+def test_subagent_tokens_and_cost_keyed_by_sub_agent_id():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _llm("sub:ev9", "2026-01-01T00:00:20+00:00", input=200, output=40),
+        _qr("sub:ev9", "2026-01-01T00:00:30+00:00", 0.12),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    sub = rows[0].subagents[0]
+    assert sub.tokens.input == 200
+    assert sub.tokens.output == 40
+    assert sub.cost == pytest.approx(0.12)
+    # Subagent usage must NOT leak into the parent step's own totals.
+    assert rows[0].tokens.input == 0
+    assert rows[0].cost == 0.0
+
+
+def test_subagent_errored_from_tool_result_error_flag():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "reviewer"),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00", error=True),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].subagents[0].errored is True
+
+
+def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _context("lead1", "2026-01-01T00:00:01+00:00"),
+        _llm("lead1", "2026-01-01T00:00:05+00:00", input=70),
+        _subcall("ev9", "blk9", "lead1", "2026-01-01T00:00:10+00:00", "coder"),
+        _llm("sub:ev9", "2026-01-01T00:00:20+00:00", input=200),
+        _llm("lead1", "2026-01-01T00:00:25+00:00", input=30),
+        _subresult("blk9", "lead1", "2026-01-01T00:00:55+00:00"),
+        _completed("task-lead", "2026-01-01T00:01:00+00:00"),
+    ])
+    assert rows[0].tokens.input == 100
+    assert rows[0].subagents[0].tokens.input == 200

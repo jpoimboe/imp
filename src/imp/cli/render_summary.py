@@ -62,6 +62,8 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     rows: list[StepRow] = []
     open_row: StepRow | None = None        # the currently-open occurrence
     pending_wait_start: str | None = None  # ts of an unresolved awaiting_user_input
+    subs_by_agent: dict[str, SubagentRow] = {}   # "sub:<event id>" -> row (tokens/cost)
+    subs_by_block: dict[str, SubagentRow] = {}    # tool_call block id -> row (close)
 
     def _close_wait(now_ts: str | None) -> None:
         nonlocal pending_wait_start
@@ -79,12 +81,12 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         p = raw if isinstance(raw, dict) else {}
 
         # Map an open step to the agent id of its first non-sub agent event.
-        if etype in ("step_context", "llm_response"):
-            if (open_row is not None and open_row.end_ts is None
-                    and open_row.agent_id is None
-                    and isinstance(agent_id, str)
-                    and not agent_id.startswith("sub:")):
-                open_row.agent_id = agent_id
+        if (etype in ("step_context", "llm_response")
+                and open_row is not None and open_row.end_ts is None
+                and open_row.agent_id is None
+                and isinstance(agent_id, str)
+                and not agent_id.startswith("sub:")):
+            open_row.agent_id = agent_id
 
         if etype == "step_started":
             step = str(p.get("step", "?"))
@@ -104,13 +106,38 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         elif etype == "awaiting_user_input":
             pending_wait_start = ts
         elif etype == "llm_response":
-            if (open_row is not None
-                    and agent_id is not None and agent_id == open_row.agent_id):
+            sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
+            if sub is not None:
+                sub.tokens.add_usage(p.get("usage"))
+            elif (open_row is not None
+                  and agent_id is not None and agent_id == open_row.agent_id):
                 open_row.tokens.add_usage(p.get("usage"))
         elif etype == "query_result":
-            if (open_row is not None
-                    and agent_id is not None and agent_id == open_row.agent_id):
-                open_row.cost += float(p.get("total_cost_usd") or 0)
+            cost = float(p.get("total_cost_usd") or 0)
+            sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
+            if sub is not None:
+                sub.cost += cost
+            elif (open_row is not None
+                  and agent_id is not None and agent_id == open_row.agent_id):
+                open_row.cost += cost
+        elif etype == "tool_call" and p.get("name") == "sub_agent":
+            if open_row is not None and open_row.end_ts is None:
+                event_id = str(e.get("id", ""))
+                block_id = str(p.get("id", ""))
+                inp = p.get("input") or {}
+                sub = SubagentRow(
+                    name=str(inp.get("subagent_name", "?")),
+                    label=p.get("label"),
+                    start_ts=ts)
+                open_row.subagents.append(sub)
+                subs_by_agent[f"sub:{event_id}"] = sub
+                if block_id:
+                    subs_by_block[block_id] = sub
+        elif etype == "tool_result":
+            sub = subs_by_block.get(str(p.get("id", "")))
+            if sub is not None:
+                sub.end_ts = ts
+                sub.errored = bool(p.get("error", False))
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True
