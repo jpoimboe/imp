@@ -27,6 +27,7 @@ from imp.cli.verify_detect import (
     format_test_cmd_fast_yaml,
     resolve_test_cmd_choice,
 )
+from imp.engine import worktree
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
@@ -99,10 +100,17 @@ def _default_detect_theme() -> str:
         return "ansi"
 
 
-def _build_project_config() -> dict[str, Any]:
-    """The committed imp/project.yaml: workflow ref + empty vars. No bindings
-    (the provider-code floor supplies tiers); no theme (user-homed)."""
-    return {"default-workflow": "imp", "vars": {}}
+def _build_project_config(default_base: str | None = None) -> dict[str, Any]:
+    """The committed imp/project.yaml: workflow ref + resolved integration
+    branch (when detected) + empty vars. No bindings (the provider-code floor
+    supplies tiers); no theme (user-homed). `default-base` is omitted entirely
+    when init could not resolve a branch — the runtime auto-detect fallback in
+    `imp new` covers that case."""
+    cfg: dict[str, Any] = {"default-workflow": "imp"}
+    if default_base is not None:
+        cfg["default-base"] = default_base
+    cfg["vars"] = {}
+    return cfg
 
 
 def _build_user_config(
@@ -310,8 +318,18 @@ def run_init(
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:
         imp_dir.mkdir(parents=True, exist_ok=True)
+        # Detect the integration branch: prefer the remote default (origin/HEAD),
+        # else the currently checked-out branch (unborn-tolerant, since init runs
+        # before the first commit). Omit the key entirely when nothing resolves.
+        default_base = (
+            worktree.origin_head_branch(project_root)
+            or worktree.checked_out_branch(project_root)
+        )
+        if default_base is not None:
+            output_fn(f"Integration branch: {default_base}")
         body = yaml.safe_dump(
-            _build_project_config(), sort_keys=False, default_flow_style=False)
+            _build_project_config(default_base),
+            sort_keys=False, default_flow_style=False)
         detect_cmd = detect_verify_fn or detect_test_command
         suggested = detect_cmd(project_root)
         test_block = ""

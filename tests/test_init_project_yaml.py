@@ -1,5 +1,6 @@
 """imp init writes imp/project.yaml (no bindings) + bootstraps user config; it is
 idempotent on a clone that already has the committed project file (spec §4)."""
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -107,3 +108,90 @@ def test_init_appends_commented_facts_example(
     facts, guidance = parse_project_facts(root / "imp" / "project.yaml")
     assert facts == {}
     assert guidance == ""
+
+
+def test_init_records_checked_out_branch_without_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "trunk", str(root)], check=True)
+    run_init(
+        root,
+        input_fn=lambda _p: "",
+        output_fn=lambda _s: None,
+        picker_fn=lambda _avail: ["claude_code"],
+        detect_theme_fn=lambda: "dark",
+        detect_verify_fn=lambda _p: None,
+    )
+    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
+    assert proj["default-base"] == "trunk"
+
+
+def test_init_prefers_origin_head_over_checked_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "feature", str(root)], check=True)
+    # `symbolic-ref <name> <target>` writes the ref without requiring <target>
+    # to exist; a non-`feature` target proves origin/HEAD wins over the checkout.
+    subprocess.run(
+        ["git", "-C", str(root), "symbolic-ref",
+         "refs/remotes/origin/HEAD", "refs/remotes/origin/mainline"],
+        check=True,
+    )
+    lines: list[str] = []
+    run_init(
+        root,
+        input_fn=lambda _p: "",
+        output_fn=lines.append,
+        picker_fn=lambda _avail: ["claude_code"],
+        detect_theme_fn=lambda: "dark",
+        detect_verify_fn=lambda _p: None,
+    )
+    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
+    assert proj["default-base"] == "mainline"
+    assert "Integration branch: mainline" in lines
+
+
+def test_init_omits_default_base_when_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "trunk", str(root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "--allow-empty", "-qm", "seed"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(root), "checkout", "--detach", "-q"], check=True)
+    run_init(
+        root,
+        input_fn=lambda _p: "",
+        output_fn=lambda _s: None,
+        picker_fn=lambda _avail: ["claude_code"],
+        detect_theme_fn=lambda: "dark",
+        detect_verify_fn=lambda _p: None,
+    )
+    proj = yaml.safe_load((root / "imp" / "project.yaml").read_text())
+    assert "default-base" not in proj
+    assert proj["default-workflow"] == "imp"
+
+
+def test_init_echoes_integration_branch_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "trunk", str(root)], check=True)
+    lines: list[str] = []
+    run_init(
+        root,
+        input_fn=lambda _p: "",
+        output_fn=lines.append,
+        picker_fn=lambda _avail: ["claude_code"],
+        detect_theme_fn=lambda: "dark",
+        detect_verify_fn=lambda _p: None,
+    )
+    assert "Integration branch: trunk" in lines
