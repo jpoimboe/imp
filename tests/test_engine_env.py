@@ -12,6 +12,10 @@ def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
         "IMP_PROJECT_ROOT": "/wt",
         "IMP_CHANGE_ID": "eee555",
         "IMP_CHANGE_TITLE": "Add OAuth",
+        "GIT_EDITOR": "true",
+        "GIT_TERMINAL_PROMPT": "0",
+        "EDITOR": "true",
+        "VISUAL": "true",
     }
     assert "IMP_ARTIFACTS_DIR" not in env
 
@@ -222,3 +226,35 @@ def test_engine_env_omits_output_path_when_absent() -> None:
 def test_output_path_var_is_engine_managed() -> None:
     from imp.engine.env import ENGINE_ENV_VARS
     assert "IMP_OUTPUT" in ENGINE_ENV_VARS
+
+
+def test_engine_env_emits_headless_vars_unconditionally() -> None:
+    # Emitted for every subprocess with no gates/dir/output — the four headless
+    # vars are unconditional, unlike IMP_TEST_CMD_* / IMP_CHANGE_DIR.
+    env = engine_env(project_root=Path("/wt"), change_id="c", change_title="t")
+    assert env["GIT_EDITOR"] == "true"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["EDITOR"] == "true"
+    assert env["VISUAL"] == "true"
+
+
+def test_headless_vars_are_engine_managed() -> None:
+    from imp.engine.env import ENGINE_ENV_VARS
+    for v in ("GIT_EDITOR", "GIT_TERMINAL_PROMPT", "EDITOR", "VISUAL"):
+        assert v in ENGINE_ENV_VARS
+
+
+def test_overlay_strips_ambient_interactive_editor() -> None:
+    # A user's ambient EDITOR=vim / GIT_EDITOR=nano is exactly the hang hazard;
+    # engine values are authoritative, so overlay drops the ambient copy.
+    parent = {"EDITOR": "vim", "VISUAL": "vim", "GIT_EDITOR": "nano",
+              "GIT_TERMINAL_PROMPT": "1", "FOO": "bar"}
+    env = overlay_engine_env(
+        parent,
+        engine_env(project_root=Path("/wt"), change_id="c", change_title="t"),
+    )
+    assert env["EDITOR"] == "true"
+    assert env["VISUAL"] == "true"
+    assert env["GIT_EDITOR"] == "true"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["FOO"] == "bar"   # untouched non-engine vars pass through
