@@ -663,3 +663,37 @@ def test_argv_binds_match_bind_plan_with_readonly_overlay():
     argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()           # no drift
     assert ("/wt/vendored", "ro") in p.bind_plan()
+
+
+def test_headless_vars_flow_through_build_sandbox_argv():
+    # The four headless vars ride the live per-spawn engine_env; the allowlist
+    # (_is_engine_passthrough) admits them so they survive --clearenv.
+    argv = build_sandbox_argv(
+        "x", cwd="/wt", policy=_policy(),
+        engine_env={"GIT_EDITOR": "true", "GIT_TERMINAL_PROMPT": "0",
+                    "EDITOR": "true", "VISUAL": "true"})
+    joined = " ".join(argv)
+    assert "--clearenv" in argv
+    assert "--setenv GIT_EDITOR true" in joined
+    assert "--setenv GIT_TERMINAL_PROMPT 0" in joined
+    assert "--setenv EDITOR true" in joined
+    assert "--setenv VISUAL true" in joined
+    # after --clearenv, not before it
+    assert argv.index("--clearenv") < argv.index("GIT_EDITOR")
+
+
+def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt), "GIT_EDITOR": "true",
+                           "GIT_TERMINAL_PROMPT": "0", "EDITOR": "true",
+                           "VISUAL": "true"},
+        environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    assert ("GIT_EDITOR", "true") in pol.setenv
+    assert ("GIT_TERMINAL_PROMPT", "0") in pol.setenv
+    assert ("EDITOR", "true") in pol.setenv
+    assert ("VISUAL", "true") in pol.setenv

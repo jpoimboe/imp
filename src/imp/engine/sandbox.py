@@ -24,6 +24,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from imp.engine.env import HEADLESS_ENV
+
 
 @dataclass(frozen=True, slots=True)
 class SandboxPolicy:
@@ -88,11 +90,12 @@ class SandboxPolicy:
 
 def _is_engine_passthrough(key: str) -> bool:
     """Engine-env keys allowed through the sandbox env allowlist: every IMP_*
-    var plus PYTHONPATH — the single deliberate non-IMP_ exception, carrying the
-    imp-on-imp import shadow. Shared by both allowlist sites (the per-spawn loop
-    in build_sandbox_argv and the policy bake in _build_setenv) so they cannot
-    drift."""
-    return key.startswith("IMP_") or key == "PYTHONPATH"
+    var, PYTHONPATH (the imp-on-imp import shadow), and the four headless
+    overrides (GIT_EDITOR / GIT_TERMINAL_PROMPT / EDITOR / VISUAL) that keep a
+    sandboxed git/tool invocation non-interactive. Shared by both allowlist
+    sites (the per-spawn loop in build_sandbox_argv and the policy bake in
+    _build_setenv) so they cannot drift."""
+    return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
 def build_sandbox_argv(
