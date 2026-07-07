@@ -88,7 +88,12 @@ def compose_activity_line(*, activity: nv.Activity, elapsed: float,
         parts.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
     if activity.detail:
         parts.append(_paint(activity.detail, "gray", color=color, over_bg=False))
-    parts.append(_paint(rt.fmt_seconds(elapsed), "dim", color=color, over_bg=False))
+    if activity.countdown_total is not None:
+        remaining = max(0.0, activity.countdown_total - elapsed)
+        tail = f"~{nv._fmt_hm(remaining)} left" if remaining >= 60 else "<1m left"
+    else:
+        tail = rt.fmt_seconds(elapsed)
+    parts.append(_paint(tail, "dim", color=color, over_bg=False))
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 
