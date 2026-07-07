@@ -226,3 +226,27 @@ def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     with pytest.raises(RuntimeError):
         _run_bash(_ctx(tmp_path), {"command": "echo hi"})
     assert captured["argv"] == ["sh", "-c", "echo hi"]
+
+
+def test_bash_editor_git_op_completes_without_blocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A hostile ambient editor that exits nonzero must NOT reach the agent's git
+    # subprocess: engine_env forces GIT_EDITOR=true and overlay_engine_env strips
+    # the ambient copy, so `git commit --amend` (no -m) keeps the prepared message
+    # and exits 0 instead of aborting on (or blocking in) the editor.
+    monkeypatch.setenv("GIT_EDITOR", "false")
+    monkeypatch.setenv("EDITOR", "false")
+    monkeypatch.setenv("VISUAL", "false")
+    ctx = _ctx(tmp_path)
+    setup = _run_bash(ctx, {"command": (
+        "git init -q && git config user.email a@b.c && git config user.name t "
+        "&& git commit -q --allow-empty -m seed")})
+    assert json.loads(setup)["returncode"] == 0
+
+    amended = json.loads(_run_bash(ctx, {"command": "git commit --amend --allow-empty"}))
+    assert amended["returncode"] == 0
+
+    # Observable consequence: the amend kept the single seed commit intact.
+    log = json.loads(_run_bash(ctx, {"command": "git log --format=%s"}))
+    assert log["stdout"].split() == ["seed"]
