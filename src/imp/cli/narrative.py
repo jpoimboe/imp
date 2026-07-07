@@ -987,6 +987,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         if not top.closed and top.name == name:
             if p.get("resumed"):
                 top.live_label = None
+                top.lane_waiting_node = None
                 top.label = p.get("label")
                 top.resumed = True
             return
@@ -1012,6 +1013,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.interrupted = False
             existing.label = p.get("label")
             existing.live_label = None
+            existing.lane_waiting_node = None
             existing.resumed = True
             if p.get("restarted"):
                 # Genuine re-run from scratch: the fresh run supersedes the
