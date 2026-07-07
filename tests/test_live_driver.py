@@ -2183,3 +2183,35 @@ def test_compose_activity_line_unchanged_when_no_countdown() -> None:
     # existing count-up render is preserved exactly
     assert "14s" in line
     assert "left" not in line
+
+
+def test_status_span_restarts_on_hinted_agent_retry_only() -> None:
+    """The span restarts at wait entry (hinted flag OR backoff >= 120) so the
+    countdown baseline is zeroed; a short blind retry does not restart it."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),  # restart
+        ev("3", "agent_retry", category="rate_limit", attempt=1,
+           backoff_seconds=2940.0, hinted=True),  # restart (hinted flag)
+        ev("4", "agent_retry", category="rate_limit", attempt=2,
+           backoff_seconds=60.0),  # NO restart (short blind)
+        ev("5", "agent_retry", category="rate_limit", attempt=3,
+           backoff_seconds=7200.0),  # restart (>= 120)
+        ev("6", "agent_retry", category="stalled", attempt=4,
+           backoff_seconds=7200.0, hinted=True),  # NO restart (stalled)
+        ev("7", "agent_retry", category="rate_limit", attempt=5,
+           hinted=True),  # NO restart (non-numeric backoff)
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart", "restart", "restart"]

@@ -231,6 +231,19 @@ class LiveDriver:
                 if (isinstance(payload, dict) and nv.llm_response_has_prose(payload)
                         and not self._builder.has_running_subagent):
                     self._status.restart_span()
+            elif etype == "agent_retry":
+                # Zero the span at wait entry so compose_activity_line's countdown
+                # (countdown_total - elapsed) measures time-since-wait-start. Mirror
+                # the exact condition under which the builder's _h_agent_retry sets
+                # _reset_wait (skips stalled, requires numeric backoff), so the
+                # wait-verb and its baseline can never disagree.
+                payload = event.get("payload") or {}
+                secs = payload.get("backoff_seconds")
+                hinted = bool(payload.get("hinted")) or (
+                    isinstance(secs, (int, float)) and secs >= 120)
+                if (payload.get("category") != "stalled" and hinted
+                        and isinstance(secs, (int, float))):
+                    self._status.restart_span()
         self._walk()
         self._maybe_reemit_header()
         self._refresh_status()
