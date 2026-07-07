@@ -106,10 +106,16 @@ def test_name_budget_fills_remaining_width(monkeypatch):
 
     monkeypatch.setattr("shutil.get_terminal_size",
                         lambda fallback=(80, 24): os.terminal_size((120, 24)))
-    # 120 cols - 51 fixed prefix = 69 left for the name.
-    assert name_budget() == 69
+    # 120 cols - 54 fixed prefix = 66 left for the name.
+    assert name_budget() == 66
     # An indent (e.g. the resume picker's marker) shrinks the budget.
-    assert name_budget(indent=2) == 67
+    assert name_budget(indent=2) == 64
+
+
+def test_header_column_reads_updated_not_age():
+    h = header_line(color=False)
+    assert "UPDATED" in h
+    assert "AGE" not in h
 
 
 def test_name_budget_floors_at_minimum(monkeypatch):

@@ -36,7 +36,7 @@ def format_timestamp(iso: str | None) -> str:
 
 ID_W = 6        # bare 6-char Change id
 STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
-AGE_W = 4
+AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 NAME_MIN = 10   # never shrink the trailing NAME column below this
 
 # Fixed columns plus their three 2-space gaps; the NAME column gets whatever
@@ -76,7 +76,7 @@ def name_budget(*, indent: int = 0) -> int:
 
 def header_line(*, color: bool) -> str:
     text = (f"{'ID':<{ID_W}}  {'STATUS':<{STATUS_W}}  "
-            f"{'AGE':<{AGE_W}}  NAME")
+            f"{'UPDATED':<{AGE_W}}  NAME")
     return pal.ansi(text, "dim", enabled=color)
 
 
