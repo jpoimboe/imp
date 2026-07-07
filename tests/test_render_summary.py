@@ -186,7 +186,7 @@ def test_no_wait_badge_and_duration_excludes_wait():
     verify = next(ln for ln in out if "verify" in ln)
     assert "⏸" not in verify
     assert "wait" not in verify
-    assert "4m 18s" in verify     # 588s wall − 330s wait = 258s work
+    assert "4m 18s" in verify     # 588s wall - 330s wait = 258s work
     assert "9m 48s" not in verify  # NOT the raw 588s wall clock
 
 
@@ -539,7 +539,7 @@ def test_header_total_is_work_time_excluding_wait():
     hdr = SummaryHeader(workflow="f", change_id="c", status="merged",
                         total_seconds=120.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
-    assert "30s" in out[0]     # 120s total − 90s wait = 30s work
+    assert "30s" in out[0]     # 120s total - 90s wait = 30s work
     assert "2m 0s" not in out[0]
 
 
