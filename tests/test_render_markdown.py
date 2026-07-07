@@ -10,6 +10,7 @@ from imp.cli.render_markdown import (
 )
 from imp.cli.render_summary import (
     StepRow,
+    SubagentRow,
     SummaryHeader,
     build_summary,
     summary_total,
@@ -387,32 +388,30 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
     header = SummaryHeader(workflow="imp", change_id="gumu81",
                            status="merged", total_seconds=summary_total(events))
     out = render_summary_markdown(build_summary(events), header=header)
-    assert "# imp — gumu81" in out           # SummaryHeader workflow/id
-    assert "merged" in out                    # status carried
-    assert "## design" in out                 # phase grouping heading
-    assert "| Step | Duration | Wait |" in out
-    assert "| spec |" in out                  # step row
-    assert "1m 0s" in out                     # start→completion wall clock
+    assert "# imp — gumu81" in out               # SummaryHeader workflow/id
+    assert "merged" in out                        # status carried
+    assert "## design" in out                     # phase grouping heading
+    assert "| Step | Duration | Tokens | Cost |" in out
+    assert "Wait" not in out                      # Wait column dropped
+    assert "| spec | 1m 0s | — | — |" in out      # work-time dur, no tokens/cost
+    assert "**Total:** 1m 0s" in out              # work-time header total
 
 
-def test_summary_wait_threshold_running_duration_and_total() -> None:
+def test_summary_markdown_durations_exclude_wait_and_drop_wait_column() -> None:
     rows = [
         StepRow(phase="design", step="waited",
                 start_ts="2024-01-01T00:00:00Z",
                 end_ts="2024-01-01T00:00:30Z", wait_seconds=10.0),
-        StepRow(phase="design", step="quick",
-                start_ts="2024-01-01T00:00:00Z",
-                end_ts="2024-01-01T00:00:05Z", wait_seconds=2.0),
         StepRow(phase="design", step="open",
                 start_ts="2024-01-01T00:00:00Z", end_ts=None),
     ]
     header = SummaryHeader(workflow="imp", change_id="c",
                            status="running", total_seconds=None)
     out = render_summary_markdown(rows, header=header)
-    assert "| waited | 30s | 10s |" in out       # wait >= threshold → shown
-    assert "| quick | 5s | — |" in out           # wait < threshold → dash
-    assert "| open | running | — |" in out       # open step → running duration
-    assert "**Total:** running" in out           # total_seconds None → running
+    assert "Wait" not in out                          # Wait column dropped
+    assert "| waited | 20s | — | — |" in out          # 30s wall - 10s wait = 20s work
+    assert "| open | running | — | — |" in out         # open step → running duration
+    assert "**Total:** running" in out                 # total_seconds None → running
 
 
 def test_summary_multiple_phases_grouped_in_order() -> None:
@@ -429,3 +428,24 @@ def test_summary_multiple_phases_grouped_in_order() -> None:
     out = render_summary_markdown(rows, header=header)
     assert out.index("## design") < out.index("## build")
     assert "| spec |" in out and "| impl |" in out
+
+
+def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
+    rows = [
+        StepRow(phase="implement", step="task-lead",
+                start_ts="2024-01-01T00:00:00Z",
+                end_ts="2024-01-01T00:01:00Z",
+                tokens=nv.TokenTotals(input=12000, output=345), cost=0.34,
+                subagents=[SubagentRow(
+                    name="explorer", label="map repo",
+                    start_ts="2024-01-01T00:00:05Z",
+                    end_ts="2024-01-01T00:00:50Z",
+                    tokens=nv.TokenTotals(input=200), cost=0.05)]),
+    ]
+    header = SummaryHeader(workflow="imp", change_id="c",
+                           status="merged", total_seconds=60.0)
+    out = render_summary_markdown(rows, header=header)
+    assert "| task-lead | 1m 0s | 12.3k | $0.34 |" in out
+    assert "| ↳ explorer (map repo) | 45s | 200 | $0.05 |" in out
+    assert "**Tokens:** 12.5k" in out    # 12345 step + 200 subagent = 12545 → 12.5k
+    assert "**Cost:** $0.39" in out       # 0.34 step + 0.05 subagent

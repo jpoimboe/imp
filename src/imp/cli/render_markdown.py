@@ -9,9 +9,14 @@ from imp.cli import narrative as nv
 from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_summary import (
-    _WAIT_THRESHOLD,
     StepRow,
     SummaryHeader,
+    _dur_text,
+    _fmt_cost,
+    _fmt_tokens,
+    _sub_body,
+    _tok_total,
+    header_totals,
 )
 
 _MAX_HEADING = 6
@@ -258,27 +263,32 @@ def render_markdown(tree: nv.NarrativeTree, *, full: bool) -> str:
 def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
-    total = ("running" if header.total_seconds is None
-             else rt.fmt_seconds(header.total_seconds))
+    work, tokens, cost = header_totals(summary, header.total_seconds)
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.change_id}")),
-        f"**Status:** {_md_escape(header.status)} · **Total:** {total}",
+        (f"**Status:** {_md_escape(header.status)}"
+         f" · **Total:** {_dur_text(work)}"
+         f" · **Tokens:** {_fmt_tokens(tokens)}"
+         f" · **Cost:** {_fmt_cost(cost)}"),
     ]
     grouped: list[tuple[str, list[str]]] = []
     for row in summary:
         if not grouped or grouped[-1][0] != row.phase:
             grouped.append((row.phase, []))
-        wall = row.wall_seconds
-        dur = "running" if wall is None else rt.fmt_seconds(wall)
-        wait = (rt.fmt_seconds(row.wait_seconds)
-                if row.wait_seconds >= _WAIT_THRESHOLD else "—")
         step = _md_escape(row.step).replace("|", "\\|")
-        grouped[-1][1].append(f"| {step} | {dur} | {wait} |")
+        grouped[-1][1].append(
+            f"| {step} | {_dur_text(row.work_seconds)}"
+            f" | {_fmt_tokens(_tok_total(row.tokens))} | {_fmt_cost(row.cost)} |")
+        for sub in row.subagents:
+            body = _md_escape(_sub_body(sub)).replace("|", "\\|")
+            grouped[-1][1].append(
+                f"| {body} | {_dur_text(sub.wall_seconds)}"
+                f" | {_fmt_tokens(_tok_total(sub.tokens))} | {_fmt_cost(sub.cost)} |")
     for phase, rows in grouped:
         table = "\n".join([
             _heading(2, _md_escape(phase)),
-            "| Step | Duration | Wait |",
-            "|---|---|---|",
+            "| Step | Duration | Tokens | Cost |",
+            "|---|---|---|---|",
             *rows,
         ])
         blocks.append(table)

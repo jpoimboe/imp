@@ -130,7 +130,8 @@ def test_md_summary_uses_summary_document(tmp_path, monkeypatch):
     assert main(["log", slug, "--md", "--summary"]) == 0
     text = (tmp_path / f"imp-log-{slug}.md").read_text()
     assert "**Status:**" in text                 # SummaryHeader line
-    assert "| Step | Duration | Wait |" in text   # summary table, not the tree spine
+    assert "| Step | Duration | Tokens | Cost |" in text  # reworked summary table
+    assert "Wait" not in text                              # Wait column dropped
     assert "<details>" not in text
 
 
