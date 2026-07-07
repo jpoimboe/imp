@@ -462,7 +462,7 @@ def test_header_totals_subtracts_wait_and_rolls_up_steps_and_subs():
                                        cost=0.05)]),
     ]
     work, tokens, cost = header_totals(rows, 120.0)
-    assert work == 30.0                 # 120s total − 90s wait
+    assert work == 30.0                 # 120s total - 90s wait
     assert tokens == 1500               # 1000 step + 500 subagent
     assert cost == pytest.approx(0.25)  # 0.20 step + 0.05 subagent
 
@@ -543,3 +543,76 @@ def test_header_rolls_up_step_tokens_and_cost():
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert "2.5k" in out[0]    # 1000 + 1500 tokens rolled up
     assert "$0.50" in out[0]   # 0.20 + 0.30 cost rolled up
+
+
+def test_subagent_row_indented_with_own_figures():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:01:00+00:00",
+                   tokens=TokenTotals(input=100), cost=0.10,
+                   subagents=[SubagentRow(
+                       name="explorer",
+                       start_ts="2026-01-01T00:00:05+00:00",
+                       end_ts="2026-01-01T00:00:50+00:00",
+                       tokens=TokenTotals(input=200), cost=0.05)])
+    out = render_summary([step], header=_HDR, color=False, width=80)
+    step_line = next(ln for ln in out if "task-lead" in ln)
+    sub_line = next(ln for ln in out if "explorer" in ln)
+    assert step_line == "  task-lead     1m 0s  100  $0.10"
+    assert sub_line == "    ↳ explorer    45s  200  $0.05"
+
+
+def test_subagent_label_shown_in_parens():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:01:00+00:00",
+                   subagents=[SubagentRow(
+                       name="explorer", label="map repo",
+                       start_ts="2026-01-01T00:00:05+00:00",
+                       end_ts="2026-01-01T00:00:50+00:00")])
+    out = render_summary([step], header=_HDR, color=False, width=80)
+    sub_line = next(ln for ln in out if "explorer" in ln)
+    assert "↳ explorer (map repo)" in sub_line
+
+
+def test_subagent_duration_follows_subagent_color():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:01:00+00:00",
+                   subagents=[SubagentRow(
+                       name="explorer",
+                       start_ts="2026-01-01T00:00:05+00:00",
+                       end_ts="2026-01-01T00:00:50+00:00")])
+    out = render_summary([step], header=_HDR, color=True, width=80)
+    sub_line = next(ln for ln in out if "explorer" in ln)
+    assert "\x1b[35m  45s\x1b[0m" in sub_line   # magenta subagent duration
+
+
+def test_errored_subagent_duration_follows_error_color():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:01:00+00:00",
+                   subagents=[SubagentRow(
+                       name="coder", errored=True,
+                       start_ts="2026-01-01T00:00:05+00:00",
+                       end_ts="2026-01-01T00:00:50+00:00")])
+    out = render_summary([step], header=_HDR, color=True, width=80)
+    sub_line = next(ln for ln in out if "coder" in ln)
+    assert "\x1b[1m\x1b[31m  45s\x1b[0m" in sub_line
+
+
+def test_header_rollup_includes_subagent_tokens_and_cost():
+    step = StepRow(phase="implement", step="task-lead",
+                   start_ts="2026-01-01T00:00:00+00:00",
+                   end_ts="2026-01-01T00:00:30+00:00",
+                   tokens=TokenTotals(input=1000), cost=0.20,
+                   subagents=[SubagentRow(
+                       name="coder",
+                       start_ts="2026-01-01T00:00:05+00:00",
+                       end_ts="2026-01-01T00:00:25+00:00",
+                       tokens=TokenTotals(input=1500), cost=0.30)])
+    hdr = SummaryHeader(workflow="f", change_id="c", status="merged",
+                        total_seconds=30.0)
+    out = render_summary([step], header=hdr, color=False, width=80)
+    assert "2.5k" in out[0]    # 1000 step + 1500 subagent
+    assert "$0.50" in out[0]   # 0.20 step + 0.30 subagent

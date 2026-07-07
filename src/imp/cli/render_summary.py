@@ -256,6 +256,18 @@ def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
     return f"  {name}  {dur}  {tok}  {cost}"
 
 
+def _sub_line(sub: SubagentRow, *, name_w: int, dur_w: int,
+              tok_w: int, cost_w: int, color: bool) -> str:
+    codes = pal.NODE_COLORS["error"] if sub.errored else pal.NODE_COLORS["subagent"]
+    # The extra two-space indent is absorbed by narrowing the label field, so the
+    # numeric columns stay aligned with the step rows (see _column_widths).
+    body = pal.ansi(f"{_sub_body(sub):<{name_w - 2}}", *codes, enabled=color)
+    dur = pal.ansi(f"{_dur_text(sub.wall_seconds):>{dur_w}}", *codes, enabled=color)
+    tok = f"{_fmt_tokens(_tok_total(sub.tokens)):>{tok_w}}"
+    cost = f"{_fmt_cost(sub.cost):>{cost_w}}"
+    return f"    {body}  {dur}  {tok}  {cost}"
+
+
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
     name_w, dur_w, tok_w, cost_w = _column_widths(summary)
@@ -274,4 +286,7 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
             next_hue += 1
         lines.append(_step_line(row, hue=hues[row.step], name_w=name_w,
                                 dur_w=dur_w, tok_w=tok_w, cost_w=cost_w, color=color))
+        for sub in row.subagents:
+            lines.append(_sub_line(sub, name_w=name_w, dur_w=dur_w,
+                                   tok_w=tok_w, cost_w=cost_w, color=color))
     return lines
