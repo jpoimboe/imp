@@ -1303,3 +1303,96 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
             tg.cancel_scope.cancel()
 
     assert survived == [True]
+
+
+@pytest.mark.anyio
+async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    actions: list[tuple[str, str | None]] = []
+    server = SessionSocket(sock, on_control=lambda a, r: actions.append((a, r)))
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    returned = anyio.Event()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+                returned.set()
+
+            tg.start_soon(_client)
+            with anyio.fail_after(5):
+                while server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            # A mid-run Ctrl-D leave: stamps leave_reason and drives the escalation.
+            await coord.leave_mid_run(reason="ctrl-d")
+            with anyio.fail_after(5):
+                await returned.wait()
+            with anyio.fail_after(5):
+                while not actions:
+                    await anyio.sleep(0.02)
+            assert actions == [("interrupt-leave", "ctrl-d")]
+            await server.close()
+            tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    actions: list[tuple[str, str | None]] = []
+    server = SessionSocket(sock, on_control=lambda a, r: actions.append((a, r)))
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    returned = anyio.Event()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+                returned.set()
+
+            tg.start_soon(_client)
+            with anyio.fail_after(5):
+                while server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            # Escalation with NO stamped trigger (a disposition-style leave):
+            # the choke point must not synthesize an interrupt-leave frame.
+            coord.escalation_event.set()
+            with anyio.fail_after(5):
+                await returned.wait()
+            await anyio.sleep(0.05)   # give any erroneous frame time to land
+            assert actions == []
+            await server.close()
+            tg.cancel_scope.cancel()
