@@ -36,6 +36,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
+@pytest.mark.timeout(120)   # own budget: the global 60s cap must not fire first
 def test_builtin_tools_match_cli() -> None:
     # Do NOT skip on CLAUDECODE=1 — the bundled claude CLI advertises an
     # identical tool registry with or without it; a CLAUDECODE skip hides real
@@ -64,7 +65,9 @@ def test_builtin_tools_match_cli() -> None:
             "--max-turns", "1",
         ],
         input=user_msg + "\n",
-        capture_output=True, text=True, timeout=20,
+        # Node cold-start on a CPU-saturated -n auto box has been seen to
+        # exceed 20s; the budget is liveness only, so keep it generous.
+        capture_output=True, text=True, timeout=90,
     )
 
     advertised: set[str] = set()

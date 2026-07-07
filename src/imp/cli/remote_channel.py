@@ -229,7 +229,13 @@ class RemoteChannel:
             return
         try:
             while True:
-                raw = await anyio.to_thread.run_sync(proc.stderr.readline)
+                try:
+                    raw = await anyio.to_thread.run_sync(proc.stderr.readline)
+                except ValueError:
+                    # stop() closed stderr before this drain's readline landed
+                    # (late scheduling under load): a closed stream is EOF, and
+                    # must never raise into the run's task group.
+                    return
                 if raw == b"":
                     return
                 level, message = _classify_stderr_line(
