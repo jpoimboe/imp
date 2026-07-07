@@ -31,6 +31,7 @@ class RetryNow:
 @dataclass(frozen=True)
 class RetryWithBackoff:
     delay_seconds: float
+    hinted: bool = False   # True when a hint > 60s set the delay (budget-exempt)
 
 
 ErrorDecision = Pause | RetryNow | RetryWithBackoff
@@ -87,16 +88,19 @@ def decide(
 ) -> ErrorDecision:
     """Map a category + prior-attempts count to a decision.
 
-    One delay formula for every backoff category, always 60s-capped:
-    ``min(60, max(2 ** prior_backoff_attempts, hint_delay_seconds or 0))`` →
-    schedule 1, 2, 4, 8, 16, 32, 60, 60, …. A server Retry-After hint is just
-    another term inside the same min/max — there is no separate hint-only branch
-    and no attempt cap (give-up is the per-category budget, owned by the caller).
+    Blind exponential backoff is 60s-capped: ``min(60, 2 ** prior_backoff_attempts)``
+    → 1, 2, 4, 8, 16, 32, 60, 60, …. A server/reset hint is the OTHER term of an
+    outer max — ``max(min(60, 2 ** n), hint)`` — so a hint LARGER than the cap wins
+    the delay outright and is flagged ``hinted=True`` (the caller exempts a hinted
+    wait from the retry budget). A hint <= 60s stays inside the capped/budgeted
+    regime and does not set the flag. Give-up is the per-category budget, owned by
+    the caller — there is no attempt cap here.
     """
     policy = _POLICY.get(category)
     if policy is None or policy.decision is Pause:
         return Pause()
     if policy.decision is RetryNow:
         return RetryNow()
-    delay = min(60.0, max(2.0 ** prior_backoff_attempts, hint_delay_seconds or 0.0))
-    return RetryWithBackoff(delay)
+    delay = max(min(60.0, 2.0 ** prior_backoff_attempts), hint_delay_seconds or 0.0)
+    hinted = (hint_delay_seconds or 0.0) > 60.0
+    return RetryWithBackoff(delay, hinted=hinted)

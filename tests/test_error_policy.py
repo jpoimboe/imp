@@ -67,12 +67,14 @@ def test_hint_floored_to_schedule_when_smaller() -> None:
     assert d.delay_seconds == 2.0
 
 
-def test_hint_capped_at_60s() -> None:
+def test_large_hint_escapes_60s_cap_and_sets_hinted() -> None:
+    # Reset-aware change: a hint above 60s is authoritative, not capped, and flagged.
     d = ep.decide(
         "rate_limit", prior_backoff_attempts=0, hint_delay_seconds=999.0,
     )
     assert isinstance(d, ep.RetryWithBackoff)
-    assert d.delay_seconds == 60.0
+    assert d.delay_seconds == 999.0
+    assert d.hinted is True
 
 
 def test_hint_ignored_for_pause_category() -> None:
@@ -98,10 +100,12 @@ def test_backoff_doubles_then_caps_at_60() -> None:
     assert [d.delay_seconds for d in delays] == [1, 2, 4, 8, 16, 32, 60, 60]
 
 
-def test_retry_after_hint_still_capped_at_60() -> None:
+def test_large_retry_after_hint_escapes_cap_for_network() -> None:
+    # Intended side effect: an HTTP Retry-After: 300 is now honored past 60s.
     from imp.engine.error_policy import RetryWithBackoff, decide
     d = decide("network", prior_backoff_attempts=0, hint_delay_seconds=300)
-    assert isinstance(d, RetryWithBackoff) and d.delay_seconds == 60.0
+    assert isinstance(d, RetryWithBackoff)
+    assert d.delay_seconds == 300.0 and d.hinted is True
 
 
 def test_auth_retries_with_60s_capped_backoff() -> None:
@@ -150,14 +154,16 @@ def test_delay_caps_at_60_without_hint() -> None:
     assert d.delay_seconds == 60.0
 
 
-def test_hint_folded_into_same_min_max_formula() -> None:
-    # A server hint is just another term inside min(60, max(2^n, hint)) —
-    # no separate hint-only branch.
-    big = ep.decide("network", prior_backoff_attempts=0, hint_delay_seconds=30.0)
-    assert isinstance(big, ep.RetryWithBackoff) and big.delay_seconds == 30.0
-    capped = ep.decide("network", prior_backoff_attempts=0,
-                       hint_delay_seconds=999.0)
-    assert isinstance(capped, ep.RetryWithBackoff) and capped.delay_seconds == 60.0
+def test_hint_folded_into_outer_max_formula() -> None:
+    # A hint is the outer-max term: max(min(60, 2^n), hint). A small hint (<=60)
+    # stays capped/unflagged; a large hint (>60) wins the delay and is flagged.
+    small = ep.decide("network", prior_backoff_attempts=0, hint_delay_seconds=30.0)
+    assert isinstance(small, ep.RetryWithBackoff)
+    assert small.delay_seconds == 30.0 and small.hinted is False
+    large = ep.decide("network", prior_backoff_attempts=0,
+                      hint_delay_seconds=999.0)
+    assert isinstance(large, ep.RetryWithBackoff)
+    assert large.delay_seconds == 999.0 and large.hinted is True
 
 
 def test_auth_never_pauses_in_decide() -> None:
@@ -193,3 +199,16 @@ def test_stalled_never_pauses_in_decide() -> None:
 def test_budget_for_stalled_is_1800() -> None:
     # Same patience as the other transient budgets (network / rate_limit / auth).
     assert ep.budget_for("stalled") == 1800.0
+
+
+def test_hint_exactly_60s_is_not_hinted() -> None:
+    # Boundary: strictly > 60 is hinted; == 60 stays in the capped/budgeted regime.
+    d = ep.decide("rate_limit", prior_backoff_attempts=0, hint_delay_seconds=60.0)
+    assert isinstance(d, ep.RetryWithBackoff)
+    assert d.delay_seconds == 60.0 and d.hinted is False
+
+
+def test_no_hint_blind_backoff_is_not_hinted() -> None:
+    d = ep.decide("network", prior_backoff_attempts=3)
+    assert isinstance(d, ep.RetryWithBackoff)
+    assert d.delay_seconds == 8.0 and d.hinted is False
