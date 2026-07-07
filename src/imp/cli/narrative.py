@@ -1711,6 +1711,15 @@ def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any])
     self._append(ErrorNode(message=message, is_warning=True))
 
 
+def _fmt_hm(seconds: float) -> str:
+    """`2h 13m` / `45m` compact duration; hours segment shown only when non-zero."""
+    total_minutes = int(seconds // 60)
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
 def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Non-terminal: a transient error was retried with backoff. Render inline so
     # a self-healed network/rate_limit blip doesn't look like a failure.
@@ -1721,6 +1730,12 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         # Stalled retry is the calm resume re-entry breadcrumb, not a technical retry line.
         self._append(ErrorNode(
             message="resuming — verifying prior work, not redoing it",
+            category=cat, is_warning=True))
+        return
+    hinted = bool(p.get("hinted")) or (isinstance(secs, (int, float)) and secs >= 120)
+    if hinted and isinstance(secs, (int, float)):
+        self._append(ErrorNode(
+            message=f"[{cat}] waiting for limit reset — retry {attempt} in {_fmt_hm(secs)}",
             category=cat, is_warning=True))
         return
     self._append(ErrorNode(
