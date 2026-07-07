@@ -159,6 +159,10 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
     not opted_in("anthropic"),
     reason="anthropic not in IMP_LIVE_PROVIDERS",
 )
+# 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
+# 240s live-test backstop can't fire mid-subprocess before imp's own internal
+# timeouts do (which yield real diagnostics instead of a killed worker).
+@pytest.mark.timeout(600)
 def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None:
     assert _anthropic_key() is not None, (
         "anthropic opted in via IMP_LIVE_PROVIDERS but no "
@@ -244,6 +248,10 @@ def _openai_key() -> str | None:
     not opted_in("openai"),
     reason="openai not in IMP_LIVE_PROVIDERS",
 )
+# 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
+# 240s live-test backstop can't fire mid-subprocess before imp's own internal
+# timeouts do (which yield real diagnostics instead of a killed worker).
+@pytest.mark.timeout(600)
 def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     tmp_path: Path,
 ) -> None:
@@ -326,6 +334,13 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     not opted_in("claude_code"),
     reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
+# Serialize the 3 crash-prone resume tests onto one worker (under --dist
+# loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
+@pytest.mark.xdist_group("live_claude_resume")
+# 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
+# 240s live-test backstop can't fire mid-subprocess before imp's own internal
+# timeouts do (which yield real diagnostics instead of a killed worker).
+@pytest.mark.timeout(600)
 def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     tmp_path: Path,
 ) -> None:
