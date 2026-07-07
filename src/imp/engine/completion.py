@@ -125,7 +125,7 @@ def build_continuation_fn(
     event_log: Any = None,
     agent_id: str | None = None,
     non_interactive: bool = False,
-    dialogue: bool = False,
+    interactive: bool = False,
     has_schema: bool = False,
 ) -> Callable[[str], str | Awaitable[str]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
@@ -136,12 +136,12 @@ def build_continuation_fn(
       1. A pending interject (a line the human typed mid-run) satisfies the
          yield — return it as the next user message (and clears the one-shot
          nudge bit so a later yield gets its own nudge).
-      2. One-shot disambiguation nudge (schema-bearing, non-dialogue agents
+      2. One-shot disambiguation nudge (schema-bearing, non-interactive-flag agents
          only): the FIRST bare turn-end of a yield returns COMPLETION_NUDGE as
          the next user message — asking the agent to call complete_step or reply
          WAITING — and emits a completion_nudge event. Fires at most once per
          yield; behavior keys only on whether the next turn calls complete_step.
-      3. Already nudged, or nudge not applicable (dialogue steps, or schema-less
+      3. Already nudged, or nudge not applicable (interactive steps, or schema-less
          agents — a true subagent's bare turn-end is its deliverable and never
          reaches this handler): today's yield behavior, carrying the stashed pre-nudge
          text so the human sees the original question, not the post-nudge reply:
@@ -182,12 +182,12 @@ def build_continuation_fn(
             if pending is not None:
                 nudged = False
                 return pending
-        # One-shot disambiguation nudge: a schema-bearing, non-dialogue agent's
+        # One-shot disambiguation nudge: a schema-bearing, non-interactive-flag agent's
         # bare turn-end is indistinguishable from a forgotten complete_step, so
         # ask ONCE (WAITING or complete_step). Behavior keys only on whether the
         # NEXT turn calls complete_step; the returned string is re-queried as the
         # next user message and the marker event is emitted alongside it.
-        if has_schema and not dialogue and not nudged:
+        if has_schema and not interactive and not nudged:
             nudged = True
             pre_nudge_text = last_text
             _emit_nudge()

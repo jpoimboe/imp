@@ -1094,12 +1094,12 @@ def test_front_door_declares_dialogue_and_no_other_step_does() -> None:
     from imp.assets import bundled_workflow_dir, bundled_workflow_names
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["front-door"].dialogue is True
+    assert by["front-door"].interactive is True
     # front-door is the ONLY step across ALL bundled workflows that opts in.
     all_steps = [
         s
         for name in bundled_workflow_names()
         for s in load_workflow(bundled_workflow_dir(name)).flat_steps()
     ]
-    others = [s.name for s in all_steps if s.name != "front-door" and s.dialogue]
+    others = [s.name for s in all_steps if s.name != "front-door" and s.interactive]
     assert others == []

@@ -1850,7 +1850,7 @@ def test_parse_agent_isolated_worktree_non_bool_raises(tmp_path: Path) -> None:
         parse_agent_file(p)
 
 
-def test_dialogue_absent_defaults_false_on_agent(tmp_path) -> None:
+def test_interactive_absent_defaults_false_on_agent(tmp_path) -> None:
     wf = _write(tmp_path, """\
         name: t
         description: t
@@ -1861,10 +1861,10 @@ def test_dialogue_absent_defaults_false_on_agent(tmp_path) -> None:
                 file: agents/spec-writer.md
         """, agents={"spec-writer": _WRITER})
     by = {s.name: s for s in load_workflow(wf).flat_steps()}
-    assert by["spec-writer"].dialogue is False
+    assert by["spec-writer"].interactive is False
 
 
-def test_dialogue_true_on_agent_parses(tmp_path) -> None:
+def test_interactive_true_on_agent_parses(tmp_path) -> None:
     wf = _write(tmp_path, """\
         name: t
         description: t
@@ -1873,13 +1873,13 @@ def test_dialogue_true_on_agent_parses(tmp_path) -> None:
             steps:
               - name: spec-writer
                 file: agents/spec-writer.md
-                dialogue: true
+                interactive: true
         """, agents={"spec-writer": _WRITER})
     by = {s.name: s for s in load_workflow(wf).flat_steps()}
-    assert by["spec-writer"].dialogue is True
+    assert by["spec-writer"].interactive is True
 
 
-def test_dialogue_on_script_step_is_load_error(tmp_path) -> None:
+def test_interactive_on_script_step_is_load_error(tmp_path) -> None:
     wf = _write(tmp_path, """\
         name: t
         description: t
@@ -1888,15 +1888,15 @@ def test_dialogue_on_script_step_is_load_error(tmp_path) -> None:
             steps:
               - name: verify
                 command: ./scripts/run-verify.sh fast
-                dialogue: true
+                interactive: true
                 rules:
                   - {else: true, continue: true}
         """)
-    with pytest.raises(LoadError, match="dialogue"):
+    with pytest.raises(LoadError, match="interactive"):
         load_workflow(wf)
 
 
-def test_dialogue_on_branch_step_is_load_error(tmp_path) -> None:
+def test_interactive_on_branch_step_is_load_error(tmp_path) -> None:
     wf = _write(tmp_path, """\
         name: t
         description: t
@@ -1904,9 +1904,9 @@ def test_dialogue_on_branch_step_is_load_error(tmp_path) -> None:
           - name: p
             steps:
               - name: route
-                dialogue: true
+                interactive: true
                 rules:
                   - {else: true, continue: true}
         """)
-    with pytest.raises(LoadError, match="dialogue"):
+    with pytest.raises(LoadError, match="interactive"):
         load_workflow(wf)

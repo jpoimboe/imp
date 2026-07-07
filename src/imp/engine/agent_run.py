@@ -497,7 +497,7 @@ def build_agent_invocation(
     log: Any = None,
     test_gates: TestGates | None = None,
     non_interactive: bool = False,
-    dialogue: bool = False,
+    interactive: bool = False,
     sandbox_policy: Any = None,
     checkpoint_threshold: float | int | None = None,
     inject_outcome_field: bool = False,
@@ -558,7 +558,7 @@ def build_agent_invocation(
         event_log=event_log,
         agent_id=agent_id,
         non_interactive=non_interactive,
-        dialogue=dialogue,
+        interactive=interactive,
         has_schema=has_schema,
     )
     return AgentInvocation(

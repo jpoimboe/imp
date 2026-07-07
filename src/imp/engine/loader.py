@@ -652,10 +652,10 @@ def _parse_step(
     if _clean_tree_raw is not None and kind != "agent":
         raise LoadError("clean_tree: only valid on an agent step", source)
     clean_tree = _clean_tree_raw if _clean_tree_raw is not None else True
-    _dialogue_raw = _parse_optional_bool_flag(raw, "dialogue", source)
-    if _dialogue_raw is not None and kind != "agent":
-        raise LoadError("dialogue: only valid on an agent step", source)
-    dialogue = _dialogue_raw if _dialogue_raw is not None else False
+    _interactive_raw = _parse_optional_bool_flag(raw, "interactive", source)
+    if _interactive_raw is not None and kind != "agent":
+        raise LoadError("interactive: only valid on an agent step", source)
+    interactive = _interactive_raw if _interactive_raw is not None else False
     output_schema = None
     if "output" in raw:
         if kind != "script":
@@ -726,7 +726,7 @@ def _parse_step(
             show_output=show_output,
             interruptible=interruptible,
             clean_tree=clean_tree,
-            dialogue=dialogue,
+            interactive=interactive,
         )
     elif kind == "script":
         step = Step(

@@ -1361,14 +1361,14 @@ def _fieldless_agent() -> AgentDef:
         source=SourceLoc(file=Path("a.md"), line=1), max_tool_calls=None)
 
 
-def test_build_agent_invocation_threads_dialogue(tmp_path: Path, monkeypatch) -> None:
+def test_build_agent_invocation_threads_interactive(tmp_path: Path, monkeypatch) -> None:
     cap_true = _capture_continuation(monkeypatch)
-    _build_inv(tmp_path, dialogue=True)
-    assert cap_true["dialogue"] is True
+    _build_inv(tmp_path, interactive=True)
+    assert cap_true["interactive"] is True
 
     cap_default = _capture_continuation(monkeypatch)
-    _build_inv(tmp_path)  # no dialogue kwarg
-    assert cap_default["dialogue"] is False
+    _build_inv(tmp_path)  # no interactive kwarg
+    assert cap_default["interactive"] is False
 
 
 def test_build_agent_invocation_derives_has_schema_true_when_fields(
