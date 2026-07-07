@@ -967,3 +967,90 @@ def test_dispatch_task_signature_has_no_abort_dispatch() -> None:
     assert not hasattr(sub, "TaskDispatchSkipped")
     assert not hasattr(sub, "TASK_REFUSAL_SENTINEL")
     assert not hasattr(sub, "TaskRefused")
+
+
+@pytest.mark.anyio
+async def test_subagent_hinted_delay_is_budget_exempt(tmp_path: Path,
+                                                       monkeypatch) -> None:
+    """A hinted reset-wait is exempt from the subagent budget: three 7200s hints
+    (each > the 1800s rate_limit budget) all ride, and the 4th drive succeeds."""
+    import imp.agents.subagents as subagents_mod
+    from imp.engine.state import InMemoryEventLog
+
+    async def _no_sleep(delay, coordinator, *, tick=0.1):
+        pass
+    monkeypatch.setattr(subagents_mod, "_interruptible_sleep", _no_sleep)
+
+    calls = {"n": 0}
+
+    async def _spawn(_inv):
+        i = calls["n"]
+        calls["n"] += 1
+        if i < 3:
+            return _FakeRunner([{"type": "error", "payload": {
+                "category": "rate_limit", "kind": "429", "message": "slow",
+                "detail": {"retry_after_seconds": 7200.0}}}])
+        return _FakeRunner([{"type": "agent_output", "payload": {"text": "ok"}}])
+
+    log = InMemoryEventLog()
+    ctx = ToolContext(project_root=tmp_path,
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn
+    ctx.event_log = log
+    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+
+    out = await dispatch_task(ctx, "reviewer", "review it")
+    assert out == "ok"
+    assert calls["n"] == 4
+    retries = [e for e in log.read() if e["type"] == "agent_retry"]
+    assert len(retries) == 3
+    assert all(e["payload"]["hinted"] is True for e in retries)
+    assert all(e["payload"]["backoff_seconds"] == 7200.0 for e in retries)
+
+
+@pytest.mark.anyio
+async def test_subagent_fourth_hinted_sleep_is_budgeted(tmp_path: Path,
+                                                         monkeypatch) -> None:
+    """The 4th hinted subagent sleep falls back to budgeted (cap=3): a 7200s hint
+    exceeds the 1800s budget, so the loop suspends after exactly 3 hinted retries."""
+    import imp.agents.subagents as subagents_mod
+    from imp.agents.subagents import SubagentSuspended
+    from imp.engine.state import InMemoryEventLog
+
+    async def _no_sleep(delay, coordinator, *, tick=0.1):
+        pass
+    monkeypatch.setattr(subagents_mod, "_interruptible_sleep", _no_sleep)
+
+    calls = {"n": 0}
+
+    async def _spawn(_inv):
+        calls["n"] += 1
+        return _FakeRunner([{"type": "error", "payload": {
+            "category": "rate_limit", "kind": "429", "message": "slow",
+            "detail": {"retry_after_seconds": 7200.0}}}])
+
+    log = InMemoryEventLog()
+    ctx = ToolContext(project_root=tmp_path,
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn
+    ctx.event_log = log
+    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+
+    with pytest.raises(SubagentSuspended, match="retry ceiling"):
+        await dispatch_task(ctx, "reviewer", "review it")
+    assert calls["n"] == 4
+    retries = [e for e in log.read() if e["type"] == "agent_retry"]
+    assert len(retries) == 3
+    assert all(e["payload"]["hinted"] is True for e in retries)

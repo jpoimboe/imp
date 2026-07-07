@@ -386,6 +386,7 @@ async def dispatch_task(
             while True:  # reincarnation loop (Tier B backstop)
                 backoff = 0
                 cumulative_backoff = 0.0
+                hint_exempt_sleeps = 0
                 while True:
                     runner = await ctx.spawn_subagent(sub_inv)
                     result = await drive_invocation(
@@ -400,24 +401,35 @@ async def dispatch_task(
                     # SubagentSuspended — this path's own clean-pause unwind (it
                     # cannot return an executor Pause).
                     category = result.error.category if result.error else "unknown"
-                    budget = budget_for(category)
-                    if budget is not None and cumulative_backoff + result.delay > budget:
-                        detail = ("re-authentication needed" if category == "auth"
-                                  else "retry ceiling reached")
-                        raise SubagentSuspended(
-                            f"{detail} during subagent backoff (category={category})")
+                    # A hinted delay is an announced reset wait, not blind retrying:
+                    # exempt it from the budget and don't accrue it, capped at 3 such
+                    # sleeps per loop (the 4th is budgeted). Mirrors _route_agent.
+                    hinted = result.delay_hinted and hint_exempt_sleeps < 3
+                    if not hinted:
+                        budget = budget_for(category)
+                        if budget is not None and cumulative_backoff + result.delay > budget:
+                            detail = ("re-authentication needed" if category == "auth"
+                                      else "retry ceiling reached")
+                            raise SubagentSuspended(
+                                f"{detail} during subagent backoff (category={category})")
                     backoff += 1
                     # Surface the subagent backoff so a self-healed retry isn't silent.
                     if ctx.event_log is not None:
+                        retry_payload = {
+                            "category": category,
+                            "attempt": backoff,
+                            "backoff_seconds": result.delay,
+                        }
+                        if hinted:
+                            retry_payload["hinted"] = True
                         ctx.event_log.append(
                             agent_id=sub_inv.agent_id, type="agent_retry",
-                            payload={
-                                "category": category,
-                                "attempt": backoff,
-                                "backoff_seconds": result.delay,
-                            })
+                            payload=retry_payload)
                     await _interruptible_sleep(result.delay, ctx.coordinator)
-                    cumulative_backoff += result.delay
+                    if hinted:
+                        hint_exempt_sleeps += 1
+                    else:
+                        cumulative_backoff += result.delay
                     if ctx.coordinator is not None and ctx.coordinator.should_pause:
                         raise SubagentSuspended("paused during subagent backoff")
 
