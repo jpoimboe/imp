@@ -1124,4 +1124,4 @@ def test_wait_for_head_declares_merge_lock_glyph(tmp_path: Path) -> None:
     wf = load_workflow(tmp_path / "wf")
     step = _steps(wf)["wait-for-head"]
     assert step.acquire == "merge-lane"
-    assert step.glyph == "▲"
+    assert step.glyph == "⛙"

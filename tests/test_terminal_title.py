@@ -127,14 +127,14 @@ def test_set_hold_glyph_emits_hold_glyph_when_working() -> None:
     title = TerminalTitle(s, "nagi22", "My Change")
     s.truncate(0)
     s.seek(0)
-    title.set_hold_glyph("▲")
-    assert s.getvalue() == "\x1b]2;▲ imp · nagi22 · My Change\x07"
+    title.set_hold_glyph("⛙")
+    assert s.getvalue() == "\x1b]2;⛙ imp · nagi22 · My Change\x07"
 
 
 def test_set_hold_glyph_none_returns_to_working_dot() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "My Change")
-    title.set_hold_glyph("▲")
+    title.set_hold_glyph("⛙")
     s.truncate(0)
     s.seek(0)
     title.set_hold_glyph(None)
@@ -144,7 +144,7 @@ def test_set_hold_glyph_none_returns_to_working_dot() -> None:
 def test_waiting_overrides_active_hold_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "My Change")
-    title.set_hold_glyph("▲")
+    title.set_hold_glyph("⛙")
     s.truncate(0)
     s.seek(0)
     title.waiting()
@@ -154,41 +154,41 @@ def test_waiting_overrides_active_hold_glyph() -> None:
 def test_working_restores_hold_glyph_after_waiting() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "My Change")
-    title.set_hold_glyph("▲")
+    title.set_hold_glyph("⛙")
     title.waiting()
     s.truncate(0)
     s.seek(0)
     title.working()
-    assert s.getvalue() == "\x1b]2;▲ imp · nagi22 · My Change\x07"
+    assert s.getvalue() == "\x1b]2;⛙ imp · nagi22 · My Change\x07"
 
 
 def test_update_name_preserves_active_hold_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
-    title.set_hold_glyph("▲")
+    title.set_hold_glyph("⛙")
     s.truncate(0)
     s.seek(0)
     title.update_name("foo")
-    assert s.getvalue() == "\x1b]2;▲ imp · nagi22 · foo\x07"
+    assert s.getvalue() == "\x1b]2;⛙ imp · nagi22 · foo\x07"
 
 
 def test_working_restores_hold_glyph_set_while_waiting() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "My Change")
     title.waiting()
-    title.set_hold_glyph("▲")
+    title.set_hold_glyph("⛙")
     s.truncate(0)
     s.seek(0)
     title.working()
-    assert s.getvalue() == "\x1b]2;▲ imp · nagi22 · My Change\x07"
+    assert s.getvalue() == "\x1b]2;⛙ imp · nagi22 · My Change\x07"
 
 
 def test_update_name_after_reset_reemits_under_hold_glyph() -> None:
     s = _TTY()
     title = TerminalTitle(s, "nagi22", "Old Name")
-    title.set_hold_glyph("▲")
+    title.set_hold_glyph("⛙")
     title.reset()
     s.truncate(0)
     s.seek(0)
     title.update_name("foo")
-    assert s.getvalue() == "\x1b]2;▲ imp · nagi22 · foo\x07"
+    assert s.getvalue() == "\x1b]2;⛙ imp · nagi22 · foo\x07"

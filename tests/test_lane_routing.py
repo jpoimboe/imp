@@ -158,13 +158,13 @@ def test_acquire_emits_glyph_in_lane_acquired_payload(tmp_path: Path) -> None:
     step = Step(name="lane", phase="merge", kind="branch",
                 rules=(Rule(condition=None, action=Continue(), mutations=(), source=loc),),
                 on_max_retries=Pause(), max_loops=1000, source=loc,
-                acquire="merge-lane", glyph="▲")
+                acquire="merge-lane", glyph="⛙")
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     state, log = State.load(ch.state_dir), InMemoryEventLog()
     anyio.run(_route_acquire, step, ch, state, log, _never_returns)
     acquired = [e for e in log.read() if e["type"] == "lane_acquired"]
     assert len(acquired) == 1
-    assert acquired[0]["payload"]["glyph"] == "▲"
+    assert acquired[0]["payload"]["glyph"] == "⛙"
 
 
 def test_acquire_lane_acquired_payload_glyph_none_when_unset(tmp_path: Path) -> None:

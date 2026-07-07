@@ -1921,14 +1921,14 @@ def test_glyph_accepted_on_merge_lane_step(tmp_path: Path) -> None:
             steps:
               - name: wait-for-head
                 acquire: merge-lane
-                glyph: "▲"
+                glyph: "⛙"
                 rules:
                   - {else: true, continue: true}
         """)
     wf_obj = load_workflow(wf)
     by = {s.name: s for s in wf_obj.flat_steps()}
     assert by["wait-for-head"].acquire == "merge-lane"
-    assert by["wait-for-head"].glyph == "▲"
+    assert by["wait-for-head"].glyph == "⛙"
 
 
 def test_glyph_without_acquire_is_load_error(tmp_path: Path) -> None:
@@ -1939,7 +1939,7 @@ def test_glyph_without_acquire_is_load_error(tmp_path: Path) -> None:
           - name: integrate
             steps:
               - name: bare
-                glyph: "▲"
+                glyph: "⛙"
                 rules:
                   - {else: true, continue: true}
         """)
@@ -1956,7 +1956,7 @@ def test_glyph_on_test_lane_is_load_error(tmp_path: Path) -> None:
             steps:
               - name: t-lane
                 acquire: test-lane
-                glyph: "▲"
+                glyph: "⛙"
                 command: "true"
                 rules:
                   - {else: true, continue: true}

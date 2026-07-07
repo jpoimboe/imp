@@ -1409,7 +1409,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         on_event({"type": "lane_acquired",
                    "payload": {"base": "main", "step": "wait-for-head",
-                               "glyph": "▲"}})
+                               "glyph": "⛙"}})
         return "done"
 
     class _Driver:
@@ -1441,7 +1441,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
 
             tg.start_soon(_client)
 
-    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
     assert hold in s.getvalue()
 
 
@@ -1456,7 +1456,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         on_event({"type": "lane_acquired", "_replay": True,
                    "payload": {"base": "main", "step": "wait-for-head",
-                               "glyph": "▲"}})
+                               "glyph": "⛙"}})
         return "done"
 
     class _Driver:
@@ -1488,7 +1488,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
 
             tg.start_soon(_client)
 
-    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
     assert hold in s.getvalue()
 
 
@@ -1503,12 +1503,12 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         on_event({"type": "lane_acquired",
                    "payload": {"base": "main", "step": "wait-for-head",
-                               "glyph": "▲"}})
+                               "glyph": "⛙"}})
         on_event({"type": "lane_released",
                    "payload": {"base": "main", "step": "merge"}})
         # Wait for the post-release working re-render to flush before returning,
         # else teardown can race ahead of the client processing the release.
-        hold_r = "\x1b]2;▲ imp · term1 · My Change\x07"
+        hold_r = "\x1b]2;⛙ imp · term1 · My Change\x07"
         work_r = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
         with anyio.fail_after(5):
             while not (hold_r in s.getvalue() and work_r in s.getvalue()
@@ -1546,7 +1546,7 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
             tg.start_soon(_client)
 
     out = s.getvalue()
-    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
     work = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
     assert hold in out
     assert out.rindex(work) > out.index(hold)
@@ -1563,12 +1563,12 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
                 await anyio.sleep(0.02)
         on_event({"type": "lane_acquired",
                    "payload": {"base": "main", "step": "wait-for-head",
-                               "glyph": "▲"}})
+                               "glyph": "⛙"}})
         on_event({"type": "lane_evicted",
                    "payload": {"base": "main", "step": "wait-for-head"}})
         # Wait for the post-evict working re-render to flush before returning,
         # else teardown can race ahead of the client processing the eviction.
-        hold_r = "\x1b]2;▲ imp · term1 · My Change\x07"
+        hold_r = "\x1b]2;⛙ imp · term1 · My Change\x07"
         work_r = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
         with anyio.fail_after(5):
             while not (hold_r in s.getvalue() and work_r in s.getvalue()
@@ -1606,7 +1606,7 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
             tg.start_soon(_client)
 
     out = s.getvalue()
-    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
     work = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
     assert hold in out
     assert out.rindex(work) > out.index(hold)
