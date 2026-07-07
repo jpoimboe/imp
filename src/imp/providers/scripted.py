@@ -97,7 +97,7 @@ class ScriptedAgentRunner:
         ctx.coordinator = invocation.coordinator
         ctx.tiers = invocation.tiers
         ctx.test_gates = invocation.test_gates
-        ctx.non_interactive = invocation.non_interactive
+        ctx.non_interactive = invocation.headless
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.user_input_fn = invocation.user_input_fn
         ctx.event_log = elog

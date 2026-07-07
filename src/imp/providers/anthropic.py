@@ -536,7 +536,7 @@ class AnthropicAgentRunner:
         ctx.tiers = invocation.tiers
         ctx.test_gates = invocation.test_gates
         ctx.checkpoint_threshold = invocation.checkpoint_threshold
-        ctx.non_interactive = invocation.non_interactive
+        ctx.non_interactive = invocation.headless
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:

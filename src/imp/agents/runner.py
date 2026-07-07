@@ -216,8 +216,8 @@ class AgentInvocation:
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
     # Threaded from run_change → _route_agent → _run_agent_invocation →
-    # build_agent_invocation → provider → ToolContext → dispatch_task.
-    non_interactive: bool = False
+    # build_agent_invocation → provider → child ToolContext → dispatch_task.
+    headless: bool = False
     # Resolved sandbox posture for this run. Threaded from run_change →
     # _route_agent → _run_agent_invocation → build_agent_invocation → provider →
     # ToolContext so every bash tool call applies the same posture. Any to avoid

@@ -114,7 +114,7 @@ async def serve_change_session(
             resume_target = None if crashed else state.resume_target
         run_kwargs: dict[str, Any] = {}
         if non_interactive:
-            run_kwargs["non_interactive"] = True
+            run_kwargs["headless"] = True
         if autonomous:
             run_kwargs["autonomous"] = True
         first_kwargs: dict[str, Any] = {}

@@ -125,7 +125,7 @@ def test_pending_interject_satisfies_without_soliciting() -> None:
         return "should-not-be-used"
 
     fn = build_continuation_fn(
-        user_input_fn=reply_fn, coordinator=coord, non_interactive=False)
+        user_input_fn=reply_fn, coordinator=coord, headless=False)
     assert fn("which database?") == "actually, stop and reconsider"
     assert calls["n"] == 0
 
@@ -141,7 +141,7 @@ async def test_attended_human_reply_becomes_next_message(
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=False)
+        event_log=log, agent_id="a1", headless=False)
     out = fn("which database should I use?")
     assert inspect.isawaitable(out)
     assert await out == "use postgres"
@@ -162,7 +162,7 @@ async def test_headless_with_channel_solicits_immediately(
 
     fn = build_continuation_fn(
         user_input_fn=channel, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=True)
+        event_log=log, agent_id="a1", headless=True)
     # Headless top-level NEVER nudges: the first bare turn-end solicits the
     # channel and emits awaiting_user_input.
     out = fn("still prose")
@@ -336,7 +336,7 @@ async def test_attended_first_yield_nudges_then_solicits(
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=False,
+        event_log=log, agent_id="a1", headless=False,
         has_schema=True, interactive=False)
     assert fn("which database?") == COMPLETION_NUDGE   # nudge, not a solicit
     out = fn("WAITING")                                # now solicits inline
@@ -360,7 +360,7 @@ async def test_two_consecutive_yields_each_get_exactly_one_nudge(
 
     fn = build_continuation_fn(
         user_input_fn=channel, coordinator=InterruptCoordinator(),
-        event_log=log, agent_id="a1", non_interactive=True,
+        event_log=log, agent_id="a1", headless=True,
         has_schema=True, interactive=False)
     # Yield 1
     assert fn("question one") == COMPLETION_NUDGE

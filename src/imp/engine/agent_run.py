@@ -496,7 +496,7 @@ def build_agent_invocation(
     resume_should_continue: bool = False,
     log: Any = None,
     test_gates: TestGates | None = None,
-    non_interactive: bool = False,
+    headless: bool = False,
     interactive: bool = False,
     sandbox_policy: Any = None,
     checkpoint_threshold: float | int | None = None,
@@ -557,7 +557,7 @@ def build_agent_invocation(
         coordinator=coordinator,
         event_log=event_log,
         agent_id=agent_id,
-        non_interactive=non_interactive,
+        headless=headless,
         interactive=interactive,
         has_schema=has_schema,
     )
@@ -588,7 +588,7 @@ def build_agent_invocation(
         subagent_depth=subagent_depth,
         coordinator=coordinator,
         test_gates=test_gates,
-        non_interactive=non_interactive,
+        headless=headless,
         sandbox_policy=sandbox_policy,
         checkpoint_threshold=checkpoint_threshold,
     )

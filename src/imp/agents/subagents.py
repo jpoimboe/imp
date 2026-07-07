@@ -343,7 +343,7 @@ async def dispatch_task(
                 # are ctx.event_log.
                 log=ctx.event_log,
                 test_gates=ctx.test_gates,
-                non_interactive=ctx.non_interactive,
+                headless=ctx.non_interactive,
                 sandbox_policy=dispatch_policy,
                 checkpoint_threshold=ctx.checkpoint_threshold,
             )

@@ -730,7 +730,7 @@ async def test_headless_top_level_pauses_immediately(tmp_path: Path) -> None:
 
     cont = build_continuation_fn(
         user_input_fn=channel, event_log=log, agent_id="root",
-        non_interactive=True)
+        headless=True)
     inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
 
     with pytest.raises(AwaitingUserInput):

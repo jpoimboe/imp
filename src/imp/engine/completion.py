@@ -124,7 +124,7 @@ def build_continuation_fn(
     coordinator: Any = None,
     event_log: Any = None,
     agent_id: str | None = None,
-    non_interactive: bool = False,
+    headless: bool = False,
     interactive: bool = False,
     has_schema: bool = False,
 ) -> Callable[[str], str | Awaitable[str]]:
@@ -145,7 +145,7 @@ def build_continuation_fn(
          agents — a true subagent's bare turn-end is its deliverable and never
          reaches this handler): today's yield behavior, carrying the stashed pre-nudge
          text so the human sees the original question, not the post-nudge reply:
-           a. Attended (user_input_fn present and not non_interactive): a human
+           a. Attended (user_input_fn present and not headless): a human
               is here, so SOLICIT inline and let them decide; the reply becomes
               the next user message. The inactivity watchdog is frozen for the
               blocked await; a human who detaches mid-turn is handled by the
@@ -198,7 +198,7 @@ def build_continuation_fn(
         # a later separate yield in this session gets its own single nudge.
         park_text = pre_nudge_text if nudged else last_text
         nudged = False
-        if user_input_fn is not None and not non_interactive:
+        if user_input_fn is not None and not headless:
             return inline(park_text)
         # Headless top-level: solicit the channel if present, else park.
         # Synchronous raise (not the async inline tail) because callers invoke

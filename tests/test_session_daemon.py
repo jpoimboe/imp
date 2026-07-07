@@ -1133,16 +1133,16 @@ async def test_serve_forwards_non_interactive_to_run_change(tmp_path: Path) -> N
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
-        non_interactive: bool = False,
+        headless: bool = False,
     ) -> str:
-        captured["non_interactive"] = non_interactive
+        captured["headless"] = headless
         return "done"
 
     with anyio.fail_after(5):
         result = await serve_change_session(
             change, run_fn=fake_run, hibernate=False, non_interactive=True)
     assert result == "done"
-    assert captured["non_interactive"] is True
+    assert captured["headless"] is True
 
 
 def test_spawn_session_daemon_emits_non_interactive_flag(
@@ -1277,9 +1277,9 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
-        non_interactive: bool = False,
+        headless: bool = False,
     ) -> RunResult:
-        received_flags.append(non_interactive)
+        received_flags.append(headless)
         if len(received_flags) == 1:
             await coordinator.signal_pause(reason="ctrl-c")
             return RunResult.PAUSED
@@ -1568,7 +1568,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
     async def fake_run(
         change: Change, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
-        non_interactive: bool = False, autonomous: bool = False,
+        headless: bool = False, autonomous: bool = False,
     ) -> RunResult:
         seen["ran"] = True
         return RunResult.COMPLETED

@@ -102,7 +102,7 @@ async def _run_real_engine(app: TuiApp) -> None:
                                change_id="2026-06-12-run0", base_branch="main")
 
         async def _drive() -> None:
-            await run_change(change, on_event=app.on_event, non_interactive=True)
+            await run_change(change, on_event=app.on_event, headless=True)
 
         _task = asyncio.create_task(_drive())
         await app.run_async()

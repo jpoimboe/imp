@@ -581,7 +581,7 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
@@ -616,7 +616,7 @@ async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
@@ -642,7 +642,7 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     types_seen = [e.get("type") for e in _run_events(change)]
     steps = [e["payload"].get("step") for e in _run_events(change)
@@ -671,7 +671,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.PAUSED
     final = State.load(change.state_dir)
     assert final.status == "merge_blocked"
@@ -692,7 +692,7 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started"]
@@ -723,7 +723,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, non_interactive=True)
+    result = await run_change(change, headless=True)
     assert result is RunResult.COMPLETED
 
     events = _run_events(change)          # the same source `imp log` renders
