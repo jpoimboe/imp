@@ -347,6 +347,24 @@ def _unexpected_death_reason(change: Change) -> str:
     return "ended unexpectedly"
 
 
+_DAEMON_CRASH_MARKER = "Traceback (most recent call last):"
+
+
+def _daemon_stderr_has_crash(path: Path) -> bool:
+    """True when daemon.stderr holds error-level content (a Python traceback).
+
+    The session daemon configures no logging, so this file is raw process
+    stderr: empty or benign provider INFO chatter on a clean detach, and a
+    traceback on a genuine death (the executor's re-raise, or the interpreter's
+    unhandled-exception printer). Only the traceback marker earns the
+    unexpected-death banner — a non-empty file is not on its own a crash."""
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return False
+    return _DAEMON_CRASH_MARKER in text
+
+
 def _pause_facts(
     change: Change, leave_trigger: str | None = None,
 ) -> tuple[str, str | None, str, str | None]:

@@ -353,3 +353,29 @@ def test_leave_trigger_returns_reason_only_when_escalated_and_stamped() -> None:
     # No escalation event at all, and the None coord used by non-interactive paths.
     assert _leave_trigger(_Coord("sigterm", None)) is None
     assert _leave_trigger(None) is None
+
+
+def test_daemon_stderr_has_crash_detects_traceback(tmp_path: Path) -> None:
+    from imp.cli.main import _daemon_stderr_has_crash
+
+    p = tmp_path / "daemon.stderr"
+    p.write_text(
+        "Traceback (most recent call last):\n"
+        '  File "runner.py", line 10, in <module>\n'
+        "RuntimeError: boom\n")
+    assert _daemon_stderr_has_crash(p) is True
+
+
+def test_daemon_stderr_has_crash_false_for_benign_info_only(tmp_path: Path) -> None:
+    # A clean run leaves only benign provider INFO chatter — non-empty, no crash.
+    from imp.cli.main import _daemon_stderr_has_crash
+
+    p = tmp_path / "daemon.stderr"
+    p.write_text("Using bundled Claude Code CLI\n")
+    assert _daemon_stderr_has_crash(p) is False
+
+
+def test_daemon_stderr_has_crash_false_when_file_absent(tmp_path: Path) -> None:
+    from imp.cli.main import _daemon_stderr_has_crash
+
+    assert _daemon_stderr_has_crash(tmp_path / "daemon.stderr") is False
