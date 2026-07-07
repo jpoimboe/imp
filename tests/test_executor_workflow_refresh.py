@@ -151,3 +151,24 @@ def test_refresh_deletes_leftover_workflow_old(tmp_path: Path) -> None:
     _refresh_workflow_snapshot(change)
     assert not old.exists()
     assert (snapshot / "workflow.yaml").exists()
+
+
+@pytest.mark.anyio
+async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
+    """The pohe33 regression: a frozen snapshot the CURRENT loader rejects is
+    replaced from a valid live source on entry, so the run proceeds instead of
+    crashing in load_workflow."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    # A snapshot using removed `chrome:` syntax: a mapping with no `phases`,
+    # which load_workflow rejects with LoadError("missing 'phases' list").
+    snapshot = change.change_dir / "workflow"
+    snapshot.mkdir(parents=True, exist_ok=True)
+    (snapshot / "workflow.yaml").write_text("chrome: removed-syntax\n")
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    assert "chrome" not in (snapshot / "workflow.yaml").read_text()
+    assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1

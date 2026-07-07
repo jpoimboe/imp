@@ -266,14 +266,7 @@ async def run_change(
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
-        snapshot = change.change_dir / "workflow"
-        if not snapshot.is_dir():
-            tmp = change.change_dir / "workflow.tmp"
-            if tmp.exists():
-                shutil.rmtree(tmp)
-            shutil.copytree(change.live_workflow_dir, tmp)
-            overlay_project_skills(change.project_root, tmp / "skills" / "user")
-            os.rename(tmp, snapshot)
+        workflow_refreshed = _refresh_workflow_snapshot(change)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
         ).config
@@ -294,6 +287,8 @@ async def run_change(
         )
         log: EventLog = JsonlEventLog(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
+        if workflow_refreshed:
+            _emit(log, "workflow_refreshed", {}, agent_id=None)
         sandbox_policy = _build_sandbox_policy(change, config, log)
         policy_root = change.project_root
 
@@ -338,7 +333,7 @@ async def run_change(
                 return _complete(change, state, log)            # genuine completion
             if index_of.get(state.step) is None:
                 # The cursor names a step absent from the loaded workflow
-                # (corruption, or a future --refresh-workflow re-snapshot). Never
+                # (corruption, or a refresh that dropped this step). Never
                 # silent-merge: pause with an error instead of calling _complete.
                 state.status = "paused"
                 state.save(change.state_dir)
