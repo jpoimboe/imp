@@ -408,6 +408,11 @@ class NarrativeTree:
 # ── builder ──────────────────────────────────────────────────────────────────
 from collections.abc import Iterable  # noqa: E402  (kept near builder for clarity)
 
+_RESUMES_WAIT = frozenset({
+    "user_message", "llm_response", "thinking", "tool_call",
+    "agent_output", "step_started", "step_completed",
+})
+
 
 class NarrativeBuilder:
     """Per-agent_id state machine. add(event) routes one event into the tree.
@@ -660,6 +665,9 @@ class NarrativeBuilder:
 
         etype = event["type"]
         agent_id = event.get("agent_id")
+
+        if etype in _RESUMES_WAIT:
+            self._reset_wait = None
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
         #    into the change total. The context-bar value (_latest_prompt_tokens)
