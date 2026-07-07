@@ -268,12 +268,12 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     error in its segment renders the bare reason, even when an earlier segment
     terminated. Returns _PauseBanner.STALE when the latest segment ended without
     its own segment-terminal event — a resume with no workflow_paused (or, for a
-    draft, conversation_saved) after it — so a run that died before writing
-    anything (e.g. a workflow LoadError at daemon startup) reads as an
-    unexpected death rather than a mute or fossil banner. A resumed draft that
-    never paused before parking has no workflow_paused at all; the resume alone
-    is enough to arm the check. Builds only from existing event fields — no
-    hardcoded kind."""
+    draft, conversation_saved) after it — so the stored reason is a fossil;
+    _pause_facts then classifies it — the unexpected-death banner only when
+    daemon.stderr holds a crash traceback (e.g. a workflow LoadError at daemon
+    startup), otherwise a calm interrupt. A resumed draft that never paused
+    before parking has no workflow_paused at all; the resume alone is enough to
+    arm the check. Builds only from existing event fields — no hardcoded kind."""
     paused: dict[str, Any] | None = None
     paused_error: dict[str, Any] | None = None
     pending_error: dict[str, Any] | None = None
@@ -336,17 +336,6 @@ def _leave_trigger(coord: Any) -> str | None:
     return None
 
 
-def _unexpected_death_reason(change: Change) -> str:
-    """The daemon-death banner; daemon.stderr pointer only when that file is non-empty."""
-    try:
-        has_detail = (change.change_dir / "daemon.stderr").stat().st_size > 0
-    except OSError:
-        has_detail = False
-    if has_detail:
-        return f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr"
-    return "ended unexpectedly"
-
-
 _DAEMON_CRASH_MARKER = "Traceback (most recent call last):"
 
 
@@ -376,7 +365,13 @@ def _pause_facts(
         return name, phase, change.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        reason: str | None = _unexpected_death_reason(change)
+        if _daemon_stderr_has_crash(change.change_dir / "daemon.stderr"):
+            reason: str | None = (
+                f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
+        else:
+            # A resumed-without-pause segment with no crash traceback is a clean
+            # deliberate detach — render the calm interrupt reason, no pointer.
+            reason = "interrupt"
     else:
         reason = reason_val
     return name, phase, change.id, reason
