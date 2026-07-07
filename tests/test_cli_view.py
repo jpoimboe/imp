@@ -453,7 +453,7 @@ def test_log_picker_rows_include_backlog(
         base_branch="main", origin="idea", seed_opening="Add OAuth")
     captured: dict = {}
 
-    async def _fake_picker(*, rows, header, on_empty, selected_index):
+    async def _fake_picker(*, control, rows, header, on_empty, selected_index):
         captured["rows"] = rows
         return 2
 

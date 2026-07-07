@@ -48,6 +48,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group, sigint_cancels_scope
+from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
@@ -128,6 +129,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, or /help for commands"
+_OPENING_SESSION_VERBS = ("/save", "/clear", "/abandon")
 
 
 def _should_prompt_opening(
@@ -268,12 +270,12 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     error in its segment renders the bare reason, even when an earlier segment
     terminated. Returns _PauseBanner.STALE when the latest segment ended without
     its own segment-terminal event — a resume with no workflow_paused (or, for a
-    draft, conversation_saved) after it — so a run that died before writing
-    anything (e.g. a workflow LoadError at daemon startup) reads as an
-    unexpected death rather than a mute or fossil banner. A resumed draft that
-    never paused before parking has no workflow_paused at all; the resume alone
-    is enough to arm the check. Builds only from existing event fields — no
-    hardcoded kind."""
+    draft, conversation_saved) after it — so the stored reason is a fossil;
+    _pause_facts then classifies it — the unexpected-death banner only when
+    daemon.stderr holds a crash traceback (e.g. a workflow LoadError at daemon
+    startup), otherwise a calm interrupt. A resumed draft that never paused
+    before parking has no workflow_paused at all; the resume alone is enough to
+    arm the check. Builds only from existing event fields — no hardcoded kind."""
     paused: dict[str, Any] | None = None
     paused_error: dict[str, Any] | None = None
     pending_error: dict[str, Any] | None = None
@@ -336,15 +338,22 @@ def _leave_trigger(coord: Any) -> str | None:
     return None
 
 
-def _unexpected_death_reason(change: Change) -> str:
-    """The daemon-death banner; daemon.stderr pointer only when that file is non-empty."""
+_DAEMON_CRASH_MARKER = "Traceback (most recent call last):"
+
+
+def _daemon_stderr_has_crash(path: Path) -> bool:
+    """True when daemon.stderr holds error-level content (a Python traceback).
+
+    The session daemon configures no logging, so this file is raw process
+    stderr: empty or benign provider INFO chatter on a clean detach, and a
+    traceback on a genuine death (the executor's re-raise, or the interpreter's
+    unhandled-exception printer). Only the traceback marker earns the
+    unexpected-death banner — a non-empty file is not on its own a crash."""
     try:
-        has_detail = (change.change_dir / "daemon.stderr").stat().st_size > 0
+        text = path.read_text(errors="replace")
     except OSError:
-        has_detail = False
-    if has_detail:
-        return f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr"
-    return "ended unexpectedly"
+        return False
+    return _DAEMON_CRASH_MARKER in text
 
 
 def _pause_facts(
@@ -358,7 +367,13 @@ def _pause_facts(
         return name, phase, change.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        reason: str | None = _unexpected_death_reason(change)
+        if _daemon_stderr_has_crash(change.change_dir / "daemon.stderr"):
+            reason: str | None = (
+                f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
+        else:
+            # A resumed-without-pause segment with no crash traceback is a clean
+            # deliberate detach — render the calm interrupt reason, no pointer.
+            reason = "interrupt"
     else:
         reason = reason_val
     return name, phase, change.id, reason
@@ -660,6 +675,20 @@ def _print_opening(change: Change, marker: str, *, interactive: bool, color: boo
     return _print_splash_banner(interactive=interactive, lead_blank=False)
 
 
+async def _read_intent_line(
+    prompt: Any, change: Any, *, color: bool, width: int,
+) -> str:
+    """Read one opening-intent line through the slash interceptor, no model turn spent."""
+    while True:
+        line = await ask_line_with_slash(
+            prompt, None, change, color=color, width=width, hint=OPENING_HINT)
+        if line in _OPENING_SESSION_VERBS:
+            print(f"{line} isn't available at the opening prompt — "
+                  f"describe your Change, or /help for commands.")
+            continue
+        return line
+
+
 async def _read_opening_message(
     change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
@@ -670,10 +699,10 @@ async def _read_opening_message(
     `banner_shown` is True on an interactive entry that should render the splash."""
     _print_opening(change, leave_mode, interactive=banner_shown, color=color)
     make = _prompt_factory or (
-        lambda: Prompt(editing_mode=editing_mode, color=color))
+        lambda: Prompt(skills_dir=change.workflow_dir / "skills",
+                       editing_mode=editing_mode, color=color))
     prompt = make()
-    reply = await prompt.ask_async(width=width, display_width=_display_width(),
-                                   hint=OPENING_HINT)
+    reply = await _read_intent_line(prompt, change, color=color, width=width)
     return _normalize_opening_reply(reply)
 
 
@@ -770,6 +799,7 @@ async def _run_tui_session(
 
 async def _run_cleared_session(
     control: Path, base: str, *, tui: bool, leave_state: dict[str, str],
+    leave_mode: str = "new",
 ) -> int:
     """Open a fresh imp new-style draft in place after /clear."""
     from imp.cli.signals import InterruptCoordinator
@@ -780,15 +810,15 @@ async def _run_cleared_session(
         base_branch=base, origin="draft")
     _session_started = False
     try:
-        print(_run_header_line(change.id, change.title, "new", color=color))
+        print(_run_header_line(change.id, change.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
         term_title = None if tui else TerminalTitle(
             sys.stdout, change.id, change.title)
-        prompt = Prompt(editing_mode=_editing_mode(control), color=color)
+        prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                        editing_mode=_editing_mode(control), color=color)
         try:
-            reply = (await prompt.ask_async(
-                width=_term_width(), display_width=_display_width(),
-                hint=OPENING_HINT)).strip()
+            reply = await _read_intent_line(
+                prompt, change, color=color, width=_term_width())
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -799,7 +829,7 @@ async def _run_cleared_session(
         if tui:
             return await _run_tui_session(
                 change, seed_opening=opening_text,
-                leave_mode="new", leave_state=leave_state)
+                leave_mode=leave_mode, leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width(),
@@ -810,7 +840,7 @@ async def _run_cleared_session(
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            leave_mode="new",
+            leave_mode=leave_mode,
             leave_state=leave_state, title=term_title)
     finally:
         if not _session_started:
@@ -822,6 +852,7 @@ async def _clear_loop(
     *,
     tui: bool,
     first: Callable[[dict[str, str]], Awaitable[int]],
+    leave_mode: str = "new",
 ) -> int:
     """Run first, then loop only while /clear: open a fresh new-style chat."""
     leave_state: dict[str, str] = {}
@@ -830,7 +861,7 @@ async def _clear_loop(
         leave_state = {}
         base = worktree.current_branch(control)
         rc = await _run_cleared_session(
-            control, base, tui=tui, leave_state=leave_state)
+            control, base, tui=tui, leave_state=leave_state, leave_mode=leave_mode)
     return rc
 
 
@@ -1052,7 +1083,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                 leave_mode=leave_mode,
                 leave_state=leave_state, autonomous=autonomous)
 
-        return await _clear_loop(control, tui=True, first=_first_tui)
+        return await _clear_loop(control, tui=True, first=_first_tui, leave_mode=leave_mode)
 
     if not header_printed:
         _print_opening(change, leave_mode, interactive=interactive, color=color)
@@ -1071,7 +1102,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous)
 
-    return await _clear_loop(control, tui=False, first=_first)
+    return await _clear_loop(control, tui=False, first=_first, leave_mode=leave_mode)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -1546,7 +1577,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
         "status:     backlog",
         f"provenance: {meta.get('origin', 'draft')}",
         f"readiness:  {readiness}",
-        f"created:    {created or '-'} ({change_row.relative_age(created, now=now)})",
+        f"created:    {change_row.format_timestamp(created)} "
+        f"({change_row.relative_age(created, now=now)})",
     ]
     if meta.get("depends_on"):
         lines.append(f"depends_on: {', '.join(meta['depends_on'])}")
@@ -1575,7 +1607,8 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         phase = _latest_phase(events)
         lines.append(f"step:          {step}" + (f" ({phase})" if phase else ""))
     lines.append(
-        f"created:       {created or '-'} ({change_row.relative_age(created, now=now)})")
+        f"created:       {change_row.format_timestamp(created)} "
+        f"({change_row.relative_age(created, now=now)})")
     lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
     meta = _change_meta(control, change_id) or {}
     if meta.get("base_branch"):
@@ -1701,11 +1734,11 @@ def _resolve_default_id(control: Path) -> str | None:
     return archive_read.most_recent_archived_id(control)
 
 
-_NO_CHANGES_MESSAGE = "No changes."
+_NO_CHANGES_MESSAGE = "No changes yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
-    print("No changes.")
+    print(_NO_CHANGES_MESSAGE)
     return 2
 
 
@@ -1717,6 +1750,7 @@ async def _pick_log_target(control: Path) -> str | int:
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
     return await _pick_change_target(
+        control=control,
         rows=rows,
         header="Show log for which change?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_log_picker_empty,
@@ -2185,6 +2219,10 @@ def _resumable_rows(control: Path) -> list[_Row]:
     return _sort_rows_newest_first(rows)
 
 
+def _abandon_rows(control: Path) -> list[_Row]:
+    return _sort_rows_newest_first(_status_rows(control) + _backlog_rows(control))
+
+
 def _past_change_count(control: Path) -> int:
     return len(_completed_rows(control))
 
@@ -2220,7 +2258,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
 
 
 async def _pick_change_target(
-    *, rows: list[_Row], header: str,
+    *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
     on_non_tty: Callable[[list[_Row]], str | int] | None = None,
     selected_index: int = 0,
@@ -2235,7 +2273,9 @@ async def _pick_change_target(
         return rows[0][0]
     candidates = [resume_select.Candidate(
         change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
-        step_label=r[6])
+        step_label=r[6],
+        intent=(_resolve_intent(_load_events_for_id(control, r[0]) or [])
+                if not r[4].strip() else None))
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -2246,6 +2286,7 @@ async def _pick_change_target(
 
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
     return await _pick_change_target(
+        control=control,
         rows=_resumable_rows(control),
         header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
         on_empty=lambda: _resume_picker_empty(control),
@@ -2273,7 +2314,7 @@ def _deliver_abandon_resident(control: Path, change_id: str) -> None:
     anyio.run(_run)
 
 
-def _abandon(control: Path, change_id: str) -> int:
+def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
@@ -2291,6 +2332,20 @@ def _abandon(control: Path, change_id: str) -> int:
         return 0
 
     token = change.id
+    if not change.materialized:
+        try:
+            discard_conversation(change)
+        except LockHeld as e:
+            print(f"imp: Change {change_id} is running (pid {e.held_by_pid or '?'}); "
+                  f"stop it before abandoning", file=sys.stderr)
+            return 2
+        print(f"Discarded idea {token}.")
+        return 0
+    if not yes and _interactive():
+        print(f"Abandon {token}? This removes its worktree, branch, and state.")
+        if input("Type 'y' to confirm: ").strip().lower() not in ("y", "yes"):
+            print(f"Left {token} in place.")
+            return 0
     if session_is_resident(control, change_id):
         try:
             _deliver_abandon_resident(control, change_id)
@@ -2332,7 +2387,8 @@ def _abandon_picker_non_tty(rows: list[_Row]) -> int:
 
 async def _pick_abandon_target(control: Path) -> str | int:
     return await _pick_change_target(
-        rows=_sort_rows_newest_first(_status_rows(control)),
+        control=control,
+        rows=_abandon_rows(control),
         header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_abandon_picker_empty,
         on_non_tty=_abandon_picker_non_tty,
@@ -2341,11 +2397,12 @@ async def _pick_abandon_target(control: Path) -> str | int:
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
+    yes = args.yes
     if args.token is None:
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
             return target
-        return _abandon(control, target)
+        return _abandon(control, target, yes=yes)
     try:
         change_id = _resolve_id(control, args.token)
     except SystemExit:
@@ -2359,11 +2416,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0])
+            return _abandon(control, hits[0], yes=yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, change_id)
+    return _abandon(control, change_id, yes=yes)
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
@@ -2384,8 +2441,10 @@ def _cmd_edit(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    if args.title is not None:
+    if args.title is not None and args.title != change.title:
+        old_title = change.title
         change.rename(args.title, log=change.event_log())
+        print(f'title: "{old_title}" → "{args.title}"')
     if args.backlog:
         change.set_origin("idea")
     elif args.active:
@@ -2482,11 +2541,24 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
+def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
+    """In-flight Change rows (id, title, status, created) whose id or title
+    contains `query` (case-insensitive) — the live counterpart to the archive
+    search, which never sees an un-archived Change."""
+    q = query.lower()
+    hits: list[tuple[str, str, str, str]] = []
+    for r in _status_rows(control):
+        if q in r[0].lower() or q in r[4].lower():
+            hits.append((r[0], r[4], r[1], r[5]))
+    return hits
+
+
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     control = _control if _control is not None else _control_root()
-    hits = archive_read.search_archive(control, args.query)
+    hits = _search_inflight(control, args.query) + archive_read.search_archive(
+        control, args.query)
     if not hits:
-        print(f"No archived changes match {args.query!r}.")
+        print(f"No changes match {args.query!r}.")
         return 0
     for change_id, title, status, _created in hits:
         print(f"{change_id}  {title or '(untitled)'}  [{status or '-'}]")
@@ -2625,7 +2697,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.set_defaults(func=_cmd_chat)
 
     p_resume = sub.add_parser(
-        "resume", help="Resume a paused or interrupted Change by id or token.")
+        "resume",
+        help="Resume a paused or interrupted Change by id or token.",
+        description=(
+            "Resume a paused or interrupted Change, replaying its narrative and "
+            "continuing the workflow where it stopped. With no token on a tty, "
+            "pick from a list of resumable Changes."))
     p_resume.add_argument(
         "token", nargs="?",
         help="Change id or resume token identifying which Change to resume.")
@@ -2745,16 +2822,27 @@ def _build_parser() -> argparse.ArgumentParser:
     p_abandon = sub.add_parser(
         "abandon",
         help="Tear down a Change's worktree, branch, and state (logged).",
+        description=(
+            "Tear down a materialized Change — its worktree, branch, and state — "
+            "or discard a pure backlog idea. On a tty, confirm before tearing "
+            "down a materialized Change; pass --yes to skip. With no token, pick "
+            "from a list."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
         help="Change id or short token identifying which Change to abandon "
              "(omit on a tty to pick from a list).")
+    p_abandon.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation prompt before tearing down a materialized Change.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit a Change's title, backlog membership, or dependencies.")
+        help="Edit a Change's title, backlog membership, or dependencies.",
+        description=(
+            "Edit a Change's title, backlog membership, or dependencies. Zone "
+            "moves (--backlog/--active) apply to un-materialized Changes only."))
     p_edit.add_argument("token", help="Change id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the Change title.")

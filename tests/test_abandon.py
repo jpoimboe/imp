@@ -97,31 +97,54 @@ def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> 
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # reaped
 
 
-def test_abandon_never_reads_stdin(
+def test_abandon_accepts_yes_flag() -> None:
+    parser = _build_parser()
+    assert parser.parse_args(["abandon", "feat"]).yes is False
+    assert parser.parse_args(["abandon", "--yes", "feat"]).yes is True
+
+
+def test_abandon_materialized_confirms_on_tty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p: "y")
+    rc = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert "Abandon feat?" in capsys.readouterr().out  # prompt was shown
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()  # torn down
+
+
+def test_abandon_declined_keeps_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p: "n")
+    rc = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert (tmp_path / ".imp" / "worktrees" / "feat").exists()  # untouched
+    assert "Left feat in place." in capsys.readouterr().out
+
+
+def test_abandon_yes_flag_skips_confirm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    # Force the interactive condition that USED to gate the prompt; abandon must
-    # still not read stdin.
     monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
-    monkeypatch.setattr(
-        "builtins.input",
-        lambda _p: (_ for _ in ()).throw(AssertionError("abandon must not read stdin")))
-    rc = _abandon(tmp_path, "feat")
+
+    def _boom(_p: str) -> str:
+        raise AssertionError("--yes must skip the prompt")
+
+    monkeypatch.setattr("builtins.input", _boom)
+    rc = _abandon(tmp_path, "feat", yes=True)
     assert rc == 0
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
-
-
-def test_abandon_rejects_yes_flag() -> None:
-    parser = _build_parser()
-    # The bare token form still parses.
-    assert parser.parse_args(["abandon", "feat"]).token == "feat"
-    # -y / --yes is no longer a recognized flag.
-    with pytest.raises(SystemExit):
-        parser.parse_args(["abandon", "-y", "feat"])
-    with pytest.raises(SystemExit):
-        parser.parse_args(["abandon", "--yes", "feat"])
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()  # torn down
 
 
 def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:
@@ -190,6 +213,20 @@ def test_tear_down_change_destroys_worktree_branch_and_archives(
     assert events is not None and b"change_abandoned" in events
 
 
+def test_abandon_refuses_when_lock_held_on_idea(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="An idea", change_id="idea1",
+                             base_branch="main", origin="idea",
+                             seed_opening="An idea\n\ndo a thing")
+    with ProjectLock(ch.change_dir / "lock").acquire():
+        rc = _abandon(tmp_path, "idea1")
+    assert rc == 2
+    assert (tmp_path / ".imp" / "changes" / "idea1").exists()  # untouched
+    assert "stop it before abandoning" in capsys.readouterr().err
+
+
 def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
@@ -208,7 +245,7 @@ def test_abandon_backlog_reports_message(
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief")
     _abandon(tmp_path, "bk1")
-    assert "Abandoned bk1." in capsys.readouterr().out
+    assert "Discarded idea bk1." in capsys.readouterr().out
 
 
 def test_abandon_unknown_id_reaps_branch_and_exits_zero(

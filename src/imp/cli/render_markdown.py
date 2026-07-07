@@ -172,8 +172,8 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         if system_prompt:
             inner_blocks.append("system_prompt:")
             inner_blocks.append(_fence(system_prompt))
-        yield _details(_md_escape(f"context · {provider}/{model}"),
-                       "\n\n".join(inner_blocks), full=full)
+        summary = f"Internal context (imp system prompts) — {provider}/{model}"
+        yield _details(_md_escape(summary), "\n\n".join(inner_blocks), full=full)
         return
     if isinstance(node, nv.SubagentFold):
         if not full:
@@ -264,6 +264,7 @@ def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
     work, tokens, cost = header_totals(summary, header.total_seconds)
+    open_label = header.status
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.change_id}")),
         (f"**Status:** {_md_escape(header.status)}"
@@ -277,7 +278,7 @@ def render_summary_markdown(summary: list[StepRow], *,
             grouped.append((row.phase, []))
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(
-            f"| {step} | {_dur_text(row.work_seconds)}"
+            f"| {step} | {_dur_text(row.work_seconds, open_label)}"
             f" | {_fmt_tokens(_tok_total(row.tokens))} | {_fmt_cost(row.cost)} |")
         for sub in row.subagents:
             body = _md_escape(_sub_body(sub)).replace("|", "\\|")

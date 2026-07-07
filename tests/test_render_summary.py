@@ -191,9 +191,20 @@ def test_no_wait_badge_and_duration_excludes_wait():
 
 
 def test_open_trailing_step_renders_running():
+    hdr = SummaryHeader(workflow="feature", change_id="abc",
+                        status="running", total_seconds=None)
     rows = [_row("implement", "task-lead", 0, open_=True)]
-    out = render_summary(rows, header=_HDR, color=False, width=80)
+    out = render_summary(rows, header=hdr, color=False, width=80)
     assert "  task-lead  running" in out[-1]
+
+
+def test_open_trailing_step_on_paused_change_reflects_status():
+    hdr = SummaryHeader(workflow="feature", change_id="abc",
+                        status="paused", total_seconds=100.0)
+    rows = [_row("implement", "task-lead", 0, open_=True)]
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert "  task-lead  paused" in out[-1]
+    assert "running" not in out[-1]
 
 
 def test_header_status_color_and_workflow_magenta():

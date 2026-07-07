@@ -106,10 +106,16 @@ def test_name_budget_fills_remaining_width(monkeypatch):
 
     monkeypatch.setattr("shutil.get_terminal_size",
                         lambda fallback=(80, 24): os.terminal_size((120, 24)))
-    # 120 cols - 51 fixed prefix = 69 left for the name.
-    assert name_budget() == 69
+    # 120 cols - 54 fixed prefix = 66 left for the name.
+    assert name_budget() == 66
     # An indent (e.g. the resume picker's marker) shrinks the budget.
-    assert name_budget(indent=2) == 67
+    assert name_budget(indent=2) == 64
+
+
+def test_header_column_reads_updated_not_age():
+    h = header_line(color=False)
+    assert "UPDATED" in h
+    assert "AGE" not in h
 
 
 def test_name_budget_floors_at_minimum(monkeypatch):
@@ -220,3 +226,18 @@ def test_status_colors_have_new_and_no_errored() -> None:
     from imp.cli.change_row import STATUS_COLORS
     assert "new" in STATUS_COLORS
     assert "errored" not in STATUS_COLORS
+
+
+@pytest.mark.parametrize(
+    "iso, expected",
+    [
+        ("2026-06-20T11:00:00.123456+00:00", "2026-06-20 11:00:00"),  # micros + offset dropped
+        ("2026-06-20T11:00:00+00:00", "2026-06-20 11:00:00"),         # already second-precision
+        (None, "-"),
+        ("", "-"),
+        ("not-a-date", "-"),
+    ],
+)
+def test_format_timestamp_trims_to_seconds(iso, expected):
+    from imp.cli.change_row import format_timestamp
+    assert format_timestamp(iso) == expected

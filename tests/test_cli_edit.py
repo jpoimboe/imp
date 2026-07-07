@@ -143,3 +143,12 @@ def test_edit_depends_on_and_clear_deps_are_mutually_exclusive() -> None:
     with pytest.raises(SystemExit):
         parser.parse_args(
             ["edit", "2026-06-24-x", "--depends-on", "A", "--clear-deps"])
+
+
+def test_edit_title_prints_confirmation(tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit10")  # fixture title is "Original"
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit10", title="Renamed"))
+    assert rc == 0
+    assert 'title: "Original" → "Renamed"' in capsys.readouterr().out

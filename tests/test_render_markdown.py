@@ -197,10 +197,11 @@ def test_step_context_fold_default_full_and_hostile_prompt() -> None:
     tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
 
     default = render_markdown(tree, full=False)
-    assert "<summary>context · anthropic/claude</summary>" in default
+    assert "<summary>Internal context (imp system prompts) — anthropic/claude</summary>" in default
+    assert "context ·" not in default
 
     full = render_markdown(tree, full=True)
-    assert "**context · anthropic/claude**" in full
+    assert "**Internal context (imp system prompts) — anthropic/claude**" in full
     assert "provider: anthropic" in full
     assert "max_tool_calls: 50" in full
     assert _in_code_fence(full, "<script>")   # untrusted system_prompt is fenced/inert
@@ -322,7 +323,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     assert "loading skill brainstorming" in out        # SkillLoadNode
     assert "→ continue" in out                         # OutcomeLine
     assert 'Set name to "new title"' in out            # RenameNode
-    assert "context · anthropic/claude" in out         # StepContextNode fold (full)
+    assert "Internal context (imp system prompts) — anthropic/claude" in out  # ctx fold
     assert "tiers resolved:" in out                    # TiersResolvedNode (full)
     assert "- high → anthropic/claude" in out          # tiers list item
     assert "**2 warnings this run**" in out            # WarningsSummaryNode
@@ -449,3 +450,13 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
     assert "| ↳ explorer (map repo) | 45s | 200 | $0.05 |" in out
     assert "**Tokens:** 12.5k" in out    # 12345 step + 200 subagent = 12545 → 12.5k
     assert "**Cost:** $0.39" in out       # 0.34 step + 0.05 subagent
+
+
+def test_summary_markdown_open_step_reflects_paused_status() -> None:
+    hdr = SummaryHeader(workflow="feature", change_id="abc",
+                        status="paused", total_seconds=100.0)
+    rows = [StepRow(phase="implement", step="task-lead",
+                    start_ts="2026-01-01T00:00:00+00:00", end_ts=None)]
+    out = render_summary_markdown(rows, header=hdr)
+    assert "| task-lead | paused |" in out
+    assert "| task-lead | running |" not in out

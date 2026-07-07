@@ -16,6 +16,7 @@ class Candidate:
     step: str
     last_iso: str
     step_label: str | None = None
+    intent: str | None = None
 
 
 class ResumePicker:
@@ -48,7 +49,7 @@ class ResumePicker:
             out.append(marker + change_row.format_change_line(
                 change_id=c.change_id, title=c.title,
                 status=c.status, step=c.step, step_label=c.step_label,
-                last_iso=c.last_iso,
+                last_iso=c.last_iso, intent=c.intent,
                 now=self.now, color=self.color, name_width=name_w))
         return "\n".join(out)
 

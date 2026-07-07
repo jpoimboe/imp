@@ -40,7 +40,7 @@ def test_status_outside_project_keeps_empty_state(
     rc = main(["show"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "No changes." in out
+    assert "No changes yet — start one with imp new" in out
 
 
 def test_config_outside_project_succeeds(

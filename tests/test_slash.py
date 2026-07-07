@@ -148,6 +148,16 @@ def test_ask_line_with_slash_passes_through_plain_text(tmp_path: Path) -> None:
     assert line == "just a message"
 
 
+def test_ask_line_with_slash_tolerates_none_status(tmp_path: Path) -> None:
+    # The pre-session opening prompt has no live status to suspend; a None status
+    # must be a no-op, not an AttributeError on None.suspend().
+    from imp.cli.slash import ask_line_with_slash
+    change = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["plain intent"])
+    line = anyio.run(ask_line_with_slash, prompt, None, change)
+    assert line == "plain intent"
+
+
 def test_ask_line_with_slash_loops_on_help_then_returns(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     change = _FakeChange(tmp_path)

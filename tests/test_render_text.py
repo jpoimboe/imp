@@ -2264,3 +2264,77 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
     full = "\n".join(_lines(events, full=True))
     assert "· complete_step" in full
     assert "coder · complete · status=Success · summary=did it · 4s" in full
+
+
+def test_stale_awaiting_reply_disarmed_at_step_boundary_drops_next_kickoff() -> None:
+    # D1: a step that SOLICITED (awaiting_user_input) but whose arm was never
+    # consumed by a human user_message — the run paused at the gate and resumed
+    # with an engine-continuation nudge (an engine_continuation event, NOT a
+    # user_message) — must not leave _awaiting_reply armed across the step
+    # boundary. Otherwise the NEXT step's begin-kickoff user_message (a synthetic
+    # engine prompt) is mis-tagged interactive and leaks as a `> ...` human turn.
+    events = [
+        _ev("1", "step_started", step="a", kind="agent", phase="p", model="m"),
+        _ev("2", "awaiting_user_input", agent_id="step:p/a", prompt="Continue?"),
+        _ev("3", "engine_continuation", agent_id="step:p/a", text="continue"),
+        _ev("4", "step_completed", step="a", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("5", "step_started", step="b", kind="agent", phase="p", model="m"),
+        _ev("6", "step_context", agent_id="step:p/b",
+            system_prompt="INTERNAL STEP B PROMPT"),
+        _ev("7", "user_message", agent_id="step:p/b",
+            content=[{"type": "text", "text": "INTERNAL STEP B KICKOFF"}]),
+    ]
+    tree = nv.build_tree(events)
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    # Render side: the kickoff never appears as a human `>` turn, and being a
+    # synthetic prompt is dropped from output entirely.
+    assert "> INTERNAL STEP B KICKOFF" not in out
+    assert "INTERNAL STEP B KICKOFF" not in out
+    # Model side: step b's kickoff node exists but is non-interactive (dropped).
+    phase = tree.root.children[0]
+    step_b = next(c for c in phase.children
+                  if isinstance(c, nv.StepNode) and c.name == "b")
+    um = next(c for c in step_b.children if isinstance(c, nv.UserMessageNode))
+    assert um.interactive is False
+
+
+def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -> None:
+    # D1 (persist + imp log replay): the same scenario persisted to a real
+    # events.jsonl and replayed the way `imp log` reads it (line-delimited JSON).
+    # The begin-kickoff IS persisted as a user_message (fresh-step path, by
+    # design) — that is the persist side; the guard is that replaying the on-disk
+    # stream never renders it as a `> ...` human turn.
+    events = [
+        {"id": "1", "agent_id": None, "type": "step_started",
+         "payload": {"step": "a", "kind": "agent", "phase": "p", "model": "m"}},
+        {"id": "2", "agent_id": "step:p/a", "type": "awaiting_user_input",
+         "payload": {"prompt": "Continue?"}},
+        {"id": "3", "agent_id": "step:p/a", "type": "engine_continuation",
+         "payload": {"text": "continue"}},
+        {"id": "4", "agent_id": None, "type": "step_completed",
+         "payload": {"step": "a", "kind": "agent",
+                     "action": {"verb": "continue"}, "var_mutations": {}}},
+        {"id": "5", "agent_id": None, "type": "step_started",
+         "payload": {"step": "b", "kind": "agent", "phase": "p", "model": "m"}},
+        {"id": "6", "agent_id": "step:p/b", "type": "step_context",
+         "payload": {"system_prompt": "INTERNAL STEP B PROMPT"}},
+        {"id": "7", "agent_id": "step:p/b", "type": "user_message",
+         "payload": {"role": "user",
+                     "content": [{"type": "text",
+                                  "text": "INTERNAL STEP B KICKOFF"}]}},
+    ]
+    log_path = tmp_path / "events.jsonl"
+    log_path.write_text("".join(json.dumps(e) + "\n" for e in events))
+
+    on_disk = [json.loads(ln) for ln in log_path.read_text().splitlines()
+               if ln.strip()]
+    # Persist side: the kickoff IS present on disk as a user_message event.
+    assert any(e["type"] == "user_message"
+               and e["payload"]["content"][0]["text"] == "INTERNAL STEP B KICKOFF"
+               for e in on_disk)
+    # Replay/render side: it never replays as a human `>` turn.
+    tree = nv.build_tree(on_disk)
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "> INTERNAL STEP B KICKOFF" not in out
+    assert "INTERNAL STEP B KICKOFF" not in out

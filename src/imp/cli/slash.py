@@ -192,7 +192,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
 
 
 async def ask_line_with_slash(
-    prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
+    prompt: Any, status: Any | None, change: Any, *, color: bool = False, width: int = 80,
     coord: Any = None, driver: Any = None, hint: str | None = None,
 ) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
@@ -241,7 +241,10 @@ async def ask_line_with_slash(
             # not-found messages print via handle_slash_line, and the live status
             # display must stay suspended while they do, or it interleaves/clobbers
             # them before the loop re-prompts.
-            with status.suspend():
+            suspend_cm = (
+                status.suspend() if status is not None
+                else contextlib.nullcontext())
+            with suspend_cm:
                 indent = driver.prompt_indent() if driver is not None else ""
                 try:
                     while True:

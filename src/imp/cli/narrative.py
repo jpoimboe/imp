@@ -1045,6 +1045,15 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    # D1: an awaiting-reply arm is valid only within the step that raised it — a
+    # solicit is always answered before its step ends. If the arm was never
+    # consumed by a human user_message (e.g. the run paused at the gate and
+    # resumed with an engine-continuation nudge, which is not a user_message), it
+    # must not survive the step boundary; otherwise the next step's begin-kickoff
+    # user_message is mis-tagged interactive and leaks as a `> ...` human turn in
+    # live stream and imp log replay. Disarm at completion (not at step start, so
+    # a resume-interject reply delivered on re-entry is still classified human).
+    self._awaiting_reply = False
     self._close_open_folds_at_step_end(event.get("timestamp"))
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))

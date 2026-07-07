@@ -267,3 +267,16 @@ def test_explain_plain_unchanged_under_no_color(
     text = out.getvalue()
     assert "\x1b[" not in text          # no SGR escapes at all
     assert "anthropic" in text and "←" in text
+
+
+def test_provenance_path_is_elided_to_fit_80_cols(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)   # user config at <xdg>/imp/config.yaml sets theme
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    theme_line = next(ln for ln in out.getvalue().splitlines()
+                      if ln.strip().startswith("theme "))
+    assert "…/imp/config.yaml" in theme_line   # elided to trailing dir/file
+    assert str(tmp_path) not in theme_line      # full absolute path is gone
+    assert len(theme_line) <= 80                 # fits an 80-col terminal, no wrap

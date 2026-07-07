@@ -12,23 +12,18 @@ from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
 
 
+def _elide(src_file: Path) -> str:
+    parts = src_file.parts
+    if len(parts) <= 2:
+        return str(src_file)
+    return "…/" + "/".join(parts[-2:])
+
+
 def _label(src_file: Path) -> str:
     """Human label for a leaf's source file (the right-hand side of `←`)."""
-    layer = _layer(src_file)
-    if layer == "default":
-        return "provider default"
-    return f"{src_file} ({layer})"
-
-
-def _layer(src_file: Path) -> str:
     if src_file == FLOOR_SRC.file:
-        return "default"
-    name = src_file.name
-    if name == "project.yaml":
-        return "project"
-    if name == "config.yaml" and src_file.parent.name == ".imp":
-        return "local"
-    return "user"
+        return "provider default"
+    return _elide(src_file)
 
 
 def _arrow(out: TextIO, key: str, value: str, src_file: Path) -> None:

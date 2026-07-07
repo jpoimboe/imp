@@ -47,4 +47,17 @@ def test_cmd_search_no_match_prints_notice(tmp_path: Path, capsys) -> None:
     rc = _cmd_search(argparse.Namespace(query="nope"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "No archived changes match" in out
+    assert "No changes match" in out          # now covers in-flight + archived, not "archived" only
+
+
+def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) -> None:
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Dark mode inflight",
+                  change_id="liveid", base_branch="main")
+    rc = _cmd_search(argparse.Namespace(query="dark"), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "liveid" in out and "Dark mode inflight" in out   # in-flight title now visible
+    assert "[new]" in out                                    # in-flight status is legible
