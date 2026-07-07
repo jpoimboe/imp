@@ -8,14 +8,19 @@ description: Drive imp's CLI/TUI with fresh eyes and emit a PASS/FAIL UX verdict
 > (`mcp__impty__start` / `send` / `send_signal` / `view` / `wait` / `snapshot` / `stop`) —
 > a real pty with a faithful pyte render — and judge imp's **UX/UI**: usability, readability,
 > polish, overall experience. This playbook is **surface-selectable**: run it against the
-> **CLI** surface (the streaming command-line UX) or the **TUI** surface (the `--tui`
-> full-screen run viewer), or **both**. You are reading the screen with fresh eyes and
-> writing down everything confusing, ugly, noisy, or rough — and flagging any functional
-> breakage you trip over. Output is an agent-authored **PASS/FAIL verdict** plus an
+> **CLI** surface (the streaming command-line UX, including `imp chat`) or the **TUI**
+> surface (the `--tui` full-screen run viewer), or **both**. You are reading the screen with
+> fresh eyes and writing down everything confusing, ugly, noisy, or rough — and flagging any
+> functional breakage you trip over. Output is an agent-authored **PASS/FAIL verdict** plus an
 > open-ended suggestions list. **Do not write any code.**
 >
 > Read the whole file before you touch a tool. The impty fidelity caveats and the
 > throwaway-clone rationale referenced here live once in `tests/playbooks/README.md`.
+>
+> **Drift guard.** Command inventories and key tables in this file are snapshots; the live
+> `imp --help` and the in-app `/help` are authoritative. If they disagree with this playbook,
+> follow the live output and **flag the drift in your report** — that finding is itself a
+> result.
 
 ---
 
@@ -23,8 +28,8 @@ description: Drive imp's CLI/TUI with fresh eyes and emit a PASS/FAIL UX verdict
 
 Pick the surface for this run **before** §1, and keep it fixed:
 
-- **CLI** — the default streaming command-line UX (`imp new` / `imp resume`, no `--tui`).
-  Uses the CLI driving profile (§2) and the CLI must-touch list (§3).
+- **CLI** — the default streaming command-line UX (`imp new` / `imp chat` / `imp resume`,
+  no `--tui`). Uses the CLI driving profile (§2) and the CLI must-touch list (§3).
 - **TUI** — the `--tui` full-screen run viewer on the alternate screen. Uses the TUI driving
   profile (§2) and the TUI must-touch list (§3).
 - **both** — run the **entire** CLI pass top-to-bottom first and write its report, then run
@@ -83,20 +88,32 @@ Read state (both modes):
 - `snapshot()` → PNG; use it to **see** color, glyphs, alignment, spacing when judging polish.
 - `wait()` → settle after output. `stop()` → end a run.
 
+### The interrupt model (both modes)
+
+imp's uniform interrupt model: **Ctrl-C pauses and stays attached** — the agent stops and you
+land at a steer prompt (reply = redirect the agent, which resumes) — and **Ctrl-D leaves**:
+at the steer prompt it detaches (rc 130, `alive=False`, Change left paused and resumable);
+mid-run it suspends & detaches directly. Interrupt *correctness* (orphans, event
+classification, resume targets) is `interrupt-playbook.md`'s job — here you judge the
+*experience* of pausing, steering, detaching, and resuming.
+
 ### CLI profile (CLI mode)
 
 Spawn imp **directly** — impty makes the spawned process the foreground, controlling-tty
 session leader, so no `bash`/`exec` wrapper is needed and keystrokes/signals reach imp:
 ```
 mcp__impty__start(argv=["imp","new"],            cwd="<WT>", cols=100, rows=30)
+mcp__impty__start(argv=["imp","chat"],           cwd="<WT>", cols=100, rows=30)
 mcp__impty__start(argv=["imp","resume","<id>"],  cwd="<WT>", cols=100, rows=30)
 ```
 To set variables (theme, or a provider's API key), pass `env=`. **`env` REPLACES the inherited
 environment**, so include everything the run needs (e.g. `{**parent_env, "IMP_THEME":"light"}`).
 - `send("your text\r")` → type a reply.
-- `send_signal(2)` → deterministic SIGINT (a real Ctrl-C) to pause a *running* agent when you
-  need a resumable Change for the pause/resume spine step. A keystroke `\x03` mid-run is
-  unreliable through impty in cooked mode — see the README fidelity reference.
+- `send_signal(2)` → deterministic SIGINT (a real Ctrl-C) to pause a *running* agent. This
+  leaves you **attached** at the steer prompt (see the interrupt model above); to get a
+  *detached* resumable Change, follow it with `send("\x04")` (Ctrl-D) at that prompt. A
+  keystroke `\x03` mid-run is unreliable through impty in cooked mode — see the README
+  fidelity reference; `\x04` **at a prompt** is fine (the prompt reads keys directly).
 
 ### TUI profile (TUI mode)
 
@@ -122,17 +139,24 @@ Key bytes you send in TUI mode:
 | PageDown | `"\x1b[6~"` | scroll down |
 | End | `"\x1b[F"` (try `"\x1bOF"` / `"\x1b[4~"` if inert) | re-engage auto-follow / jump to tail |
 | Ctrl-O | `"\x0f"` | toggle verbosity expanded↔lean |
-| ESC | `"\x1b"` | **pause** (`signal_pause("esc")`), not quit |
-| Ctrl-C | `"\x03"` | interrupt via the same coordinator |
+| Ctrl-C | `"\x03"` | **pause mid-run, stay attached** at the steer prompt (same coordinator as streaming mode) |
+| Ctrl-D | `"\x04"` | **leave**: mid-run = suspend & detach; at the steer prompt = detach (alt-screen restored, Change resumable) |
 | Tab | `"\t"` | `/command` / skill completion |
 | Ctrl-U | `"\x15"` | clear the prompt line |
 | Enter | `"\r"` | submit the bottom prompt buffer |
 
-> **ESC escape-flush + keystroke-drop caveats (TUI).** A bare `ESC` is held by
+> **ESC is deliberately not a run-viewer key.** The old ESC-pause binding was removed; a bare
+> ESC in the viewer should do nothing to the run. ESC still *cancels the inline pickers*
+> (no-arg `imp resume` / `imp abandon` — CLI must-touch, §3); there a bare ESC is held by
 > prompt_toolkit's escape-flush timeout (~0.5s) before it fires — `send("\x1b")` then
 > `wait()`. impty can also drop the odd keystroke; if a result looks wrong, re-send once and
 > only record it if it persists (note the suspected harness artifact). These are the same
 > impty fidelity caveats catalogued in the README.
+
+> **Mouse wheel (optional).** The viewer enables mouse support; wheel events would arrive as
+> SGR mouse reports (`send("\x1b[<64;10;10M")` = wheel-up, `65` = wheel-down). Mouse delivery
+> through impty is unproven — treat this as a bonus probe and do **not** grade a
+> non-response as a defect.
 
 > Drive it like a real user: type an intent, watch what renders, react to what you see. You
 > don't need a run to finish — a few steps is enough to feel the experience. Abandon at the end.
@@ -151,17 +175,21 @@ Run this top-to-bottom once on a real feature-sized intent:
 2. **A feature-sized intent** — send something meaty enough that imp does its *normal* thing
    (plans, runs multiple steps, maybe dispatches a subagent), e.g.:
    ```
-   send("add an `imp version` subcommand that prints the installed package version, wired into the CLI and argparse help\r")
+   send("add an `imp doctor` subcommand that checks the project setup (git repo present, providers configured, workflow resolvable) and prints a short report\r")
    ```
-   Live through plan presentation, step-by-step execution, status/progress. Judge clarity of
-   *what imp is doing* and *where you are*. `snapshot()` the plan screen and a mid-execution
-   screen.
+   (Pick something that does **not** already exist — check `imp --help` first so the agent
+   isn't derailed by "that's already there".) Live through plan presentation, step-by-step
+   execution, status/progress. Judge clarity of *what imp is doing* and *where you are*.
+   `snapshot()` the plan screen and a mid-execution screen.
 3. **An in-turn prompt** — when a step asks you a question, read *that* prompt with fresh
    eyes: clear question, obvious default, discoverable affordance? `snapshot()`.
-4. **Pause, then `imp resume`** — with the agent working, pause it (CLI: `send_signal(2)`;
-   TUI: `send("\x1b")` = ESC) and grab the change id (`cd "$WT" && imp list`, first column).
-   Spawn resume in the same mode. Judge: does the resume banner make it obvious which Change
-   you're continuing and where it left off? Header parity with the live run?
+4. **Pause → steer → detach → `imp resume`** — with the agent working, pause it (CLI:
+   `send_signal(2)`; TUI: `send("\x03")`). You stay **attached** at a steer prompt — judge it
+   with fresh eyes: is it obvious you can reply to redirect *or* detach? Then detach with
+   `send("\x04")` and grab the change id (`cd "$WT" && imp show`, the id column). Spawn
+   `imp resume <id>` in the same mode. Judge: does the resume banner make it obvious which
+   Change you're continuing and where it left off — and does it land you back where you left
+   it? Header parity with the live run?
 5. **Sweep every subcommand** — enumerate the real surface so nothing is missed as imp grows
    (`cd "$WT" && imp --help`), then read each subcommand's output with fresh eyes.
 6. **Whole-run readability sweep** — `view(full=True)` end to end on the step-2 run. Judge
@@ -175,16 +203,55 @@ uninformed (this is where non-discoverable behaviors survive: as actions to take
 to score).
 
 *CLI mode:*
+- **Bare `imp` and `imp --version`** — the no-command overview is the actual front door: does
+  it orient a brand-new user? Version output sane?
 - **Every subcommand** the live `imp --help` lists, **plus each `imp <cmd> -h`** — alignment,
-  headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at:
-  - `imp init` — first-run bootstrap (run in a *fresh* clone with no `.imp/config.yaml`).
-  - `imp list` — the Changes table: headers, alignment, id vs slug, empty state.
-  - `imp log <id>` — a readable story or a wall of internals?
+  headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at
+  (snapshot list — the live `--help` wins; flag drift):
+  - `imp init` — first-run bootstrap (run in a *fresh* clone with no `.imp/config.yaml`);
+    it's interactive — judge its prompts and the theme detection.
+  - `imp new -h` — the flag surface (`--backlog`, `--depends-on`, `--workflow`,
+    `--autonomous`, `--non-interactive`/`--message`): can a new user tell which they need?
+  - `imp chat` — the conversation surface (own item below).
+  - `imp show` — the overview: zones (in-flight / Backlog / recently merged) legible? ids vs
+    titles? Then `imp show <id>` (detail card) and one artifact view (e.g.
+    `imp show <id> status`), plus `-a`.
+  - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
+    (the per-step timeline) and `--full`.
+  - `imp search <query>` — both a hit and a miss: is the no-match wording helpful?
   - `imp config` / `imp config --explain high` — layer/source arrows legible? precedence clear?
   - `imp abandon <id>` — teardown wording clear? confirmation/affordance?
-  - `imp eval -h` — purpose and usage clear from help alone?
-  - any command not listed here — cover it too; flag if its UX lags.
-- **Empty states** — `imp list` / `imp log` with no Changes yet.
+  - `imp edit <id> --title "…"` — is the confirmation clear about what changed?
+  - `imp remote-control -h` — purpose clear from help alone? (The full chat UX has its own
+    playbook — don't drive the daemon here.)
+  - any command not listed here — cover it too; flag if its UX lags **and flag this list as
+    stale in your report**.
+- **The pager** — `imp log` / `imp show` page through `less` on a tty: a long narrative holds
+  the screen (send `"q"` to quit); `--no-pager` prints straight through (use it or
+  `view(full=True)` when *you* need to read). Judge that paging feels intentional, not broken.
+- **Slash commands at the interactive prompt** — at any imp prompt: `/help` (readable, and
+  does it match reality?), `/skills`, `/list`, `/search <q>`; Tab completion (`send("/sk\t")`
+  → `/skills`); Up-arrow recalls your previous input; Alt+Enter (`send("\x1b\r")`) inserts a
+  newline instead of submitting; Ctrl-C at the prompt clears the buffer (and hints at Ctrl-D
+  once); and paste a bare path like `/home/user/foo.py` — it must submit as ordinary input,
+  **not** error as an unknown command.
+- **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
+  (ask something about the repo), then `/save` — is the saved-to-Backlog messaging clear? Try
+  `/clear` (parks the chat, starts fresh). Also compare Ctrl-D dispositions: after an
+  exchange (saves) vs in a brand-new chat with no exchange (cancels). Does chat read as a
+  distinct, lighter thing than `imp new`?
+- **Inline pickers** — no-arg `imp resume` and no-arg `imp abandon` open an arrow-key picker:
+  `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects, ESC cancels (escape-flush
+  caveat, §2). Judge the candidate rows: enough context to pick confidently?
+- **Backlog flow** — `imp new --backlog "some idea"` files an idea and exits: does the
+  message tell you how to start it later? Confirm it appears in `imp show`'s Backlog zone.
+- **Empty states** — `imp show` / `imp log` before any Change exists.
+- **`NO_COLOR=1`** — rerun `imp log <id>` with `NO_COLOR=1` in the env: fully legible, no
+  meaning carried by color alone?
+- **Log exports** — `imp log <id> --md -` (read it: honest, well-structured Markdown?) and
+  `imp log <id> --html <file>` (spot-check the file: self-contained, opens as one page?).
+- **Narrow terminal (bonus)** — repeat one or two visual screens at `cols=80`: wrapping,
+  clipped tables, broken alignment.
 - **`imp init` in a fresh clone** — the real first-run experience.
 
 *TUI mode:*
@@ -195,10 +262,15 @@ to score).
   and back.
 - **Slash + Tab completion** — at the bottom prompt buffer `send("/help\r")` renders the slash
   help *inside* the app; `send("/sk\t")` completes to `/skills`; `send("\x15")` clears.
-- **ESC-pause** — with the agent working, `send("\x1b")` then `wait()` → clean `paused (esc)`,
-  alt-screen restored (`regime=scroll`), `alive=False`, resumable.
-- **Ctrl-C-interrupt** — fresh run, type an intent, let it work, `send("\x03")` → clean
-  `paused (ctrl-c)`; one Ctrl-C suffices.
+- **Ctrl-C pause → steer (attached)** — with the agent working, `send("\x03")` then `wait()`
+  → the run pauses and you're at a steer prompt, still attached. Judge the paused state's
+  wording: is it obvious you can reply to redirect, or detach? Send a short steer reply and
+  confirm the agent visibly resumes with it.
+- **Ctrl-D detach** — pause again (or straight from mid-run) and `send("\x04")` → clean exit:
+  alt-screen restored (`regime=scroll`), `alive=False`, Change left paused and resumable.
+  One keystroke suffices.
+- **Stray ESC is inert** — while the viewer is live, `send("\x1b")` + `wait()`: the run must
+  keep going — ESC is not a pause/quit key anymore; a stray ESC must not nuke the run.
 - **Exit → collapsed transcript** — after a pause or completion, `view(full=True)`: the
   alt-screen is gone and a **collapsed** transcript (lean tree, no expanded `command=…` lines)
   is in normal scrollback — reads like a non-`--tui` run, lost nothing.
@@ -213,6 +285,8 @@ to score).
   status bar stays the last line. Restore `remote: {driver: null}` afterward.
 - **`resume <id> --tui` replay** — on a paused Change: replays history expanded & scrollable
   (PageUp works immediately), then live events fold in on top.
+- **Mouse wheel (bonus)** — try the SGR wheel reports from §2; scrolling is a nice
+  confirmation, but a non-response is a harness caveat, not a defect.
 
 ---
 
@@ -243,7 +317,8 @@ Open with the **verdict**, then functional findings, then suggestions — in thi
    and a "what worked well" call-out (a clean area is a result).
 
 Also record the **build under test** (`git -C "$REPO" rev-parse --short HEAD`), provider, the
-mode, and themes swept.
+mode, themes swept, and any **playbook drift** you hit (commands or keys where the live
+surface disagreed with this file).
 
 Frame polish items as *suggestions* (severity = how much it hurts the experience); frame
 functional findings as *defects* (severity = correctness).
