@@ -261,3 +261,18 @@ def test_resize_wait_true_returns_screen_not_resized_marker() -> None:
         assert result.startswith("[")  # status header
     finally:
         d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_numeric_wait_settles_fixed_time() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
+    try:
+        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        t = time.monotonic()
+        screen = d.resize(30, 100, wait=0.5)  # rows=30, cols=100
+        dt = time.monotonic() - t
+        assert "WIDTH=100" in screen
+        assert dt < 3.0
+    finally:
+        d.stop()
