@@ -653,22 +653,38 @@ def test_reconciler_sources_human_decision_bar() -> None:
     assert "asynchronous human triage" in text
 
 
-def test_front_door_documents_split_off_a_change(tmp_path) -> None:
+def test_front_door_adopts_discovered_work_by_default(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    out = render_prompt(body, build_context(
+    attended = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
-    # The capability is documented (create_change is otherwise absent from this file).
-    assert "create_change" in out
-    # Confirm-first discipline: propose, then gate before spawning.
-    assert "before calling `create_change`" in out
-    # depends_on is conditional and the current change id is wired into the example.
-    assert 'depends_on=["abc"]' in out
-    # Plain-language resume hint for the spun-off change.
-    assert "imp resume" in out
+    # Adoption is the unmarked default: discovered work folds into the current change.
+    assert "## Keep discovered work here by default" in attended
+    assert "fold it into this change" in attended
+    # Spin-off is demoted to the exception, not a first-class move.
+    assert "is the exception" in attended
+    # The create_change capability survives, in condensed conditional form.
+    assert "create_change" in attended
+    assert 'depends_on=["abc"]' in attended
+    assert "imp resume" in attended
+    # The old spin-off-first section and its framing are gone.
+    assert "## Splitting off a separate change" not in attended
+    assert "forcing every idea" not in attended
+    assert "before calling `create_change`" not in attended
+
+    # Autonomous runs omit the whole {% if not run.autonomous %} block; because
+    # create_change appears nowhere else in front-door.md, its absence proves the
+    # block was dropped.
+    autonomous = render_prompt(body, build_context(
+        change_title="t", event_log=log, change_id="abc",
+        change_home=".imp/changes/abc", autonomous=True,
+        project_facts={}),
+        workflow_dir=bundled_workflow_dir("imp"))
+    assert "## Keep discovered work here by default" not in autonomous
+    assert "create_change" not in autonomous
 
 
 def test_task_lead_sources_human_decision_bar() -> None:

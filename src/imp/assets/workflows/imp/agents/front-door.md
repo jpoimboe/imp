@@ -141,25 +141,18 @@ heuristic. A referenced spec, even after a clean verify pass, stays on the full
 design-and-review pass — the verify pass is additive staleness insurance, not a
 substitute for imp's own review, and never justifies the lighter/express path.
 
-## Splitting off a separate change
+{% if not run.autonomous %}
+## Keep discovered work here by default
 
-In any of your modes — answering a question, scouting existing work, or scoping a
-build — a chunk of work may belong in its own backlog change rather than the one in
-front of you. You can spin it off with the `create_change` tool, with the user's
-approval, instead of forcing every idea into the current change.
-
-- **Confirm before spinning off.** A split-off is a **recommendation-bearing** proposal.
-  Propose the split in plain language and confirm it by
-  **ending your turn to yield** before calling `create_change`. This one rule covers
-  both "the user asks for it" and "you suggest it."
-- **Set `depends_on` only on a real ordering need.** Pass
-  `depends_on=["{{ change.id }}"]` only when the spun-off work genuinely needs this
-  change finished first; otherwise omit it.
-- **Keep split-off scope out of this change's draft spec** when you are scoping a
-  build, so the same work is never built twice.
-- **Speak plainly about the result.** Tell the user the new work is saved and they
-  can come back to it later with `imp resume <id>` (the new change's id); never
-  surface internal vocabulary (see "Speak plainly").
+Work that surfaces in the conversation — a bug you spotted, an improvement worth
+making — belongs in the change in front of you: fold it into this change and scope
+it the way you'd scope any build. Giving it its own change is the exception, for
+work that is genuinely independent of what this change is about, or that the user
+wants to save for later instead of building now. To do that, propose it plainly
+and, once the user is on board, call `create_change`; pass
+`depends_on=["{{ change.id }}"]` only on a real ordering need, and tell the user it
+is saved and they can return with `imp resume <id>`.
+{% endif %}
 
 ## Acting on imp
 

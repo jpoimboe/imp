@@ -84,7 +84,7 @@ def test_front_door_agent_prose_carries_the_three_hats_and_handoff() -> None:
     assert "announce the name in prose without asking permission" in body
 
 
-def test_front_door_split_off_is_unconditional_and_rekeyed(tmp_path) -> None:
+def test_front_door_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None:
     body = _wf().agents["front-door"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
@@ -92,18 +92,21 @@ def test_front_door_split_off_is_unconditional_and_rekeyed(tmp_path) -> None:
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "## Splitting off a separate change" in attended
-    assert "ending your turn to yield** before calling `create_change`" in attended
+    # Attended runs render the adoption-first section.
+    assert "## Keep discovered work here by default" in attended
+    assert "create_change" in attended
 
     autonomous = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "## Splitting off a separate change" in autonomous
-    # Split-off no longer branches on autonomy — it always confirms by yielding.
-    assert "ending your turn to yield** before calling `create_change`" in autonomous
-    assert "call `create_change` without\n  yielding" not in autonomous
+    # Autonomous runs omit the whole {% if not run.autonomous %} block.
+    assert "## Keep discovered work here by default" not in autonomous
+    assert "create_change" not in autonomous
+    # The retired unconditional / spin-off-first heading and phrasing are gone.
+    assert "## Splitting off a separate change" not in attended
+    assert "ending your turn to yield** before calling `create_change`" not in attended
 
 
 def test_front_door_has_no_headless_branch(tmp_path) -> None:
