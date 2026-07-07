@@ -22,7 +22,7 @@ async def test_interrupt_gesture_forwards_interrupt_control_without_detaching(
 ) -> None:
     sock = str(tmp_path / "s.sock")
     actions: list[str] = []
-    server = SessionSocket(sock, on_control=actions.append)
+    server = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
     client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
     coord = InterruptCoordinator()
     async with anyio.create_task_group() as tg:
@@ -53,7 +53,7 @@ async def test_interrupt_gesture_forwards_interrupt_control_without_detaching(
 async def test_abandon_sends_abandon_control(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     actions: list[str] = []
-    server = SessionSocket(sock, on_control=actions.append)
+    server = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
     client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
     coord = InterruptCoordinator()
     async with anyio.create_task_group() as tg:
@@ -70,31 +70,6 @@ async def test_abandon_sends_abandon_control(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         assert actions == ["abandon"]
         assert server.attached_count == 1
-        await client.aclose()
-        await server.close()
-        tg.cancel_scope.cancel()
-
-
-@pytest.mark.anyio
-async def test_leave_mid_run_forwards_interrupt_leave_control(tmp_path: Path) -> None:
-    sock = str(tmp_path / "s.sock")
-    actions: list[str] = []
-    server = SessionSocket(sock, on_control=actions.append)
-    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
-    coord = InterruptCoordinator()
-    async with anyio.create_task_group() as tg:
-        await server.open()
-        tg.start_soon(server.serve)
-        await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
-        SessionControls(client, coord)
-        await coord.leave_mid_run()
-        with anyio.fail_after(5):
-            while not actions:
-                await anyio.sleep(0.02)
-        assert actions == ["interrupt-leave"]
         await client.aclose()
         await server.close()
         tg.cancel_scope.cancel()

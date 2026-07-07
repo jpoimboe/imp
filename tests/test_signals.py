@@ -20,7 +20,11 @@ import signal
 
 import pytest
 
-from imp.cli.signals import InterruptCoordinator, install_process_group
+from imp.cli.signals import (
+    InterruptCoordinator,
+    install_process_group,
+    sigint_cancels_scope,
+)
 
 
 @pytest.fixture
@@ -373,3 +377,74 @@ async def test_tty_quiesced_parks_reader_then_rearms(monkeypatch) -> None:
         os.close(master)
         with contextlib.suppress(OSError):
             os.close(slave)
+
+
+@pytest.mark.anyio
+async def test_sigint_guard_cancels_prompt_and_restores_handler() -> None:
+    """An OS SIGINT delivered while inside the guard cancels the wrapped body and
+    surfaces as a KeyboardInterrupt (never a raw interpreter KBI); on exit the
+    guard restores the exact prior SIGINT disposition it found on entry."""
+    def _sentinel(_signum, _frame):  # a distinct prior handler to restore
+        raise AssertionError("prior handler must not actually fire")
+
+    prev = signal.signal(signal.SIGINT, _sentinel)
+    try:
+        raised = False
+        async with asyncio.timeout(10):
+            try:
+                async with sigint_cancels_scope():
+                    os.kill(os.getpid(), signal.SIGINT)
+                    await asyncio.sleep(5)  # cancelled well before this elapses
+            except KeyboardInterrupt:
+                raised = True
+        assert raised is True
+        # The guard restored the exact disposition present on entry — NOT the
+        # asyncio default that remove_signal_handler would otherwise leave.
+        assert signal.getsignal(signal.SIGINT) is _sentinel
+    finally:
+        signal.signal(signal.SIGINT, prev)
+
+
+@pytest.mark.anyio
+async def test_sigint_guard_clean_body_does_not_raise() -> None:
+    """A body that completes with no SIGINT runs to completion and the guard
+    raises nothing."""
+    ran = False
+    async with sigint_cancels_scope():
+        ran = True
+    assert ran is True
+
+
+@pytest.mark.anyio
+async def test_sigint_guard_degrades_to_noop_when_unsupported(monkeypatch) -> None:
+    """Where loop.add_signal_handler is unsupported (Windows), the guard degrades
+    to a no-op: the body still runs and no error propagates."""
+    loop = asyncio.get_running_loop()
+
+    def _unsupported(*_a, **_k):
+        raise NotImplementedError
+
+    monkeypatch.setattr(loop, "add_signal_handler", _unsupported)
+    ran = False
+    async with sigint_cancels_scope():
+        ran = True
+    assert ran is True
+
+
+@pytest.mark.anyio
+async def test_sigint_guard_passes_body_exception_through_and_restores() -> None:
+    """A non-cancellation exception raised in the body (e.g. the EOFError the
+    opening prompt legitimately raises) propagates unchanged — never swallowed
+    nor replaced by KeyboardInterrupt — and the guard still restores the prior
+    SIGINT disposition on the way out."""
+    def _sentinel(_signum, _frame):
+        raise AssertionError("prior handler must not actually fire")
+
+    prev = signal.signal(signal.SIGINT, _sentinel)
+    try:
+        with pytest.raises(EOFError):
+            async with sigint_cancels_scope():
+                raise EOFError
+        assert signal.getsignal(signal.SIGINT) is _sentinel
+    finally:
+        signal.signal(signal.SIGINT, prev)

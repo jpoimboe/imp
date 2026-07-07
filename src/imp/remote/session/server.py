@@ -83,10 +83,10 @@ class SessionServer:
             on_control=self._enqueue_control,
             on_lease_change=self._on_lease_change,
         )
-        ctl_send, ctl_recv = anyio.create_memory_object_stream[str](
+        ctl_send, ctl_recv = anyio.create_memory_object_stream[tuple[str, str | None]](
             max_buffer_size=_CONTROL_QUEUE_DEPTH)
-        self._control_send: MemoryObjectSendStream[str] = ctl_send
-        self._control_recv: MemoryObjectReceiveStream[str] = ctl_recv
+        self._control_send: MemoryObjectSendStream[tuple[str, str | None]] = ctl_send
+        self._control_recv: MemoryObjectReceiveStream[tuple[str, str | None]] = ctl_recv
 
     @property
     def attached_count(self) -> int:
@@ -279,9 +279,9 @@ class SessionServer:
             return
         with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError,
                                  anyio.BrokenResourceError):
-            self._control_send.send_nowait(_INTERNAL_PAUSE)
+            self._control_send.send_nowait((_INTERNAL_PAUSE, None))
 
-    def _enqueue_control(self, action: str) -> None:
+    def _enqueue_control(self, action: str, reason: str | None = None) -> None:
         if action == CONTROL_ABANDON:
             # Terminal control: a guaranteed off-queue signal the consumer checks
             # every iteration, PLUS a best-effort enqueue so an empty/non-full
@@ -290,33 +290,33 @@ class SessionServer:
             # then fires abandon on its very next iteration via the signal.
             self._abandon_requested = True
             with contextlib.suppress(anyio.WouldBlock):
-                self._control_send.send_nowait(action)
+                self._control_send.send_nowait((action, reason))
             return
         if action == CONTROL_SAVE:
             # Same guaranteed-delivery pattern as abandon: flag is always set;
             # enqueue is best-effort so the loop wakes immediately when possible.
             self._save_requested = True
             with contextlib.suppress(anyio.WouldBlock):
-                self._control_send.send_nowait(action)
+                self._control_send.send_nowait((action, reason))
             return
         if action == CONTROL_ARCHIVE:
             self._archive_requested = True
             with contextlib.suppress(anyio.WouldBlock):
-                self._control_send.send_nowait(action)
+                self._control_send.send_nowait((action, reason))
             return
         if action == CONTROL_DISCARD:
             self._discard_requested = True
             with contextlib.suppress(anyio.WouldBlock):
-                self._control_send.send_nowait(action)
+                self._control_send.send_nowait((action, reason))
             return
         try:
-            self._control_send.send_nowait(action)
+            self._control_send.send_nowait((action, reason))
         except anyio.WouldBlock:
             _log.warning(
                 "session control queue overflow; dropping ordinary control %r", action)
 
     async def _control_loop(self) -> None:
-        async for action in self._control_recv:
+        async for action, reason in self._control_recv:
             if self._abandon_requested:
                 await self._dispatch_control(CONTROL_ABANDON)
                 return
@@ -329,9 +329,9 @@ class SessionServer:
             if self._discard_requested:
                 await self._dispatch_control(CONTROL_DISCARD)
                 return
-            await self._dispatch_control(action)
+            await self._dispatch_control(action, reason)
 
-    async def _dispatch_control(self, action: str) -> None:
+    async def _dispatch_control(self, action: str, reason: str | None = None) -> None:
         if action == _INTERNAL_PAUSE:
             if self._coordinator is not None and self.leased_count == 0:
                 await self._coordinator.signal_pause(reason="detached")
@@ -339,7 +339,7 @@ class SessionServer:
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
-            await self._coordinator.signal_pause(reason="ctrl-d")
+            await self._coordinator.signal_pause(reason=reason or "ctrl-d")
         elif action == CONTROL_DETACH:
             await self._socket.detach_all()
         elif action == CONTROL_ABANDON:

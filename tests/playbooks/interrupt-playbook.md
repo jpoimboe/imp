@@ -409,10 +409,10 @@ in-app bottom buffer, so there is no separate cooked opening prompt. The `view()
    you still can't locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what
    it surfaces; note the limitation.)
 6. **Record the change id** for resume + abandon. The authoritative source is
-   `bash: cd "$WT" && imp list` — its first column is the change **id** (the
+   `bash: cd "$WT" && imp show` — its first column is the change **id** (the
    `.imp/worktrees/<id>` dir name), which is what the event path and `imp resume`/`imp abandon`
    key on. The `paused` headline should print that same id; if it ever shows a slug or other
-   display name instead, that's itself a bug — record it and rely on `imp list` for the id.
+   display name instead, that's itself a bug — record it and rely on `imp show` for the id.
 
 ### **`RESUME-AND-VERIFY(id)`**
 
@@ -531,7 +531,7 @@ with no artifact is the most likely failure of this convention.
 ## 8. Cleanup and wrap-up
 
 ```bash
-cd "$WT" && imp abandon <id>   # abandon any open Changes in the clone (get <id> from §5.6 / imp list)
+cd "$WT" && imp abandon <id>   # abandon any open Changes in the clone (get <id> from §5.6 / imp show)
 rm -rf "$WT"
 git -C "$REPO" status --short  # only the report file should be new
 ```

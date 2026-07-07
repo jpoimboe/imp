@@ -456,3 +456,90 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     block = streamed[0][0].content[0]
     assert isinstance(block, TextBlock)
     assert block.text == inv.retry_feedback
+
+
+def _must_not_solicit(_prompt: str) -> str:
+    raise AssertionError(
+        "resume solicited the user — R4 requires the continuation nudge to "
+        "continue the agent, not park at a prompt")
+
+
+@pytest.mark.skipif(
+    not opted_in("claude_code"),
+    reason="claude_code not in IMP_LIVE_PROVIDERS",
+)
+@pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
+@pytest.mark.anyio
+async def test_midrun_interrupt_resume_continues_agent(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R4: a mid-run leave (Ctrl-D) arms resume_should_continue; on a bare-turn-end
+    (AWAITING_USER) tail the native resume takes the continuation nudge and drives
+    the agent to complete_step — it never solicits / parks at a prompt."""
+    assert shutil.which("claude") is not None, (
+        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
+        "not found on PATH"
+    )
+    _init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
+    inv = _live_inv(tmp_path)
+    # The ctrl-d arming's runtime shape: resume_should_continue=True (unioned by the
+    # executor from State.interrupt_pending) + the kept-transcript balance flag, and
+    # a REAL solicit channel that must never fire on the continue path.
+    inv = replace(
+        inv, balance_on_resume=True, resume_should_continue=True,
+        user_input_fn=_must_not_solicit)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    # Bare-turn-end tail: a.txt was read and its result recorded, then the agent
+    # ENDED ITS TURN on prose without complete_step -> classify_resume == AWAITING_USER,
+    # the exact "parks at a prompt" shape R4 must instead continue.
+    msgs = [
+        Message(role="user", content=(TextBlock(text="Read a.txt, then finish."),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="t0", name="mcp__imp__read_file",
+                         input={"path": "a.txt"}),)),
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t0", content="ALPHA-CONTENT\n",
+                            is_error=False),)),
+        Message(role="assistant", content=(
+            TextBlock(text="I read a.txt; it says ALPHA-CONTENT."),)),
+    ]
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    for m in msgs:
+        t.append(m)
+    # The batcher flushed through the tool_result (msgs[:3]); the trailing assistant
+    # prose is the unflushed tail reconciled before the native --resume load.
+    await store.append(skey, message_to_session_records(
+        msgs[:3], parent_uuid=None, session_id=skey["session_id"],
+        cwd=str(tmp_path), model=_MODEL, start_index=0))
+
+    # Spy on the first-query history stream: the native continue path streams ONLY
+    # the continuation-nudge turn (1 turn); a solicit/replay would look different.
+    streamed: list[list[Message]] = []
+    _orig_stream = claude_code._stream_history
+    monkeypatch.setattr(
+        claude_code, "_stream_history",
+        lambda messages: (streamed.append(list(messages)), _orig_stream(messages))[1])
+
+    runner = ClaudeCodeAgentRunner(model_name=_MODEL, user_input_fn=_must_not_solicit)
+    events = [ev async for ev in runner.run(inv)]
+
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    # Continued to completion — no deadlock, no 400, no abort.
+    assert events[-1]["type"] == "agent_output", events[-1]
+    assert not any(e["type"] == "error" for e in events), [
+        e for e in events if e["type"] == "error"]
+    # R4 crux: it did NOT park — no solicit gate was emitted (the _must_not_solicit
+    # sentinel would have raised had _resolve_wait_reply reached its solicit branch).
+    log_types = [ev["type"] for ev in inv.event_log.read()]
+    assert "awaiting_user_input" not in log_types, log_types
+    # The continuation nudge drove the resume: the single streamed delta is exactly
+    # the nudge user turn (not the whole-transcript replay, not an empty query).
+    assert len(streamed) == 1, streamed
+    assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
+    assert any(isinstance(b, TextBlock) and b.text == _CONTINUATION_NUDGE
+               for b in streamed[0][0].content), streamed[0][0]
+    # Zero re-execution: a.txt was recalled from the loaded session, not re-read.
+    assert _read_file_call_count(inv.event_log) == 0

@@ -47,7 +47,7 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.session_terminal import run_terminal_client
-from imp.cli.signals import install_process_group
+from imp.cli.signals import install_process_group, sigint_cancels_scope
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
@@ -325,30 +325,49 @@ def _pause_lines(
     ]
 
 
+def _leave_trigger(coord: Any) -> str | None:
+    """The deliberate-leave trigger string, else None."""
+    if coord is None:
+        return None
+    evt = getattr(coord, "escalation_event", None)
+    if evt is not None and evt.is_set() and coord.leave_reason is not None:
+        reason: str | None = coord.leave_reason
+        return reason
+    return None
+
+
+def _unexpected_death_reason(change: Change) -> str:
+    """The daemon-death banner; daemon.stderr pointer only when that file is non-empty."""
+    try:
+        has_detail = (change.change_dir / "daemon.stderr").stat().st_size > 0
+    except OSError:
+        has_detail = False
+    if has_detail:
+        return f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr"
+    return "ended unexpectedly"
+
+
 def _pause_facts(
-    change: Change, *, deliberate_leave: bool = False,
+    change: Change, leave_trigger: str | None = None,
 ) -> tuple[str, str | None, str, str | None]:
-    """`deliberate_leave`: the client itself chose to leave (Ctrl-D / /save /
-    headless detach). The daemon writes its pause event only after the last
-    client detaches, so a resumed-without-pause log is expected there — render
-    a bare banner, not the unexpected-death notice."""
     name = change.id
     events = list(change.event_log().read())
     phase = _phase_from_events(events)
+    if leave_trigger is not None:
+        # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
+        return name, phase, change.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        reason: str | None = None if deliberate_leave else (
-            f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
+        reason: str | None = _unexpected_death_reason(change)
     else:
         reason = reason_val
     return name, phase, change.id, reason
 
 
-def _emit_paused_summary(change: Change, *, deliberate_leave: bool = False) -> None:
+def _emit_paused_summary(change: Change, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    name, phase, token, reason = _pause_facts(
-        change, deliberate_leave=deliberate_leave)
+    name, phase, token, reason = _pause_facts(change, leave_trigger)
     for ln in _pause_lines(name, phase, token, reason=reason, color=color):
         print(ln)
 
@@ -466,10 +485,7 @@ def _handle_terminal_outcome(
                 payload.get("stderr", ""),
                 payload.get("stdout", ""),
             )
-    escalated = getattr(coord, "escalation_event", None)
-    deliberate = bool(getattr(coord, "should_pause", False)) or bool(
-        escalated is not None and escalated.is_set())
-    _emit_paused_summary(change, deliberate_leave=deliberate)
+    _emit_paused_summary(change, _leave_trigger(coord))
     return 1
 
 
@@ -989,10 +1005,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     header_printed = False
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         try:
-            reply = await _read_opening_message(
-                change, leave_mode=leave_mode, banner_shown=interactive,
-                color=color, width=_term_width(),
-                editing_mode=_editing_mode(control))
+            async with sigint_cancels_scope():
+                reply = await _read_opening_message(
+                    change, leave_mode=leave_mode, banner_shown=interactive,
+                    color=color, width=_term_width(),
+                    editing_mode=_editing_mode(control))
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()

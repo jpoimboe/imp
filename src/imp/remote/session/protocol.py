@@ -45,6 +45,7 @@ class Input:
 @dataclass(frozen=True, slots=True)
 class Control:
     action: str
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,10 +69,13 @@ def encode_input(text: str) -> str:
     return json.dumps({"kind": "input", "text": text})
 
 
-def encode_control(action: str) -> str:
+def encode_control(action: str, reason: str | None = None) -> str:
     if action not in _CONTROL_ACTIONS:
         raise ValueError(f"unknown control action {action!r}")
-    return json.dumps({"kind": "control", "action": action})
+    payload: dict[str, Any] = {"kind": "control", "action": action}
+    if reason is not None:
+        payload["reason"] = reason
+    return json.dumps(payload)
 
 
 def encode_event(event: dict[str, Any]) -> str:
@@ -94,7 +98,7 @@ def parse_client_message(line: str) -> ClientMessage:
             action = obj["action"]
             if action not in _CONTROL_ACTIONS:
                 raise ValueError(f"unknown control action {action!r}")
-            return Control(action)
+            return Control(action, obj.get("reason"))
     except KeyError as exc:
         raise ValueError(f"missing required field {exc}") from exc
     raise ValueError(f"unknown client message kind {kind!r}")

@@ -1599,3 +1599,52 @@ async def test_interrupt_leave_control_pauses_with_ctrl_d_reason(tmp_path: Path)
     server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
     await server._dispatch_control(CONTROL_INTERRUPT_LEAVE)
     assert coord.reasons == ["ctrl-d"]
+
+
+@pytest.mark.anyio
+async def test_interrupt_leave_control_passes_frame_reason_through(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+    from imp.remote.session.server import SessionServer
+
+    class _FakeCoord:
+        def __init__(self) -> None:
+            self.reasons: list[str] = []
+
+        async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
+            self.reasons.append(reason)
+
+    coord = _FakeCoord()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+    # A stamped trigger passes through verbatim…
+    await server._dispatch_control(CONTROL_INTERRUPT_LEAVE, "sigterm")
+    # …and a frame with no reason still defaults to the ctrl-d fallback.
+    await server._dispatch_control(CONTROL_INTERRUPT_LEAVE)
+    assert coord.reasons == ["sigterm", "ctrl-d"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reason", ["ctrl-d", "sigterm", "sighup", "sigquit"])
+async def test_leave_frame_reason_wins_over_lease_drop(tmp_path: Path, reason: str) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+    from imp.remote.session.server import _INTERNAL_PAUSE, SessionServer
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+    # The deliberate-leave frame carries the trigger and lands first; the
+    # subsequent lease-drop pause cannot overwrite it (signal_pause is first-wins).
+    await server._dispatch_control(CONTROL_INTERRUPT_LEAVE, reason)
+    await server._dispatch_control(_INTERNAL_PAUSE)
+    assert coord.pause_reason == reason
+
+
+@pytest.mark.anyio
+async def test_lease_drop_without_a_gesture_records_detached(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.server import _INTERNAL_PAUSE, SessionServer
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+    # No leave frame — a client that vanished without a gesture (lease drop).
+    await server._dispatch_control(_INTERNAL_PAUSE)
+    assert coord.pause_reason == "detached"

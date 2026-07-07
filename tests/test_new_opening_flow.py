@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 from argparse import Namespace
 from types import SimpleNamespace
@@ -294,3 +295,47 @@ async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
 
     assert rc == 0
     assert captured["title"]._change_id == "z9y8x7"
+
+
+@pytest.mark.anyio
+async def test_opening_prompt_wrapped_in_sigint_guard(stub_new, monkeypatch) -> None:
+    """The opening prompt is read INSIDE sigint_cancels_scope, so a
+    pre-coordinator OS SIGINT is caught by the guard rather than escaping. Assert
+    the guard is active while the prompt is awaited."""
+    m = stub_new
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+
+    entered = {"v": False}
+
+    @contextlib.asynccontextmanager
+    async def _fake_guard():
+        entered["v"] = True
+        yield
+
+    monkeypatch.setattr(m, "sigint_cancels_scope", _fake_guard)
+
+    prompt_ran = {"v": False}
+
+    class _FakePrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            assert entered["v"] is True   # guard active while the prompt blocks
+            prompt_ran["v"] = True
+            return "do the thing"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+
+    assert rc == 0
+    assert prompt_ran["v"] is True
+    assert entered["v"] is True

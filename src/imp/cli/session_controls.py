@@ -7,7 +7,6 @@ from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_INTERRUPT,
-    CONTROL_INTERRUPT_LEAVE,
 )
 
 
@@ -15,13 +14,9 @@ class SessionControls:
     def __init__(self, client: SessionClient, coord: InterruptCoordinator) -> None:
         self._client = client
         coord.attach_runner(self._forward_interrupt)
-        coord.attach_leave_runner(self._forward_interrupt_leave)
 
     async def _forward_interrupt(self) -> None:
         await self._client.send_control(CONTROL_INTERRUPT)
-
-    async def _forward_interrupt_leave(self) -> None:
-        await self._client.send_control(CONTROL_INTERRUPT_LEAVE)
 
     async def abandon(self) -> None:
         await self._client.send_control(CONTROL_ABANDON)

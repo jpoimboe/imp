@@ -29,6 +29,7 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.remote.session.client import SessionClient
+from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
 
@@ -125,6 +126,7 @@ async def run_terminal_client(
                         # A non-tty solicit (prompt_toolkit add_reader on a piped
                         # stdin) or Ctrl-D at a real tty surfaces as EOFError.
                         # Treat it as a deliberate detach: leave the change paused.
+                        coord.leave_reason = "ctrl-d"
                         coord.escalation_event.set()
 
                 async def _watch_force_quit() -> None:
@@ -141,6 +143,7 @@ async def run_terminal_client(
                     if sigquit_signals is None:
                         return
                     async for _sig in sigquit_signals:
+                        coord.leave_reason = "sigquit"
                         coord.escalation_event.set()
                         break
 
@@ -157,24 +160,28 @@ async def run_terminal_client(
                 tg.cancel_scope.cancel()
         finally:
             coord.detach_runner()
-            coord.detach_leave_runner()
             coord.set_escalation_hook(None)
             await gate_send.aclose()
             gate_recv.close()
             driver.finish()
             if title is not None:
                 title.reset()
-            # Deliberate leave (ctrl-d / /save / /clear / Ctrl-\ / headless): decide
-            # the disposition lock-free and flush the control frame BEFORE aclose so
-            # the daemon observes it ahead of the detach (spec "Sequencing"). Abandon
-            # has its own frame path and never sets the escalation event, so it is
-            # skipped here; a natural completion leaves the event unset too.
-            if (leave_state is not None and control_root is not None
-                    and coord.escalation_event is not None
+            # Deliberate leave (ctrl-d / sigterm / sighup / Ctrl-\ / EOF / /save /
+            # /clear / headless): decide the disposition lock-free and flush a
+            # control frame BEFORE aclose so the daemon observes it ahead of the
+            # detach (spec "Sequencing"). A materialized/mid-run leave has no
+            # disposition frame — it instead carries its trigger on a single
+            # CONTROL_INTERRUPT_LEAVE so workflow_paused records the truth rather
+            # than the lease-drop "detached". Abandon has its own frame path and
+            # never sets the escalation event; a natural completion leaves it unset.
+            if (coord.escalation_event is not None
                     and coord.escalation_event.is_set()):
-                action = resolve_leave_action(
-                    control_root, change_id, leave_mode, leave_state.get("intent"))
-                if action is not None:
+                action = None
+                if leave_state is not None and control_root is not None:
+                    action = resolve_leave_action(
+                        control_root, change_id, leave_mode,
+                        leave_state.get("intent"))
+                if action is not None and leave_state is not None:
                     _sent = False
                     with contextlib.suppress(
                         RuntimeError, anyio.BrokenResourceError,
@@ -185,4 +192,13 @@ async def run_terminal_client(
                         _sent = True
                     if not _sent:
                         leave_state["send_failed"] = "1"
+                elif coord.leave_reason is not None:
+                    # Single choke point for the leave frame; best-effort — a dead
+                    # daemon must never block the leave.
+                    with contextlib.suppress(
+                        RuntimeError, anyio.BrokenResourceError,
+                        anyio.ClosedResourceError,
+                    ):
+                        await client.send_control(
+                            CONTROL_INTERRUPT_LEAVE, coord.leave_reason)
             await client.aclose()
