@@ -47,7 +47,7 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.session_terminal import run_terminal_client
-from imp.cli.signals import install_process_group
+from imp.cli.signals import install_process_group, sigint_cancels_scope
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
@@ -989,10 +989,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     header_printed = False
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         try:
-            reply = await _read_opening_message(
-                change, leave_mode=leave_mode, banner_shown=interactive,
-                color=color, width=_term_width(),
-                editing_mode=_editing_mode(control))
+            async with sigint_cancels_scope():
+                reply = await _read_opening_message(
+                    change, leave_mode=leave_mode, banner_shown=interactive,
+                    color=color, width=_term_width(),
+                    editing_mode=_editing_mode(control))
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
