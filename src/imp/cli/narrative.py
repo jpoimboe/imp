@@ -1720,10 +1720,10 @@ def _h_output_validation_nudge(
 def _h_completion_nudge(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
-    # A nudged bare turn-end is a recoverable prompt, not a failure — render dim.
-    self._append(ErrorNode(
-        message="bare turn-end — nudged to complete or confirm waiting",
-        is_warning=True))
+    # Telemetry-only (mirrors _h_max_tokens_truncated): the disambiguation nudge
+    # is engine plumbing and never user-visible. events.jsonl keeps the
+    # completion_nudge event as the forensic record; render nothing.
+    return
 
 
 def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
