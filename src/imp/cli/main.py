@@ -1748,6 +1748,7 @@ async def _pick_log_target(control: Path) -> str | int:
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
     return await _pick_change_target(
+        control=control,
         rows=rows,
         header="Show log for which change?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_log_picker_empty,
@@ -2255,7 +2256,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
 
 
 async def _pick_change_target(
-    *, rows: list[_Row], header: str,
+    *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
     on_non_tty: Callable[[list[_Row]], str | int] | None = None,
     selected_index: int = 0,
@@ -2270,7 +2271,9 @@ async def _pick_change_target(
         return rows[0][0]
     candidates = [resume_select.Candidate(
         change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
-        step_label=r[6])
+        step_label=r[6],
+        intent=(_resolve_intent(_load_events_for_id(control, r[0]) or [])
+                if not r[4].strip() else None))
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -2281,6 +2284,7 @@ async def _pick_change_target(
 
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
     return await _pick_change_target(
+        control=control,
         rows=_resumable_rows(control),
         header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
         on_empty=lambda: _resume_picker_empty(control),
@@ -2381,6 +2385,7 @@ def _abandon_picker_non_tty(rows: list[_Row]) -> int:
 
 async def _pick_abandon_target(control: Path) -> str | int:
     return await _pick_change_target(
+        control=control,
         rows=_abandon_rows(control),
         header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_abandon_picker_empty,
