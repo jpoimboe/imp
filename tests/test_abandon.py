@@ -190,6 +190,20 @@ def test_tear_down_change_destroys_worktree_branch_and_archives(
     assert events is not None and b"change_abandoned" in events
 
 
+def test_abandon_refuses_when_lock_held_on_idea(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="An idea", change_id="idea1",
+                             base_branch="main", origin="idea",
+                             seed_opening="An idea\n\ndo a thing")
+    with ProjectLock(ch.change_dir / "lock").acquire():
+        rc = _abandon(tmp_path, "idea1")
+    assert rc == 2
+    assert (tmp_path / ".imp" / "changes" / "idea1").exists()  # untouched
+    assert "stop it before abandoning" in capsys.readouterr().err
+
+
 def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
@@ -208,7 +222,7 @@ def test_abandon_backlog_reports_message(
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief")
     _abandon(tmp_path, "bk1")
-    assert "Abandoned bk1." in capsys.readouterr().out
+    assert "Discarded idea bk1." in capsys.readouterr().out
 
 
 def test_abandon_unknown_id_reaps_branch_and_exits_zero(

@@ -2216,6 +2216,10 @@ def _resumable_rows(control: Path) -> list[_Row]:
     return _sort_rows_newest_first(rows)
 
 
+def _abandon_rows(control: Path) -> list[_Row]:
+    return _sort_rows_newest_first(_status_rows(control) + _backlog_rows(control))
+
+
 def _past_change_count(control: Path) -> int:
     return len(_completed_rows(control))
 
@@ -2322,6 +2326,15 @@ def _abandon(control: Path, change_id: str) -> int:
         return 0
 
     token = change.id
+    if not change.materialized:
+        try:
+            discard_conversation(change)
+        except LockHeld as e:
+            print(f"imp: Change {change_id} is running (pid {e.held_by_pid or '?'}); "
+                  f"stop it before abandoning", file=sys.stderr)
+            return 2
+        print(f"Discarded idea {token}.")
+        return 0
     if session_is_resident(control, change_id):
         try:
             _deliver_abandon_resident(control, change_id)
@@ -2363,7 +2376,7 @@ def _abandon_picker_non_tty(rows: list[_Row]) -> int:
 
 async def _pick_abandon_target(control: Path) -> str | int:
     return await _pick_change_target(
-        rows=_sort_rows_newest_first(_status_rows(control)),
+        rows=_abandon_rows(control),
         header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_abandon_picker_empty,
         on_non_tty=_abandon_picker_non_tty,
