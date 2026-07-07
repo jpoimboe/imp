@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imp.cli.render_summary import (
     StepRow,
+    SubagentRow,
     SummaryHeader,
     build_summary,
     render_summary,
@@ -197,3 +198,48 @@ def test_summary_total_is_first_to_last_timestamp():
               {"timestamp": "2026-01-01T00:39:02+00:00"}]
     assert summary_total(events) == 2342.0
     assert summary_total([]) is None
+
+
+def test_step_row_work_seconds_is_wall_minus_wait():
+    row = StepRow(phase="implement", step="verify",
+                  start_ts="2026-01-01T00:00:00+00:00",
+                  end_ts="2026-01-01T00:02:00+00:00",
+                  wait_seconds=90.0)
+    assert row.wall_seconds == 120.0
+    assert row.work_seconds == 30.0
+
+
+def test_step_row_work_seconds_floors_at_zero():
+    row = StepRow(phase="implement", step="verify",
+                  start_ts="2026-01-01T00:00:00+00:00",
+                  end_ts="2026-01-01T00:00:10+00:00",
+                  wait_seconds=999.0)
+    assert row.work_seconds == 0.0
+
+
+def test_step_row_work_seconds_is_none_while_open():
+    row = StepRow(phase="implement", step="verify",
+                  start_ts="2026-01-01T00:00:00+00:00", end_ts=None,
+                  wait_seconds=30.0)
+    assert row.wall_seconds is None
+    assert row.work_seconds is None
+
+
+def test_step_row_new_usage_fields_default_empty():
+    row = StepRow(phase="plan", step="plan-writer", start_ts=None)
+    assert row.agent_id is None
+    assert row.cost == 0.0
+    assert row.tokens.input == 0
+    assert row.tokens.output == 0
+    assert row.subagents == []
+
+
+def test_subagent_row_wall_seconds_and_defaults():
+    sub = SubagentRow(name="explorer",
+                      start_ts="2026-01-01T00:00:00+00:00",
+                      end_ts="2026-01-01T00:00:45+00:00")
+    assert sub.wall_seconds == 45.0
+    assert sub.label is None
+    assert sub.errored is False
+    assert sub.cost == 0.0
+    assert sub.tokens.input == 0

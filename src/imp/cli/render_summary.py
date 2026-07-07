@@ -1,13 +1,29 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from imp.cli import palette as pal
 from imp.cli.change_row import STATUS_COLORS
-from imp.cli.narrative import elapsed_seconds
+from imp.cli.narrative import TokenTotals, elapsed_seconds
 from imp.cli.render_text import fmt_seconds
+
+
+@dataclass
+class SubagentRow:
+    name: str
+    label: str | None = None
+    start_ts: str | None = None
+    end_ts: str | None = None
+    errored: bool = False
+    tokens: TokenTotals = field(default_factory=TokenTotals)
+    cost: float = 0.0
+
+    @property
+    def wall_seconds(self) -> float | None:
+        """dispatch → result wall clock; None while the subagent is still running."""
+        return elapsed_seconds(self.start_ts, self.end_ts)
 
 
 @dataclass
@@ -18,11 +34,23 @@ class StepRow:
     end_ts: str | None = None
     wait_seconds: float = 0.0
     errored: bool = False
+    agent_id: str | None = None
+    tokens: TokenTotals = field(default_factory=TokenTotals)
+    cost: float = 0.0
+    subagents: list[SubagentRow] = field(default_factory=list)
 
     @property
     def wall_seconds(self) -> float | None:
         """start → completion wall clock; None for an open (still-running) step."""
         return elapsed_seconds(self.start_ts, self.end_ts)
+
+    @property
+    def work_seconds(self) -> float | None:
+        """wall clock minus accrued human wait; None while the step is still open."""
+        wall = self.wall_seconds
+        if wall is None:
+            return None
+        return max(0.0, wall - self.wait_seconds)
 
 
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
