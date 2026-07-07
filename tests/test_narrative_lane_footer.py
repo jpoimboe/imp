@@ -38,3 +38,36 @@ def test_subsequent_lane_waiting_mutates_same_node_no_append() -> None:
     assert first_node.text == "waiting to merge · 1 ahead"
     assert step.live_label == "waiting to merge · 1 ahead"
     assert b.current_activity().verb == "waiting to merge · 1 ahead"
+
+
+def test_lane_acquired_clears_live_label_and_node_ref() -> None:
+    b = _acquire_open()
+    b.add(ev("3", "lane_waiting", base="main", ahead=3))
+    step = b._step_stack[-1]
+    assert step.live_label == "waiting to merge · 3 ahead"
+    assert step.lane_waiting_node is not None
+    b.add(ev("4", "lane_acquired", base="main"))
+    # Footer reverts to the step's own label; the per-step node ref is dropped.
+    assert step.live_label is None
+    assert step.lane_waiting_node is None
+    assert b.current_activity().verb == "waiting in merge queue"
+
+
+def test_lane_released_still_uses_generic_handler() -> None:
+    b = _acquire_open()
+    b.add(ev("3", "lane_waiting", base="main", ahead=3))
+    step = b._step_stack[-1]
+    # A release event must NOT touch the footer override (only lane_acquired does).
+    b.add(ev("4", "lane_released", base="main"))
+    assert step.live_label == "waiting to merge · 3 ahead"
+    assert step.lane_waiting_node is not None
+
+
+def test_lane_evicted_still_uses_generic_handler() -> None:
+    b = _acquire_open()
+    b.add(ev("3", "lane_waiting", base="main", ahead=3))
+    step = b._step_stack[-1]
+    # An evict event must NOT touch the footer override (only lane_acquired does).
+    b.add(ev("4", "lane_evicted", base="main"))
+    assert step.live_label == "waiting to merge · 3 ahead"
+    assert step.lane_waiting_node is not None

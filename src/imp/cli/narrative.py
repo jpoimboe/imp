@@ -922,7 +922,15 @@ def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, An
     self._flush_burst()
 
 
-NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_event
+def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    if self._step_stack:
+        top = self._step_stack[-1]
+        top.live_label = None
+        top.lane_waiting_node = None
+
+
+NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_acquired
 NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
