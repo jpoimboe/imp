@@ -77,6 +77,7 @@ from imp.engine.types import (
     Pause,
     Retry,
     Step,
+    Vars,
     Workflow,
 )
 from imp.providers.effective import load_effective_config
@@ -263,6 +264,20 @@ def _reconcile_resolved_run(
     return changed
 
 
+def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
+    """Seed any workflow-declared var whose key is absent from state.vars with its
+    declared default. Vars are seeded from the workflow only at Change creation
+    (change.py); a var added to the workflow later is missing from an in-flight
+    change's persisted vars, so a template referencing it under StrictUndefined
+    (`{{ vars.x }}`) raises "'dict object' has no attribute 'x'" on resume. An
+    already-set var keeps its persisted value. Returns the names added (sorted;
+    empty if none), so the caller persists + logs only on a real change."""
+    added = [name for name in decls.names() if name not in state.vars]
+    for name in added:
+        state.vars[name] = decls.defaults()[name]
+    return sorted(added)
+
+
 async def run_change(
     change: Change,
     *,
@@ -312,6 +327,13 @@ async def run_change(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
+        # Seed any workflow var introduced after this change was created (its
+        # default is missing from the persisted vars); otherwise a StrictUndefined
+        # template reference to it crashes the render on resume.
+        backfilled = _backfill_var_defaults(state, workflow.vars)
+        if backfilled:
+            state.save(change.state_dir)
+            _emit(log, "vars_backfilled", {"names": backfilled}, agent_id=None)
         sandbox_policy = _build_sandbox_policy(change, config, log)
         policy_root = change.project_root
 

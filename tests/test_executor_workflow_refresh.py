@@ -10,6 +10,7 @@ import pytest
 
 from imp.engine.executor import (
     RunResult,
+    _backfill_var_defaults,
     _reconcile_resolved_run,
     _refresh_workflow_snapshot,
     _trees_identical,
@@ -17,9 +18,40 @@ from imp.engine.executor import (
 )
 from imp.engine.loader import load_workflow
 from imp.engine.state import State
+from imp.engine.types import SourceLoc, VarDecl, Vars
 from imp.providers.config import ProviderModel
 from imp.providers.effective import load_effective_config
 from tests.test_executor import _register_fake, _seed_minimal_workflow
+
+_VSRC = SourceLoc(file=Path("wf"), line=1)
+
+
+def _state_with_vars(vars_: dict) -> State:
+    return State(id="c", step="s", step_attempt=0, status="running", vars=vars_)
+
+
+def test_backfill_seeds_var_declared_after_change_created() -> None:
+    """A var added to the workflow after a change was created is missing from that
+    change's persisted vars (defaults are seeded only at creation). Backfill adds
+    its default so a StrictUndefined template reference doesn't crash on resume."""
+    state = _state_with_vars({"fast_path": False})
+    decls = Vars((
+        VarDecl(name="fast_path", type="bool", default=False, source=_VSRC),
+        VarDecl(name="auto_merge", type="bool", default=True, source=_VSRC),
+    ))
+    added = _backfill_var_defaults(state, decls)
+    assert added == ["auto_merge"]
+    assert state.vars == {"fast_path": False, "auto_merge": True}
+
+
+def test_backfill_never_overwrites_existing_value() -> None:
+    """An already-set var keeps its persisted value, even one that differs from
+    the declared default."""
+    state = _state_with_vars({"auto_merge": False})
+    decls = Vars((VarDecl(name="auto_merge", type="bool", default=True, source=_VSRC),))
+    added = _backfill_var_defaults(state, decls)
+    assert added == []
+    assert state.vars == {"auto_merge": False}
 
 
 @pytest.fixture
@@ -340,6 +372,43 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
     state = State.load(change.state_dir)
     assert "w2" in state.resolved_steps                        # new step override merged
     assert state.resolved_tiers["low"].model == "pinned-low"   # pinned entry preserved
+
+
+@pytest.mark.anyio
+async def test_var_added_after_creation_backfilled_no_render_crash(tmp_path: Path) -> None:
+    """A change created before a var existed has that var missing from its persisted
+    vars. When the workflow is updated to declare the var AND a template references
+    it under StrictUndefined, resume must backfill the default rather than crash the
+    render (regression: integrate/finalize paused on `vars.auto_merge` undefined)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    # state.vars was seeded from the original (var-less) workflow.
+    assert "auto_merge" not in State.load(change.state_dir).vars
+
+    # Update the LIVE workflow: declare the new var and have the agent reference it.
+    wf_dir = tmp_path / "imp" / "workflows" / "imp"
+    (wf_dir / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "vars:\n  auto_merge: {type: bool, default: true}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+    )
+    (wf_dir / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "go {{ change.id }} merge={{ vars.auto_merge }}\n"
+    )
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.COMPLETED
+    assert State.load(change.state_dir).vars["auto_merge"] is True
+    assert any(e["type"] == "vars_backfilled"
+               and e["payload"]["names"] == ["auto_merge"] for e in events)
 
 
 @pytest.mark.anyio
