@@ -281,6 +281,24 @@ def resolve_policy(
         remask += [str(p / "config.worktree") for p in sorted(wt_dir.iterdir())
                    if (p / "config.worktree").exists()]
 
+    # Git-ref foot-gun guard: RO-mask the crown-jewel shared paths (all of
+    # refs/heads, refs/stash, the main index) via the existing git_ro_remask
+    # ro-bind category, and RW re-expose refs/heads/imp so the agent's own
+    # change/spike branches still update. bind_plan() emits the re-expose after
+    # the refs/heads mask, so last-wins keeps the imp/ subtree writable while
+    # master and every other branch stay read-only. Existence-gated like caches/
+    # secrets. Skipped for the draft/degenerate case where the agent legitimately
+    # IS the control root (mirrors _enforce_clean_tree's project_root ==
+    # control_root guard).
+    git_ref_reexpose: tuple[str, ...] = ()
+    if worktree != control_root:
+        refs_heads = git / "refs" / "heads"
+        remask += list(_existing(
+            [str(refs_heads), str(git / "refs" / "stash"), str(git / "index")]))
+        imp_refs = refs_heads / "imp"
+        imp_refs.mkdir(parents=True, exist_ok=True)
+        git_ref_reexpose = (str(imp_refs),)
+
     cache_names = cfg.writable_caches or _DEFAULT_CACHES
     caches = _existing([str(home / c) for c in cache_names])
 
@@ -302,6 +320,7 @@ def resolve_policy(
         git_common_dir=str(git),
         change_home=str(change_dir) if change_dir is not None else "",
         git_ro_remask=tuple(remask),
+        git_ref_reexpose=git_ref_reexpose,
         writable_caches=caches,
         extra_readable=tuple(cfg.extra_readable),
         extra_writable=tuple(cfg.extra_writable),

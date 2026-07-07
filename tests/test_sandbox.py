@@ -759,3 +759,60 @@ def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
     assert ("GIT_TERMINAL_PROMPT", "0") in pol.setenv
     assert ("EDITOR", "true") in pol.setenv
     assert ("VISUAL", "true") in pol.setenv
+
+
+def test_resolve_policy_masks_git_refs_and_reexposes_imp(tmp_path):
+    control, wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "index").write_text("")
+    (git / "refs" / "stash").write_text("")
+    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    # The three crown-jewel paths join the RO remask...
+    assert str(git / "refs" / "heads") in pol.git_ro_remask
+    assert str(git / "refs" / "stash") in pol.git_ro_remask
+    assert str(git / "index") in pol.git_ro_remask
+    # ...and refs/heads/imp is the RW re-expose, created on disk so the bind is
+    # valid even before the first imp/ loose ref exists.
+    assert pol.git_ref_reexpose == (str(git / "refs" / "heads" / "imp"),)
+    assert (git / "refs" / "heads" / "imp").is_dir()
+    # End-to-end verdicts through the in-process mirror.
+    assert pol.allows_write(git / "refs" / "heads" / "master") is False
+    assert pol.allows_write(git / "index") is False
+    assert pol.allows_write(git / "refs" / "heads" / "imp" / "abc") is True
+
+
+def test_resolve_policy_skips_absent_ref_masks(tmp_path):
+    control, wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    # No index and no refs/stash on disk — a fresh clone may lack refs/stash.
+    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    assert str(git / "refs" / "heads") in pol.git_ro_remask
+    assert str(git / "refs" / "stash") not in pol.git_ro_remask
+    assert str(git / "index") not in pol.git_ro_remask
+    # The re-expose is still emitted (refs/heads/imp is created unconditionally
+    # for a non-draft change).
+    assert pol.git_ref_reexpose == (str(git / "refs" / "heads" / "imp"),)
+    assert (git / "refs" / "heads" / "imp").is_dir()
+
+
+def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
+    control, _wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "index").write_text("")
+    # worktree IS the control root → draft/degenerate case: emit none of it.
+    pol = resolve_policy(worktree=control, control_root=control, change_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    assert str(git / "refs" / "heads") not in pol.git_ro_remask
+    assert str(git / "refs" / "stash") not in pol.git_ro_remask
+    assert str(git / "index") not in pol.git_ro_remask
+    assert pol.git_ref_reexpose == ()
+    # refs/heads/imp is NOT created for the draft case.
+    assert not (git / "refs" / "heads" / "imp").exists()
