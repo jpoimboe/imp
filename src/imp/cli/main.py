@@ -2682,7 +2682,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.set_defaults(func=_cmd_chat)
 
     p_resume = sub.add_parser(
-        "resume", help="Resume a paused or interrupted Change by id or token.")
+        "resume",
+        help="Resume a paused or interrupted Change by id or token.",
+        description=(
+            "Resume a paused or interrupted Change, replaying its narrative and "
+            "continuing the workflow where it stopped. With no token on a tty, "
+            "pick from a list of resumable Changes."))
     p_resume.add_argument(
         "token", nargs="?",
         help="Change id or resume token identifying which Change to resume.")
@@ -2802,6 +2807,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_abandon = sub.add_parser(
         "abandon",
         help="Tear down a Change's worktree, branch, and state (logged).",
+        description=(
+            "Tear down a materialized Change — its worktree, branch, and state — "
+            "or discard a pure backlog idea. On a tty, confirm before tearing "
+            "down a materialized Change; pass --yes to skip. With no token, pick "
+            "from a list."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
@@ -2814,7 +2824,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit a Change's title, backlog membership, or dependencies.")
+        help="Edit a Change's title, backlog membership, or dependencies.",
+        description=(
+            "Edit a Change's title, backlog membership, or dependencies. Zone "
+            "moves (--backlog/--active) apply to un-materialized Changes only."))
     p_edit.add_argument("token", help="Change id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the Change title.")

@@ -40,3 +40,21 @@ def test_config_has_description() -> None:
     desc = _subparser("config").description
     assert desc is not None
     assert "provenance" in desc
+
+
+def test_resume_has_description() -> None:
+    desc = _subparser("resume").description
+    assert desc is not None
+    assert "resumable" in desc
+
+
+def test_abandon_has_description() -> None:
+    desc = _subparser("abandon").description
+    assert desc is not None
+    assert "worktree" in desc
+
+
+def test_edit_has_description() -> None:
+    desc = _subparser("edit").description
+    assert desc is not None
+    assert "title" in desc
