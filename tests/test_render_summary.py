@@ -416,6 +416,9 @@ def test_parent_and_subagent_tokens_accrue_independently_while_sub_open():
     (999, "999"),
     (1000, "1.0k"),
     (12345, "12.3k"),
+    (999_949, "999.9k"),
+    (999_950, "1.0M"),
+    (999_999, "1.0M"),
     (1_200_000, "1.2M"),
 ])
 def test_fmt_tokens(n, expected):

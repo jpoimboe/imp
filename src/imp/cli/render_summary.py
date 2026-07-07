@@ -160,7 +160,7 @@ def _fmt_tokens(total: int) -> str:
         return "—"
     if total < 1000:
         return str(total)
-    if total < 1_000_000:
+    if total < 999_950:  # 999_950+ rounds up to "1000.0k"; roll it into the M bucket instead.
         return f"{total / 1000:.1f}k"
     return f"{total / 1_000_000:.1f}M"
 
