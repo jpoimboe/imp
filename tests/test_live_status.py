@@ -168,6 +168,41 @@ def test_restart_span_resets_elapsed() -> None:
     assert seen[-1] == 5.0      # elapsed is from the new t0 (not 35.0 from the original)
 
 
+def test_hide_after_narrowing_climbs_reflowed_physical_lines() -> None:
+    # The resize-repeat bug: a permanent print calls hide() on a footer whose rows
+    # were committed at the OLD (wider) width. After the terminal narrowed those rows
+    # soft-wrap, so erase must climb the reflowed PHYSICAL line count — one-per-logical
+    # -row leaves the wrapped tails behind as a duplicated footer.
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    w = [40]
+    s._width_fn = lambda: w[0]
+    # Two rows, 30 and 20 cols wide, drawn at width 40 (each one physical line).
+    s.update(lambda f, e: ["x" * 30, "y" * 20])
+    assert s._physical_rows() == 2                   # nothing wrapped yet
+    w[0] = 10                                         # terminal shrinks to 10 cols
+    # 30 cols → ceil(30/10)=3 lines; 20 cols → ceil(20/10)=2 lines → 5 physical lines.
+    assert s._physical_rows() == 5
+    out.truncate(0)
+    out.seek(0)
+    s.hide()
+    v = out.getvalue()
+    assert v.count("\x1b[K") == 5                     # every reflowed physical line cleared
+    assert v.count("\x1b[1A") == 5                    # climb lands on the owned blank
+
+
+def test_physical_rows_counts_empty_row_as_one_line() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    w = [8]
+    s._width_fn = lambda: w[0]
+    s.update(lambda f, e: ["activity", "", "bar"])    # 8-col row clipped to 7, blank, 3
+    assert s._physical_rows() == 3                    # each fits: 1 + 1(blank) + 1
+    w[0] = 4
+    # "activi…" is 7 cols → ceil(7/4)=2; blank → 1; "bar" (3) → 1 → 4 physical lines.
+    assert s._physical_rows() == 4
+
+
 def test_double_hide_does_not_cursor_up() -> None:
     out = _TTY()
     s = LiveStatus(out, now=lambda: 0.0)
@@ -188,33 +223,37 @@ def test_status_clipped_to_width_minus_one() -> None:
     assert "abcd…" in out.getvalue()           # 5 cols = width-1
 
 
-def test_narrowing_from_visible_abandons_without_cursor_up() -> None:
+def test_narrowing_erases_reflowed_lines_then_redraws_in_place() -> None:
+    # On narrowing the committed row soft-wraps; the footer fully erases the reflowed
+    # physical lines (climbing onto the owned blank) and redraws IN PLACE, so no blank
+    # gap is stranded between the narrative and the footer.
     out = _TTY()
     s = LiveStatus(out, now=lambda: 0.0)
-    widths = iter([20, 4])
-    s._width_fn = lambda: next(widths)
-    s.update(lambda f, e: ["first frame here"])       # drawn at width 20
+    w = [20]
+    s._width_fn = lambda: w[0]
+    s.update(lambda f, e: ["first frame here"])       # 16 cols at width 20
     out.truncate(0)
     out.seek(0)
-    s.update(lambda f, e: ["second"])                 # width now 4 → narrowing
-    assert "\x1b[1A" not in out.getvalue()            # no cursor-up on narrowing
-    assert "\n" in out.getvalue()                     # fresh redraw: new blank + status below
-
-
-def test_narrowing_from_visible_multirow_abandons_in_place() -> None:
-    out = _TTY()
-    s = LiveStatus(out, now=lambda: 0.0)
-    widths = iter([20, 4])
-    s._width_fn = lambda: next(widths)
-    s.update(lambda f, e: ["a row", "b row", "c row"])  # drawn at width 20, 3-row block
-    out.truncate(0)
-    out.seek(0)
-    s.update(lambda f, e: ["a row", "b row", "c row"])  # width now 4 → narrowing
+    w[0] = 4
+    s.update(lambda f, e: ["second"])                 # width 4 → ceil(16/4)=4 phys lines
     v = out.getvalue()
-    assert "\x1b[1A" not in v                           # no owned-blank ascent during abandon
-    assert "\x1b[2A" in v                               # _clear_rows_in_place climbs to first row
-    assert v.count("\x1b[K") == 3 + 3                   # 3 in-place clears + 3 fresh redraws
-    assert "\n" in v                                    # fresh redraw: new blank + status below
+    assert v.count("\x1b[1A") == 4                    # climbed all four reflowed lines
+    assert v.count("\x1b[K") == 4 + 1                 # 4 erased + 1 redrawn row
+
+
+def test_narrowing_multirow_erases_all_reflowed_lines() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    w = [20]
+    s._width_fn = lambda: w[0]
+    s.update(lambda f, e: ["a row", "b row", "c row"])  # three 5-col rows at width 20
+    out.truncate(0)
+    out.seek(0)
+    w[0] = 4
+    s.update(lambda f, e: ["a row", "b row", "c row"])  # width 4 → each 5→2 phys = 6
+    v = out.getvalue()
+    assert v.count("\x1b[1A") == 6                       # all six reflowed lines climbed
+    assert v.count("\x1b[K") == 6 + 3                    # 6 erased + 3 redrawn rows
 
 
 def test_elapsed_zero_before_session_starts_and_tracks_after() -> None:
@@ -391,11 +430,12 @@ def test_hide_then_erase_ends_cursor_shown() -> None:
 def test_narrowing_redraw_ends_cursor_hidden() -> None:
     out = _TTY()
     s = LiveStatus(out, now=lambda: 0.0)
-    widths = iter([20, 4])
-    s._width_fn = lambda: next(widths)
+    w = [20]
+    s._width_fn = lambda: w[0]
     s.update(lambda f, e: ["first frame here"])     # drawn at width 20, cursor hidden
     out.truncate(0)
     out.seek(0)
+    w[0] = 4
     s.update(lambda f, e: ["second"])               # width now 4 -> narrowing
     v = out.getvalue()
     assert "\x1b[?25h" in v and "\x1b[?25l" in v     # clear shows, frame re-hides

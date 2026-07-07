@@ -57,6 +57,7 @@ class LiveStatus:
         self._prev_width: int | None = None     # display width of the last drawn frame
         self._width_fn: Callable[[], int] = term_width
         self._rows = 0                          # number of footer rows currently on screen
+        self._drawn_widths: list[int] = []      # display width of each on-screen row
 
     def update(self, compose: Callable[[int, float], list[str] | None]) -> None:
         """Set/refresh the compose fn and redraw. Starts the session timer on the
@@ -135,6 +136,7 @@ class LiveStatus:
         self._stream.flush()
         self._visible = True
         self._rows = 1
+        self._drawn_widths = [_display_width(text)]
 
     # -- internals ------------------------------------------------------------
     def _hide_cursor(self) -> None:
@@ -148,6 +150,23 @@ class LiveStatus:
             self._stream.flush()
             self._cursor_hidden = False
 
+    def _physical_rows(self) -> int:
+        """Physical line count of the on-screen footer at the CURRENT width.
+
+        Each row was clipped to its draw-time width, so at a stable width it is
+        one physical line. But a terminal that has since NARROWED soft-wraps any
+        row wider than the new width into ceil(display_width / width) lines (an
+        empty row still occupies one). Erase/abandon must climb this reflowed
+        count, not the logical row count — otherwise the wrapped tails survive as
+        a duplicated footer in scroll-back (the resize-repeat bug). At an
+        unchanged or widened width every row still fits, so this equals _rows."""
+        if not self._drawn_widths:
+            return self._rows
+        w = self._width_fn()
+        if w <= 0:
+            return self._rows
+        return sum(1 if dw <= 0 else -(-dw // w) for dw in self._drawn_widths)
+
     def _draw(self) -> None:
         if not self._enabled or self._compose is None or self._suspended:
             return
@@ -159,13 +178,17 @@ class LiveStatus:
             return
         width = self._width_fn()
         rows = [pal.clip_display(r, width - 1) for r in block]
-        new_w = max((_display_width(r) for r in rows), default=0)
+        widths = [_display_width(r) for r in rows]
+        new_w = max(widths, default=0)
         if (self._visible and self._prev_width is not None
                 and (width - 1) < self._prev_width):
-            # Narrowing: abandon the current block in place (no climb), redraw fresh below.
-            self._clear_rows_in_place()
-            self._visible = False
-            self._prev_width = None
+            # Narrowing: the committed rows have soft-wrapped to more physical lines
+            # than they were drawn with. Fully erase them — climbing the reflowed
+            # physical-line count onto the owned blank — so the redraw below reuses the
+            # SAME position. Clearing in place and redrawing lower would instead strand
+            # the surplus lines as a blank gap between the narrative and the footer.
+            # _erase() resets _visible / _prev_width / _drawn_widths itself.
+            self._erase()
         if self._visible and self._rows == len(rows):
             self._hide_cursor()
             self._stream.write("\r")
@@ -181,31 +204,21 @@ class LiveStatus:
         self._visible = True
         self._prev_width = new_w
         self._rows = len(rows)
-
-    def _clear_rows_in_place(self) -> None:
-        # Clear every drawn row WITHOUT climbing onto the owned blank (narrowing reflow).
-        if not (self._enabled and self._visible):
-            return
-        self._stream.write("\r")
-        if self._rows > 1:
-            self._stream.write(f"\x1b[{self._rows - 1}A")
-        for i in range(self._rows):
-            self._stream.write("\x1b[K")
-            if i < self._rows - 1:
-                self._stream.write("\n")
-        self._show_cursor()
-        self._stream.flush()
-        self._rows = 0
+        self._drawn_widths = widths
 
     def _erase(self) -> None:
         if self._enabled and self._visible:
-            # From the end of the last row, clear each row bottom-up and climb one line
-            # per row, ending on the status-owned blank above the block.
+            # From the end of the last row, clear each PHYSICAL line bottom-up and climb
+            # one line per physical line, ending on the status-owned blank above the
+            # block. Using the reflowed physical count (not the logical row count) keeps
+            # erase correct after the terminal has narrowed and the rows soft-wrapped.
+            phys = self._physical_rows()
             self._stream.write("\r")
-            for _ in range(self._rows):
+            for _ in range(phys):
                 self._stream.write("\x1b[K" + _UP)
             self._show_cursor()
             self._stream.flush()
         self._visible = False
         self._prev_width = None
         self._rows = 0
+        self._drawn_widths = []

@@ -2215,3 +2215,44 @@ def test_status_span_restarts_on_hinted_agent_retry_only() -> None:
     ]:
         drv.on_event(e)
     assert calls == ["restart", "restart", "restart"]
+
+
+def test_prose_reflows_to_live_width_between_emissions() -> None:
+    # Regression: the live driver must read the terminal width at each emission,
+    # not freeze it at construction. Otherwise markdown printed AFTER a terminal
+    # resize keeps wrapping to the startup width (the status footer already
+    # re-reads term_width() every tick, so only the permanent blocks were stale).
+    out = _Pipe()
+    w = [200]
+    drv = LiveDriver(stream=out, color=False, width=lambda: w[0],
+                     status=LiveStatus(out))
+    first = ("Alpha bravo charlie delta echo foxtrot golf hotel india juliet "
+             "kilo lima mike november oscar papa quebec romeo sierra tango")
+    second = ("Uniform victor whiskey xray yankee zulu uniform victor whiskey "
+              "xray yankee zulu uniform victor whiskey xray yankee zulu foo")
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="one", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": first}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    w[0] = 24  # terminal resized narrower between turns
+    for e in [
+        ev("4", "step_started", step="two", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("5", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": second}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    # The turn marker "• " leads the first prose line; ignore it when matching.
+    first_words = set(first.split()) | {"•"}
+    second_words = set(second.split()) | {"•"}
+    body = [ln.rstrip() for ln in _body(out) if ln.strip()]
+    first_lines = [ln for ln in body if ln.split() and set(ln.split()) <= first_words]
+    second_lines = [ln for ln in body if ln.split() and set(ln.split()) <= second_words]
+    # First turn printed pre-resize: one wide line. Second turn wraps to 24.
+    assert max(len(ln) for ln in first_lines) > 24, first_lines
+    assert len(second_lines) >= 4, body            # reflowed, not one wide line
+    assert max(len(ln) for ln in second_lines) <= 24, second_lines

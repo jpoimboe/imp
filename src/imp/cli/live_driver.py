@@ -24,6 +24,7 @@ cancellation-sentinel leak).
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -169,12 +170,18 @@ def _container_closed(container: Any) -> bool:
 
 
 class LiveDriver:
-    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
-                 display_width: int = 80, suppress_replay: bool = False,
+    def __init__(self, *, stream: Any, color: bool,
+                 width: int | Callable[[], int], status: LiveStatus,
+                 display_width: int | Callable[[], int] = 80,
+                 suppress_replay: bool = False,
                  preceded_by_blank: bool = False) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
+        # width/display_width may be a live callable (a real terminal, re-read
+        # per emission so markdown reflows after a resize) or a fixed int (piped
+        # capture, tests). The status footer already polls term_width() each tick;
+        # resolving here keeps the permanent blocks in step with it.
         self._width = width
         self._display_width = display_width
         self._status = status
@@ -282,6 +289,14 @@ class LiveDriver:
             context_pct=self._builder.latest_context_pct)
 
     # -- emission -------------------------------------------------------------
+    def _cur_width(self) -> int:
+        w = self._width
+        return w() if callable(w) else w
+
+    def _cur_display_width(self) -> int:
+        dw = self._display_width
+        return dw() if callable(dw) else dw
+
     def _walk(self, *, force: bool = False) -> None:
         while self._frontier:
             cur = self._frontier[-1]
@@ -434,14 +449,16 @@ class LiveDriver:
             # (offline capture / `imp run | tee` / the snap-ui mockup), so live and
             # `imp log` show the user's turn identically.
             lines = rt._render(node, depth=depth, full=False, color=self._color,
-                               width=self._width, display_width=self._display_width,
+                               width=self._cur_width(),
+                               display_width=self._cur_display_width(),
                                gutters=gutters)
             self._print_lines(
                 list(lines), prose=True,
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
         lines = rt._render(node, depth=depth, full=False, color=self._color,
-                           width=self._width, display_width=self._display_width,
+                           width=self._cur_width(),
+                           display_width=self._cur_display_width(),
                            gutters=gutters)
         prose = rt.spaces_after(node, full=False)
         self._print_lines(

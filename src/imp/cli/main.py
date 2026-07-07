@@ -832,8 +832,8 @@ async def _run_cleared_session(
                 leave_mode=leave_mode, leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
-            stream=sys.stdout, color=color, width=_term_width(),
-            display_width=_display_width(), status=status)
+            stream=sys.stdout, color=color, width=_term_width,
+            display_width=_display_width, status=status)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -920,7 +920,7 @@ async def _run_fresh_session(
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), display_width=_display_width(), status=status)
+                            width=_term_width, display_width=_display_width, status=status)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -939,7 +939,7 @@ async def _run_fresh_session(
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), display_width=_display_width(), status=status)
+                            width=_term_width, display_width=_display_width, status=status)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -1064,7 +1064,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), display_width=_display_width(), status=status)
+                            width=_term_width, display_width=_display_width, status=status)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1092,7 +1092,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), display_width=_display_width(), status=status)
+                            width=_term_width, display_width=_display_width, status=status)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -1183,7 +1183,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), display_width=_display_width(), status=status,
+                            width=_term_width, display_width=_display_width, status=status,
                             suppress_replay=True)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
@@ -1217,7 +1217,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
-                            width=_term_width(), display_width=_display_width(), status=status,
+                            width=_term_width, display_width=_display_width, status=status,
                             suppress_replay=True,
                             preceded_by_blank=splash_shown)
         coord = InterruptCoordinator()
@@ -1261,7 +1261,7 @@ async def _resume_inert(
         async def _first(leave_state: dict[str, str]) -> int:
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout, color=color,
-                                width=_term_width(), status=status,
+                                width=_term_width, status=status,
                                 suppress_replay=True)
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
