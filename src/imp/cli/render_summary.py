@@ -74,8 +74,17 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     for e in events:
         etype = e.get("type")
         ts = e.get("timestamp")
+        agent_id = e.get("agent_id")
         raw = e.get("payload")
         p = raw if isinstance(raw, dict) else {}
+
+        # Map an open step to the agent id of its first non-sub agent event.
+        if etype in ("step_context", "llm_response"):
+            if (open_row is not None and open_row.end_ts is None
+                    and open_row.agent_id is None
+                    and isinstance(agent_id, str)
+                    and not agent_id.startswith("sub:")):
+                open_row.agent_id = agent_id
 
         if etype == "step_started":
             step = str(p.get("step", "?"))
@@ -94,6 +103,14 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             open_row = None
         elif etype == "awaiting_user_input":
             pending_wait_start = ts
+        elif etype == "llm_response":
+            if (open_row is not None
+                    and agent_id is not None and agent_id == open_row.agent_id):
+                open_row.tokens.add_usage(p.get("usage"))
+        elif etype == "query_result":
+            if (open_row is not None
+                    and agent_id is not None and agent_id == open_row.agent_id):
+                open_row.cost += float(p.get("total_cost_usd") or 0)
         elif etype == "error" and not _is_nonterminal_error(p):
             if open_row is not None and open_row.end_ts is None:
                 open_row.errored = True

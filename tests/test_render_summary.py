@@ -243,3 +243,84 @@ def test_subagent_row_wall_seconds_and_defaults():
     assert sub.errored is False
     assert sub.cost == 0.0
     assert sub.tokens.input == 0
+
+
+def _context(agent_id: str, ts: str) -> dict:
+    return {"type": "step_context", "agent_id": agent_id, "timestamp": ts,
+            "payload": {}}
+
+
+def _llm(agent_id: str, ts: str, *, input=0, output=0,
+         cache_read=0, cache_creation=0) -> dict:
+    return {"type": "llm_response", "agent_id": agent_id, "timestamp": ts,
+            "payload": {"usage": {"input_tokens": input, "output_tokens": output,
+                                  "cache_read_input_tokens": cache_read,
+                                  "cache_creation_input_tokens": cache_creation}}}
+
+
+def _qr(agent_id: str, ts: str, cost: float) -> dict:
+    return {"type": "query_result", "agent_id": agent_id, "timestamp": ts,
+            "payload": {"total_cost_usd": cost}}
+
+
+def test_step_own_tokens_summed_from_matching_agent_id():
+    rows = build_summary([
+        _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
+        _llm("a1", "2026-01-01T00:00:05+00:00",
+             input=100, output=20, cache_read=5, cache_creation=3),
+        _llm("a1", "2026-01-01T00:00:10+00:00", input=10, output=2),
+        _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
+    ])
+    assert rows[0].agent_id == "a1"
+    assert rows[0].tokens.input == 110
+    assert rows[0].tokens.output == 22
+    assert rows[0].tokens.cache_read == 5
+    assert rows[0].tokens.cache_creation == 3
+
+
+def test_step_own_cost_summed_from_matching_agent_id():
+    rows = build_summary([
+        _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
+        _context("a1", "2026-01-01T00:00:01+00:00"),
+        _qr("a1", "2026-01-01T00:00:05+00:00", 0.34),
+        _qr("a1", "2026-01-01T00:00:10+00:00", 0.06),
+        _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
+    ])
+    assert rows[0].cost == pytest.approx(0.40)
+
+
+def test_usage_from_other_agent_id_is_not_attributed():
+    rows = build_summary([
+        _started("plan-writer", "plan", "2026-01-01T00:00:00+00:00"),
+        _context("a1", "2026-01-01T00:00:01+00:00"),
+        _llm("other", "2026-01-01T00:00:05+00:00", input=999),
+        _qr("other", "2026-01-01T00:00:06+00:00", 5.0),
+        _completed("plan-writer", "2026-01-01T00:00:20+00:00"),
+    ])
+    assert rows[0].tokens.input == 0
+    assert rows[0].cost == 0.0
+
+
+def test_step_tokens_accumulate_across_resume_reentry():
+    rows = build_summary([
+        _started("verify", "implement", "2026-01-01T00:00:00+00:00"),
+        _llm("a1", "2026-01-01T00:00:05+00:00", input=50),
+        _await("2026-01-01T00:01:00+00:00"),
+        _started("verify", "implement", "2026-01-01T00:06:00+00:00"),  # resume
+        _llm("a1", "2026-01-01T00:06:05+00:00", input=30),
+        _completed("verify", "2026-01-01T00:06:30+00:00"),
+    ])
+    assert len(rows) == 1
+    assert rows[0].agent_id == "a1"
+    assert rows[0].tokens.input == 80
+
+
+def test_sub_prefixed_agent_does_not_establish_step_mapping_or_tokens():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        _llm("sub:ev1", "2026-01-01T00:00:05+00:00", input=999),
+        _llm("a1", "2026-01-01T00:00:10+00:00", input=10),
+        _completed("task-lead", "2026-01-01T00:00:20+00:00"),
+    ])
+    assert rows[0].agent_id == "a1"
+    assert rows[0].tokens.input == 10
