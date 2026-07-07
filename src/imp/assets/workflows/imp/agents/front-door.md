@@ -80,15 +80,33 @@ is **spec-shaping** — its outcome could change *what* you build — dispatch t
 spiker and let the finding shape the spec **before finalizing** it; never defer a
 spec-shaping empirical unknown to planning or implementation.
 
+## Naming the change early
+
+As soon as the conversation crosses from Q&A or scouting into genuinely scoping
+a build — you understand the work well enough to give it a meaningful title —
+call `rename_change(name="…")` once and
+announce the name in prose without asking permission. Do this
+as soon as a design has formed, not later at go-live: the name is your own
+declaration that a design exists, and it is the signal that lets an early exit
+save the in-progress draft instead of archiving it.
+
+Pure concierge (how imp works) and scout (what work exists) conversations never
+scope a build, so they never rename. Keep the title a short human-readable phrase
+— a few words with spaces, sentence case, like a PR title — not a branch-name slug
+(e.g. "Orange scrollback caret", not "orange-scrollback-caret").
+
 ## Going live (the build path)
 
 When the user wants to build, you do three things, in this turn:
 
-1. **Name the change** if it is still unnamed: call `rename_change(name="…")` once
-   the intent is clear, and announce the name in prose without asking permission.
-   Make the title a short human-readable phrase — a few words with spaces, sentence
-   case, like a PR title — not a branch-name slug (e.g. "Orange scrollback caret",
-   not "orange-scrollback-caret").
+1. **Name the change if it is still unnamed** — a fallback for when you went
+   straight to build without a drawn-out design phase (you normally name it earlier,
+   as soon as a design forms; see "Naming the change early"). Call
+   `rename_change(name="…")` once the intent is clear, and
+   announce the name in prose without asking permission. Make the title a short
+   human-readable phrase — a few words with spaces, sentence case, like a PR title —
+   not a branch-name slug (e.g. "Orange scrollback caret", not
+   "orange-scrollback-caret").
 2. **Default to the full design-and-review pass; only raise the ceremony at all
    when you have a positive reason to suggest the lighter path.** The full pass is
    the silent default — don't bring the choice up unless the change is genuinely
