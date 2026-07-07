@@ -124,6 +124,13 @@ def header_line(event: Mapping[str, Any]) -> str:
     return f"{cid} · {name} · {when}"
 
 
+def _pause_is_silent(payload: Mapping[str, Any]) -> bool:
+    """A workflow_paused is silent when a companion event already buzzed the stop
+    (or the stop was self-inflicted / self-resolving). Sole source of truth for the
+    silence decision, shared by curate() and event_body()."""
+    return payload.get("reason") in _PAUSE_SILENT_REASONS
+
+
 def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
     """Classify an event into a delivery tier: 'buzz' (notify), 'silent' (quiet
     stream), or None (dropped). Buzz = input prompts + status transitions; silent =
@@ -135,7 +142,7 @@ def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
         from imp.cli.render_summary import _is_nonterminal_error
         return None if _is_nonterminal_error(dict(payload)) else "buzz"
     if event_type == "workflow_paused":
-        return "silent" if payload.get("reason") in _PAUSE_SILENT_REASONS else "buzz"
+        return "silent" if _pause_is_silent(payload) else "buzz"
     if event_type in _BUZZ:
         return "buzz"
     if event_type in _SILENT:
@@ -217,9 +224,9 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
         detail = str(payload.get("detail") or "").strip()
         return f"{reason}\n{detail}".strip() if detail else reason
     if event_type == "workflow_paused":
-        reason = str(payload.get("reason") or "").strip()
-        if reason in _PAUSE_SILENT_REASONS:
+        if _pause_is_silent(payload):
             return ""
+        reason = str(payload.get("reason") or "").strip()
         if reason in _PAUSE_REASON_BODIES:
             return _PAUSE_REASON_BODIES[reason]
         return f"paused ({reason})" if reason else "paused"

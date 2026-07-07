@@ -120,3 +120,10 @@ def test_paused_message_has_header_and_plain_speak_body() -> None:
 @pytest.mark.parametrize("reason", ["merge_blocked", "script_blocked", "interrupt"])
 def test_silenced_paused_has_empty_body(reason: str) -> None:
     assert imp_telegram.event_body("workflow_paused", {"reason": reason}) == ""
+
+
+def test_pause_is_silent_predicate_reflects_denylist() -> None:
+    # A reason in the denylist is silent; a companion-less reason is not.
+    assert imp_telegram._pause_is_silent({"reason": "interrupt"}) is True
+    assert imp_telegram._pause_is_silent({"reason": "max_loops"}) is False
+    assert imp_telegram._pause_is_silent({}) is False
