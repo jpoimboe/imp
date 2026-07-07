@@ -934,8 +934,18 @@ async def _route_acquire(
     if not _is_head():
         ahead = merge_queue.position(change.control_root, change.id, lane)
         _emit(log, "lane_waiting", {"base": lane, "ahead": ahead})
+        last_ahead = ahead
+
+        def _poll_turn() -> bool:
+            nonlocal last_ahead
+            current = merge_queue.position(change.control_root, change.id, lane)
+            if current != last_ahead:
+                _emit(log, "lane_waiting", {"base": lane, "ahead": current})
+                last_ahead = current
+            return _is_head()
+
         try:
-            await wait_for_turn_fn(_is_head)
+            await wait_for_turn_fn(_poll_turn)
         except AwaitingUserInput:
             pause = Pause(reason="awaiting_turn")
             _emit(log, "step_completed", {
