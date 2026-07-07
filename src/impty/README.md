@@ -51,6 +51,7 @@ Two ready-made entry points:
   `scripts/snap_imp_ui.py {stream,prompt} [--out PATH] [--open]` directly.
 - **Drive a live program over MCP and screenshot it:** run the stdio MCP server
   (`python -m impty.mcp`, registered in `.mcp.json`). Tools: `start`, `send`,
+  `resize` (`(rows, cols)` — resizes the live terminal, delivering a real `SIGWINCH`),
   `wait`, `view` (`full=True` for the whole strip), `snapshot` (renders the live screen to a PNG and
   returns its path), `stop`. Adding/removing a tool needs a server restart.
 

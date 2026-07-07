@@ -71,7 +71,8 @@ async def test_impty_sdk_tools_carry_driver_names_and_descriptions() -> None:
     sdk_tools = await _make_impty_sdk_tools(driver)
     by_name = {t.name: t for t in sdk_tools}
     assert set(by_name) == {
-        "start", "view", "send", "send_signal", "wait", "snapshot", "stop"}
+        "start", "view", "send", "send_signal", "resize",
+        "wait", "snapshot", "stop"}
     method_docs = {m.__name__: m.__doc__ for m in driver.tool_methods()}
     for name, sdk in by_name.items():
         assert sdk.description == method_docs[name]
