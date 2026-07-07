@@ -87,6 +87,15 @@ def branch_exists(control_root: Path, branch: str) -> bool:
     ).returncode == 0
 
 
+def origin_head_branch(control_root: Path) -> str | None:
+    proc = _git(
+        control_root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip().removeprefix("origin/")
+
+
 def commit_count(control_root: Path, change_id: str, base: str) -> int:
     """Commits on imp/<id> not reachable from base — the Change's own work."""
     proc = _git(control_root, "rev-list", "--count", f"{base}..imp/{change_id}")
