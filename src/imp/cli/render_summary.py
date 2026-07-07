@@ -208,7 +208,6 @@ class SummaryHeader:
 
 
 _HUE_ROTATION: tuple[str, ...] = ("step", "magenta", "cyan", "green")
-_WAIT_THRESHOLD = 5.0
 
 
 def summary_total(events: list[dict[str, Any]]) -> float | None:
@@ -217,32 +216,51 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
     return elapsed_seconds(events[0].get("timestamp"), events[-1].get("timestamp"))
 
 
-def _header_line(h: SummaryHeader, *, color: bool) -> str:
+def _header_line(h: SummaryHeader, work_seconds: float | None,
+                 tokens: int, cost: float, *, color: bool) -> str:
     workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
     status = pal.ansi(h.status, *STATUS_COLORS.get(h.status, ()), enabled=color)
-    total = "running" if h.total_seconds is None else fmt_seconds(h.total_seconds)
-    return f"{workflow}  ·  {h.change_id}  ·  {status}  ·  {total}"
+    total = _dur_text(work_seconds)
+    tok = _fmt_tokens(tokens)
+    cst = _fmt_cost(cost)
+    return (f"{workflow}  ·  {h.change_id}  ·  {status}"
+            f"  ·  {total}  ·  {tok}  ·  {cst}")
 
 
-def _step_line(row: StepRow, *, hue: str, name_w: int, color: bool) -> str:
-    padded = f"{row.step:<{name_w}}"
+def _column_widths(summary: list[StepRow]) -> tuple[int, int, int, int]:
+    """Column widths measured across every step AND subagent so numbers align."""
+    names = [len(r.step) for r in summary]
+    names += [len(_sub_body(s)) + 2 for r in summary for s in r.subagents]
+    durs: list[int] = []
+    toks: list[int] = []
+    costs: list[int] = []
+    for r in summary:
+        durs.append(len(_dur_text(r.work_seconds)))
+        toks.append(len(_fmt_tokens(_tok_total(r.tokens))))
+        costs.append(len(_fmt_cost(r.cost)))
+        for s in r.subagents:
+            durs.append(len(_dur_text(s.wall_seconds)))
+            toks.append(len(_fmt_tokens(_tok_total(s.tokens))))
+            costs.append(len(_fmt_cost(s.cost)))
+    return (max(names, default=0), max(durs, default=0),
+            max(toks, default=0), max(costs, default=0))
+
+
+def _step_line(row: StepRow, *, hue: str, name_w: int, dur_w: int,
+               tok_w: int, cost_w: int, color: bool) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
-    label = pal.ansi(padded, *codes, enabled=color)
-    wall = row.wall_seconds
-    dur_text = "running" if wall is None else fmt_seconds(wall)
-    dur = pal.ansi(dur_text, "gray", enabled=color)
-    line = f"  {label}  {dur}"
-    if row.wait_seconds >= _WAIT_THRESHOLD:
-        wait = pal.ansi(f"⏸ {fmt_seconds(row.wait_seconds)} wait",
-                        "bright_blue", enabled=color)
-        line += f"   {wait}"
-    return line
+    name = pal.ansi(f"{row.step:<{name_w}}", *codes, enabled=color)
+    dur = pal.ansi(f"{_dur_text(row.work_seconds):>{dur_w}}", *codes, enabled=color)
+    tok = f"{_fmt_tokens(_tok_total(row.tokens)):>{tok_w}}"
+    cost = f"{_fmt_cost(row.cost):>{cost_w}}"
+    return f"  {name}  {dur}  {tok}  {cost}"
 
 
 def render_summary(summary: list[StepRow], *, header: SummaryHeader,
                    color: bool, width: int) -> list[str]:
-    lines = [_header_line(header, color=color)]
-    name_w = max((len(r.step) for r in summary), default=0)
+    name_w, dur_w, tok_w, cost_w = _column_widths(summary)
+    work, tokens, cost = header_totals(summary, header.total_seconds)
+    lines = [_header_line(header, work, tokens, cost, color=color)]
     cur_phase: str | None = None
     hues: dict[str, str] = {}
     next_hue = 0
@@ -254,5 +272,6 @@ def render_summary(summary: list[StepRow], *, header: SummaryHeader,
         if row.step not in hues:
             hues[row.step] = _HUE_ROTATION[next_hue % len(_HUE_ROTATION)]
             next_hue += 1
-        lines.append(_step_line(row, hue=hues[row.step], name_w=name_w, color=color))
+        lines.append(_step_line(row, hue=hues[row.step], name_w=name_w,
+                                dur_w=dur_w, tok_w=tok_w, cost_w=cost_w, color=color))
     return lines

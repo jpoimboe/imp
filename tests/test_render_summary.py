@@ -124,9 +124,9 @@ def test_plain_output_has_no_sgr_and_expected_lines():
     rows = [_row("plan", "plan-writer", 90)]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged  ·  39m 2s",
+        "feature  ·  abc  ·  merged  ·  39m 2s  ·  —  ·  —",
         "plan",
-        "  plan-writer  1m 30s",
+        "  plan-writer  1m 30s  —  —",
     ]
 
 
@@ -138,12 +138,12 @@ def test_plain_multi_step_shows_column_padding():
     ]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged  ·  39m 2s",
+        "feature  ·  abc  ·  merged  ·  39m 2s  ·  —  ·  —",
         "plan",
-        "  plan-writer  1m 30s",
-        "  plan-review  2m 0s",
+        "  plan-writer  1m 30s  —  —",
+        "  plan-review   2m 0s  —  —",
         "implement",
-        "  verify       30s",
+        "  verify          30s  —  —",
     ]
 
 
@@ -180,14 +180,14 @@ def test_errored_step_renders_bold_red_overriding_hue():
     assert "\x1b[1m\x1b[31mtask-lead" in next(ln for ln in out if "task-lead" in ln)
 
 
-def test_wait_annotation_only_at_or_above_threshold():
-    rows = [_row("implement", "verify", 588, wait=330.0),
-            _row("implement", "task-lead", 60, wait=4.0)]
+def test_no_wait_badge_and_duration_excludes_wait():
+    rows = [_row("implement", "verify", 588, wait=330.0)]
     out = render_summary(rows, header=_HDR, color=False, width=80)
     verify = next(ln for ln in out if "verify" in ln)
-    task = next(ln for ln in out if "task-lead" in ln)
-    assert "⏸ 5m 30s wait" in verify
-    assert "wait" not in task                          # sub-5s wait is omitted
+    assert "⏸" not in verify
+    assert "wait" not in verify
+    assert "4m 18s" in verify     # 588s wall − 330s wait = 258s work
+    assert "9m 48s" not in verify  # NOT the raw 588s wall clock
 
 
 def test_open_trailing_step_renders_running():
@@ -480,3 +480,66 @@ def test_header_totals_none_total_gives_none_work():
     assert work is None
     assert tokens == 0
     assert cost == 0.0
+
+
+def test_step_row_shows_token_and_cost_columns():
+    row = StepRow(phase="plan", step="plan-writer",
+                  start_ts="2026-01-01T00:00:00+00:00",
+                  end_ts="2026-01-01T00:01:30+00:00",
+                  tokens=TokenTotals(input=12000, output=345), cost=0.34)
+    out = render_summary([row], header=_HDR, color=False, width=80)
+    line = next(ln for ln in out if "plan-writer" in ln)
+    assert line == "  plan-writer  1m 30s  12.3k  $0.34"
+
+
+def test_cost_column_dash_fallback_when_zero():
+    row = StepRow(phase="plan", step="s",
+                  start_ts="2026-01-01T00:00:00+00:00",
+                  end_ts="2026-01-01T00:00:10+00:00",
+                  tokens=TokenTotals(input=5), cost=0.0)
+    out = render_summary([row], header=_HDR, color=False, width=80)
+    line = next(ln for ln in out if "10s" in ln)
+    assert line == "  s  10s  5  —"
+
+
+def test_duration_renders_in_step_hue():
+    rows = [_row("plan", "plan-writer", 90)]
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+    line = next(ln for ln in out if "plan-writer" in ln)
+    assert "\x1b[34m1m 30s\x1b[0m" in line   # first hue: step-blue on the duration
+
+
+def test_errored_step_duration_follows_error_color():
+    rows = [_row("implement", "task-lead", 10, errored=True)]
+    out = render_summary(rows, header=_HDR, color=True, width=80)
+    line = next(ln for ln in out if "task-lead" in ln)
+    assert "\x1b[1m\x1b[31m10s\x1b[0m" in line
+
+
+def test_header_total_is_work_time_excluding_wait():
+    rows = [StepRow(phase="implement", step="verify",
+                    start_ts="2026-01-01T00:00:00+00:00",
+                    end_ts="2026-01-01T00:02:00+00:00", wait_seconds=90.0)]
+    hdr = SummaryHeader(workflow="f", change_id="c", status="merged",
+                        total_seconds=120.0)
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert "30s" in out[0]     # 120s total − 90s wait = 30s work
+    assert "2m 0s" not in out[0]
+
+
+def test_header_rolls_up_step_tokens_and_cost():
+    rows = [
+        StepRow(phase="plan", step="a",
+                start_ts="2026-01-01T00:00:00+00:00",
+                end_ts="2026-01-01T00:00:30+00:00",
+                tokens=TokenTotals(input=1000), cost=0.20),
+        StepRow(phase="plan", step="b",
+                start_ts="2026-01-01T00:00:30+00:00",
+                end_ts="2026-01-01T00:01:00+00:00",
+                tokens=TokenTotals(input=1500), cost=0.30),
+    ]
+    hdr = SummaryHeader(workflow="feature", change_id="abc", status="merged",
+                        total_seconds=60.0)
+    out = render_summary(rows, header=hdr, color=False, width=80)
+    assert "2.5k" in out[0]    # 1000 + 1500 tokens rolled up
+    assert "$0.50" in out[0]   # 0.20 + 0.30 cost rolled up
