@@ -105,7 +105,7 @@ async def test_clear_loop_reopens_only_on_clear(
     intents = iter(["clear", "save"])
     calls: list[str] = []
 
-    async def _fake_cleared(control, base, *, tui, leave_state):
+    async def _fake_cleared(control, base, *, tui, leave_state, leave_mode="new"):
         kind = next(intents)
         calls.append(f"cleared:{kind}")
         leave_state["intent"] = kind
@@ -180,7 +180,7 @@ async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
 ) -> None:
     call_count = 0
 
-    async def _fake_cleared(control, base, *, tui, leave_state):
+    async def _fake_cleared(control, base, *, tui, leave_state, leave_mode="new"):
         nonlocal call_count
         call_count += 1
         assert call_count <= 3, "loop did not exit — leave_state reset is missing"
@@ -204,7 +204,7 @@ async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
 async def test_clear_loop_propagates_exception_from_cleared_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _fake_cleared(control, base, *, tui, leave_state):
+    async def _fake_cleared(control, base, *, tui, leave_state, leave_mode="new"):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
@@ -226,8 +226,9 @@ def test_new_interactive_routes_through_clear_loop(
 
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, *, tui, first):
+    async def _fake_loop(control, *, tui, first, leave_mode="new"):
         seen["tui"] = tui
+        seen["leave_mode"] = leave_mode
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -245,6 +246,7 @@ def test_new_interactive_routes_through_clear_loop(
 
     assert rc == 0
     assert seen["tui"] is False        # interactive line client → line modality
+    assert seen["leave_mode"] == "new"
 
 
 def test_resume_tui_routes_through_clear_loop(
@@ -357,8 +359,9 @@ def test_new_tui_routes_through_clear_loop(
 
     seen: dict[str, object] = {}
 
-    async def _fake_loop(control, *, tui, first):
+    async def _fake_loop(control, *, tui, first, leave_mode="new"):
         seen["tui"] = tui
+        seen["leave_mode"] = leave_mode
         return 0
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
@@ -377,6 +380,7 @@ def test_new_tui_routes_through_clear_loop(
 
     assert rc == 0
     assert seen["tui"] is True        # TUI arm → tui modality
+    assert seen["leave_mode"] == "new"
 
 
 @pytest.mark.anyio
@@ -651,3 +655,94 @@ async def test_run_cleared_session_tui_builds_no_title(
 
     rc = await m._run_cleared_session(tmp_path, "main", tui=True, leave_state={})
     assert rc == 0
+
+
+@pytest.mark.anyio
+async def test_run_cleared_session_chat_marks_header_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
+
+    class _FakePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(change: object, **kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    ls: dict[str, str] = {}
+    rc = await m._run_cleared_session(
+        tmp_path, "main", tui=False, leave_state=ls, leave_mode="chat")
+
+    assert rc == 0
+    assert " · chat" in buf.getvalue()          # header reflects the chat surface
+    assert captured["leave_mode"] == "chat"     # disposition threaded too, not "new"
+
+
+@pytest.mark.anyio
+async def test_run_cleared_session_tui_arm_chat_marks_leave_mode_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
+
+    class _FakePrompt:
+        def __init__(self, *a: object, **k: object) -> None: ...
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return "build a parser"
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_tui_session(change: object, **kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(m, "_run_tui_session", _fake_tui_session)
+
+    ls: dict[str, str] = {}
+    rc = await m._run_cleared_session(
+        tmp_path, "main", tui=True, leave_state=ls, leave_mode="chat")
+
+    assert rc == 0
+    assert captured["leave_mode"] == "chat"
+
+
+@pytest.mark.anyio
+async def test_clear_loop_forwards_leave_mode_to_cleared_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    seen: dict[str, object] = {}
+
+    async def _fake_cleared(*args: object, **kwargs: object) -> int:
+        seen["leave_mode"] = kwargs["leave_mode"]
+        kwargs["leave_state"]["intent"] = "done"   # stop the loop after one pass
+        return 0
+
+    monkeypatch.setattr(m, "_run_cleared_session", _fake_cleared)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        leave_state["intent"] = "clear"          # trigger exactly one cleared session
+        return 0
+
+    rc = await m._clear_loop(tmp_path, tui=False, first=_first, leave_mode="chat")
+    assert rc == 0
+    assert seen["leave_mode"] == "chat"          # _clear_loop forwards the surface marker

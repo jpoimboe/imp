@@ -783,6 +783,7 @@ async def _run_tui_session(
 
 async def _run_cleared_session(
     control: Path, base: str, *, tui: bool, leave_state: dict[str, str],
+    leave_mode: str = "new",
 ) -> int:
     """Open a fresh imp new-style draft in place after /clear."""
     from imp.cli.signals import InterruptCoordinator
@@ -793,7 +794,7 @@ async def _run_cleared_session(
         base_branch=base, origin="draft")
     _session_started = False
     try:
-        print(_run_header_line(change.id, change.title, "new", color=color))
+        print(_run_header_line(change.id, change.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
         term_title = None if tui else TerminalTitle(
             sys.stdout, change.id, change.title)
@@ -812,7 +813,7 @@ async def _run_cleared_session(
         if tui:
             return await _run_tui_session(
                 change, seed_opening=opening_text,
-                leave_mode="new", leave_state=leave_state)
+                leave_mode=leave_mode, leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width(),
@@ -823,7 +824,7 @@ async def _run_cleared_session(
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             seed_opening=opening_text, status=status,
-            leave_mode="new",
+            leave_mode=leave_mode,
             leave_state=leave_state, title=term_title)
     finally:
         if not _session_started:
@@ -835,6 +836,7 @@ async def _clear_loop(
     *,
     tui: bool,
     first: Callable[[dict[str, str]], Awaitable[int]],
+    leave_mode: str = "new",
 ) -> int:
     """Run first, then loop only while /clear: open a fresh new-style chat."""
     leave_state: dict[str, str] = {}
@@ -843,7 +845,7 @@ async def _clear_loop(
         leave_state = {}
         base = worktree.current_branch(control)
         rc = await _run_cleared_session(
-            control, base, tui=tui, leave_state=leave_state)
+            control, base, tui=tui, leave_state=leave_state, leave_mode=leave_mode)
     return rc
 
 
@@ -1065,7 +1067,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                 leave_mode=leave_mode,
                 leave_state=leave_state, autonomous=autonomous)
 
-        return await _clear_loop(control, tui=True, first=_first_tui)
+        return await _clear_loop(control, tui=True, first=_first_tui, leave_mode=leave_mode)
 
     if not header_printed:
         _print_opening(change, leave_mode, interactive=interactive, color=color)
@@ -1084,7 +1086,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous)
 
-    return await _clear_loop(control, tui=False, first=_first)
+    return await _clear_loop(control, tui=False, first=_first, leave_mode=leave_mode)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
