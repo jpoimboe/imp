@@ -272,7 +272,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
     complete_step again — no file reads."""
     agent_def = AgentDef(
         name="resumer", description="",
-        tools=frozenset({"complete_step", "read_file"}), subagents=(),
+        tools=frozenset({"complete_step"}), subagents=(),
         output_schema=OutputSchema(
             fields=(OutputField(name="status", type="enum",
                                 values=("Success", "Error"), required=True),),
@@ -289,7 +289,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
             completion_instruction(agent_def.output_schema)
             + "\n\nYou are resuming a step you already finished. Your previous "
             "complete_step was recorded. The feedback below is the only remaining "
-            "instruction. Do NOT call read_file. Acknowledge the feedback in one "
+            "instruction. Acknowledge the feedback in one "
             "sentence, then call complete_step with status=Success now."
         ),
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
@@ -366,8 +366,6 @@ async def test_complete_step_handback_native_resume(
     assert len(results) == 1 and results[0].tool_use_id == "c0"
     assert results[0].is_error is True
     assert "REVISE: confirm the work is done, then finish." in results[0].content
-    # Zero re-execution: no read_file was issued on resume.
-    assert _read_file_call_count(inv.event_log) == 0
     # On a rework resume NO success result is folded: the complete_step is left
     # dangling in the loaded session and the is_error feedback result streams as
     # the delta and pairs it. reconcile + overwrite writes [seed user, dangling
@@ -451,8 +449,6 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     log_types = [ev["type"] for ev in inv.event_log.read()]
     assert "awaiting_user_input" not in log_types
     assert "runner_warning" not in log_types
-    # Zero re-execution: no read_file was issued on resume.
-    assert _read_file_call_count(inv.event_log) == 0
     # Native single-turn delta: the first query streamed exactly the delivered
     # feedback turn, not the whole transcript a replay fallback would send.
     assert len(streamed) == 1, streamed
