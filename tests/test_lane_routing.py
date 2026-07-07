@@ -150,3 +150,28 @@ def test_acquire_poll_reemits_lane_waiting_on_position_change(tmp_path: Path, mo
     # Pre-wait emit (2) seeds the dedup; each *changed* poll emits exactly once;
     # unchanged polls emit nothing. One entry per position change, not per poll.
     assert aheads == [2, 1, 0]
+
+
+def test_acquire_emits_glyph_in_lane_acquired_payload(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    loc = SourceLoc(file=Path("t"), line=1)
+    step = Step(name="lane", phase="merge", kind="branch",
+                rules=(Rule(condition=None, action=Continue(), mutations=(), source=loc),),
+                on_max_retries=Pause(), max_loops=1000, source=loc,
+                acquire="merge-lane", glyph="▲")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    state, log = State.load(ch.state_dir), InMemoryEventLog()
+    anyio.run(_route_acquire, step, ch, state, log, _never_returns)
+    acquired = [e for e in log.read() if e["type"] == "lane_acquired"]
+    assert len(acquired) == 1
+    assert acquired[0]["payload"]["glyph"] == "▲"
+
+
+def test_acquire_lane_acquired_payload_glyph_none_when_unset(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    state, log = State.load(ch.state_dir), InMemoryEventLog()
+    anyio.run(_route_acquire, _acquire_step(), ch, state, log, _never_returns)
+    acquired = [e for e in log.read() if e["type"] == "lane_acquired"]
+    assert len(acquired) == 1
+    assert acquired[0]["payload"]["glyph"] is None
