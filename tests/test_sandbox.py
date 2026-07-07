@@ -665,6 +665,68 @@ def test_argv_binds_match_bind_plan_with_readonly_overlay():
     assert ("/wt/vendored", "ro") in p.bind_plan()
 
 
+def _refprot_policy() -> SandboxPolicy:
+    # A policy that exercises git-ref protection: the three RO masks live in
+    # git_ro_remask (as resolve_policy will append them); refs/heads/imp is the
+    # RW re-expose. A secret dir is present so the ordering test has a mask to
+    # anchor against.
+    return _policy(
+        worktree="/wt",
+        git_common_dir="/ctl/.git",
+        git_ro_remask=("/ctl/.git/hooks", "/ctl/.git/config",
+                       "/ctl/.git/refs/heads", "/ctl/.git/refs/stash",
+                       "/ctl/.git/index"),
+        git_ref_reexpose=("/ctl/.git/refs/heads/imp",),
+        writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=("/home/u/.ssh",), secret_files=(),
+    )
+
+
+def test_ref_masks_deny_shared_refs_and_index():
+    p = _refprot_policy()
+    # A non-imp branch, the stash ref, and the main index are all read-only.
+    assert p.allows_write(Path("/ctl/.git/refs/heads/master")) is False
+    assert p.allows_write(Path("/ctl/.git/refs/stash")) is False
+    assert p.allows_write(Path("/ctl/.git/index")) is False
+
+
+def test_ref_reexpose_keeps_imp_and_imp_own_git_writes_writable():
+    p = _refprot_policy()
+    # The agent's own change + spike branches (under refs/heads/imp) stay rw...
+    assert p.allows_write(Path("/ctl/.git/refs/heads/imp/nate82")) is True
+    assert p.allows_write(Path("/ctl/.git/refs/heads/imp/spike-nate82-1")) is True
+    # ...and imp's other in-sandbox .git writes are untouched by the masks:
+    assert p.allows_write(Path("/ctl/.git/objects/ab/cdef")) is True
+    assert p.allows_write(Path("/ctl/.git/worktrees/nate82/x")) is True
+    assert p.allows_write(Path("/ctl/.git/refs/imp/artifacts/nate82")) is True
+    assert p.allows_write(Path("/ctl/.git/imp/repo.lock")) is True
+
+
+def test_ref_reexpose_argv_after_refs_heads_mask_before_secrets():
+    p = _refprot_policy()
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    flat = " ".join(argv)
+    assert "--ro-bind /ctl/.git/refs/heads /ctl/.git/refs/heads" in flat
+    assert "--ro-bind /ctl/.git/refs/stash /ctl/.git/refs/stash" in flat
+    assert "--ro-bind /ctl/.git/index /ctl/.git/index" in flat
+    assert "--bind /ctl/.git/refs/heads/imp /ctl/.git/refs/heads/imp" in flat
+    # Ordering (bwrap last-wins): the refs/heads RO mask, then the refs/heads/imp
+    # RW re-expose, then the first secret mask. "/ctl/.git/refs/heads" and
+    # "/ctl/.git/refs/heads/imp" are distinct tokens, so index() finds each src.
+    i_mask = argv.index("/ctl/.git/refs/heads")
+    i_reexpose = argv.index("/ctl/.git/refs/heads/imp")
+    i_secret = argv.index("--tmpfs")
+    assert i_mask < i_reexpose < i_secret
+
+
+def test_argv_binds_match_bind_plan_with_ref_protection():
+    # Drift guard: the new rw category must round-trip through the argv parser.
+    p = _refprot_policy()
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    assert _parse_argv_binds(argv) == p.bind_plan()
+    assert ("/ctl/.git/refs/heads/imp", "rw") in p.bind_plan()
+
+
 def test_headless_vars_flow_through_build_sandbox_argv():
     # The four headless vars ride the live per-spawn engine_env; the allowlist
     # (_is_engine_passthrough) admits them so they survive --clearenv.
@@ -697,3 +759,60 @@ def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
     assert ("GIT_TERMINAL_PROMPT", "0") in pol.setenv
     assert ("EDITOR", "true") in pol.setenv
     assert ("VISUAL", "true") in pol.setenv
+
+
+def test_resolve_policy_masks_git_refs_and_reexposes_imp(tmp_path):
+    control, wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "index").write_text("")
+    (git / "refs" / "stash").write_text("")
+    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    # The three crown-jewel paths join the RO remask...
+    assert str(git / "refs" / "heads") in pol.git_ro_remask
+    assert str(git / "refs" / "stash") in pol.git_ro_remask
+    assert str(git / "index") in pol.git_ro_remask
+    # ...and refs/heads/imp is the RW re-expose, created on disk so the bind is
+    # valid even before the first imp/ loose ref exists.
+    assert pol.git_ref_reexpose == (str(git / "refs" / "heads" / "imp"),)
+    assert (git / "refs" / "heads" / "imp").is_dir()
+    # End-to-end verdicts through the in-process mirror.
+    assert pol.allows_write(git / "refs" / "heads" / "master") is False
+    assert pol.allows_write(git / "index") is False
+    assert pol.allows_write(git / "refs" / "heads" / "imp" / "abc") is True
+
+
+def test_resolve_policy_skips_absent_ref_masks(tmp_path):
+    control, wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    # No index and no refs/stash on disk — a fresh clone may lack refs/stash.
+    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    assert str(git / "refs" / "heads") in pol.git_ro_remask
+    assert str(git / "refs" / "stash") not in pol.git_ro_remask
+    assert str(git / "index") not in pol.git_ro_remask
+    # The re-expose is still emitted (refs/heads/imp is created unconditionally
+    # for a non-draft change).
+    assert pol.git_ref_reexpose == (str(git / "refs" / "heads" / "imp"),)
+    assert (git / "refs" / "heads" / "imp").is_dir()
+
+
+def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
+    control, _wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "index").write_text("")
+    # worktree IS the control root → draft/degenerate case: emit none of it.
+    pol = resolve_policy(worktree=control, control_root=control, change_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    assert str(git / "refs" / "heads") not in pol.git_ro_remask
+    assert str(git / "refs" / "stash") not in pol.git_ro_remask
+    assert str(git / "index") not in pol.git_ro_remask
+    assert pol.git_ref_reexpose == ()
+    # refs/heads/imp is NOT created for the draft case.
+    assert not (git / "refs" / "heads" / "imp").exists()

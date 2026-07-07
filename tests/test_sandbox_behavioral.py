@@ -594,3 +594,244 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
         assert str(worktree_imp) in result.stdout
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Git-ref protection (nate82): real-bwrap integration + regression
+# ---------------------------------------------------------------------------
+
+def _refprot_repo(prefix: str) -> tuple[Path, Path]:
+    """A real control repo (branch `main`, one seed commit) plus a linked change
+    worktree on branch `imp/esc1` — the non-draft layout the guard protects."""
+    control = Path(tempfile.mkdtemp(prefix=prefix))
+    _init_repo(control)
+    wt_path = wt.create_worktree(control, "esc1", "main")
+    return control, wt_path
+
+
+def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPolicy]:
+    """Resolve the REAL policy for `worktree` under `control` and wrap it in a
+    ToolContext the `bash` tool can drive. worktree != control → the git-ref
+    guard is active (Part 1). Used for the change worktree and, with a different
+    `worktree`, for the spike worktree."""
+    pol = resolve_policy(
+        worktree=worktree, control_root=control, change_id="esc1",
+        cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+        engine_env_result={"IMP_PROJECT_ROOT": str(worktree)},
+        environ=os.environ, available=True,
+    )
+    ctx = ToolContext(
+        project_root=worktree, events_path=worktree / "events.jsonl")
+    ctx.change_context = ChangeContext(
+        title="Ref Test", project_root=worktree,
+        workflow_dir=worktree / ".imp" / "wf")
+    ctx.sandbox_policy = pol
+    return ctx, pol
+
+
+def _seed_stash(control: Path) -> str:
+    """Create a real refs/stash on the host so the guard's EXISTENCE-GATED mask
+    (resolve_policy → _existing) actually covers it — a fresh repo has no
+    refs/stash, so without this the stash mask is silently dropped and stays
+    writable. Leaves the working tree clean (the dirt is stashed away). Returns
+    the stash commit sha for an unchanged-after assertion."""
+    (control / "README.md").write_text("stash seed\n")
+    _git(control, "stash", "push", "-m", "seed-stash")
+    sha = _git(control, "rev-parse", "refs/stash").stdout.strip()
+    assert sha, "seed stash was not created — refs/stash mask would be untested"
+    return sha
+
+
+def test_control_root_shared_ref_mutation_blocked() -> None:
+    """Inside the sandbox, mutations of the control root's shared refs all FAIL:
+    update-ref on the base branch (refs/heads RO), git stash (refs/stash + index
+    RO), and a bare commit -a on the base branch (index RO). The host base ref
+    and the pre-existing stash ref are proven unchanged.
+
+    A refs/stash is pre-seeded on the host BEFORE the policy is resolved: the mask
+    is existence-gated (resolve_policy → _existing), so without a pre-existing
+    refs/stash the stash mask is dropped and a first stash would not be blocked.
+
+    Falsifiability: without the Part-1 masks, .git is bound fully rw, so all three
+    commands would succeed (rc=0), refs/heads/main would move to `other_sha`, and
+    the in-sandbox stash would push a NEW refs/stash tip (!= stash_before).
+    """
+    control, wt_path = _refprot_repo("imp-test-refblock-")
+    try:
+        # Give imp/esc1 a distinct commit so a successful update-ref of main to it
+        # would be an observable MOVE (this runs on the host — no mask there).
+        (wt_path / "w.txt").write_text("w\n")
+        _git(wt_path, "add", "-A")
+        _git(wt_path, "-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "-qm", "branch work")
+        other_sha = _git(wt_path, "rev-parse", "HEAD").stdout.strip()
+        main_before = _git(control, "rev-parse", "refs/heads/main").stdout.strip()
+        assert other_sha != main_before
+        # Pre-create refs/stash on the host so the existence-gated mask covers it.
+        stash_before = _seed_stash(control)
+        # Re-dirty the control tree (the seed dirt was stashed away) so the
+        # in-sandbox `stash` / `commit -a` have real work to do — a clean tree
+        # would no-op with rc=0 and never touch the masked paths.
+        (control / "README.md").write_text("dirty\n")
+
+        ctx, _pol = _refprot_ctx(control, wt_path)
+
+        r1 = _bash(
+            ctx,
+            f"git -C {control} update-ref refs/heads/main {other_sha} "
+            "2>&1; echo rc=$?")
+        assert "rc=0" not in r1["stdout"], (
+            f"update-ref on base branch succeeded — refs/heads mask NOT enforced: {r1}")
+
+        r2 = _bash(ctx, f"git -C {control} stash 2>&1; echo rc=$?")
+        assert "rc=0" not in r2["stdout"], (
+            f"git stash succeeded — refs/stash / index mask NOT enforced: {r2}")
+        # `git stash` computes the stash commit (objects rw) but cannot update the
+        # masked refs/stash file nor the masked index → rc!=0 and the ref does not
+        # advance past the seed stash.
+
+        # Re-dirty the tree so the bare-commit probe exercises the index mask
+        # INDEPENDENTLY: in a counterfactual no-guard run the stash above would
+        # succeed and reset the working tree, leaving `commit -am` with nothing to
+        # stage (a spurious rc=1). Re-dirtying keeps r3 an unambiguous index-mask
+        # probe in every run.
+        (control / "README.md").write_text("dirty again\n")
+        r3 = _bash(
+            ctx,
+            f"git -C {control} -c user.email=t@t -c user.name=t "
+            "commit -am pwned 2>&1; echo rc=$?")
+        assert "rc=0" not in r3["stdout"], (
+            f"bare commit on base branch succeeded — index mask NOT enforced: {r3}")
+
+        # HOST invariants: the base ref did not move; the stash ref did not advance
+        # past the pre-seeded tip (no new stash was pushed).
+        assert _git(
+            control, "rev-parse", "refs/heads/main").stdout.strip() == main_before, (
+            "refs/heads/main moved despite the mask")
+        assert _git(
+            control, "rev-parse", "refs/stash").stdout.strip() == stash_before, (
+            "refs/stash advanced despite the mask")
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
+
+def test_change_and_spike_branch_writes_succeed() -> None:
+    """The finalize-flow guard: commits + autosquash rebase on the change branch
+    imp/esc1 succeed, and a commit on a spike branch imp/spike-esc1-1 succeeds —
+    both branches live under the rw re-exposed refs/heads/imp.
+
+    Falsifiability: if the refs/heads RO mask were NOT re-exposed for the imp/
+    subtree, every commit/rebase here would fail (rc!=0) and the CHANGE_OK /
+    SPIKE_OK markers would be absent; the host commit-count / spike-ref assertions
+    would then fail.
+    """
+    control, wt_path = _refprot_repo("imp-test-refok-")
+    try:
+        ctx, _pol = _refprot_ctx(control, wt_path)
+
+        # Change branch: two commits then an autosquash rebase onto main. The
+        # inline GIT_SEQUENCE_EDITOR/GIT_EDITOR=: keep rebase -i non-interactive
+        # (they are shell-assignment prefixes, independent of the --clearenv jail).
+        r1 = _bash(
+            ctx,
+            "echo a > f.txt && git add f.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm work && "
+            "echo b >> f.txt && git add f.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm 'fixup! work' && "
+            "GIT_SEQUENCE_EDITOR=: GIT_EDITOR=: "
+            "git -c user.email=t@t -c user.name=t rebase -i --autosquash main && "
+            "echo CHANGE_OK")
+        assert "CHANGE_OK" in r1["stdout"], (
+            f"change-branch commit/rebase failed — refs/heads/imp re-expose broken: {r1}")
+        # Host: imp/esc1 advanced and the fixup collapsed it to a single commit
+        # over main (proves the writes + rebase actually landed).
+        assert _git(
+            control, "rev-list", "--count",
+            "main..imp/esc1").stdout.strip() == "1", "imp/esc1 did not collapse to 1 commit"
+
+        # Spike branch: a fresh spike worktree on imp/spike-esc1-1, policy rooted
+        # at the spike worktree (mirrors _build_spike_policy inheriting the guard).
+        spike_wt = wt.create_spike_worktree(control, "esc1", 1, "main")
+        spike_ctx, _ = _refprot_ctx(control, spike_wt)
+        r2 = _bash(
+            spike_ctx,
+            "echo s > s.txt && git add s.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm spike && echo SPIKE_OK")
+        assert "SPIKE_OK" in r2["stdout"], (
+            f"spike-branch commit failed — refs/heads/imp re-expose broken: {r2}")
+        assert _git(
+            control, "rev-parse", "--verify", "--quiet",
+            "refs/heads/imp/spike-esc1-1").returncode == 0, "spike branch ref not updated"
+    finally:
+        with contextlib.suppress(Exception):
+            wt.destroy_spike_worktree(control, "esc1", 1)
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
+
+def test_imp_own_git_writes_unaffected_by_ref_masks() -> None:
+    """Regression: the guard must not touch imp's own in-sandbox .git writes.
+    refs/imp/* and .git/imp/ are writable inside a real sandbox, and the real
+    artifact_commit lands refs/imp/artifacts/<id>. The policy mirror agrees each
+    artifact_commit path is writable while the masked crown jewels deny.
+
+    Falsifiability: if a mask accidentally covered refs/imp or .git/imp, the
+    in-sandbox probes would fail (rc!=0) and the host ref/file would be absent;
+    the allows_write assertions on refs/imp/artifacts and .git/imp/repo.lock
+    would flip to False.
+    """
+    control, wt_path = _refprot_repo("imp-test-artifact-")
+    try:
+        # Pre-create refs/stash so the existence-gated stash mask is actually
+        # applied (a fresh repo has none → it would be dropped and stay writable,
+        # making the allows_write(refs/stash) assertion below read True).
+        _seed_stash(control)
+        ctx, pol = _refprot_ctx(control, wt_path)
+        head = _git(control, "rev-parse", "HEAD").stdout.strip()
+
+        # refs/imp/* is NOT masked → update-ref succeeds in-sandbox and lands on host.
+        r1 = _bash(
+            ctx,
+            f"git -C {control} update-ref refs/imp/probe {head} 2>&1; echo rc=$?")
+        assert "rc=0" in r1["stdout"], (
+            f"update-ref refs/imp/probe failed — refs/imp wrongly masked: {r1}")
+        assert _git(
+            control, "rev-parse", "--verify", "--quiet",
+            "refs/imp/probe").stdout.strip() == head, "refs/imp/probe not written on host"
+
+        # .git/imp scratch (RepoGitLock + artifact_commit's temp index) is writable.
+        r2 = _bash(
+            ctx,
+            f"mkdir -p {control}/.git/imp && "
+            f"echo x > {control}/.git/imp/probe.lock 2>&1; echo rc=$?")
+        assert "rc=0" in r2["stdout"], (
+            f"write under .git/imp failed — .git/imp wrongly masked: {r2}")
+        assert (control / ".git" / "imp" / "probe.lock").exists(), (
+            ".git/imp/probe.lock not written on host")
+
+        # The real artifact_commit writes refs/imp/artifacts/esc1 (full-tree snapshot).
+        art = wt_path / "artifact.md"
+        art.write_text("hello\n")
+        wrote = wt.artifact_commit(
+            control, "esc1", {"spec/esc1.md": art}, message="snap")
+        assert wrote is True
+        assert _git(
+            control, "rev-parse", "--verify", "--quiet",
+            "refs/imp/artifacts/esc1").returncode == 0, "artifact ref not created"
+
+        # Policy mirror: every artifact_commit write path is writable; the three
+        # masked crown jewels deny.
+        git = control / ".git"
+        assert pol.allows_write(git / "refs" / "imp" / "artifacts" / "esc1") is True
+        assert pol.allows_write(git / "imp" / "repo.lock") is True
+        assert pol.allows_write(git / "objects" / "ab" / "cdef") is True
+        assert pol.allows_write(git / "refs" / "heads" / "main") is False
+        assert pol.allows_write(git / "refs" / "stash") is False
+        assert pol.allows_write(git / "index") is False
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
