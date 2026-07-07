@@ -28,6 +28,8 @@ def test_new_help_documents_the_message_positional(
     out = _help_for(["new", "-h"], capsys)
     assert "MESSAGE" in out
     assert "opening intent" in out.lower()
+    assert "front-door" not in out.lower()
+    assert "threshold" not in out.lower()
 
 
 def test_resume_help_documents_the_token_positional(

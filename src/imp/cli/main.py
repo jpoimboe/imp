@@ -191,7 +191,7 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
 
     A non-empty positional MESSAGE becomes the user's verbatim opening intent
     (delivered unwrapped); otherwise there is no seed. A spec is named in the
-    positional MESSAGE and read by front-door itself, never inlined here."""
+    positional MESSAGE and read by the workflow's opening step itself, never inlined here."""
     title = getattr(args, "title", None)
     opening = getattr(args, "opening", None)
 
@@ -1000,8 +1000,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             print("imp: cancelled", file=sys.stderr)
             return 130
         header_printed = True
-        # An empty reply falls back to the unseeded path (front-door opens
-        # by asking); a real answer becomes the opening intent.
+        # An empty reply falls back to the unseeded path (the opening step
+        # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
 
     _warn_if_tui_unavailable(args, sys.stdout)
@@ -2550,12 +2550,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "new", help="Start a new Change: run the workflow from an opening intent.")
     p_new.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
-        help="Opening intent handed verbatim to front-door as its first "
-             "message; omit to start with an interactive prompt. Distinct from "
-             "--message, which is a headless reply to the first solicit.")
+        help="Opening intent handed verbatim to the workflow's opening step "
+             "as its first message; omit to start with an interactive prompt. "
+             "Distinct from --message, which is a headless reply to the first solicit.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
-                       help="Set the Change title explicitly; front-door "
-                            "names the Change if omitted.")
+                       help="Set the Change title explicitly; the workflow's "
+                            "opening step names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Run headless: no live prompt; supply the first reply "
                             "via --message.")
