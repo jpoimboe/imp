@@ -561,6 +561,10 @@ class NarrativeBuilder:
             if extra:
                 noun = "subagent" if extra == 1 else "subagents"
                 detail = _join(detail, f"+{extra} {noun}")
+            if nested is not None and nested.countdown_total is not None:
+                return Activity(position=position, verb=nested.verb,
+                                detail=detail, model=model,
+                                countdown_total=nested.countdown_total)
             return Activity(position=position, verb=verb, detail=detail, model=model)
 
         detail = None

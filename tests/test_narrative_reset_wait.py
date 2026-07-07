@@ -126,3 +126,24 @@ def test_non_resume_event_leaves_wait_set() -> None:
     b.add(ev("9", "warning", message="a transient note"))
     assert b._reset_wait is not None
     assert b.current_activity().verb == "waiting for limit reset"
+
+
+def test_running_subagent_wait_propagates_to_parent() -> None:
+    b = _build()
+    # Dispatch a subagent (no closing tool_result -> the fold stays running).
+    b.add({"id": "tk1", "agent_id": "step:convergence/deferred-sweep",
+           "type": "tool_call",
+           "payload": {"id": "tk1", "name": "sub_agent",
+                       "input": {"subagent_name": "coder",
+                                 "task_description": "edit"}}})
+    # The subagent hits the limit: its agent_retry routes into the nested builder.
+    b.add(ev("r1", "agent_retry", agent_id="sub:tk1",
+             category="rate_limit", attempt=1,
+             backoff_seconds=2940.0, hinted=True))
+    act = b.current_activity()
+    assert act.verb == "waiting for limit reset"
+    assert act.countdown_total == 2940.0
+    assert act.detail is None
+    # position is the phase label alone: the step label rides as the fold verb here.
+    assert act.position == "convergence phase"
+    assert act.model == "claude"
