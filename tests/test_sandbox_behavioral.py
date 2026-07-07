@@ -715,3 +715,58 @@ def test_control_root_shared_ref_mutation_blocked() -> None:
         with contextlib.suppress(Exception):
             wt.remove_worktree(control, "esc1", force=True)
         shutil.rmtree(control, ignore_errors=True)
+
+
+def test_change_and_spike_branch_writes_succeed() -> None:
+    """The finalize-flow guard: commits + autosquash rebase on the change branch
+    imp/esc1 succeed, and a commit on a spike branch imp/spike-esc1-1 succeeds —
+    both branches live under the rw re-exposed refs/heads/imp.
+
+    Falsifiability: if the refs/heads RO mask were NOT re-exposed for the imp/
+    subtree, every commit/rebase here would fail (rc!=0) and the CHANGE_OK /
+    SPIKE_OK markers would be absent; the host commit-count / spike-ref assertions
+    would then fail.
+    """
+    control, wt_path = _refprot_repo("imp-test-refok-")
+    try:
+        ctx, _pol = _refprot_ctx(control, wt_path)
+
+        # Change branch: two commits then an autosquash rebase onto main. The
+        # inline GIT_SEQUENCE_EDITOR/GIT_EDITOR=: keep rebase -i non-interactive
+        # (they are shell-assignment prefixes, independent of the --clearenv jail).
+        r1 = _bash(
+            ctx,
+            "echo a > f.txt && git add f.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm work && "
+            "echo b >> f.txt && git add f.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm 'fixup! work' && "
+            "GIT_SEQUENCE_EDITOR=: GIT_EDITOR=: "
+            "git -c user.email=t@t -c user.name=t rebase -i --autosquash main && "
+            "echo CHANGE_OK")
+        assert "CHANGE_OK" in r1["stdout"], (
+            f"change-branch commit/rebase failed — refs/heads/imp re-expose broken: {r1}")
+        # Host: imp/esc1 advanced and the fixup collapsed it to a single commit
+        # over main (proves the writes + rebase actually landed).
+        assert _git(
+            control, "rev-list", "--count",
+            "main..imp/esc1").stdout.strip() == "1", "imp/esc1 did not collapse to 1 commit"
+
+        # Spike branch: a fresh spike worktree on imp/spike-esc1-1, policy rooted
+        # at the spike worktree (mirrors _build_spike_policy inheriting the guard).
+        spike_wt = wt.create_spike_worktree(control, "esc1", 1, "main")
+        spike_ctx, _ = _refprot_ctx(control, spike_wt)
+        r2 = _bash(
+            spike_ctx,
+            "echo s > s.txt && git add s.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm spike && echo SPIKE_OK")
+        assert "SPIKE_OK" in r2["stdout"], (
+            f"spike-branch commit failed — refs/heads/imp re-expose broken: {r2}")
+        assert _git(
+            control, "rev-parse", "--verify", "--quiet",
+            "refs/heads/imp/spike-esc1-1").returncode == 0, "spike branch ref not updated"
+    finally:
+        with contextlib.suppress(Exception):
+            wt.destroy_spike_worktree(control, "esc1", 1)
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "esc1", force=True)
+        shutil.rmtree(control, ignore_errors=True)
