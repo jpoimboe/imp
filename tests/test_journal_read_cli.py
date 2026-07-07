@@ -189,7 +189,7 @@ def test_status_empty_prints_no_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """No in-flight worktrees + empty archive → exactly `No changes.\n`."""
+    """No in-flight worktrees + empty archive → exactly the empty-state hint line."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -198,7 +198,7 @@ def test_status_empty_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No changes.\n"
+    assert capsys.readouterr().out == "No changes yet — start one with imp new\n"
 
 
 def test_status_precondition_error_prints_no_changes(
@@ -217,7 +217,7 @@ def test_status_precondition_error_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No changes.\n"
+    assert capsys.readouterr().out == "No changes yet — start one with imp new\n"
 
 
 def test_status_column_alignment_short_ids(
@@ -428,7 +428,7 @@ def test_overview_only_history_not_reported_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """An overview with only merged history is NOT reported `No changes.`"""
+    """An overview with only merged history is NOT reported as the empty-state hint."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -441,7 +441,7 @@ def test_overview_only_history_not_reported_empty(
 
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     out = capsys.readouterr().out
-    assert out != "No changes.\n"
+    assert out != "No changes yet — start one with imp new\n"
     assert "done" in out and "merged" in out
 
 

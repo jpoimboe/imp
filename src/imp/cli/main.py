@@ -1734,11 +1734,11 @@ def _resolve_default_id(control: Path) -> str | None:
     return archive_read.most_recent_archived_id(control)
 
 
-_NO_CHANGES_MESSAGE = "No changes."
+_NO_CHANGES_MESSAGE = "No changes yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
-    print("No changes.")
+    print(_NO_CHANGES_MESSAGE)
     return 2
 
 
