@@ -1393,3 +1393,54 @@ def test_build_agent_invocation_derives_has_schema_false_when_fieldless(
         event_log=None, change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
     assert captured["has_schema"] is False
+
+
+def test_agent_run_result_delay_hinted_defaults_false() -> None:
+    from imp.engine.agent_run import AgentRunResult
+    res = AgentRunResult(output=None, errored=True, paused=False, fatal=False,
+                         delay=7200.0)
+    assert res.delay_hinted is False
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_large_hint_sets_delay_hinted(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "rate_limit", "kind": "429", "message": "resets 4am",
+        "detail": {"retry_after_seconds": 7200.0}}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False,
+                                 prior_backoff_attempts=0)
+    assert res.delay == 7200.0
+    assert res.delay_hinted is True
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_small_hint_not_delay_hinted(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "rate_limit", "kind": "429", "message": "slow",
+        "detail": {"retry_after_seconds": 30.0}}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False,
+                                 prior_backoff_attempts=0)
+    assert res.delay == 30.0
+    assert res.delay_hinted is False
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_blind_backoff_not_delay_hinted(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "rate_limit", "kind": "429", "message": "slow"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False,
+                                 prior_backoff_attempts=0)
+    assert res.delay is not None
+    assert res.delay_hinted is False

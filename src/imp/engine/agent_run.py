@@ -209,6 +209,10 @@ class AgentRunResult:
     fatal: bool
     delay: float | None
     error: ErrorInfo | None = None
+    # True when `delay` came from a reset/Retry-After hint above 60s
+    # (error_policy RetryWithBackoff.hinted): the executor/subagent backoff loop
+    # exempts this announced wait from the per-category retry budget.
+    delay_hinted: bool = False
     # Bare-turn-end yield pause: paused=True drives normal pause handling;
     # awaiting_user=True additionally tells the executor to mark THIS step
     # resumable so the paused step survives the reload. Stays False for every
@@ -702,7 +706,8 @@ async def drive_invocation(
                         if isinstance(decision, error_policy.RetryWithBackoff):
                             return AgentRunResult(None, True, False, False,
                                                   decision.delay_seconds,
-                                                  ErrorInfo(category, kind))
+                                                  ErrorInfo(category, kind),
+                                                  delay_hinted=decision.hinted)
                         # RetryNow (agent_output_missing today)
                         return AgentRunResult(None, True, False, False, None,
                                               ErrorInfo(category, kind))
@@ -745,7 +750,8 @@ async def drive_invocation(
         # delay is always present — the executor loop owns budget exhaustion.
         assert isinstance(decision, error_policy.RetryWithBackoff)
         return AgentRunResult(None, True, False, False, decision.delay_seconds,
-                              ErrorInfo("stalled", "stalled"))
+                              ErrorInfo("stalled", "stalled"),
+                              delay_hinted=decision.hinted)
 
     if agent_output is None:
         return AgentRunResult(None, True, False, False, None)
