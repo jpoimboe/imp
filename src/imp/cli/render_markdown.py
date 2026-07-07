@@ -172,8 +172,8 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         if system_prompt:
             inner_blocks.append("system_prompt:")
             inner_blocks.append(_fence(system_prompt))
-        yield _details(_md_escape(f"context · {provider}/{model}"),
-                       "\n\n".join(inner_blocks), full=full)
+        summary = f"Internal context (imp system prompts) — {provider}/{model}"
+        yield _details(_md_escape(summary), "\n\n".join(inner_blocks), full=full)
         return
     if isinstance(node, nv.SubagentFold):
         if not full:
