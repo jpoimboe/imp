@@ -229,10 +229,14 @@ to score).
 - **The pager** — `imp log` / `imp show` page through `less` on a tty: a long narrative holds
   the screen (send `"q"` to quit); `--no-pager` prints straight through (use it or
   `view(full=True)` when *you* need to read). Judge that paging feels intentional, not broken.
-- **Slash commands at the interactive prompt** — at any imp prompt: `/help` (readable, and
-  does it match reality?), `/skills`, `/list`, `/search <q>`; Tab completion (`send("/sk\t")`
-  → `/skills`); Up-arrow recalls your previous input; Alt+Enter (`send("\x1b\r")`) inserts a
-  newline instead of submitting; Ctrl-C at the prompt clears the buffer (and hints at Ctrl-D
+- **Slash commands at the interactive prompt** — at any imp prompt, including the opening
+  `imp new` / `imp chat` intent prompt and the post-`/clear` prompt: the full eight-command
+  client-side set — `/help` (readable, and does it match reality?), `/skills`, `/list [-a]`,
+  `/search <q>`, `/resume <id>`, `/save`, `/clear`, `/abandon` — each handled client-side
+  without spending a model turn; Tab completion covers all eight (`send("/sk\t")` →
+  `/skills`, `send("/li\t")` → `/list`), so an unambiguous prefix fills and an ambiguous one
+  lists candidates; Up-arrow recalls your previous input; Alt+Enter (`send("\x1b\r")`) inserts
+  a newline instead of submitting; Ctrl-C at the prompt clears the buffer (and hints at Ctrl-D
   once); and paste a bare path like `/home/user/foo.py` — it must submit as ordinary input,
   **not** error as an unknown command.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
@@ -261,7 +265,8 @@ to score).
 - **Ctrl-O toggle** — expanded tree collapses to a lean burst summary (e.g. `N calls · bash`)
   and back.
 - **Slash + Tab completion** — at the bottom prompt buffer `send("/help\r")` renders the slash
-  help *inside* the app; `send("/sk\t")` completes to `/skills`; `send("\x15")` clears.
+  help *inside* the app; `send("/sk\t")` completes to `/skills` and `send("/li\t")` to `/list`
+  (all eight client-side commands complete); `send("\x15")` clears.
 - **Ctrl-C pause → steer (attached)** — with the agent working, `send("\x03")` then `wait()`
   → the run pauses and you're at a steer prompt, still attached. Judge the paused state's
   wording: is it obvious you can reply to redirect, or detach? Send a short steer reply and
