@@ -18,6 +18,7 @@ description: |
 
 vars:
   fast_path:              {type: bool, default: false}
+  auto_merge:             {type: bool, default: true}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   coverage_settled:       {type: bool, default: false}

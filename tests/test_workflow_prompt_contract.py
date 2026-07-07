@@ -809,7 +809,8 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
             return render_prompt(body, build_context(
                 change_title="t", event_log=log, change_id="abc",
                 change_home=".imp/changes/abc",
-                project_facts={}, autonomous=autonomous),
+                project_facts={}, autonomous=autonomous,
+                vars={"auto_merge": True}),
                 workflow_dir=wdir).lower()
 
         attended = render(False)

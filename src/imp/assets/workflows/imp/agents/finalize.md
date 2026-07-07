@@ -86,6 +86,17 @@ With every item now either trusted-and-merged or seeded to the backlog, take the
 non-converging verify-triage case above) — that still **pauses** for a human even under
 autonomy; do not force it through. Then route on the dispositions below.
 {% else %}
+{% if vars.auto_merge %}
+**Auto-merge — this run merges clean changes without asking.** When the §1
+**needs-decision** closed set is empty AND there is no unrecoverable problem (e.g.
+the non-converging verify-triage case above), do **not** open the live gate or solicit
+a decision: take the **merge** disposition directly and route on the dispositions
+below. Still emit the full audit record (`verify_status` / `open_items` (empty) /
+`next_steps`) on `complete_step`, and state in `comments` that you merged
+automatically because there were no open items. When open items **do** exist, or an
+unrecoverable problem is present, ignore this shortcut and fall through to the
+interactive gate text below.
+{% endif %}
 This is the final **merge gate**, and a human reads it. Speak in **prose**, never
 a labelled **field-dump**.
 

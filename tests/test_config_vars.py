@@ -113,3 +113,27 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="X", change_id="x", base_branch="main")
     st = State.load(ch.state_dir)
     assert st.vars["flag_var"] is False
+
+
+def test_shipped_workflow_declares_auto_merge_bool_default_true() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    decls = {d.name: d for d in wf.vars.decls}
+    assert "auto_merge" in decls
+    assert decls["auto_merge"].type == "bool"
+    assert decls["auto_merge"].default is True
+
+
+def test_shipped_auto_merge_override_type_enforced() -> None:
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.loader import load_workflow
+
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    # A bool override applies over the default...
+    out = apply_var_overrides(wf.vars, {"auto_merge": False})
+    assert out["auto_merge"] is False
+    # ...and a non-bool override is rejected with a LoadError.
+    with pytest.raises(LoadError, match="expects bool"):
+        apply_var_overrides(wf.vars, {"auto_merge": 3})
