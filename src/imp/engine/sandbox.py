@@ -43,6 +43,7 @@ class SandboxPolicy:
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
     change_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
+    git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
 
     def allows_read(self, path: Path) -> bool:
         """In-process mirror of the sandbox's read exposure: the whole host is
@@ -68,6 +69,7 @@ class SandboxPolicy:
             (self.git_common_dir, "rw"),
             *([(self.change_home, "rw")] if self.change_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
+            *[(p, "rw") for p in self.git_ref_reexpose],
             *[(p, "ro") for p in self.readonly_overlays],
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],
