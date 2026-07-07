@@ -104,6 +104,53 @@ def install_process_group() -> None:
         os.setpgrp()
 
 
+@contextlib.asynccontextmanager
+async def sigint_cancels_scope() -> AsyncIterator[None]:
+    """Cancel the wrapped body on an out-of-band SIGINT and re-raise it as
+    KeyboardInterrupt.
+
+    For a prompt window that runs BEFORE any InterruptCoordinator receiver
+    exists (the `imp new` / `imp chat` opening prompt), an OS SIGINT would
+    otherwise land in asyncio.Runner's default handling and escape as a raw
+    KeyboardInterrupt above the caller's cleanup arm. This installs a loop-level
+    SIGINT handler that cancels an anyio scope wrapping just the body; on exit it
+    removes the handler and RESTORES the prior signal disposition (not the
+    asyncio default that remove_signal_handler leaves), and if the scope was
+    cancelled by SIGINT it raises KeyboardInterrupt so the caller's
+    `except (EOFError, KeyboardInterrupt)` arm runs. Where add_signal_handler is
+    unsupported (Windows) it degrades to a no-op — no worse than before."""
+    import anyio
+
+    loop = asyncio.get_running_loop()
+    scope = anyio.CancelScope()
+    hit_sigint = False
+
+    def _on_sigint() -> None:
+        nonlocal hit_sigint
+        hit_sigint = True
+        scope.cancel()
+
+    prev_handler = signal.getsignal(signal.SIGINT)
+    supported = True
+    try:
+        loop.add_signal_handler(signal.SIGINT, _on_sigint)
+    except (NotImplementedError, RuntimeError, ValueError):
+        supported = False
+    if not supported:
+        yield  # unsupported (Windows) — degrade to a no-op guard
+        return
+    try:
+        with scope:
+            yield
+    finally:
+        with _suppress(NotImplementedError, RuntimeError, ValueError):
+            loop.remove_signal_handler(signal.SIGINT)
+        with _suppress(TypeError, ValueError, OSError):
+            signal.signal(signal.SIGINT, prev_handler)
+    if hit_sigint:
+        raise KeyboardInterrupt
+
+
 def _reason_for_signal(sig: int) -> str:
     """Map an incoming POSIX signal number to the pause-reason string surfaced
     on the final `paused (<reason>)` headline. Unknown signals default to the
