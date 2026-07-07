@@ -1793,6 +1793,10 @@ def test_fmt_seconds_done_suppresses_sub_second_keeps_whole() -> None:
     assert rt.fmt_seconds_done(1) == "1s"
     assert rt.fmt_seconds_done(12.4) == "12s"
     assert rt.fmt_seconds_done(336) == "5m 36s"
+    # An hour and up gains the hours unit and drops the seconds noise.
+    assert rt.fmt_seconds_done(3600) == "1h 0m"
+    assert rt.fmt_seconds_done(4536) == "1h 15m"
+    assert rt.fmt_seconds_done(7205) == "2h 0m"
     # fmt_seconds itself is unchanged: the live clock still shows 0s.
     assert rt.fmt_seconds(0.4) == "0s"
 

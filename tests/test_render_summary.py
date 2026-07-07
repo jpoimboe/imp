@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import pytest
-
 from imp.cli.render_summary import (
     StepRow,
     SummaryHeader,
-    _fmt_compact,
     build_summary,
     render_summary,
     summary_total,
@@ -102,18 +99,6 @@ def test_interrupt_config_error_does_not_mark_errored():
     assert rows[-1].errored is False
 
 
-@pytest.mark.parametrize("seconds, expected", [
-    (90, "1m30s"),
-    (4, "0m04s"),
-    (588, "9m48s"),
-    (330, "5m30s"),
-    (2342, "39m02s"),
-    (0, "0m00s"),
-])
-def test_fmt_compact(seconds, expected):
-    assert _fmt_compact(seconds) == expected
-
-
 def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):
     start = "2026-01-01T00:00:00+00:00"
     end = None if open_ else f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00"
@@ -129,9 +114,9 @@ def test_plain_output_has_no_sgr_and_expected_lines():
     rows = [_row("plan", "plan-writer", 90)]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged  ·  39m02s",
+        "feature  ·  abc  ·  merged  ·  39m 2s",
         "plan",
-        "  plan-writer  1m30s",
+        "  plan-writer  1m 30s",
     ]
 
 
@@ -143,12 +128,12 @@ def test_plain_multi_step_shows_column_padding():
     ]
     lines = render_summary(rows, header=_HDR, color=False, width=80)
     assert lines == [
-        "feature  ·  abc  ·  merged  ·  39m02s",
+        "feature  ·  abc  ·  merged  ·  39m 2s",
         "plan",
-        "  plan-writer  1m30s",
-        "  plan-review  2m00s",
+        "  plan-writer  1m 30s",
+        "  plan-review  2m 0s",
         "implement",
-        "  verify       0m30s",
+        "  verify       30s",
     ]
 
 
@@ -191,7 +176,7 @@ def test_wait_annotation_only_at_or_above_threshold():
     out = render_summary(rows, header=_HDR, color=False, width=80)
     verify = next(ln for ln in out if "verify" in ln)
     task = next(ln for ln in out if "task-lead" in ln)
-    assert "⏸ 5m30s wait" in verify
+    assert "⏸ 5m 30s wait" in verify
     assert "wait" not in task                          # sub-5s wait is omitted
 
 

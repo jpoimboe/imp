@@ -12,7 +12,6 @@ from imp.cli.render_summary import (
     _WAIT_THRESHOLD,
     StepRow,
     SummaryHeader,
-    _fmt_compact,
 )
 
 _MAX_HEADING = 6
@@ -260,7 +259,7 @@ def render_summary_markdown(summary: list[StepRow], *,
                             header: SummaryHeader) -> str:
     """Render the `imp log --summary` view as a Markdown document."""
     total = ("running" if header.total_seconds is None
-             else _fmt_compact(header.total_seconds))
+             else rt.fmt_seconds(header.total_seconds))
     blocks = [
         _heading(1, _md_escape(f"{header.workflow} — {header.change_id}")),
         f"**Status:** {_md_escape(header.status)} · **Total:** {total}",
@@ -270,8 +269,8 @@ def render_summary_markdown(summary: list[StepRow], *,
         if not grouped or grouped[-1][0] != row.phase:
             grouped.append((row.phase, []))
         wall = row.wall_seconds
-        dur = "running" if wall is None else _fmt_compact(wall)
-        wait = (_fmt_compact(row.wait_seconds)
+        dur = "running" if wall is None else rt.fmt_seconds(wall)
+        wait = (rt.fmt_seconds(row.wait_seconds)
                 if row.wait_seconds >= _WAIT_THRESHOLD else "—")
         step = _md_escape(row.step).replace("|", "\\|")
         grouped[-1][1].append(f"| {step} | {dur} | {wait} |")

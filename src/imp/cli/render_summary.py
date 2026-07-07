@@ -7,6 +7,7 @@ from typing import Any
 from imp.cli import palette as pal
 from imp.cli.change_row import STATUS_COLORS
 from imp.cli.narrative import elapsed_seconds
+from imp.cli.render_text import fmt_seconds
 
 
 @dataclass
@@ -71,11 +72,6 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
     return rows
 
 
-def _fmt_compact(seconds: float) -> str:
-    total = int(seconds)
-    return f"{total // 60}m{total % 60:02d}s"
-
-
 @dataclass
 class SummaryHeader:
     workflow: str
@@ -97,7 +93,7 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
 def _header_line(h: SummaryHeader, *, color: bool) -> str:
     workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
     status = pal.ansi(h.status, *STATUS_COLORS.get(h.status, ()), enabled=color)
-    total = "running" if h.total_seconds is None else _fmt_compact(h.total_seconds)
+    total = "running" if h.total_seconds is None else fmt_seconds(h.total_seconds)
     return f"{workflow}  ·  {h.change_id}  ·  {status}  ·  {total}"
 
 
@@ -106,11 +102,11 @@ def _step_line(row: StepRow, *, hue: str, name_w: int, color: bool) -> str:
     codes = pal.NODE_COLORS["error"] if row.errored else (hue,)
     label = pal.ansi(padded, *codes, enabled=color)
     wall = row.wall_seconds
-    dur_text = "running" if wall is None else _fmt_compact(wall)
+    dur_text = "running" if wall is None else fmt_seconds(wall)
     dur = pal.ansi(dur_text, "gray", enabled=color)
     line = f"  {label}  {dur}"
     if row.wait_seconds >= _WAIT_THRESHOLD:
-        wait = pal.ansi(f"⏸ {_fmt_compact(row.wait_seconds)} wait",
+        wait = pal.ansi(f"⏸ {fmt_seconds(row.wait_seconds)} wait",
                         "bright_blue", enabled=color)
         line += f"   {wait}"
     return line

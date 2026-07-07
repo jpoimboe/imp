@@ -57,15 +57,19 @@ def _caret_escape(text: str) -> str:
 
 
 def fmt_seconds(seconds: float | int | None) -> str:
-    """Format an elapsed-second count for a completion/recap line. Under a minute
-    reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`) so a long
-    step reads in human time instead of a wall of seconds. None → empty string."""
+    """Format an elapsed-second count. This is the single duration formatter for
+    every surface (tree recaps, live timer, summary tables, markdown). Under a
+    minute reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`); an
+    hour or more as `Hh Mm` (e.g. 4536 → `1h 15m` — seconds are noise at that
+    scale). None → empty string."""
     if seconds is None:
         return ""
     total = int(seconds)
     if total < 60:
         return f"{total}s"
-    return f"{total // 60}m {total % 60}s"
+    if total < 3600:
+        return f"{total // 60}m {total % 60}s"
+    return f"{total // 3600}h {total % 3600 // 60}m"
 
 
 def fmt_seconds_done(seconds: float | int | None) -> str:

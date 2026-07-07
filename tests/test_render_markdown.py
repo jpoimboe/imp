@@ -392,7 +392,7 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
     assert "## design" in out                 # phase grouping heading
     assert "| Step | Duration | Wait |" in out
     assert "| spec |" in out                  # step row
-    assert "1m00s" in out                     # start→completion wall clock
+    assert "1m 0s" in out                     # start→completion wall clock
 
 
 def test_summary_wait_threshold_running_duration_and_total() -> None:
@@ -409,8 +409,8 @@ def test_summary_wait_threshold_running_duration_and_total() -> None:
     header = SummaryHeader(workflow="imp", change_id="c",
                            status="running", total_seconds=None)
     out = render_summary_markdown(rows, header=header)
-    assert "| waited | 0m30s | 0m10s |" in out   # wait >= threshold → shown
-    assert "| quick | 0m05s | — |" in out        # wait < threshold → dash
+    assert "| waited | 30s | 10s |" in out       # wait >= threshold → shown
+    assert "| quick | 5s | — |" in out           # wait < threshold → dash
     assert "| open | running | — |" in out       # open step → running duration
     assert "**Total:** running" in out           # total_seconds None → running
 

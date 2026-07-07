@@ -47,17 +47,17 @@ def test_summary_renders_header_and_timeline(tmp_path, monkeypatch, capsys):
     rc = main(["log", "-s", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    assert f"·  {slug}  ·  paused  ·  4m45s" in out
+    assert f"·  {slug}  ·  paused  ·  4m 45s" in out
     assert "spec\n" in out
-    assert "  spec-writer  1m30s" in out
+    assert "  spec-writer  1m 30s" in out
     assert "plan\n" in out
-    assert "  plan-writer  3m10s" in out
+    assert "  plan-writer  3m 10s" in out
 
 
 def test_summary_long_flag_alias(tmp_path, monkeypatch, capsys):
     slug = _setup(tmp_path, monkeypatch)
     assert main(["log", "--summary", slug]) == 0
-    assert "  spec-writer  1m30s" in capsys.readouterr().out
+    assert "  spec-writer  1m 30s" in capsys.readouterr().out
 
 
 def test_summary_and_full_are_mutually_exclusive(tmp_path, monkeypatch):
@@ -94,4 +94,4 @@ def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys)
     assert rc == 0
     out = capsys.readouterr().out
     assert "merged" in out
-    assert "  merge-to-base  0m10s" in out
+    assert "  merge-to-base  10s" in out
