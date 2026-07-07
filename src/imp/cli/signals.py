@@ -160,6 +160,14 @@ def _reason_for_signal(sig: int) -> str:
     return "ctrl-c"
 
 
+def _leave_reason_for_signal(sig: int) -> str:
+    """Map an Intent-B leave signal to its trigger string for `leave_reason`."""
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None and sig == sighup:
+        return "sighup"
+    return "sigterm"
+
+
 class InterruptCoordinator:
     """Signal-driven pause coordinator.
 
@@ -176,8 +184,11 @@ class InterruptCoordinator:
 
     def __init__(self) -> None:
         self._runner_interrupt: Any = None
-        self._leave_runner_interrupt: Any = None
         self._ctrl_d_reader: Any = None  # CtrlDReader | None — CLI cbreak /dev/tty reader
+        # Client-side leave trigger, stamped at gesture time (distinct from the
+        # first-wins pause_reason). The single choke point in run_terminal_client
+        # reads it to fill the CONTROL_INTERRUPT_LEAVE frame's reason.
+        self.leave_reason: str | None = None
         self._should_pause = False
         self.pause_reason: str | None = None
         self._loop: Any = None          # event loop owning the signal handlers
@@ -337,6 +348,7 @@ class InterruptCoordinator:
         interjects."""
         self._should_pause = False
         self.pause_reason = None
+        self.leave_reason = None
         self._first_gesture_at = None
         self.escalated = False
 
@@ -362,13 +374,6 @@ class InterruptCoordinator:
 
     def detach_runner(self) -> None:
         self._runner_interrupt = None
-
-    def attach_leave_runner(self, interrupt_fn: Any) -> None:
-        """Attach the ctrl-d leave-interrupt forward, distinct from the Ctrl-C runner."""
-        self._leave_runner_interrupt = interrupt_fn
-
-    def detach_leave_runner(self) -> None:
-        self._leave_runner_interrupt = None
 
     def attach_ctrl_d_reader(self, reader: Any) -> None:
         self._ctrl_d_reader = reader
@@ -434,10 +439,10 @@ class InterruptCoordinator:
             await fn()
 
     async def leave_mid_run(self, *, reason: str = "ctrl-d") -> None:
-        """Ctrl-D mid-run suspend & leave: forward the leave-interrupt and take the leave path."""
-        fn = self._leave_runner_interrupt
-        if fn is not None:
-            await fn()
+        """Ctrl-D mid-run suspend & leave: stamp the leave trigger and take the
+        leave path. The leave frame itself is sent exactly once, from the single
+        choke point in run_terminal_client — never from here."""
+        self.leave_reason = reason
         self.request_exit(reason)
         evt = self.escalation_event
         if evt is not None:
@@ -479,6 +484,7 @@ class InterruptCoordinator:
         otherwise enqueue for the receiver (→ signal_pause → runner interrupt →
         pause-to-prompt)."""
         if sig in _leave_signals():
+            self.leave_reason = _leave_reason_for_signal(sig)
             fn = self._trigger_escalation
             if fn is not None:
                 fn()

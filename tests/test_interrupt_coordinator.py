@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import signal
+
 import anyio
 import pytest
 
@@ -205,25 +207,37 @@ def test_begin_end_tool_watchdog_depth_counter_and_listeners() -> None:
 
 
 @pytest.mark.anyio
-async def test_leave_mid_run_forwards_leave_and_takes_leave_path() -> None:
+async def test_leave_mid_run_stamps_reason_and_takes_leave_path() -> None:
     coord = InterruptCoordinator()
     coord.escalation_event = anyio.Event()
-    forwarded: list[str] = []
     runner_called = {"n": 0}
-
-    async def leave_forward() -> None:
-        forwarded.append("leave")
 
     async def runner_interrupt() -> None:
         runner_called["n"] += 1
 
     coord.attach_runner(runner_interrupt)
-    coord.attach_leave_runner(leave_forward)
 
     await coord.leave_mid_run(reason="ctrl-d")
 
-    assert forwarded == ["leave"]          # leave-interrupt forwarded
-    assert runner_called["n"] == 0         # NOT the signal_pause/ctrl-c runner
-    assert coord.should_pause is True      # rc 130 path
+    assert coord.leave_reason == "ctrl-d"    # trigger stamped for the choke point
+    assert runner_called["n"] == 0           # NOT the ctrl-c signal_pause runner
+    assert coord.should_pause is True        # rc 130 path
     assert coord.pause_reason == "ctrl-d"
-    assert coord.escalation_event.is_set()  # detach driven
+    assert coord.escalation_event.is_set()   # detach driven
+
+
+def test_dispatch_signal_leave_branch_stamps_the_trigger() -> None:
+    coord = InterruptCoordinator()
+    fired: list[bool] = []
+    coord.set_escalation_hook(lambda: fired.append(True))
+
+    coord._dispatch_signal(signal.SIGTERM)
+    assert coord.leave_reason == "sigterm"
+    assert fired == [True]
+
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None:
+        coord2 = InterruptCoordinator()
+        coord2.set_escalation_hook(lambda: None)
+        coord2._dispatch_signal(sighup)
+        assert coord2.leave_reason == "sighup"
