@@ -655,14 +655,18 @@ class NarrativeBuilder:
                 self._tokens.add_usage(usage)
             pt = usage_prompt_tokens(usage)
             is_subagent = isinstance(agent_id, str) and agent_id.startswith("sub:")
-            if pt is not None and not is_subagent:
-                self._latest_prompt_tokens = pt
-            cpct = payload.get("context_pct")
-            if cpct is not None and not is_subagent:
-                self._latest_context_pct = cpct
-            cwin = payload.get("context_window")
-            if cwin is not None and not is_subagent:
-                self._latest_context_window = cwin
+            # pt==0 is an all-zero "empty reply" (e.g. freshly-resumed
+            # claude_code) — no gauge signal, hold last good values. pt is None
+            # (usage absent) is distinct: context_pct/window may still update.
+            if pt != 0 and not is_subagent:
+                if pt is not None:
+                    self._latest_prompt_tokens = pt
+                cpct = payload.get("context_pct")
+                if cpct is not None:
+                    self._latest_context_pct = cpct
+                cwin = payload.get("context_window")
+                if cwin is not None:
+                    self._latest_context_window = cwin
         elif etype == "query_result":
             # Authoritative per-query totals/cost from claude_code. Accumulated
             # BEFORE sub-routing so a subagent's query_result still folds in.
