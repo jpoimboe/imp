@@ -213,8 +213,8 @@ def test_named_resume_agents_carry_no_handoff_reemit_prose() -> None:
     assert "complete_step" in imp_reconciler
 
 
-def test_front_door_renames_early_on_design_formation() -> None:
-    body = _agent_prompt("front-door")
+def test_threshold_renames_early_on_design_formation() -> None:
+    body = _agent_prompt("threshold")
     # Rename fires as soon as a design forms, not deferred to go-live.
     assert "as soon as a design has formed" in body
     # Pure concierge/scout conversations are explicitly excluded from renaming.
