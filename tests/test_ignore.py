@@ -122,6 +122,31 @@ def test_partition_ignored_none_when_not_a_repo(
     assert anyio.run(partition_ignored, tmp_path, {tmp_path / "x"}) is None
 
 
+def test_partition_ignored_stdin_write_racing_dead_git_fails_soft(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # In a not-a-repo, check-ignore exits without ever reading stdin. A payload
+    # larger than the pipe buffer forces the stdin write to outlive the child,
+    # so run_process raises ExceptionGroup([BrokenPipeError]) — deterministically
+    # here, and under suite load even for one-path payloads (the flake this
+    # pins). The fail-soft contract must map it to None, not propagate.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    paths = {tmp_path / f"x{i}" for i in range(5000)}
+    assert anyio.run(partition_ignored, tmp_path, paths) is None
+
+
+def test_git_non_oserror_group_still_propagates(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fail-soft covers pipe/spawn OSErrors only: a group carrying a real bug
+    # (any non-OSError leaf) must escape, not be masked as "git unavailable".
+    import imp.agents.tools.ignore as ignore_mod
+
+    async def _raise_group(*args: object, **kwargs: object) -> object:
+        raise ExceptionGroup("boom", [BrokenPipeError(), ValueError("bug")])
+    monkeypatch.setattr(ignore_mod.anyio, "run_process", _raise_group)
+    with pytest.raises(ExceptionGroup):
+        anyio.run(repo_root, tmp_path)
+
+
 def test_git_oserror_causes_repo_root_to_return_none(
         tmp_path: Path, monkeypatch) -> None:
     import imp.agents.tools.ignore as ignore_mod

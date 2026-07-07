@@ -20,13 +20,24 @@ async def _git(root: Path, *args: str,
                stdin: bytes | None = None) -> tuple[int, bytes]:
     """Run `git -C <root> <args>` on the host via anyio.run_process (a real,
     cancellable await point). Returns (returncode, stdout-bytes). A missing git
-    binary or any spawn error returns (-1, b"") rather than raising."""
+    binary or any spawn error returns (-1, b"") rather than raising.
+
+    A fast-failing git (e.g. check-ignore in a not-a-repo, which exits without
+    reading stdin) can die before the stdin feed finishes; run_process surfaces
+    that BrokenPipeError/ConnectionResetError wrapped in an ExceptionGroup from
+    its internal task group. All-OSError groups are the same fail-soft case;
+    a group with any non-OSError leaf is a real bug and propagates."""
     try:
         result = await anyio.run_process(
             ["git", "-C", str(root), *args],
             input=stdin, stdout=PIPE, stderr=PIPE, check=False,
         )
     except OSError:
+        return -1, b""
+    except ExceptionGroup as eg:
+        _, rest = eg.split(OSError)
+        if rest is not None:
+            raise
         return -1, b""
     return result.returncode, result.stdout
 
