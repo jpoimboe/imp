@@ -141,7 +141,7 @@ async def test_client_input_satisfies_server_gate(tmp_path: Path) -> None:
 async def test_client_control_invokes_server_on_control(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     actions: list[str] = []
-    server = SessionSocket(sock, on_control=actions.append)
+    server = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
     client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
     async with anyio.create_task_group() as tg:
         await server.open()
@@ -230,7 +230,7 @@ async def test_concurrent_send_input_and_control_do_not_collide(tmp_path: Path) 
     sock = str(tmp_path / "s.sock")
     actions: list[str] = []
     inputs: list[str] = []
-    server = SessionSocket(sock, on_control=actions.append)
+    server = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
     client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
     async with anyio.create_task_group() as tg:
         await server.open()

@@ -82,7 +82,7 @@ class SessionSocket:
             [Attach, Callable[[dict[str, Any]], None]], ReplaySnapshot | None
         ] | None = None,
         on_detach: Callable[[], None] | None = None,
-        on_control: Callable[[str], None] | None = None,
+        on_control: Callable[[str, str | None], None] | None = None,
         on_lease_change: Callable[[], None] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
     ) -> None:
@@ -187,7 +187,7 @@ class SessionSocket:
             with contextlib.suppress(anyio.WouldBlock):
                 self._input_send.send_nowait(message.text)
         elif isinstance(message, Control) and self._on_control is not None:
-            self._on_control(message.action)
+            self._on_control(message.action, message.reason)
         elif isinstance(message, SetLease):
             client.leased = message.value
             if self._on_lease_change is not None:

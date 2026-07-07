@@ -98,7 +98,7 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
 ) -> None:
     sock = str(tmp_path / "s.sock")
     actions: list[str] = []
-    server = SessionSocket(sock, on_control=actions.append)
+    server = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
     coord = InterruptCoordinator()
 
     async def _attach(

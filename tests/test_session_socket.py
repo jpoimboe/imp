@@ -216,7 +216,7 @@ async def test_input_outside_a_gate_is_dropped(tmp_path: Path) -> None:
 async def test_control_frame_invokes_on_control(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     actions: list[str] = []
-    session = SessionSocket(sock, on_control=actions.append)
+    session = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
     async with anyio.create_task_group() as tg:
         await session.open()
         tg.start_soon(session.serve)
