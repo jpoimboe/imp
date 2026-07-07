@@ -139,18 +139,21 @@ async def test_send_to_llm_store_backed_native_resume(
     for m in msgs:
         t.append(m)
     # The store holds only what the batcher flushed at the prior result boundary
-    # (the first two turns). The trailing tool_result is the unflushed tail; a
-    # SEND_TO_LLM native resume must STREAM it as the delta (it is the message
-    # that kicks the next turn), NOT fold it into the loaded session — claude-p
-    # never generates from a loaded session alone, so an empty delta deadlocks.
+    # (the first two turns). The trailing tool_result is the unflushed tail; it is
+    # a completed-call boundary, so a SEND_TO_LLM native resume FOLDS it into the
+    # loaded session (so the model recalls the real result) rather than streaming
+    # it as a dangling delta. That leaves an empty delta, so the native empty-delta
+    # guard kicks the turn with the continuation nudge — claude-p never generates
+    # from a loaded session alone, so an empty delta would deadlock.
     await store.append(skey, message_to_session_records(
         msgs[:2], parent_uuid=None, session_id=skey["session_id"],
         cwd=str(tmp_path), model=_MODEL, start_index=0))
 
     # Spy on the first-query history stream to prove which path ran: native
-    # resume streams ONLY the trailing tool_result (1 turn); a silent stream-json
-    # fallback would replay the full transcript (3 turns). Both would otherwise
-    # satisfy the behavioral assertions below.
+    # resume folds the tool_result into the store and streams ONLY the
+    # continuation nudge (1 turn); a silent stream-json fallback would replay the
+    # full transcript (3 turns). Both would otherwise satisfy the behavioral
+    # assertions below.
     streamed: list[list[Message]] = []
     _orig_stream = claude_code._stream_history
     monkeypatch.setattr(
@@ -166,13 +169,17 @@ async def test_send_to_llm_store_backed_native_resume(
     assert events[-1]["type"] == "agent_output", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
-    # Zero re-execution: the seeded read was recalled, not redone.
+    # Zero re-execution: the folded tool_result was recalled, not redone.
     assert _read_file_call_count(inv.event_log) == 0
-    # Native path ran: the first query streamed exactly the trailing tool_result
-    # turn, not the whole transcript (which a replay fallback would send).
+    # Native path ran: the first query streamed exactly the continuation-nudge
+    # turn (the folded tool_result is NOT in the delta), not the whole transcript
+    # (which a replay fallback would send).
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
     assert len(streamed) == 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
-    assert any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
+    assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
+    assert any(isinstance(b, TextBlock) and b.text == _CONTINUATION_NUDGE
+               for b in streamed[0][0].content)
 
 
 @pytest.mark.skipif(

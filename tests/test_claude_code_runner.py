@@ -295,10 +295,13 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
         events.append(ev)
 
     assert events[-1]["type"] == "agent_output"
-    # Initial messages were NOT re-appended: no-store SEND_TO_LLM now
-    # resumes natively — no manifest turn, so 3 original + 1 new assistant = 4.
+    # Initial messages were NOT re-appended: no-store SEND_TO_LLM resumes
+    # natively — no manifest turn. The trailing tool_result folds into the store
+    # (completed-call boundary), leaving an empty delta, so the native empty-delta
+    # guard appends a continuation-nudge turn: 3 original + nudge + 1 new
+    # assistant = 5.
     loaded = t.load()
-    assert len(loaded) == 4
+    assert len(loaded) == 5
 
 
 @pytest.mark.anyio
@@ -567,6 +570,28 @@ async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
     assert queried["hit"] is False, "no transcript may be streamed to the provider"
     errors = [e for e in events if e["type"] == "error"]
     assert errors and errors[0]["payload"]["kind"] == "no_user_input_fn"
+
+
+def test_contains_tool_result_discriminates_turn_kinds() -> None:
+    from imp.agents.runner import ToolResultBlock
+    from imp.providers.claude_code import _contains_tool_result
+
+    tool_result_turn = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t0", content="x"),),
+    )
+    text_turn = Message(role="user", content=(TextBlock(text="more please"),))
+    mixed_turn = Message(
+        role="user",
+        content=(
+            TextBlock(text="here"),
+            ToolResultBlock(tool_use_id="t1", content="y"),
+        ),
+    )
+
+    assert _contains_tool_result(tool_result_turn) is True
+    assert _contains_tool_result(mixed_turn) is True
+    assert _contains_tool_result(text_turn) is False
 
 
 @pytest.mark.anyio
@@ -1784,10 +1809,191 @@ async def test_resume_without_stored_session_passes_native_session_state(tmp_pat
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
     assert opts.resume == resume_session_id("step:p/s")
-    # SEND_TO_LLM folds the trailing user tool_result OUT of resume_base and
-    # streams it as the delta, so 2 flushed turns are reconstructed (not 3).
+    # SEND_TO_LLM now KEEPS the trailing tool_result turn below resume_base (a
+    # completed-call boundary, not an unanswered prompt), so it folds into the
+    # loaded session: 3 turns are reconstructed and the last is the tool_result
+    # pairing t0.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 3
+    assert reconciled[-1]["type"] == "user"
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t0"
+
+
+@pytest.mark.anyio
+async def test_native_resume_folds_mixed_tool_result_then_text_tail(
+    tmp_path: Path,
+) -> None:
+    """Mixed tail folds the completed pair; only the trailing text streams as the delta."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="x"),)))
+    t.append(Message(role="user", content=(TextBlock(text="also do Y"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    # The completed pair (+ the leading user turn) folds into the store: 3
+    # reconstructed turns, the last being the tool_result pairing t0.
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 3
+    assert reconciled[-1]["type"] == "user"
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t0"
+    # Only the trailing text turn streams as the delta.
+    assert _user_text_blob(created[0].queries[0]) == "also do Y"
+
+
+@pytest.mark.anyio
+async def test_native_resume_holds_back_plain_text_tail(tmp_path: Path) -> None:
+    """A trailing plain-text user turn is still held back and streamed as the delta."""
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(TextBlock(text="hi"),)))
+    t.append(Message(role="user", content=(TextBlock(text="keep going"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    # The text tail is folded OUT: only the first two turns are reconstructed.
     reconciled = await store.load(skey)
     assert len(reconciled) == 2
+    assert reconciled[-1]["message"]["role"] == "assistant"
+    # The held-back text is the streamed delta.
+    assert _user_text_blob(created[0].queries[0]) == "keep going"
+
+
+@pytest.mark.anyio
+async def test_native_resume_folds_is_error_tool_result_tail(tmp_path: Path) -> None:
+    """A trailing is_error tool_result folds the same way, exposing the real error content."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.providers.claude_code_session_store import session_key
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path, agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+    skey = session_key(inv.change_context.project_root, "step:p/s")
+    store = session_store_for(inv.transcript_dir)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="sub_agent", input={"subagent_name": "coder"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(
+            tool_use_id="t0", content="sub-agent degraded", is_error=True),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    reconciled = await store.load(skey)
+    assert len(reconciled) == 3
+    last_block = reconciled[-1]["message"]["content"][0]
+    assert last_block["type"] == "tool_result"
+    assert last_block["is_error"] is True
+    assert last_block["content"] == "sub-agent degraded"
+
+
+@pytest.mark.anyio
+async def test_native_folded_tool_result_tail_gets_continuation_nudge(
+    tmp_path: Path,
+) -> None:
+    """Folded tool_result tail with no interject gets _CONTINUATION_NUDGE (delta non-empty)."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, agent_id="step:p/s", event_log=log)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="x"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    # resume_should_continue defaults to False → the existing continuation-nudge
+    # block does NOT fire; only the new native empty-delta guard can.
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    [ev async for ev in runner.run(inv)]
+
+    # The nudge is journaled as an internal engine_continuation (not a user turn).
+    conts = [e for e in log.read() if e["type"] == "engine_continuation"]
+    assert len(conts) == 1
+    assert conts[0]["payload"]["text"] == _CONTINUATION_NUDGE
+    # The streamed delta carries exactly that nudge (non-empty).
+    assert _user_text_blob(created[0].queries[0]) == _CONTINUATION_NUDGE
 
 
 def _user_text_blob(replayed: list[Any]) -> str:
@@ -2366,17 +2572,20 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     assert opts.resume == resume_session_id("step:p/s")
     assert isinstance(opts.session_store, ImpSessionStore)
     assert opts.session_id is None
-    # SEND_TO_LLM STREAMS the trailing user turn to kick the next turn: claude-p
-    # never self-starts a loaded --resume session, so an empty streamed slice
-    # would park it (and the runner in receive_response()) forever.
+    # The trailing tool_result is a completed-call boundary, so it FOLDS into the
+    # native session instead of streaming as a dangling delta. With no interject
+    # and resume_should_continue=False the delta would be empty, so the native
+    # empty-delta guard kicks the turn with the continuation nudge (claude-p never
+    # self-starts a loaded --resume session — an empty slice would park it).
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
-    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
-    # The tail was streamed, NOT folded into the native session: the store keeps
-    # only the 2 flushed turns, ending on the assistant tool_use.
+    assert _user_text_blob(streamed) == _CONTINUATION_NUDGE
+    # The completed pair folded into the store: 3 turns, ending on the tool_result.
     reconciled = await store.load(skey)
-    assert len(reconciled) == 2
-    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_use"
+    assert len(reconciled) == 3
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
+    assert reconciled[-1]["message"]["content"][0]["tool_use_id"] == "t0"
 
 
 @pytest.mark.anyio
@@ -3618,10 +3827,12 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
         any(isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
             for b in m.content)
         for m in replayed if m.role == "user")
-    # The 2 flushed turns were reconstructed; the trailing user tool_result is
-    # streamed as the SEND_TO_LLM delta, not stored.
+    # The trailing tool_result is a completed-call boundary, so it folds into the
+    # reconstructed session: 3 turns, ending on the tool_result (not streamed as a
+    # dangling delta).
     reconciled = await store.load(skey)
-    assert len(reconciled) == 2
+    assert len(reconciled) == 3
+    assert reconciled[-1]["message"]["content"][0]["type"] == "tool_result"
 
 
 @pytest.mark.anyio
@@ -4297,3 +4508,33 @@ async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> 
     assert tr["content"] == "REAL BODY OF b.txt"
     assert "interrupted" not in tr["content"]
     assert tr.get("is_error") in (False, None)
+
+
+def test_history_dicts_renders_merged_user_text_blocks_separately() -> None:
+    """Merged user text turns render as separate text blocks, not one fused string."""
+    from imp.providers.claude_code import (
+        _history_dicts,
+        _merge_assistant_fragments,
+    )
+
+    merged = _merge_assistant_fragments([
+        Message(role="user", content=(TextBlock(text="A"),)),
+        Message(role="user", content=(TextBlock(text="B"),)),
+    ])
+    dicts = list(_history_dicts(merged))
+    assert len(dicts) == 1
+    assert dicts[0]["type"] == "user"
+    assert dicts[0]["message"]["content"] == [
+        {"type": "text", "text": "A"},
+        {"type": "text", "text": "B"},
+    ]
+
+
+def test_history_dicts_keeps_lone_user_text_as_plain_string() -> None:
+    """A lone user text block keeps the canonical plain-string content form."""
+    from imp.providers.claude_code import _history_dicts
+
+    dicts = list(_history_dicts([
+        Message(role="user", content=(TextBlock(text="solo"),)),
+    ]))
+    assert dicts[0]["message"]["content"] == "solo"

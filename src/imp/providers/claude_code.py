@@ -352,6 +352,10 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
     )
 
 
+def _contains_tool_result(msg: Message) -> bool:
+    return any(isinstance(b, ToolResultBlock) for b in msg.content)
+
+
 def _drain_interject_message(coordinator: Any, elog: Any,
                              agent_id: str) -> Message | None:
     """claude_code variant of agent_run.deliver_interject. The SDK is queried
@@ -947,8 +951,10 @@ def _history_dicts(messages: list[Message]) -> Any:
                 "uuid": str(uuid.uuid4()),
                 "message": {
                     "role": "user",
+                    # >1 block → block list keeps merged text turns (interjects) separate.
                     "content": [_block_to_dict(b) for b in m.content]
-                    if any(not isinstance(b, TextBlock) for b in m.content)
+                    if len(m.content) > 1
+                    or any(not isinstance(b, TextBlock) for b in m.content)
                     else _join_text(m.content),
                 },
             }
@@ -1528,7 +1534,9 @@ class ClaudeCodeAgentRunner:
         # stream them as the delta — they are the message that kicks the turn.
         if (shape_native_eligible
                 and classify_resume(existing) is ResumeState.SEND_TO_LLM):
-            while resume_base > 0 and existing[resume_base - 1].role == "user":
+            while (resume_base > 0
+                   and existing[resume_base - 1].role == "user"
+                   and not _contains_tool_result(existing[resume_base - 1])):
                 resume_base -= 1
         # Dispatch-only respawn: resume_base collapsed to 0, so the whole (short)
         # history streams fresh and the store is truncated/rebuilt from scratch —
@@ -1776,6 +1784,16 @@ class ClaudeCodeAgentRunner:
             if not native_resume and len(messages) == replay_stream_base:
                 deliver_reply_on_resume(
                     messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            # Native folded-tool_result tail: after the fold, a transcript ending
+            # exactly on the tool_result leaves messages[resume_base:] empty.
+            # Mirror the replay guard on the native arm — claude-p never generates
+            # from a loaded --resume session with an empty delta (it parks reading
+            # stdin and the runner deadlocks in receive_response()). Use the
+            # continuation nudge, not the redo nudge: the folded work stands, so
+            # the resumed turn continues from it rather than redoing it.
+            if native_resume and len(messages) == resume_base:
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, _CONTINUATION_NUDGE)
         else:
             messages = []
             for m in invocation.initial_messages:
