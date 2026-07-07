@@ -569,6 +569,28 @@ async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
     assert errors and errors[0]["payload"]["kind"] == "no_user_input_fn"
 
 
+def test_contains_tool_result_discriminates_turn_kinds() -> None:
+    from imp.agents.runner import ToolResultBlock
+    from imp.providers.claude_code import _contains_tool_result
+
+    tool_result_turn = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t0", content="x"),),
+    )
+    text_turn = Message(role="user", content=(TextBlock(text="more please"),))
+    mixed_turn = Message(
+        role="user",
+        content=(
+            TextBlock(text="here"),
+            ToolResultBlock(tool_use_id="t1", content="y"),
+        ),
+    )
+
+    assert _contains_tool_result(tool_result_turn) is True
+    assert _contains_tool_result(mixed_turn) is True
+    assert _contains_tool_result(text_turn) is False
+
+
 @pytest.mark.anyio
 async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     """Extended-thinking output from claude_code is captured as a `thinking`

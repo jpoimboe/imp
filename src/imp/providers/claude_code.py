@@ -352,6 +352,10 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
     )
 
 
+def _contains_tool_result(msg: Message) -> bool:
+    return any(isinstance(b, ToolResultBlock) for b in msg.content)
+
+
 def _drain_interject_message(coordinator: Any, elog: Any,
                              agent_id: str) -> Message | None:
     """claude_code variant of agent_run.deliver_interject. The SDK is queried
