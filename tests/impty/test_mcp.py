@@ -10,10 +10,10 @@ from impty.driver import ImptyDriver
 from impty.mcp import build_server, impty_tool_specs
 
 
-def test_server_lists_the_seven_tools_and_drops_transcript() -> None:
+def test_server_lists_the_eight_tools_and_drops_transcript() -> None:
     names = {t.name for t in asyncio.run(mcp_mod.mcp.list_tools())}
     assert "transcript" not in names
-    assert {"start", "view", "send", "wait",
+    assert {"start", "view", "send", "wait", "resize",
             "snapshot", "stop", "send_signal"} <= names
 
 
@@ -29,7 +29,8 @@ def test_impty_tool_specs_pair_each_method_with_its_schema() -> None:
     driver = ImptyDriver()
     specs = asyncio.run(impty_tool_specs(driver))
     assert [s.name for s in specs] == [
-        "start", "view", "send", "send_signal", "wait", "snapshot", "stop"]
+        "start", "view", "send", "send_signal", "resize",
+        "wait", "snapshot", "stop"]
     start_spec = next(s for s in specs if s.name == "start")
     # Schema is the FastMCP-introspected JSON Schema of the bound method.
     assert "argv" in start_spec.input_schema["properties"]

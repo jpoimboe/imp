@@ -40,6 +40,17 @@ _ANIMATING_CHILD = (
     "    time.sleep(0.02)\n"
 )
 
+_RESIZE_CHILD = (
+    "import os, signal, sys, time, tty\n"
+    "def _handler(signum, frame):\n"
+    "    cols = os.get_terminal_size(sys.stdin.fileno()).columns\n"
+    "    os.write(1, b'WIDTH=' + str(cols).encode() + b'\\r\\n')\n"
+    "signal.signal(signal.SIGWINCH, _handler)\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(30)\n"
+)
+
 
 def test_decodes_carriage_return_so_enter_submits() -> None:
     assert _decode_keys("foo\\r") == "foo\r"
@@ -59,10 +70,11 @@ def test_leaves_unrecognized_backslash_literal() -> None:
     assert _decode_keys("a\\z b") == "a\\z b"
 
 
-def test_tool_methods_expose_the_seven_tools_in_order() -> None:
+def test_tool_methods_expose_the_eight_tools_in_order() -> None:
     names = [m.__name__ for m in ImptyDriver().tool_methods()]
     assert names == [
-        "start", "view", "send", "send_signal", "wait", "snapshot", "stop"]
+        "start", "view", "send", "send_signal", "resize",
+        "wait", "snapshot", "stop"]
 
 
 def test_require_raises_before_start() -> None:
@@ -202,6 +214,50 @@ def test_send_wait_true_returns_screen_not_sent_marker() -> None:
         d.wait(idle=0.2, hard=5.0)  # wait for READY
         result = d.send("x", wait=True)
         assert result != "[sent]"
+        assert result.startswith("[")  # status header
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_delivers_sigwinch_and_child_sees_new_width() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
+    try:
+        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        screen = d.resize(30, 100)  # rows=30, cols=100
+        # The live session reflects the new geometry.
+        assert d._require().cols == 100
+        assert d._require().rows == 30
+        # The child observed SIGWINCH and rendered its new width; poll like the
+        # send_signal e2e test since the reaction can land a beat after settle.
+        deadline = time.monotonic() + 5.0
+        while "WIDTH=100" not in screen and time.monotonic() < deadline:
+            time.sleep(0.02)
+            screen = d.view(full=True)
+        assert "WIDTH=100" in screen
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_wait_false_returns_marker_without_render() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _RESIZE_CHILD])
+    try:
+        assert d.resize(30, 100, wait=False) == "[resized]"
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_resize_wait_true_returns_screen_not_resized_marker() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _RESIZE_CHILD])
+    try:
+        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        result = d.resize(30, 100, wait=True)
+        assert result != "[resized]"
         assert result.startswith("[")  # status header
     finally:
         d.stop()

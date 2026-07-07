@@ -1,6 +1,6 @@
 """Transport-neutral driver for one interactive program over an impty
-`TerminalSession`. Owns the session and exposes the seven tool bodies (start,
-view, send, send_signal, wait, snapshot, stop) plus helpers. The tool
+`TerminalSession`. Owns the session and exposes the eight tool bodies (start,
+view, send, send_signal, resize, wait, snapshot, stop) plus helpers. The tool
 descriptions live on the method docstrings as the single source of truth — the
 provider host adapters (claude_code SDK tools, codex FastMCP, the standalone
 stdio server) all surface these same methods, so there is no per-provider
@@ -164,6 +164,40 @@ class ImptyDriver:
         session.wait_idle(since=since)  # inherit the library settle policy
         return self._render(session)
 
+    def resize(self, rows: int, cols: int, wait: bool | float = True) -> str:
+        """Resize the live terminal and return the new screen. The child receives
+        a real `SIGWINCH`, so a program that reflows on that signal (a TUI relaying
+        out, a CLI re-wrapping at a new width) reacts exactly as it would in a real
+        terminal that got resized.
+
+        `rows, cols` is the new size — NOTE this order is the REVERSE of
+        `start(cols, rows)`; it matches the wrapped `TerminalSession.resize(rows,
+        cols)`. pyte only pads/clips its grid to the new geometry; the *program*
+        does the actual reflow. A program that ignores `SIGWINCH` just gets a
+        re-framed grid.
+
+        `wait` controls how long to settle before snapshotting (same tri-state as
+        `send`):
+        - True (default): wait for the redraw reaction to go QUIET, then return.
+        - False: fire and return `[resized]` immediately (e.g. a never-quiet
+          animating TUI; snapshot separately).
+        - a number (seconds): settle for that FIXED duration, then return the screen.
+        """
+        session = self._require()
+        # Mark the boundary before the resize so wait_idle settles on the REDRAW
+        # reaction, not on a stale pre-resize screen.
+        since = time.monotonic()
+        session.resize(rows, cols)
+        # `is False` / `is True`: bool is an int subclass, so a numeric `wait` must
+        # be distinguished by identity, not truthiness (0.0 is a valid fixed settle).
+        if wait is False:
+            return "[resized]"
+        if wait is True:
+            session.wait_idle(since=since)  # inherit the library settle policy
+        else:
+            time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
+        return self._render(session)
+
     def wait(
         self, idle: float = DEFAULT_SETTLE_IDLE, hard: float = DEFAULT_SETTLE_HARD,
     ) -> str:
@@ -230,6 +264,6 @@ class ImptyDriver:
         """The bound tool methods, in a fixed order, for the host adapters to
         register. The single enumeration point shared by all three hosts."""
         return [
-            self.start, self.view, self.send, self.send_signal,
+            self.start, self.view, self.send, self.send_signal, self.resize,
             self.wait, self.snapshot, self.stop,
         ]
