@@ -692,6 +692,14 @@ def _parse_step(
         raise LoadError(
             f"release: only valid on an agent step, not a {kind} step", source)
 
+    glyph = raw.get("glyph")
+    if glyph is not None:
+        if not isinstance(glyph, str):
+            raise LoadError("a step's `glyph:` must be a string", source)
+        if acquire != "merge-lane":
+            raise LoadError(
+                "glyph: only valid on a step with acquire: merge-lane", source)
+
     max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
     max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops
     on_max = defaults.on_max_retries  # on_max_retries is not a per-step YAML knob
@@ -762,6 +770,7 @@ def _parse_step(
             label=label,
             acquire=acquire,
             release=release,
+            glyph=glyph,
             phase_label=phase_label,
             phase_show_label=phase_show_label,
             show_label=show_label,

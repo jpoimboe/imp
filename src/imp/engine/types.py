@@ -184,6 +184,7 @@ class Step:
     label: str | None = None
     acquire: str | None = None  # "merge-lane" (branch FIFO) or "test-lane" (counting semaphore)
     release: str | None = None  # "merge-lane"; runs before step body; agent steps only
+    glyph: str | None = None  # merge-lane hold title glyph; loader-guarded to acquire: merge-lane
     phase_label: str | None = None  # owning phase's label template, stamped at load
     show_label: bool = True     # frame: header + completion breadcrumb (default on)
     show_output: bool = False   # script body: stdout as a • message (scripts only)

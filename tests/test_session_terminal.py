@@ -1396,3 +1396,272 @@ async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Pa
             assert actions == []
             await server.close()
             tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "lane_acquired",
+                   "payload": {"base": "main", "step": "wait-for-head",
+                               "glyph": "▲"}})
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("no gate should fire")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    assert hold in s.getvalue()
+
+
+@pytest.mark.anyio
+async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "lane_acquired", "_replay": True,
+                   "payload": {"base": "main", "step": "wait-for-head",
+                               "glyph": "▲"}})
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("no gate should fire")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    assert hold in s.getvalue()
+
+
+@pytest.mark.anyio
+async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "lane_acquired",
+                   "payload": {"base": "main", "step": "wait-for-head",
+                               "glyph": "▲"}})
+        on_event({"type": "lane_released",
+                   "payload": {"base": "main", "step": "merge"}})
+        # Wait for the post-release working re-render to flush before returning,
+        # else teardown can race ahead of the client processing the release.
+        hold_r = "\x1b]2;▲ imp · term1 · My Change\x07"
+        work_r = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+        with anyio.fail_after(5):
+            while not (hold_r in s.getvalue() and work_r in s.getvalue()
+                       and s.getvalue().rindex(work_r) > s.getvalue().index(hold_r)):
+                await anyio.sleep(0.02)
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("no gate should fire")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    out = s.getvalue()
+    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    work = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+    assert hold in out
+    assert out.rindex(work) > out.index(hold)
+
+
+@pytest.mark.anyio
+async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "lane_acquired",
+                   "payload": {"base": "main", "step": "wait-for-head",
+                               "glyph": "▲"}})
+        on_event({"type": "lane_evicted",
+                   "payload": {"base": "main", "step": "wait-for-head"}})
+        # Wait for the post-evict working re-render to flush before returning,
+        # else teardown can race ahead of the client processing the eviction.
+        hold_r = "\x1b]2;▲ imp · term1 · My Change\x07"
+        work_r = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+        with anyio.fail_after(5):
+            while not (hold_r in s.getvalue() and work_r in s.getvalue()
+                       and s.getvalue().rindex(work_r) > s.getvalue().index(hold_r)):
+                await anyio.sleep(0.02)
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+        raise AssertionError("no gate should fire")
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    out = s.getvalue()
+    hold = "\x1b]2;▲ imp · term1 · My Change\x07"
+    work = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+    assert hold in out
+    assert out.rindex(work) > out.index(hold)
+
+
+@pytest.mark.anyio
+async def test_replayed_ordinary_event_does_not_flip_to_working(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input",
+                   "payload": {"prompt": "name?"}})
+        await user_chat_input_fn("name?")
+        # A replayed ordinary event must NOT flip activity back to working.
+        on_event({"type": "llm_response", "_replay": True, "payload": {}})
+        return "done"
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(prompt: str) -> str:
+        return "imp"
+
+    s = _TTYStream()
+    title = TerminalTitle(s, "term1", "My Change")
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, title=title)
+
+            tg.start_soon(_client)
+
+    out = s.getvalue()
+    waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
+    working = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+    assert waiting in out
+    post_gate = out[out.index(waiting) + len(waiting):]
+    assert working not in post_gate

@@ -956,7 +956,7 @@ async def _route_acquire(
     state.held_lane = lane
     state.held_acquire_step = step.name
     state.save(change.state_dir)
-    _emit(log, "lane_acquired", {"base": lane, "step": step.name})
+    _emit(log, "lane_acquired", {"base": lane, "step": step.name, "glyph": step.glyph})
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
     return _finish(log, step, change, match, state)
