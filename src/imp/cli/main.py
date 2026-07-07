@@ -2539,11 +2539,24 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
+def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
+    """In-flight Change rows (id, title, status, created) whose id or title
+    contains `query` (case-insensitive) — the live counterpart to the archive
+    search, which never sees an un-archived Change."""
+    q = query.lower()
+    hits: list[tuple[str, str, str, str]] = []
+    for r in _status_rows(control):
+        if q in r[0].lower() or q in r[4].lower():
+            hits.append((r[0], r[4], r[1], r[5]))
+    return hits
+
+
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     control = _control if _control is not None else _control_root()
-    hits = archive_read.search_archive(control, args.query)
+    hits = _search_inflight(control, args.query) + archive_read.search_archive(
+        control, args.query)
     if not hits:
-        print(f"No archived changes match {args.query!r}.")
+        print(f"No changes match {args.query!r}.")
         return 0
     for change_id, title, status, _created in hits:
         print(f"{change_id}  {title or '(untitled)'}  [{status or '-'}]")
