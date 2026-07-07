@@ -227,6 +227,25 @@ def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> No
     assert captured["warnings"] == 2
 
 
+def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
+    class _Evt:
+        def is_set(self) -> bool:
+            return True
+
+    class _Coord:
+        leave_reason = "ctrl-d"
+        escalation_event = _Evt()
+
+    change = _Change([])
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_paused_summary") as ps:
+        State.load.return_value = _State("paused", step=None)
+        rc = main._handle_terminal_outcome(change, RunResult.PAUSED, coord=_Coord())
+    assert rc == 1
+    ps.assert_called_once()
+    assert ps.call_args.args[1] == "ctrl-d"   # the trigger reached the summary
+
+
 def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(monkeypatch) -> None:
     # _Change([]) has no events_path attribute and event_log().read() returns [] —
     # so the code falls through to the archive_read.read_events fallback branch.

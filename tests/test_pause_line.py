@@ -247,26 +247,56 @@ def test_pause_facts_stale_segment_renders_unexpected_death_banner(tmp_path: Pat
     assert reason == "ended unexpectedly — see .imp/changes/mona44/daemon.stderr"
 
 
-def test_pause_facts_deliberate_leave_downgrades_stale_to_bare(tmp_path: Path) -> None:
+def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path) -> None:
     import json
 
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    # The client itself chose to leave (Ctrl-D / /save / headless detach): the
-    # daemon writes its pause event only after the client is gone, so the
-    # resumed-without-pause log must render a bare banner, not a death notice.
-    change_dir = tmp_path / ".imp" / "changes" / "mona44"
+    # Event log that, WITHOUT a deliberate-leave signal, reads as STALE (a pause
+    # followed by a resume) — the daemon-derived path would render the
+    # unexpected-death banner. The stamped trigger must win instead.
+    change_dir = tmp_path / ".imp" / "changes" / "krol99"
     change_dir.mkdir(parents=True)
     events = [
-        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("1", "step_started", step="task-lead", kind="agent", phase="implement"),
         ev("2", "workflow_paused", reason="terminated", kind="terminated"),
         ev("3", "workflow_resumed"),
     ]
     (change_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
-    change = Change(id="mona44", title="", base_branch="main",
+    change = Change(id="krol99", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
-    _name, _phase, _token, reason = _pause_facts(change, deliberate_leave=True)
-    assert reason is None
+
+    name, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
+    assert name == "krol99"
+    assert phase == "implement"          # last-seen phase, local knowledge
+    assert token == "krol99"
+    assert reason == "sigterm"           # the client's trigger, NOT "ended unexpectedly"
+
+
+def test_leave_trigger_returns_reason_only_when_escalated_and_stamped() -> None:
+    from imp.cli.main import _leave_trigger
+
+    class _Evt:
+        def __init__(self, is_set: bool) -> None:
+            self._set = is_set
+
+        def is_set(self) -> bool:
+            return self._set
+
+    class _Coord:
+        def __init__(self, reason: str | None, evt: object | None) -> None:
+            self.leave_reason = reason
+            self.escalation_event = evt
+
+    # A deliberate leave: escalation set AND a stamped trigger.
+    assert _leave_trigger(_Coord("ctrl-d", _Evt(True))) == "ctrl-d"
+    # Escalation set but no trigger stamped (a /save-style disposition leave).
+    assert _leave_trigger(_Coord(None, _Evt(True))) is None
+    # A trigger present but escalation not fired (defensive: not a completed leave).
+    assert _leave_trigger(_Coord("sigterm", _Evt(False))) is None
+    # No escalation event at all, and the None coord used by non-interactive paths.
+    assert _leave_trigger(_Coord("sigterm", None)) is None
+    assert _leave_trigger(None) is None
