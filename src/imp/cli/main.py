@@ -2308,7 +2308,7 @@ def _deliver_abandon_resident(control: Path, change_id: str) -> None:
     anyio.run(_run)
 
 
-def _abandon(control: Path, change_id: str) -> int:
+def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
@@ -2335,6 +2335,11 @@ def _abandon(control: Path, change_id: str) -> int:
             return 2
         print(f"Discarded idea {token}.")
         return 0
+    if not yes and _interactive():
+        print(f"Abandon {token}? This removes its worktree, branch, and state.")
+        if input("Type 'y' to confirm: ").strip().lower() not in ("y", "yes"):
+            print(f"Left {token} in place.")
+            return 0
     if session_is_resident(control, change_id):
         try:
             _deliver_abandon_resident(control, change_id)
@@ -2385,11 +2390,12 @@ async def _pick_abandon_target(control: Path) -> str | int:
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
+    yes = args.yes
     if args.token is None:
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
             return target
-        return _abandon(control, target)
+        return _abandon(control, target, yes=yes)
     try:
         change_id = _resolve_id(control, args.token)
     except SystemExit:
@@ -2403,11 +2409,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0])
+            return _abandon(control, hits[0], yes=yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, change_id)
+    return _abandon(control, change_id, yes=yes)
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
@@ -2796,6 +2802,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "token", nargs="?",
         help="Change id or short token identifying which Change to abandon "
              "(omit on a tty to pick from a list).")
+    p_abandon.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation prompt before tearing down a materialized Change.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(
