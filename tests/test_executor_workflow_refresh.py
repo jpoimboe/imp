@@ -10,10 +10,15 @@ import pytest
 
 from imp.engine.executor import (
     RunResult,
+    _reconcile_resolved_run,
     _refresh_workflow_snapshot,
     _trees_identical,
     run_change,
 )
+from imp.engine.loader import load_workflow
+from imp.engine.state import State
+from imp.providers.config import ProviderModel
+from imp.providers.effective import load_effective_config
 from tests.test_executor import _register_fake, _seed_minimal_workflow
 
 
@@ -228,3 +233,75 @@ async def test_self_edit_picked_up_on_resume(tmp_path: Path) -> None:
     snap_writer = change.change_dir / "workflow" / "agents" / "writer.md"
     assert "edited-by-self" in snap_writer.read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
+
+
+def _load_workflow_and_config(change):
+    """Load the refreshed snapshot workflow + config the way run_change does."""
+    config = load_effective_config(
+        project_root=change.project_root, control_root=change.control_root,
+    ).config
+    workflow = load_workflow(change.workflow_dir, project_keys=frozenset())
+    return workflow, config
+
+
+@pytest.mark.anyio
+async def test_reconcile_adds_missing_tier_keeps_pinned(tmp_path: Path) -> None:
+    """A tier absent from the persisted map is filled in from a fresh resolve;
+    an already-present (pinned) tier is left exactly as it was."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change, on_event=lambda _e: None)   # persists {low,medium,high}
+    workflow, config = _load_workflow_and_config(change)
+
+    state = State.load(change.state_dir)
+    del state.resolved_tiers["high"]                     # simulate a stale map
+    state.resolved_tiers["low"] = ProviderModel(provider="fake", model="pinned-low")
+
+    assert _reconcile_resolved_run(state, workflow, config) is True
+    assert state.resolved_tiers["high"].provider == "fake"   # re-added
+    assert state.resolved_tiers["low"].model == "pinned-low"  # NOT overwritten
+
+
+@pytest.mark.anyio
+async def test_reconcile_no_missing_returns_false_no_overwrite(tmp_path: Path) -> None:
+    """When every tier/step key is already present the helper adds nothing,
+    returns False, and never overwrites a pinned model (fresh resolve would
+    give model 'm'; the pin must survive)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change, on_event=lambda _e: None)
+    workflow, config = _load_workflow_and_config(change)
+
+    state = State.load(change.state_dir)
+    state.resolved_tiers["low"] = ProviderModel(provider="fake", model="pinned-low")
+
+    assert _reconcile_resolved_run(state, workflow, config) is False
+    assert state.resolved_tiers["low"].model == "pinned-low"
+
+
+@pytest.mark.anyio
+async def test_reconcile_adds_missing_step_override(tmp_path: Path) -> None:
+    """A new differ_from step present in the refreshed workflow but absent from
+    the persisted resolved_steps is filled in."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change, on_event=lambda _e: None)   # resolved_steps == {}
+
+    # Add a differ_from step to the live workflow, then refresh the snapshot.
+    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf.write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: low}\n"
+        "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
+    )
+    _refresh_workflow_snapshot(change)
+    workflow, config = _load_workflow_and_config(change)
+
+    state = State.load(change.state_dir)
+    assert "w2" not in state.resolved_steps
+    assert _reconcile_resolved_run(state, workflow, config) is True
+    assert "w2" in state.resolved_steps

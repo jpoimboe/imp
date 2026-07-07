@@ -22,7 +22,7 @@ import traceback
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
@@ -81,6 +81,9 @@ from imp.engine.types import (
 )
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import provider_from_model, resolve_run
+
+if TYPE_CHECKING:
+    from imp.providers.config import Config
 
 EventCallback = Callable[[dict[str, Any]], None]
 
@@ -238,6 +241,26 @@ def _refresh_workflow_snapshot(change: Change) -> bool:
         os.rename(tmp, snapshot)
 
     return had_snapshot
+
+
+def _reconcile_resolved_run(
+    state: State, workflow: Workflow, config: Config,
+) -> bool:
+    """Merge into the persisted resolution maps only the tier/step keys the
+    refreshed workflow introduced (keys absent from the current maps), so a
+    pinned model survives; returns True iff a key was added (caller persists)."""
+    fresh_tiers, fresh_steps, _details = resolve_run(workflow, config)
+    assert state.resolved_tiers is not None and state.resolved_steps is not None
+    changed = False
+    for tier, pm in fresh_tiers.items():
+        if tier not in state.resolved_tiers:
+            state.resolved_tiers[tier] = pm
+            changed = True
+    for step_name, pm in fresh_steps.items():
+        if step_name not in state.resolved_steps:
+            state.resolved_steps[step_name] = pm
+            changed = True
+    return changed
 
 
 async def run_change(
