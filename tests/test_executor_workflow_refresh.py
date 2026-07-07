@@ -172,3 +172,59 @@ async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
     assert "chrome" not in (snapshot / "workflow.yaml").read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
+
+
+@pytest.mark.anyio
+async def test_unchanged_resume_emits_no_refresh_event(tmp_path: Path) -> None:
+    """Identical live source across entries → no swap and no workflow_refreshed
+    event (neither the fresh initial copy nor an unchanged re-entry emits)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    events: list[dict] = []
+    await run_change(change, on_event=events.append)   # fresh: initial copy
+    await run_change(change, on_event=events.append)   # unchanged: no-op
+    assert not [e for e in events if e["type"] == "workflow_refreshed"]
+
+
+@pytest.mark.anyio
+async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) -> None:
+    """A refreshed workflow that no longer contains the cursor step pauses with
+    an unknown_step event instead of silent-merging."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)   # cursor seeded at step "w"
+    _register_fake({"status": "Success"})
+    _refresh_workflow_snapshot(change)                 # snapshot now contains "w"
+
+    # Drop step "w" from the LIVE source (rename it); the cursor stays at "w".
+    wf_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf_yaml.write_text(wf_yaml.read_text().replace("name: w,", "name: renamed,"))
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    events = list(change.event_log().read())
+    paused = [e for e in events if e.get("type") == "workflow_paused"]
+    assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
+    assert paused[-1]["payload"]["step"] == "w"
+    assert not any(e.get("type") == "change_merged" for e in events)
+    # run_change's own entry refresh swapped the "w" snapshot to the new live
+    # version, which is what drops the cursor step.
+    assert "name: renamed" in (
+        change.change_dir / "workflow" / "workflow.yaml").read_text()
+
+
+@pytest.mark.anyio
+async def test_self_edit_picked_up_on_resume(tmp_path: Path) -> None:
+    """A change whose live workflow source was edited (self-edit) sees that edit
+    in its snapshot on the next resume, with one workflow_refreshed event."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change, on_event=lambda _e: None)   # snapshot v1
+
+    writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
+    writer.write_text(writer.read_text() + "\nedited-by-self\n")
+
+    events: list[dict] = []
+    await run_change(change, on_event=events.append)      # resume re-snapshots
+    snap_writer = change.change_dir / "workflow" / "agents" / "writer.md"
+    assert "edited-by-self" in snap_writer.read_text()
+    assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
