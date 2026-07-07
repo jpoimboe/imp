@@ -7,7 +7,7 @@ stage.
 The core idea is a **Change** — one unit of work imp tracks from initial idea to
 merged code. Each Change moves through a sequence of phases:
 
-- **front-door** — conversation: answering questions, taking stock, or scoping a
+- **threshold** — conversation: answering questions, taking stock, or scoping a
   new change.
 - **spec** — pinning down what the change must accomplish.
 - **plan** — turning that into a step-by-step implementation.
@@ -26,5 +26,5 @@ A few things worth knowing:
 - Everything for a change — its spec, plans, and history — lives together in one
   per-change home on disk.
 
-In practice, the front door can answer how imp works, report on what work you
+In practice, the threshold phase can answer how imp works, report on what work you
 already have in flight, or help you scope and kick off something new.
