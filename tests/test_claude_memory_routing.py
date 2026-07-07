@@ -50,6 +50,7 @@ def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
     assert "## Plain-speak copy" in body
     assert "imp-native" in body
     assert '"express"' in body
+    assert "front-door" not in body
 
 
 def test_imp_invariants_has_layering_and_future_sections() -> None:

@@ -54,7 +54,7 @@ non-soliciting exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Front-door express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
+| Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): author a new corrective plan N+1 from `comments`; never revise the settled plan. |
@@ -128,7 +128,7 @@ is preserved — you still read `progress.md`, so plan N's HOW reacts to what pl
 `plan_total` comes from the outline, **not** an estimate: count the outline's plans and
 echo that **outline-derived** value (see *First-run plan_total estimate*).
 
-**Express carve-out.** On the **express** path, front-door routes straight here with
+**Express carve-out.** On the **express** path, threshold routes straight here with
 `fast_path: true` and **no `spec-finalizer` runs**, so **no `## Plan outline` section
 exists**. Do **not** hard-depend on the outline being present: when there is no
 `## Plan outline`, **self-scope** the single plan directly from the spec exactly as

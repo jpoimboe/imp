@@ -13,6 +13,6 @@ borrowings so the choice is deliberate rather than inherited.
 
 User-facing copy uses only imp-canon nouns: Change, workflow, backlog, phase,
 step, spec, plan. Coined brainstorm terms (e.g. "express") may exist only as
-internal engine values — never user-facing. The runtime agents `front-door` and
+internal engine values — never user-facing. The runtime agents `threshold` and
 `finalize` already self-enforce plain terms; this doc is the canonical reference
 for new copy, so no agent edits are needed to honor it.

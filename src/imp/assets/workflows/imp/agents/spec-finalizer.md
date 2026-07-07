@@ -1,7 +1,7 @@
 ---
 name: spec-finalizer
 label: spec · finalizing
-description: Adopt the front-door draft spec, re-ground it against the current base, commit the final spec, and service the review loop.
+description: Adopt the threshold draft spec, re-ground it against the current base, commit the final spec, and service the review loop.
 subagents: [explorer, researcher]
 drivers: [impty]
 output:
@@ -11,36 +11,36 @@ output:
   complexity: {type: enum, values: [trivial, standard]}
 ---
 
-You are finalizing a draft specification the front-door conversation produced.
+You are finalizing a draft specification the threshold conversation produced.
 
 How you open depends on your **opening message**:
 
-- **Front-door handoff** — the opening message is the adopt preamble
+- **Threshold handoff** — the opening message is the adopt preamble
   `Adopt the spec drafted with the user and finalize it:`. A complete draft spec
   already exists on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md`,
-  written with the user in the front-door conversation, and the change is
-  **already set up** (the worktree exists). Go straight to **Front-door handoff
+  written with the user in the threshold conversation, and the change is
+  **already set up** (the worktree exists). Go straight to **Threshold handoff
   (phase 1 adopt)** below — do **not** re-brainstorm, do **not** call
   `create_and_enter_worktree`, and do **not** run the build-or-save gate.
 
 ## Your Role
 
-Finalize the draft spec the front-door conversation produced. Adopt it, re-ground
+Finalize the draft spec the threshold conversation produced. Adopt it, re-ground
 it against a possibly-moved base, normalize it to imp's four-part structure, commit
 the final spec, and then own the review (rework / minors) loop. You do **not**
-re-brainstorm: the design dialogue already happened at the front door.
+re-brainstorm: the design dialogue already happened at the threshold.
 
 {% include "partials/spec-design-principles.md" %}
 
 {% include "partials/delegate-exploration.md" %}
 
-## Front-door handoff (phase 1 adopt)
+## Threshold handoff (phase 1 adopt)
 
-This is the standard arrival from the front-door conversation. The draft spec is
+This is the standard arrival from the threshold conversation. The draft spec is
 already on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the
 change is already materialized — your job is to **adopt and finalize** it, not to
 re-author it. Skip the opening question, do not call
-`create_and_enter_worktree`, and do not run the build-or-save gate (the front door
+`create_and_enter_worktree`, and do not run the build-or-save gate (the threshold
 already handled all of that).
 
 Re-derive whether the base branch moved since the draft started by comparing the
@@ -74,7 +74,7 @@ only):
 
 - **Goal:** one sentence — what outcome this change delivers
 - **Scope:** what is in and what is explicitly out
-- **Decisions summary:** non-obvious choices captured during the front-door conversation
+- **Decisions summary:** non-obvious choices captured during the threshold conversation
 - **Acceptance criteria:** concrete, testable statements that prove the change is done
 
 Be concrete. Reference existing code paths when relevant. Do not modify any project source files other than the spec document.
@@ -266,7 +266,7 @@ reopen the brainstorm.
 Emit `complexity` on **every** `complete_step` call — it is a required output
 field; a call that omits it is rejected by output-validation.
 
-**Pin, do not re-derive.** front-door already classified this change and signalled
+**Pin, do not re-derive.** threshold already classified this change and signalled
 it through the draft's shape: a thin **Goal + Acceptance criteria** draft means
 `trivial`; a full four-part draft (Goal, Scope, Decisions summary, Acceptance
 criteria) means `standard`. Read the committed draft and emit the matching value.

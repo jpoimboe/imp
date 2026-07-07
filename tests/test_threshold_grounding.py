@@ -1,4 +1,4 @@
-"""The front-door persona names both grounding skills under its concierge and
+"""The threshold persona names both grounding skills under its concierge and
 scout hats and carries the load-or-introspect-first grounding rule (spec AC 4)."""
 
 from __future__ import annotations
@@ -7,19 +7,19 @@ from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
 
-def _front_door() -> str:
+def _threshold() -> str:
     wf = load_workflow(bundled_workflow_dir("imp"))
-    return wf.agents["front-door"].prompt_template_source
+    return wf.agents["threshold"].prompt_template_source
 
 
-def test_front_door_names_both_skills() -> None:
-    body = _front_door()
+def test_threshold_names_both_skills() -> None:
+    body = _threshold()
     assert 'load_skill(name="imp-mental-model")' in body
     assert 'load_skill(name="imp-introspect")' in body
 
 
-def test_front_door_skills_named_under_concierge_and_scout_hats() -> None:
-    body = _front_door()
+def test_threshold_skills_named_under_concierge_and_scout_hats() -> None:
+    body = _threshold()
     concierge = body[body.index("**concierge**"):body.index("**scout**")]
     assert "imp-mental-model" in concierge
     assert "imp-introspect" in concierge
@@ -27,8 +27,8 @@ def test_front_door_skills_named_under_concierge_and_scout_hats() -> None:
     assert "imp-introspect" in scout
 
 
-def test_front_door_has_grounding_rule_forbidding_memory_answers() -> None:
-    body = _front_door()
+def test_threshold_has_grounding_rule_forbidding_memory_answers() -> None:
+    body = _threshold()
     assert "## Grounding" in body
     low = body.lower()
     assert "do not answer" in low
@@ -38,8 +38,8 @@ def test_front_door_has_grounding_rule_forbidding_memory_answers() -> None:
     assert "imp-introspect" in grounding
 
 
-def test_front_door_action_rule_present() -> None:
-    body = _front_door()
+def test_threshold_action_rule_present() -> None:
+    body = _threshold()
     assert "## Acting on imp" in body
     # current-session mutations handed back via the slash commands
     assert "/save" in body
@@ -50,21 +50,21 @@ def test_front_door_action_rule_present() -> None:
     assert "confirm" in low
 
 
-def test_front_door_preserves_speak_plainly() -> None:
-    body = _front_door()
+def test_threshold_preserves_speak_plainly() -> None:
+    body = _threshold()
     assert "## Speak plainly" in body
     assert "never surface these internal terms" in body
 
 
-def test_front_door_introduces_no_new_cli_command_or_read_tool() -> None:
-    body = _front_door()
+def test_threshold_introduces_no_new_cli_command_or_read_tool() -> None:
+    body = _threshold()
     for banned in ("list_changes", "show_change",
                    "imp explain", "imp doctor", "imp workflow show"):
         assert banned not in body, banned
 
 
-def test_front_door_has_lazy_orientation_cue() -> None:
-    body = _front_door()
+def test_threshold_has_lazy_orientation_cue() -> None:
+    body = _threshold()
     # The cue lives in its own section.
     assert "## Orienting before you offer" in body
     low = body.lower()

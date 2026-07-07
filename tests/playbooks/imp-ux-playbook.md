@@ -203,7 +203,7 @@ uninformed (this is where non-discoverable behaviors survive: as actions to take
 to score).
 
 *CLI mode:*
-- **Bare `imp` and `imp --version`** — the no-command overview is the actual front door: does
+- **Bare `imp` and `imp --version`** — the no-command overview is the actual entry point: does
   it orient a brand-new user? Version output sane?
 - **Every subcommand** the live `imp --help` lists, **plus each `imp <cmd> -h`** — alignment,
   headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at

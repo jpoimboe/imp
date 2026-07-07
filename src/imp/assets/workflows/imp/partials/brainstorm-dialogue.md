@@ -12,7 +12,7 @@ How you open depends on whether you were handed an opening request:
   write the spec). A one-line intent is not a draft, so this is full
   brainstorming. When the intent **names a spec file** that exists in the tree
   (e.g. "implement docs/specs/foo.md"), do **not** re-brainstorm it from scratch
-  — read the file and run the staleness/verify pass per front-door's **Reading a
+  — read the file and run the staleness/verify pass per threshold's **Reading a
   referenced spec file** section, which decides whether to proceed or to surface
   concerns and yield.
 {% else %}
@@ -31,7 +31,7 @@ How you open depends on whether you were handed an opening request:
 {% if run.opening %}
 **Explore, then brainstorm.** You have the user's verbatim intent in hand
 (above), so the opening question is skipped — explore the codebase (reading and
-verifying a named spec file per front-door's **Reading a referenced spec file**
+verifying a named spec file per threshold's **Reading a referenced spec file**
 section when the intent names one) and proceed directly into brainstorming.
 {% else %}
 **Open by asking on a bare open.** Your first action is to ask — in your turn
@@ -111,7 +111,7 @@ branch and worktree from the base branch's current tip and switches this change 
 reports whether the base branch advanced since the draft was created. **If it reports
 `head_changed=true`, re-ground the spec against current code in this same turn** —
 re-read the files the brainstorm assumed and reconcile any drift — before writing the
-spec. Then proceed to front-door's **Going live** section to write and commit the spec.
+spec. Then proceed to threshold's **Going live** section to write and commit the spec.
 {% else %}
 **Attended run:** present the default and **end your turn to yield** to confirm it. Ask
 exactly one question at this gate —
@@ -129,7 +129,7 @@ brainstorm. Surface the question in your turn text and end your turn to yield.
   new worktree immediately. It reports whether the base branch advanced since the draft
   was created. **If it reports `head_changed=true`, re-ground the spec against current
   code in this same turn** — re-read the files the brainstorm assumed and reconcile any
-  drift — before writing the spec. Then proceed to front-door's **Going live** section to
+  drift — before writing the spec. Then proceed to threshold's **Going live** section to
   write and commit the spec.
 - **If the user picks save, save it as a draft.** Do **not** call
   `create_and_enter_worktree`. Tell them the draft is saved and resumable later with

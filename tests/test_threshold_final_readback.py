@@ -10,7 +10,7 @@ from imp.engine.state import JsonlEventLog
 
 def _render(tmp_path: Path) -> str:
     wf = load_workflow(bundled_workflow_dir("imp"))
-    body = wf.agents["front-door"].prompt_template_source
+    body = wf.agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     return render_prompt(
         body,

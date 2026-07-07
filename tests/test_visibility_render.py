@@ -42,9 +42,9 @@ def test_show_label_false_script_reveals_frame_and_error_on_pause() -> None:
 def test_show_label_false_agent_shows_prose_without_step_header() -> None:
     body = _body([
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="scoping", kind="agent", phase="front-door",
+        ev("2", "step_started", step="scoping", kind="agent", phase="threshold",
            model="m", provider="anthropic", label="chatting", show_label=False),
-        ev("3", "llm_response", agent_id="step:front-door/scoping",
+        ev("3", "llm_response", agent_id="step:threshold/scoping",
            provider="anthropic", model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "how can I help"}]}),
         ev("4", "step_completed", step="scoping", kind="agent",
@@ -128,16 +128,16 @@ def test_script_output_renders_bullet_message_under_step() -> None:
 def test_phase_show_label_false_suppresses_phase_header() -> None:
     body = _body([
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="front-door", kind="agent",
-           phase="front-door", model="m", provider="anthropic",
-           label="chatting", phase_label="front-door phase",
+        ev("2", "step_started", step="threshold", kind="agent",
+           phase="threshold", model="m", provider="anthropic",
+           label="chatting", phase_label="threshold phase",
            show_label=False, phase_show_label=False),
-        ev("3", "llm_response", agent_id="step:front-door/front-door",
+        ev("3", "llm_response", agent_id="step:threshold/threshold",
            provider="anthropic", model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "hello there"}]}),
-        ev("4", "step_completed", step="front-door", kind="agent",
+        ev("4", "step_completed", step="threshold", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
     ])
     out = "\n".join(body)
     assert "hello there" in out                 # conversation body survives
-    assert "front-door phase" not in out        # phase header suppressed
+    assert "threshold phase" not in out        # phase header suppressed

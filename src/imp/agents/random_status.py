@@ -1,16 +1,17 @@
-"""The front-door live-status phrase pool.
+"""A pool of random status phrases, drawn for a step's live display label.
 
-The engine draws one phrase for the step's frozen display label whenever a step
-declares the reserved `"<imp>"` label sentinel, and the live renderer rotates a
-fresh phrase per work segment within the turn. The pool stays imp-owned here; the
+Any workflow step opts into rotation by declaring the reserved
+`STATUS_PHRASE_LABEL` sentinel as its label: the engine then draws one phrase
+for the step's frozen display label, and the live renderer rotates a fresh
+phrase per work segment within the turn. The pool stays imp-owned here; the
 generic renderer is told only "rotate this step's phrase" via a payload flag."""
 from __future__ import annotations
 
 import random
 
-STATUS_PHRASE_LABEL = "<imp>"
+STATUS_PHRASE_LABEL = "<random>"
 
-FRONT_DOOR_STATUS_PHRASES: tuple[str, ...] = (
+RANDOM_STATUS_PHRASES: tuple[str, ...] = (
     "scheming", "plotting", "brooding", "hatching plans", "laying groundwork",
     "setting traps", "laying snares", "baiting hooks", "fermenting plots",
     "eyeing angles", "biding time", "casting bones", "scrying", "reading omens",
@@ -40,6 +41,6 @@ FRONT_DOOR_STATUS_PHRASES: tuple[str, ...] = (
 )
 
 
-def front_door_status_phrase() -> str:
+def random_status_phrase() -> str:
     """A uniformly-random phrase from the pool, chosen once per call."""
-    return random.choice(FRONT_DOOR_STATUS_PHRASES)
+    return random.choice(RANDOM_STATUS_PHRASES)

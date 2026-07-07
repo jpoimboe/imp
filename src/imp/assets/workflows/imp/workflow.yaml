@@ -1,6 +1,6 @@
 name: feature
 description: |
-  front-door -> spec -> (plan -> implement)* -> converge -> integrate
+  threshold -> spec -> (plan -> implement)* -> converge -> integrate
 
 # Single provider by design: review independence is by MODEL TIER (a high-tier
 # reviewer judging the coder's work), not by vendor. The per-plan implement loop
@@ -32,17 +32,17 @@ defaults:
   max_tool_calls: 10000
 
 phases:
-  # ── front-door: phase 0, a bare conversation (show_label:false). It answers
+  # ── threshold: phase 0, a bare conversation (show_label:false). It answers
   # questions, scouts existing work, or scopes a build; on go-live it sets the
   # ceremony and routes into the pipeline. express skips the spec beat entirely
   # (the new edge); full enters spec-finalizer for adopt-with-light-review.
-  - name: front-door
+  - name: threshold
     show_label: false
     steps:
-      - name: front-door
-        file: agents/front-door.md
+      - name: threshold
+        file: agents/threshold.md
         tier: high
-        label: "<imp>"
+        label: "<random>"
         interactive: true
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}

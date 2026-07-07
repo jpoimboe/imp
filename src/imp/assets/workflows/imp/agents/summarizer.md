@@ -23,7 +23,7 @@ Read, to ground the summary:
 - `{{ change.home }}/progress.md`;
 - the change diff via `bash` (`git diff <base>..HEAD`) for the *what*.
 
-When the spec is thin on the *why*, recover the front-door rationale — what was
+When the spec is thin on the *why*, recover the threshold rationale — what was
 said, not current state — with `query_events` as a fallback.
 
 ## Write the summary

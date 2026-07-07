@@ -459,7 +459,7 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # ceremony:express -> front-door sets fast_path=true and routes straight to
+    # ceremony:express -> threshold sets fast_path=true and routes straight to
     # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer) and plan
     # review (plan-verify-commit fast-path rule). The implement-side fast_path ->
     # finalize shortcut is GONE: express now runs the full pipeline. The single
