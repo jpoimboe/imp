@@ -37,8 +37,10 @@ import shutil
 import signal
 import time
 import uuid
+import zoneinfo
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -151,6 +153,53 @@ _QUOTA_PATTERNS = (
 # previously the 5xx case fell through to None and was treated as agent text →
 # wrong nudge loop.
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
+
+# Matches the CLI session-limit reset announcement, e.g.
+# "resets 4am (America/Los_Angeles)", "resets 4:30pm (...)", "resets 16:00 (...)".
+_RESET_RE = re.compile(
+    r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)",
+    re.IGNORECASE,
+)
+_RESET_MARGIN_SECONDS = 120.0
+_MAX_RESET_WAIT_SECONDS = 6 * 3600.0
+
+
+def _reset_hint_seconds(text: str, now: float) -> float | None:
+    """Seconds to wait until the announced session-limit reset, + a 2-minute
+    margin, or None. `now` is epoch seconds, injected for testability.
+
+    Returns None on any parse failure, an unknown/bad zone, an out-of-range
+    time, or a computed wait over 6 h (session windows are 5 h, so a larger
+    figure means a bad parse we distrust). None means exactly today's behavior.
+    """
+    m = _RESET_RE.search(text)
+    if m is None:
+        return None
+    hour_s, minute_s, ampm, zone_name = m.groups()
+    try:
+        tz = zoneinfo.ZoneInfo(zone_name)
+    except (KeyError, ValueError):
+        # ZoneInfoNotFoundError subclasses KeyError; a malformed name -> ValueError.
+        return None
+    hour = int(hour_s)
+    minute = int(minute_s) if minute_s else 0
+    if ampm:
+        if not 1 <= hour <= 12:
+            return None
+        if ampm.lower() == "pm" and hour != 12:
+            hour += 12
+        elif ampm.lower() == "am" and hour == 12:
+            hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    now_local = datetime.fromtimestamp(now, tz=tz)
+    target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now_local:
+        target += timedelta(days=1)
+    delta = target.timestamp() - now
+    if delta > _MAX_RESET_WAIT_SECONDS:
+        return None
+    return delta + _RESET_MARGIN_SECONDS
 
 
 def _classify_agent_text(
