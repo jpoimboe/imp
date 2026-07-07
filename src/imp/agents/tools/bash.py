@@ -143,16 +143,21 @@ async def bash(
     async def _drain(stream: object, sink: list[bytes], name: str) -> None:
         if stream is None:
             return
+        # Post-cap the loop keeps consuming (discarding) to EOF: asyncio only
+        # resolves proc.wait() once every pipe transport disconnects, and an
+        # abandoned stream gets flow-control-paused on the killed child's pipe
+        # residue — its fd leaves the selector, EOF is never seen, and wait()
+        # deadlocks to the tool wall-clock. Residue is bounded (kernel pipe +
+        # reader buffer), so this costs a few reads, not another flood.
         async for chunk in stream:  # type: ignore[attr-defined]
             if counter.capped:
-                return
+                continue
             sink.append(chunk)
             counter.total += len(chunk)
             if counter.total >= cap:
                 counter.capped = True
                 counter.which = name           # S2: which stream crossed the cap
                 await kill_process_tree(proc, signal.SIGKILL)
-                return
 
     # Decision 10 ticker (pinned lifecycle): sweeps the background registry
     # while THIS foreground call runs — the only coverage for a long QUIET
