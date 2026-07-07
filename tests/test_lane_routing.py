@@ -119,3 +119,34 @@ def test_rule_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     assert State.load(a.state_dir).held_lane is None
     released = [e for e in log.read() if e["type"] == "lane_released"]
     assert released and released[-1]["payload"]["step"] == "reconciler"
+
+
+def test_acquire_poll_reemits_lane_waiting_on_position_change(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="first", change_id="first", base_branch="main")
+    Change.create(tmp_path, title="second", change_id="second", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "first", "main")    # head
+    mq.enqueue_if_absent(tmp_path, "second", "main")   # 2nd ahead
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")     # 3rd -> ahead == 2
+    # popping a head wakes the next head; stub the real daemon spawn.
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+
+    # Fake wait_for_turn_fn: poll the predicate, draining the lane between polls.
+    async def _drain(pred):
+        assert pred() is False                       # ahead still 2 -> no new emit
+        mq.pop_and_wake(tmp_path, "first", "main")
+        assert pred() is False                        # ahead now 1 -> emits ahead=1
+        assert pred() is False                        # ahead still 1 -> no new emit
+        mq.pop_and_wake(tmp_path, "second", "main")
+        assert pred() is True                         # ahead now 0 (head) -> emits ahead=0
+
+    state, log = State.load(ch.state_dir), InMemoryEventLog()
+    action, _fb, _muts = anyio.run(
+        _route_acquire, _acquire_step(), ch, state, log, _drain)
+
+    assert isinstance(action, Continue)
+    aheads = [e["payload"]["ahead"] for e in log.read() if e["type"] == "lane_waiting"]
+    # Pre-wait emit (2) seeds the dedup; each *changed* poll emits exactly once;
+    # unchanged polls emit nothing. One entry per position change, not per poll.
+    assert aheads == [2, 1, 0]

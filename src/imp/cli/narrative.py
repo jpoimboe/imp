@@ -129,6 +129,7 @@ class StepNode:
     position_label: bool = False       # step label is a position counter, not a verb
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
+    lane_waiting_node: Any = None      # in-place merge-queue transcript node; None when unset
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
@@ -863,8 +864,17 @@ NarrativeBuilder._HANDLERS["merge_retry"] = _h_merge_retry
 
 def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    self._append(LiteralTextNode(text=f"waiting to merge — {p.get('ahead', 0)} ahead",
-                                 color_role="lifecycle"))
+    text = f"waiting to merge · {p.get('ahead', 0)} ahead"
+    step = self._step_stack[-1] if self._step_stack else None
+    if step is not None and step.lane_waiting_node is not None:
+        step.lane_waiting_node.text = text
+    else:
+        node = LiteralTextNode(text=text, color_role="lifecycle")
+        self._append(node)
+        if step is not None:
+            step.lane_waiting_node = node
+    if step is not None:
+        step.live_label = text
 
 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
@@ -912,7 +922,15 @@ def _h_lane_event(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, An
     self._flush_burst()
 
 
-NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_event
+def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    if self._step_stack:
+        top = self._step_stack[-1]
+        top.live_label = None
+        top.lane_waiting_node = None
+
+
+NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_acquired
 NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
 
@@ -969,6 +987,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         if not top.closed and top.name == name:
             if p.get("resumed"):
                 top.live_label = None
+                top.lane_waiting_node = None
                 top.label = p.get("label")
                 top.resumed = True
             return
@@ -994,6 +1013,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.interrupted = False
             existing.label = p.get("label")
             existing.live_label = None
+            existing.lane_waiting_node = None
             existing.resumed = True
             if p.get("restarted"):
                 # Genuine re-run from scratch: the fresh run supersedes the
