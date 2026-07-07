@@ -46,7 +46,8 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "new_change_id", lambda: "z9y8x7")
     monkeypatch.setattr(
         main.Change, "create_draft",
-        staticmethod(lambda *a, **k: SimpleNamespace(id="z9y8x7", title="")))
+        staticmethod(lambda *a, **k: SimpleNamespace(
+            id="z9y8x7", title="", workflow_dir=tmp_path)))
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
     monkeypatch.setattr(main, "_tui_requested", lambda args: False)
     return main

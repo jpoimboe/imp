@@ -48,6 +48,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group, sigint_cancels_scope
+from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
@@ -128,6 +129,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, or /help for commands"
+_OPENING_SESSION_VERBS = ("/save", "/clear", "/abandon")
 
 
 def _should_prompt_opening(
@@ -673,6 +675,20 @@ def _print_opening(change: Change, marker: str, *, interactive: bool, color: boo
     return _print_splash_banner(interactive=interactive, lead_blank=False)
 
 
+async def _read_intent_line(
+    prompt: Any, change: Any, *, color: bool, width: int,
+) -> str:
+    """Read one opening-intent line through the slash interceptor, no model turn spent."""
+    while True:
+        line = await ask_line_with_slash(
+            prompt, None, change, color=color, width=width, hint=OPENING_HINT)
+        if line in _OPENING_SESSION_VERBS:
+            print(f"{line} isn't available at the opening prompt — "
+                  f"describe your Change, or /help for commands.")
+            continue
+        return line
+
+
 async def _read_opening_message(
     change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
@@ -683,10 +699,10 @@ async def _read_opening_message(
     `banner_shown` is True on an interactive entry that should render the splash."""
     _print_opening(change, leave_mode, interactive=banner_shown, color=color)
     make = _prompt_factory or (
-        lambda: Prompt(editing_mode=editing_mode, color=color))
+        lambda: Prompt(skills_dir=change.workflow_dir / "skills",
+                       editing_mode=editing_mode, color=color))
     prompt = make()
-    reply = await prompt.ask_async(width=width, display_width=_display_width(),
-                                   hint=OPENING_HINT)
+    reply = await _read_intent_line(prompt, change, color=color, width=width)
     return _normalize_opening_reply(reply)
 
 
@@ -798,11 +814,11 @@ async def _run_cleared_session(
         _print_splash_banner(interactive=True)
         term_title = None if tui else TerminalTitle(
             sys.stdout, change.id, change.title)
-        prompt = Prompt(editing_mode=_editing_mode(control), color=color)
+        prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                        editing_mode=_editing_mode(control), color=color)
         try:
-            reply = (await prompt.ask_async(
-                width=_term_width(), display_width=_display_width(),
-                hint=OPENING_HINT)).strip()
+            reply = await _read_intent_line(
+                prompt, change, color=color, width=_term_width())
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()

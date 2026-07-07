@@ -725,6 +725,42 @@ async def test_run_cleared_session_tui_arm_chat_marks_leave_mode_chat(
 
 
 @pytest.mark.anyio
+async def test_run_cleared_session_intercepts_help(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
+
+    class _QueuePrompt:
+        def __init__(self, *a: object, **k: object) -> None:
+            self._lines = ["/help", "build a parser"]
+        async def ask_async(self, *a: object, **k: object) -> str:
+            return self._lines.pop(0)
+
+    monkeypatch.setattr(m, "Prompt", _QueuePrompt)
+    monkeypatch.setattr(m, "make_interactive_solicit",
+                        lambda *a, **k: (lambda _p: None))
+
+    captured: dict[str, object] = {}
+
+    async def _fake_client(change: object, **kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _fake_client)
+
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    ls: dict[str, str] = {}
+    rc = await m._run_cleared_session(tmp_path, "main", tui=False, leave_state=ls)
+
+    assert rc == 0
+    assert captured["seed_opening"] == "build a parser"   # /help intercepted, not seeded
+    assert "Available slash commands" in buf.getvalue()
+
+
+@pytest.mark.anyio
 async def test_clear_loop_forwards_leave_mode_to_cleared_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
