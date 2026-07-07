@@ -74,6 +74,14 @@ def current_branch(root: Path) -> str:
     return _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
+def checked_out_branch(control_root: Path) -> str | None:
+    """Branch HEAD symbolically points at; None on detached HEAD or unresolvable ref."""
+    proc = _git(control_root, "symbolic-ref", "--short", "HEAD")
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
 def head_of(control_root: Path, ref: str) -> str:
     """The commit sha `ref` resolves to (e.g. a branch tip)."""
     return _git_ok(control_root, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
