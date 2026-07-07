@@ -218,11 +218,11 @@ def test_front_door_routes_inline_satisfiable_requests_to_bare_turn_end_yield() 
 
 
 def test_front_door_status_label_resolves_to_a_pool_member() -> None:
-    from imp.agents.front_door_status import FRONT_DOOR_STATUS_PHRASES
     from imp.agents.prompts import render_label
+    from imp.agents.random_status import RANDOM_STATUS_PHRASES
     step = _wf().phases[0].steps[0]
     rendered = render_label(step.label, change=None, log=None)
-    assert rendered in FRONT_DOOR_STATUS_PHRASES
+    assert rendered in RANDOM_STATUS_PHRASES
 
 
 def test_front_door_live_gate_conventions_relocated_to_partial(tmp_path) -> None:

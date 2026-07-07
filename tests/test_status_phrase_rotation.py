@@ -5,7 +5,7 @@ import itertools
 from imp.cli import narrative as nv
 from tests._event_fixtures import ev
 
-_PHRASE_FN = "imp.agents.front_door_status.front_door_status_phrase"
+_PHRASE_FN = "imp.agents.random_status.random_status_phrase"
 
 
 def _deterministic_draws(monkeypatch) -> None:

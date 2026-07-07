@@ -1284,8 +1284,8 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
 
 def _draw_status_phrase() -> str:
     # Lazy import keeps `import narrative` free of agent-package weight (design D3).
-    from imp.agents.front_door_status import front_door_status_phrase
-    return front_door_status_phrase()
+    from imp.agents.random_status import random_status_phrase
+    return random_status_phrase()
 
 
 def _rotate_status_phrase(self: NarrativeBuilder) -> None:

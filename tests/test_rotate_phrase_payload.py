@@ -3,7 +3,7 @@ from __future__ import annotations
 import types
 from pathlib import Path
 
-from imp.agents.front_door_status import FRONT_DOOR_STATUS_PHRASES, STATUS_PHRASE_LABEL
+from imp.agents.random_status import RANDOM_STATUS_PHRASES, STATUS_PHRASE_LABEL
 from imp.engine.executor import _step_started_payload
 from imp.engine.types import Continue, SourceLoc, Step
 
@@ -20,7 +20,7 @@ def test_sentinel_label_sets_rotate_phrase_and_a_concrete_frozen_phrase() -> Non
     p = _step_started_payload(_step(label=STATUS_PHRASE_LABEL),
                               types.SimpleNamespace(route_label=None))
     assert p["rotate_phrase"] is True
-    assert p["label"] in FRONT_DOOR_STATUS_PHRASES      # frozen phrase, not "<imp>"
+    assert p["label"] in RANDOM_STATUS_PHRASES      # frozen phrase, not "<imp>"
 
 
 def test_plain_label_carries_no_rotate_phrase_flag() -> None:

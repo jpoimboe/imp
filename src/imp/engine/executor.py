@@ -26,8 +26,8 @@ from typing import Any
 
 import anyio
 
-from imp.agents.front_door_status import STATUS_PHRASE_LABEL
 from imp.agents.prompts import build_context, render_label, render_prompt
+from imp.agents.random_status import STATUS_PHRASE_LABEL
 from imp.agents.runner import (
     ChangeContext,
     Message,
