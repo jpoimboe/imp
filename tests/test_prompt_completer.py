@@ -30,13 +30,18 @@ def _texts(completer: SlashCompleter, text: str) -> list[str]:
 
 def test_completes_skill_names_by_prefix(tmp_path: Path) -> None:
     c = SlashCompleter(_skills(tmp_path))
-    assert set(_texts(c, "/re")) == {"refactor", "review"}
+    # /re matches the resume builtin alongside the refactor/review skills.
+    assert set(_texts(c, "/re")) == {"refactor", "review", "resume"}
 
 
 def test_includes_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(_skills(tmp_path))
-    assert "help" in _texts(c, "/h")
-    assert "skills" in _texts(c, "/s")
+    assert set(_texts(c, "/")) >= {
+        "help", "skills", "list", "search", "save", "clear", "abandon", "resume"}
+    # An unambiguous prefix fills exactly one command (no skill shares these stems).
+    assert set(_texts(c, "/sa")) == {"save"}
+    assert set(_texts(c, "/se")) == {"search"}
+    assert set(_texts(c, "/ab")) == {"abandon"}
 
 
 def test_no_completion_for_non_slash(tmp_path: Path) -> None:
@@ -46,7 +51,8 @@ def test_no_completion_for_non_slash(tmp_path: Path) -> None:
 
 def test_missing_skills_dir_only_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(tmp_path / "nope")
-    assert set(_texts(c, "/")) >= {"help", "skills"}
+    assert set(_texts(c, "/")) == {
+        "help", "skills", "list", "search", "save", "clear", "abandon", "resume"}
 
 
 def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:
@@ -59,7 +65,7 @@ def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:
     async def _collect() -> list[str]:
         return [item.text async for item in c.get_completions_async(doc, None)]
 
-    assert set(asyncio.run(_collect())) == {"refactor", "review"}
+    assert set(asyncio.run(_collect())) == {"refactor", "review", "resume"}
 
 
 def test_completion_carries_description_as_meta(tmp_path: Path) -> None:

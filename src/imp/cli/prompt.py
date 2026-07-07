@@ -91,11 +91,10 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
 
 class SlashCompleter:
-    """Completes /help, /skills, and user skill names (from skills_dir/user/*.md)
-    when the line starts with '/'. prompt_toolkit Completer protocol (duck-typed to
-    avoid importing prompt_toolkit at module import time)."""
+    """Completes client-side slash commands and user skill names when the line starts with '/'."""
 
-    _BUILTINS = ("help", "skills")
+    _BUILTINS = (
+        "help", "skills", "list", "search", "save", "clear", "abandon", "resume")
 
     def __init__(self, skills_dir: Any) -> None:
         self._skills_dir = Path(skills_dir)
