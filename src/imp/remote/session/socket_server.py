@@ -162,7 +162,18 @@ class SessionSocket:
     ) -> None:
         with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
             async for event in recv:
-                line = (encode_event(event) + "\n").encode("utf-8")
+                # Coalesce all currently-buffered events into one write: at run
+                # teardown the pump is cancelled right after run_fn returns, so a
+                # per-event await would flush only the first queued event and drop
+                # the rest. Draining synchronously into one send closes that window.
+                batch = [event]
+                while True:
+                    try:
+                        batch.append(recv.receive_nowait())
+                    except (anyio.WouldBlock, anyio.EndOfStream):
+                        break
+                line = b"".join(
+                    (encode_event(e) + "\n").encode("utf-8") for e in batch)
                 try:
                     await client.stream.send(line)
                 except (anyio.BrokenResourceError, anyio.ClosedResourceError):
