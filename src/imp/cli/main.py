@@ -869,14 +869,13 @@ async def _clear_loop(
     return rc
 
 
-def _record_idea(args: argparse.Namespace, control: Path) -> int:
+def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     title = args.idea
     if not title.strip():
         print("imp: --backlog title must be non-empty", file=sys.stderr)
         return 2
     description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
-    base = worktree.current_branch(control)
     change_id = new_change_id()
     try:
         Change.create_draft(
@@ -1003,7 +1002,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     control = _control_root()
     worktree.check_preconditions(control)
     worktree.ensure_imp_ignored(control)
-    base = worktree.current_branch(control)
+    base, base_notice = _resolve_new_base(control, getattr(args, "base", None))
 
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):
@@ -1024,7 +1023,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         if not args.idea.strip():
             print("imp: --backlog title must be non-empty", file=sys.stderr)
             return 2
-        return _record_idea(args, control)
+        return _record_idea(args, control, base)
 
     try:
         seed = resolve_spec_seed(args)
@@ -1049,6 +1048,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     color = should_use_color(sys.stdout)
 
+    if base_notice is not None:
+        print(base_notice)
     change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
@@ -2708,6 +2709,10 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Run this Change on workflow NAME instead of the "
                             "project default. A bundled name needs no commit; a "
                             "committed imp/workflows/NAME fork overrides it.")
+    p_new.add_argument("--base", metavar="BRANCH", default=None,
+                       help="Base the Change on BRANCH instead of the resolved "
+                            "integration branch. Use --base . (or --base HEAD) "
+                            "to base on the currently checked-out branch.")
     p_new.set_defaults(func=_cmd_new)
 
     p_chat = sub.add_parser(

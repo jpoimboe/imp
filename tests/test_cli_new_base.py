@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
-from imp.cli.main import _resolve_new_base
-from tests.conftest import _git
+from imp.cli.main import _build_parser, _record_idea, _resolve_new_base
+from imp.engine.change import Change
+from tests.conftest import _git, _seed_control
 
 
 def _repo(root: Path, branch: str) -> None:
@@ -89,3 +91,29 @@ def test_auto_detect_main_when_master_absent(tmp_path: Path) -> None:
 def test_fallback_to_current_head_when_nothing_resolves(tmp_path: Path) -> None:
     _repo(tmp_path, "solo")
     assert _resolve_new_base(tmp_path, None) == ("solo", None)
+
+
+def test_new_parser_accepts_base_flag() -> None:
+    args = _build_parser().parse_args(["new", "do a thing", "--base", "trunk"])
+    assert args.base == "trunk"
+
+
+def test_new_parser_base_defaults_none() -> None:
+    args = _build_parser().parse_args(["new", "do a thing"])
+    assert args.base is None
+
+
+def test_record_idea_uses_passed_base_not_current_branch(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    _git(tmp_path, "branch", "release/9")
+    _git(tmp_path, "checkout", "-b", "work")
+    monkeypatch.chdir(tmp_path)
+    ns = argparse.Namespace(idea="my idea", opening=None, depends_on=None, workflow=None)
+    rc = _record_idea(ns, tmp_path, "release/9")
+    assert rc == 0
+    ids = [p.name for p in (tmp_path / ".imp" / "changes").iterdir()]
+    assert len(ids) == 1, ids
+    change_id = ids[0]
+    change = Change.load(tmp_path, change_id)
+    assert change.base_branch == "release/9"
