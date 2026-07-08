@@ -489,3 +489,47 @@ def test_follow_non_tty_footer_stays_inert(tmp_path: Path) -> None:
     # Equal to the driver-only narrative → the footer contributed nothing.
     assert body == _live_narrative_no_finish(events)
     assert "\x1b" not in body                      # no cursor-hide / erase ANSI
+
+
+def test_cmd_log_follow_long_form_starts_follow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `--follow` long form starts a follow on a live home exactly as `-f`
+    does — both spellings route to _follow_live with the change home path."""
+    import imp.cli.main as m
+    slug = "long-form"
+    _make_live_home(tmp_path, slug)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    _fake_tty(monkeypatch, isatty=False)
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "_follow_live",
+        lambda control, cid, home: (seen.update(cid=cid, home=home), 5)[1])
+    rc = m.main(["log", "--follow", slug])
+    assert rc == 5
+    assert seen["cid"] == slug
+    assert seen["home"] == tmp_path / ".imp" / "changes" / slug
+
+
+def test_cmd_log_follow_backlog_id_prints_card_and_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A backlog/unstarted id under `-f` prints the backlog card and exits 0 —
+    nothing will ever stream, so the backlog guard fires before the follow route
+    and neither follow entrypoint is invoked."""
+    import imp.cli.main as m
+
+    def _boom(*a: object, **k: object) -> int:
+        raise AssertionError("follow must not run for a backlog id")
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "back")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: {"stub": True})
+    monkeypatch.setattr(m, "_backlog_card", lambda meta, control, now: ["BACKLOG CARD"])
+    monkeypatch.setattr(m, "_follow_live", _boom)
+    monkeypatch.setattr(m, "_follow_log", _boom)
+    rc = m.main(["log", "-f", "back"])
+    assert rc == 0
+    assert "BACKLOG CARD" in capsys.readouterr().out
