@@ -68,20 +68,30 @@ def snapshot(control_root: Path, change_id: str) -> tuple[str, str, str] | None:
     return (status, step, title)
 
 
-def recent_narrative(control_root: Path, change_id: str, n: int) -> list[str]:
+def recent_narrative(control_root: Path, change_id: str, n: int) -> list[dict[str, Any]]:
+    """Last n non-empty llm_response events, oldest-first, augmented for /replay."""
     from imp.cli.main import _load_events_for_id
+    from imp.remote.curate import EventCurator
     from imp.remote.drivers.telegram import event_body
+    if n <= 0:
+        return []
     events = _load_events_for_id(control_root, change_id)
     if events is None:
         return []
-    bodies: list[str] = []
-    for event in events:
-        if event.get("type") != "llm_response":
-            continue
-        body = event_body("llm_response", event.get("payload") or {})
-        if body.strip():
-            bodies.append(body)
-    return bodies[-n:] if n > 0 else []
+    selected = [
+        event for event in events
+        if event.get("type") == "llm_response"
+        and event_body("llm_response", event.get("payload") or {}).strip()
+    ]
+    snap = snapshot(control_root, change_id)
+    title = snap[2] if snap is not None else ""
+    curator = EventCurator(id=change_id, title=title, events=("all",))
+    out: list[dict[str, Any]] = []
+    for event in selected[-n:]:
+        augmented = curator.curate(event)
+        if augmented is not None:
+            out.append(augmented)
+    return out
 
 
 def socket_is_live(path: Path | str) -> bool:

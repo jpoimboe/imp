@@ -18,7 +18,7 @@ class ControlPlane:
         list_changes: Callable[[], list[ChangeInfo]],
         subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
-        recent_narrative: Callable[[str, int], list[str]],
+        recent_narrative: Callable[[str, int], list[dict[str, Any]]],
         search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
         resume: Callable[[str], str] | None = None,
         save: Callable[[str], None] | None = None,
@@ -41,7 +41,7 @@ class ControlPlane:
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshot(change_id)
 
-    def recent_narrative(self, change_id: str, n: int) -> list[str]:
+    def recent_narrative(self, change_id: str, n: int) -> list[dict[str, Any]]:
         return self._recent_narrative(change_id, n)
 
     def search(self, query: str) -> list[tuple[str, str, str, str]]:

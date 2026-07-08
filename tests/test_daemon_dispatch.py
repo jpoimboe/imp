@@ -56,7 +56,7 @@ class FakeControl:
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshots.get(change_id)
 
-    def recent_narrative(self, change_id: str, n: int) -> list[str]:
+    def recent_narrative(self, change_id: str, n: int) -> list[dict]:
         return self._narratives.get(change_id, [])[-n:]
 
     async def reply(self, change_id: str, text: str) -> str:
@@ -203,15 +203,33 @@ async def test_unsubscribe_removes_the_target_and_confirms() -> None:
     assert responses.get_nowait() == Notice("Unfollowed @k3f9qa.")
 
 
+def _narr_event(eid: str, text: str) -> dict:
+    return {
+        "id": eid, "type": "llm_response",
+        "timestamp": "2026-06-25T14:32:05+00:00",
+        "change": {"id": "k3f9qa", "title": "Dark mode"},
+        "payload": {"raw": {"content": [{"type": "text", "text": text}]}},
+    }
+
+
 @pytest.mark.anyio
-async def test_replay_resends_each_message_oldest_first() -> None:
-    control = FakeControl(
-        narratives={"k3f9qa": ["one", "two", "three"]})
+async def test_replay_renders_each_event_through_the_common_envelope() -> None:
+    control = FakeControl(narratives={"k3f9qa": [
+        _narr_event("e1", "one"), _narr_event("e2", "two")]})
     responses: queue.Queue = queue.Queue()
-    await _handle_command(Replay("k3f9qa", 2), control, responses)
-    assert responses.get_nowait() == Notice("two")
-    assert responses.get_nowait() == Notice("three")
+    await _handle_command(Replay("k3f9qa", 5), control, responses)
+    first = responses.get_nowait()
+    second = responses.get_nowait()
     assert responses.empty()
+    # Full envelope (id · title · time / body / reply footer), not a bare body.
+    assert isinstance(first, Notice) and isinstance(second, Notice)
+    assert first.text.startswith("k3f9qa · Dark mode · ")
+    assert first.text.endswith("\none\n↩ @k3f9qa")
+    assert second.text.startswith("k3f9qa · Dark mode · ")
+    assert second.text.endswith("\ntwo\n↩ @k3f9qa")
+    # Each replayed Notice is tagged so a reply routes back to the Change.
+    assert first.change_id == "k3f9qa"
+    assert second.change_id == "k3f9qa"
 
 
 @pytest.mark.anyio
