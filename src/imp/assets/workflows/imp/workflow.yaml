@@ -243,7 +243,6 @@ phases:
     steps:
       - name: wait-for-head
         acquire: merge-lane
-        glyph: "ѱ"
         label: waiting in merge queue
         rules:
           - {else: true, continue: true}

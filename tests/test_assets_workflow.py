@@ -1118,10 +1118,10 @@ def test_interactive_steps_are_exactly_the_conversational_gates() -> None:
     assert patent["ids"].interactive is False
 
 
-def test_wait_for_head_declares_merge_lock_glyph(tmp_path: Path) -> None:
+def test_wait_for_head_has_no_hold_glyph(tmp_path: Path) -> None:
     asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     step = _steps(wf)["wait-for-head"]
     assert step.acquire == "merge-lane"
-    assert step.glyph == "ѱ"
+    assert step.glyph is None

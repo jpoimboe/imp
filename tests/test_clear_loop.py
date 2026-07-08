@@ -584,7 +584,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
 
     assert rc == 0
     # The working escape for the freshly minted (unnamed) draft is already written.
-    assert "\x1b]2;• imp · " in at_prompt["value"]
+    assert "\x1b]2;๏ imp · " in at_prompt["value"]
     title = captured["title"]
     assert title._change_id == captured["change"].id   # one instance threaded through
 
