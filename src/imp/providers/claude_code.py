@@ -93,8 +93,6 @@ from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     RESUME_REDO_NUDGE,
     Transcript,
-    balance_success_on_resume,
-    build_resume_manifest,
     captured_result_key,
     deliver_engine_continuation,
     deliver_reply_on_resume,
@@ -121,7 +119,6 @@ from imp.providers.claude_code_session_store import (
     resume_session_id,
     session_key,
     session_store_for,
-    store_reconcilable,
 )
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
@@ -1554,22 +1551,18 @@ class ClaudeCodeAgentRunner:
         # store before claude-p loads its native session. A genuinely DANGLING
         # tool_use likewise resumes natively (with a store) — claude-p's own pairing
         # injects the is_error placeholder, which is correct for an unfinished call.
-        # No resume shape stays on stream-json replay now: a trailing complete_step
-        # is balanced with a SUCCESS result inside the loaded session and the
-        # handback rides the streamed delta, and a no-store resume reconstructs the
-        # store from the transcript.
+        # A trailing complete_step is balanced with a SUCCESS result inside the
+        # loaded session and the handback rides the streamed delta, and a no-store
+        # resume reconstructs the store from the transcript.
         store_body = await store.load(skey)
         # Every well-formed resume takes the native path. A trailing complete_step
         # is balanced with a SUCCESS tool_result folded INTO the loaded session
         # (synthesize_native_success_on_resume), so claude-p never auto-pairs an
         # is_error; the handback (retry_feedback) rides the streamed delta. The
-        # store is reconstructed from the transcript when absent, so neither the
-        # complete_step tail nor retry_feedback forces stream-json replay.
-        # Shape eligibility for native resume — decided WITHOUT the store. The
-        # store marker (store_reconcilable) is now always True: reconcile maps any
-        # at-rest store body (including a store-ahead drift) onto the transcript,
-        # so no store shape forces replay. A dispatch-only tail collapses
-        # resume_base to 0 (fresh_stream) and rebuilds the store from scratch.
+        # store is reconstructed from the transcript when absent.
+        # Shape eligibility for native resume — decided WITHOUT the store. A
+        # dispatch-only tail collapses resume_base to 0 (fresh_stream) and rebuilds
+        # the store from scratch.
         shape_native_eligible = (
             (not is_fresh)
             and classify_resume(existing) in (
@@ -1579,12 +1572,6 @@ class ClaudeCodeAgentRunner:
         # Native resume sends only messages[resume_base:] — the turns appended on
         # THIS entry; claude-p already holds the rest in its loaded session.
         resume_base = len(existing)
-        # Replay's delta base. Bound here (beside resume_base, OUTSIDE `if
-        # existing:`) so a fresh run — which never enters the resume block that
-        # rebinds it — still has the name defined; fresh streams the whole list.
-        # On the replay resume path it is REBOUND below to len(messages) AFTER
-        # tail-balancing, so the balance turn is excluded.
-        replay_stream_base = len(existing)
         # A SEND_TO_LLM tail needs the LLM to RESPOND to a trailing user turn,
         # but claude-p never generates from a loaded --resume session alone — it
         # blocks reading stdin for an input message. Folding that user turn into
@@ -1600,32 +1587,11 @@ class ClaudeCodeAgentRunner:
                    and not _contains_tool_result(existing[resume_base - 1])):
                 resume_base -= 1
         # Dispatch-only respawn: resume_base collapsed to 0, so the whole (short)
-        # history streams fresh and the store is truncated/rebuilt from scratch —
-        # store_reconcilable is moot (prefix-faithfulness is guaranteed).
+        # history streams fresh and the store is truncated/rebuilt from scratch.
         fresh_stream = shape_native_eligible and resume_base == 0
-        # A PARTIAL native resume (resume_base > 0) loads the store. A store-ahead
-        # drift (more turns than the transcript, from a mid-turn kill flushing a
-        # partial turn) is reconciled by dropping that stalled turn, so it resolves
-        # NATIVELY rather than falling back to replay — store_reconcilable is now
-        # an always-True marker, so native_resume reduces to shape_native_eligible.
-        native_resume = shape_native_eligible and (
-            fresh_stream or store_reconcilable(existing, store_body)
-        )
-        if existing and not native_resume:
-            shape = classify_resume(existing)
-            native_eligible = shape in (
-                ResumeState.AWAITING_USER, ResumeState.SEND_TO_LLM,
-                ResumeState.DANGLING_TOOL_USE, ResumeState.STEP_COMPLETED)
-            reason = (
-                "resume shape is not native-eligible"
-                if not native_eligible
-                else "session store unreconstructable from transcript")
-            elog.append(
-                agent_id=aid, type="runner_warning",
-                payload={"message": (
-                    "claude_code resume fell back to stream-json replay "
-                    f"(shape={shape.value}): {reason}; native --resume unavailable."
-                )})
+        # native_resume is False only on the fresh path; it still routes config_dir
+        # (elif native_resume) and the reconcile_store_tail block (if native_resume).
+        native_resume = shape_native_eligible
         config_dir: Path | None = None
         if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
@@ -1633,17 +1599,10 @@ class ClaudeCodeAgentRunner:
             opt_store, opt_session_id, opt_resume = (
                 store, resume_session_id(aid), None)
         elif native_resume:
+            # Native resume: hand claude-p the loaded session by id; config_dir
+            # stays None (the only disposition with no ephemeral home).
             opt_store, opt_session_id, opt_resume = (
                 store, None, resume_session_id(aid))
-        else:
-            # Replay disposition: no native session is handed to claude-p, so imp
-            # owns an isolated ephemeral home (removed in run()'s finally) — a pure
-            # throwaway sink for whatever claude-p writes (incl. the CC 2.x ai-title
-            # stub), never the real ~/.claude. After this, native resume is the only
-            # disposition left with config_dir = None.
-            config_dir = materialize_fresh_config_dir()
-            self._config_dir = config_dir
-            opt_store, opt_session_id, opt_resume = (None, None, None)
         # Build options only when we'll use the real SDK (mcp_server is not None).
         # When a client_factory is injected (tests), skip building options to
         # avoid constructing ClaudeAgentOptions with mcp_server=None.
@@ -1658,8 +1617,6 @@ class ClaudeCodeAgentRunner:
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
-            # ids for which repair synthesized placeholders — must not be named succeeded
-            dangling_ids: set[str] = set()
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Synthesize a placeholder tool_result so the tail is balanced and
             # emit `tool_result` events so `imp log` shows what the agent sees on
@@ -1669,110 +1626,77 @@ class ClaudeCodeAgentRunner:
             # The synth result is appended AFTER resume_base was captured, so it
             # streams as the delta (claude-p pairs the dangling call in the loaded
             # session and the result kicks the next turn).
-            if invocation.balance_on_resume and not native_resume:
-                # Balance the tail in the TRANSCRIPT (integrity), but drop the
-                # handback here — it is folded into the composed manifest turn
-                # below. Collect the error-flavored (genuinely interrupted) result
-                # ids so the manifest does not claim them succeeded.
-                balanced = balance_success_on_resume(messages, transcript, elog, aid)
-                if balanced is not None:
-                    dangling_ids.update(
-                        b.tool_use_id for b in balanced.content
-                        if isinstance(b, ToolResultBlock) and b.is_error)
-            elif not native_resume:
+            # Native tail-balancing.
+            #  - Rework (retry_feedback) + complete_step tail: leave the
+            #    complete_step DANGLING in the loaded session and stream an
+            #    is_error result whose content IS the feedback as the delta —
+            #    claude-p pairs the dangling call against it, so the feedback
+            #    reaches the model AS the result of its own complete_step call
+            #    (parity with the anthropic/openai is_error path). A SUCCESS
+            #    fold here would pre-balance the call and the feedback would
+            #    never reach the model.
+            #  - Bare backward goto (no feedback) + complete_step tail: fold a
+            #    SUCCESS result INTO the loaded session (resume_base advances
+            #    over it) so claude-p never auto-pairs an is_error telling the
+            #    agent its accepted work failed, then kick the otherwise-empty
+            #    delta with a redo nudge.
+            #  - Any other dangling tool_use keeps the placeholder repair.
+            #    Such a genuinely-dangling non-complete_step tail is a
+            #    mid-tool interrupt that resumes as a forward-continue with
+            #    retry_feedback=None, so this arm never coincides with feedback
+            #    (the if/elif ordering would otherwise drop it — it cannot here).
+            #  - A mid-step forward tail (SEND_TO_LLM) carrying rework feedback
+            #    keeps the UNCHANGED separate-user-turn handback — the spec's
+            #    removal scope is completed (complete_step-tail) steps only, and
+            #    such a tail can still carry retry_feedback. The AWAITING_USER
+            #    exclusion is preserved here (that shape delivers its reply via
+            #    the AWAITING_USER arm below, not this handback).
+            # Capture the tail shape BEFORE synthesis: synthesize_*/repair_*
+            # append a user turn to `messages` (which IS `existing`), so a
+            # later _tail_has_complete_step(existing) would wrongly return False.
+            tail_is_complete_step = _tail_has_complete_step(existing)
+            # STEP_COMPLETED: trailing prose over an ALREADY-resolved
+            # complete_step. Unlike the dangling arms above, the result is
+            # already in the loaded session, so there is NO SUCCESS-fold and
+            # NO resume_base advance — rewriting the accepted result to
+            # is_error would lie about history. Deliver the handback (feedback
+            # or redo nudge) as a plain trailing user turn; it becomes the
+            # streamed kicking delta and re-drives the step (an empty delta
+            # would deadlock receive_response()).
+            tail_step_completed = (
+                classify_resume(existing) is ResumeState.STEP_COMPLETED)
+            if tail_is_complete_step and invocation.retry_feedback:
+                synth = repair_dangling_tool_use_on_resume(
+                    messages, transcript, feedback=invocation.retry_feedback,
+                    captured=_load_captured_tool_results(invocation.transcript_dir))
+                if synth is not None:
+                    for rb in synth:
+                        elog.append_tool_result(agent_id=aid, block=rb)
+            elif tail_is_complete_step:
+                injected = synthesize_native_success_on_resume(
+                    messages, transcript, elog, aid)
+                if injected is not None:
+                    resume_base += 1
+                deliver_reply_on_resume(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            elif tail_step_completed and invocation.retry_feedback:
+                deliver_reply_on_resume(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
+            elif tail_step_completed:
+                deliver_reply_on_resume(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+            elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
                 synth = repair_dangling_tool_use_on_resume(
                     messages, transcript,
                     captured=_load_captured_tool_results(invocation.transcript_dir))
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
-                        dangling_ids.add(rb.tool_use_id)
-            else:
-                # Native tail-balancing.
-                #  - Rework (retry_feedback) + complete_step tail: leave the
-                #    complete_step DANGLING in the loaded session and stream an
-                #    is_error result whose content IS the feedback as the delta —
-                #    claude-p pairs the dangling call against it, so the feedback
-                #    reaches the model AS the result of its own complete_step call
-                #    (parity with the anthropic/openai is_error path). A SUCCESS
-                #    fold here would pre-balance the call and the feedback would
-                #    never reach the model.
-                #  - Bare backward goto (no feedback) + complete_step tail: fold a
-                #    SUCCESS result INTO the loaded session (resume_base advances
-                #    over it) so claude-p never auto-pairs an is_error telling the
-                #    agent its accepted work failed, then kick the otherwise-empty
-                #    delta with a redo nudge.
-                #  - Any other dangling tool_use keeps the placeholder repair.
-                #    Such a genuinely-dangling non-complete_step tail is a
-                #    mid-tool interrupt that resumes as a forward-continue with
-                #    retry_feedback=None, so this arm never coincides with feedback
-                #    (the if/elif ordering would otherwise drop it — it cannot here).
-                #  - A mid-step forward tail (SEND_TO_LLM) carrying rework feedback
-                #    keeps the UNCHANGED separate-user-turn handback — the spec's
-                #    removal scope is completed (complete_step-tail) steps only, and
-                #    such a tail can still carry retry_feedback. The AWAITING_USER
-                #    exclusion is preserved here (that shape delivers its reply via
-                #    the AWAITING_USER arm below, not this handback).
-                # Capture the tail shape BEFORE synthesis: synthesize_*/repair_*
-                # append a user turn to `messages` (which IS `existing`), so a
-                # later _tail_has_complete_step(existing) would wrongly return False.
-                tail_is_complete_step = _tail_has_complete_step(existing)
-                # STEP_COMPLETED: trailing prose over an ALREADY-resolved
-                # complete_step. Unlike the dangling arms above, the result is
-                # already in the loaded session, so there is NO SUCCESS-fold and
-                # NO resume_base advance — rewriting the accepted result to
-                # is_error would lie about history. Deliver the handback (feedback
-                # or redo nudge) as a plain trailing user turn; it becomes the
-                # streamed kicking delta and re-drives the step (an empty delta
-                # would deadlock receive_response()).
-                tail_step_completed = (
-                    classify_resume(existing) is ResumeState.STEP_COMPLETED)
-                if tail_is_complete_step and invocation.retry_feedback:
-                    synth = repair_dangling_tool_use_on_resume(
-                        messages, transcript, feedback=invocation.retry_feedback,
-                        captured=_load_captured_tool_results(invocation.transcript_dir))
-                    if synth is not None:
-                        for rb in synth:
-                            elog.append_tool_result(agent_id=aid, block=rb)
-                elif tail_is_complete_step:
-                    injected = synthesize_native_success_on_resume(
-                        messages, transcript, elog, aid)
-                    if injected is not None:
-                        resume_base += 1
-                    deliver_reply_on_resume(
-                        messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-                elif tail_step_completed and invocation.retry_feedback:
-                    deliver_reply_on_resume(
-                        messages, transcript, elog, aid, invocation.retry_feedback)
-                elif tail_step_completed:
-                    deliver_reply_on_resume(
-                        messages, transcript, elog, aid, RESUME_REDO_NUDGE)
-                elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
-                    synth = repair_dangling_tool_use_on_resume(
-                        messages, transcript,
-                        captured=_load_captured_tool_results(invocation.transcript_dir))
-                    if synth is not None:
-                        for rb in synth:
-                            elog.append_tool_result(agent_id=aid, block=rb)
-                elif (invocation.retry_feedback
-                        and classify_resume(existing) is not ResumeState.AWAITING_USER):
-                    deliver_reply_on_resume(
-                        messages, transcript, elog, aid, invocation.retry_feedback)
-            # Rebind the replay delta base to AFTER tail-balancing. Replay streams
-            # ONLY what is appended from here on (the composed manifest+handback
-            # turn, plus any AWAITING_USER reply / nudge) — never prior history or
-            # the tail-balancing turn, whose reconstructed tool_results pair prior
-            # tool_uses the delta-only stream omits (an orphaned tool_result 400s).
-            # Harmless on the native arm (which streams messages[resume_base:]).
-            replay_stream_base = len(messages)
+            elif (invocation.retry_feedback
+                    and classify_resume(existing) is not ResumeState.AWAITING_USER):
+                deliver_reply_on_resume(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
             resume_state = classify_resume(messages)
-            if resume_state is ResumeState.DANGLING_TOOL_USE and not native_resume:
-                yield {"type": "error", "payload": {
-                    "category": "config",
-                    "kind": "transcript_invalid",
-                    "message": "transcript ended with dangling tool_use",
-                }}
-                return
             if resume_state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
                     yield {"type": "error", "payload": {
@@ -1809,25 +1733,6 @@ class ClaudeCodeAgentRunner:
             if resume_state is not ResumeState.AWAITING_USER:
                 drained = drain_all_interjects_at_resume(
                     invocation.coordinator, messages, transcript, elog, aid)
-            # Faithful replay fallback: name every prior tool call SUCCEEDED so the
-            # replayed placeholder errors do not trigger a redo, and FOLD the
-            # handback into the SAME composed user turn (never a separate feedback
-            # turn). Built on every replay entry — the balance path included (the
-            # old balanced_msg gate skipped it for the gate-handback shape).
-            # Genuinely-dangling ids stay excluded so they are not claimed succeeded.
-            if not native_resume:
-                manifest = build_resume_manifest(
-                    messages, exclude_tool_use_ids=frozenset(dangling_ids))
-                blocks: list[TextBlock] = []
-                if manifest is not None:
-                    blocks.append(TextBlock(text=manifest))
-                if invocation.retry_feedback:
-                    blocks.append(TextBlock(text=invocation.retry_feedback))
-                if blocks:
-                    composed = Message(role="user", content=tuple(blocks))
-                    messages.append(composed)
-                    transcript.append(composed)
-                    elog.append_user_message(agent_id=aid, message=composed)
             # A mid-tool Ctrl-C resumes as SEND_TO_LLM/DANGLING (the dangling call
             # was repaired with a synthetic result), never AWAITING_USER, so the
             # _resolve_wait_reply nudge above can't reach it. Append the same
@@ -1840,19 +1745,14 @@ class ClaudeCodeAgentRunner:
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     _CONTINUATION_NUDGE)
-            # A delta-only replay stream must never be empty (a bare goto with no
-            # prior tools and no handback would otherwise stream nothing and hang).
-            if not native_resume and len(messages) == replay_stream_base:
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
             # Native folded-tool_result tail: after the fold, a transcript ending
             # exactly on the tool_result leaves messages[resume_base:] empty.
-            # Mirror the replay guard on the native arm — claude-p never generates
-            # from a loaded --resume session with an empty delta (it parks reading
-            # stdin and the runner deadlocks in receive_response()). Use the
-            # continuation nudge, not the redo nudge: the folded work stands, so
-            # the resumed turn continues from it rather than redoing it.
-            if native_resume and len(messages) == resume_base:
+            # claude-p never generates from a loaded --resume session with an empty
+            # delta (it parks reading stdin and the runner deadlocks in
+            # receive_response()). Use the continuation nudge, not the redo nudge:
+            # the folded work stands, so the resumed turn continues from it rather
+            # than redoing it.
+            if len(messages) == resume_base:
                 deliver_engine_continuation(
                     messages, transcript, elog, aid, _CONTINUATION_NUDGE)
         else:
@@ -1978,9 +1878,7 @@ class ClaudeCodeAgentRunner:
             # code). Each outer iteration runs its OWN receive_response() so a
             # follow-up turn is consumed from a fresh generator (issue 7:
             # receive_response() terminates after the first ResultMessage).
-            next_query: Any = _stream_history(
-                messages[resume_base:]
-                if native_resume else messages[replay_stream_base:])
+            next_query: Any = _stream_history(messages[resume_base:])
             from imp.engine.reincarnation import handoff_instruction, handoff_path_for
             from imp.providers.catalog import sdk_context_threshold_crossed
             # Tier A proactive-handoff watch state (Mechanism 3).

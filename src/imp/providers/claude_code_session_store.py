@@ -275,21 +275,6 @@ def reconcile_store_tail(
     return kept + tail
 
 
-def store_reconcilable(
-    messages: list[Message], store_entries: list[dict[str, Any]] | None,
-) -> bool:
-    """Always True: reconcile_store_tail can map ANY store body onto the
-    transcript — TRUNCATE a surplus (store-ahead) body, append a deficit, or
-    rebuild an absent body — so no at-rest store shape forces stream-json replay.
-    A store carrying MORE turns than the transcript is the mid-turn-kill case:
-    claude-p flushed a partial post-kill turn imp never recorded, and dropping
-    that stalled turn (which is exactly the turn we re-run) is the correct
-    resolution. Retained as a named always-True marker at the native-resume gate;
-    the parameters are part of that call contract.
-    """
-    return True
-
-
 def message_to_session_records(
     messages: list[Message], *, parent_uuid: str | None, session_id: str,
     cwd: str, model: str, start_index: int = 0,
