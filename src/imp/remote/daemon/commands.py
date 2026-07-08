@@ -117,7 +117,7 @@ HELP_TEXT = (
     "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
     "/save (reply or @handle) — save a conversation to your Backlog\n"
-    "/alerts on|off — alert on every Change, not just the ones you follow\n"
+    "/alerts on|off — alert on every Change, not just the ones you follow (default: on)\n"
     "/help — this message\n"
     "Reply to a Change's message (or @handle) to answer it.")
 
