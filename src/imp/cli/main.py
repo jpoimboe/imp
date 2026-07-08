@@ -1902,6 +1902,41 @@ def _follow_log(events: list[dict[str, Any]]) -> int:
     return 0
 
 
+class _EventTail:
+    """Offset-tracked, partial-line-tolerant reader for a live events.jsonl.
+
+    Reads only complete, newline-terminated lines from a kept-open descriptor.
+    A complete line that fails to parse (a transient btrfs+zstd read fault, or a
+    torn append) halts consumption at that byte offset and is retried on the
+    next read — it never raises. `emitted` counts every event handed out."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._fp: Any = None
+        self._offset = 0
+        self.emitted = 0
+
+    def read_new(self) -> list[dict[str, Any]]:
+        if self._fp is None:
+            try:
+                self._fp = self._path.open("rb")
+            except FileNotFoundError:
+                return []
+        self._fp.seek(self._offset)
+        data = self._fp.read()
+        events: list[dict[str, Any]] = []
+        consumed = 0
+        for chunk in data.split(b"\n")[:-1]:
+            try:
+                events.append(json.loads(chunk.decode("utf-8")))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                break
+            consumed += len(chunk) + 1
+        self._offset += consumed
+        self.emitted += len(events)
+        return events
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree

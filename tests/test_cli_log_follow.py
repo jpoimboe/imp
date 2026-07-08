@@ -141,3 +141,60 @@ def test_main_log_follow_routes_through_livedriver(
     assert popen.call_count == 0
     assert driver.on_event.call_count == 2
     driver.finish.assert_called_once()
+
+
+def test_event_tail_incremental(tmp_path: Path) -> None:
+    """read_new() returns only lines appended since the previous call, and
+    `emitted` counts every event handed out."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    p.write_text(json.dumps({"type": "a"}) + "\n")
+    tail = _EventTail(p)
+    assert tail.read_new() == [{"type": "a"}]
+    assert tail.read_new() == []
+    with p.open("a") as f:
+        f.write(json.dumps({"type": "b"}) + "\n")
+    assert tail.read_new() == [{"type": "b"}]
+    assert tail.emitted == 2
+
+
+def test_event_tail_partial_line_held(tmp_path: Path) -> None:
+    """A final line with no trailing newline is held back until it is
+    newline-terminated."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    p.write_bytes(json.dumps({"type": "a"}).encode() + b"\n"
+                  + json.dumps({"type": "b"}).encode())  # no trailing "\n"
+    tail = _EventTail(p)
+    assert tail.read_new() == [{"type": "a"}]
+    with p.open("a") as f:
+        f.write("\n")
+    assert tail.read_new() == [{"type": "b"}]
+
+
+def test_event_tail_bad_line_halts_then_recovers(tmp_path: Path) -> None:
+    """A complete but unparseable line halts consumption at its offset without
+    raising; once the bytes at that offset read as valid JSON (transient fault
+    cleared) the tail resumes from there."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    good = json.dumps({"type": "a"}).encode() + b"\n"
+    p.write_bytes(good + b"{bad json}\n" + json.dumps({"type": "c"}).encode() + b"\n")
+    tail = _EventTail(p)
+    assert tail.read_new() == [{"type": "a"}]   # stops at the bad line, no crash
+    assert tail.read_new() == []                # still blocked at the same offset
+    p.write_bytes(good + json.dumps({"type": "b"}).encode() + b"\n"
+                  + json.dumps({"type": "c"}).encode() + b"\n")
+    assert tail.read_new() == [{"type": "b"}, {"type": "c"}]
+
+
+def test_event_tail_missing_file_then_created(tmp_path: Path) -> None:
+    """A missing file yields [] without raising; once it appears, read_new()
+    reads it from the start."""
+    from imp.cli.main import _EventTail
+    p = tmp_path / "events.jsonl"
+    tail = _EventTail(p)
+    assert tail.read_new() == []          # file absent → [], no crash
+    p.write_text(json.dumps({"type": "a"}) + "\n")
+    assert tail.read_new() == [{"type": "a"}]
+    assert tail.emitted == 1
