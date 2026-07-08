@@ -6,6 +6,7 @@ from pathlib import Path
 
 from imp.engine.change import LAYOUT_VERSION
 from imp.remote.daemon import discover
+from imp.remote.drivers.telegram import event_body
 from tests.conftest import _seed_control
 
 
@@ -52,11 +53,20 @@ def test_snapshot_is_none_for_unknown_change(tmp_path: Path) -> None:
     assert discover.snapshot(tmp_path, "2026-06-14-nosuch") is None
 
 
-def test_recent_narrative_returns_last_n_oldest_first(tmp_path: Path) -> None:
+def test_recent_narrative_returns_last_n_augmented_events_oldest_first(
+    tmp_path: Path,
+) -> None:
     cid = _seed_change(tmp_path)
     for word in ("first", "second", "third"):
         _append_event(tmp_path, cid, _llm_response(word))
-    assert discover.recent_narrative(tmp_path, cid, 2) == ["second", "third"]
+    events = discover.recent_narrative(tmp_path, cid, 2)
+    # The last two, oldest-first, as curated events — not bare strings.
+    assert [event_body("llm_response", e["payload"]) for e in events] == [
+        "second", "third"]
+    assert all(e["type"] == "llm_response" for e in events)
+    # Augmented with change context so header_line can render id · title.
+    assert all(e["change"]["id"] == cid for e in events)
+    assert all(e["change"]["title"] == "Dark mode" for e in events)
 
 
 def test_recent_narrative_skips_tool_only_responses(tmp_path: Path) -> None:
@@ -70,7 +80,8 @@ def test_recent_narrative_skips_tool_only_responses(tmp_path: Path) -> None:
                 {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]},
         },
     })
-    assert discover.recent_narrative(tmp_path, cid, 5) == ["hello"]
+    events = discover.recent_narrative(tmp_path, cid, 5)
+    assert [event_body("llm_response", e["payload"]) for e in events] == ["hello"]
 
 
 def test_recent_narrative_is_empty_for_unknown_change(tmp_path: Path) -> None:

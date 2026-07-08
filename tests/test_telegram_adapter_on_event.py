@@ -189,7 +189,9 @@ def _alert_all_on() -> AlertAll:
 
 def test_alert_all_off_drops_unsubscribed_buzz_and_records_no_maps() -> None:
     sent: list = []
-    adapter = _adapter(sent, subscriptions=Subscriptions())  # alert-all default off
+    off = AlertAll()
+    off.set(False)  # force OFF — default is now on
+    adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=off)
     adapter.on_event(LOUD_EVENT)
     assert sent == []
     assert adapter._handle_to_change == {}
@@ -301,7 +303,8 @@ def test_replayed_then_live_alert_all_duplicate_is_deduped_new_id_sends() -> Non
 
 def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> None:
     sent: list = []
-    alert = AlertAll()  # default OFF — no set(True)
+    alert = AlertAll()
+    alert.set(False)  # force OFF — default is now on
     adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=alert)
     adapter.on_event(REPLAY_LOUD)              # unsubscribed → alert-all path, history
     assert sent == []                          # never sends

@@ -12,7 +12,7 @@ import threading
 class AlertAll:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._enabled = False
+        self._enabled = True
         self._delivered: dict[str, set[str]] = {}
 
     def enabled(self) -> bool:

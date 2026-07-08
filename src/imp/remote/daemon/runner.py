@@ -300,14 +300,10 @@ async def _handle_command(
             responses.put(Notice(
                 f"No Change @{handle} — send /show to see what's running."))
             return
-        events = await anyio.to_thread.run_sync(
+        await anyio.to_thread.run_sync(
             control.subscriptions.snapshot_and_add,
             command.change_id,
             lambda: control.full_history(command.change_id))
-        for event in events:
-            text = format_replay_event(event)
-            if text is not None:
-                responses.put(Notice(text))
         responses.put(Notice(f"Following @{handle}."))
     elif isinstance(command, Unsubscribe):
         control.subscriptions.remove(command.change_id)
@@ -317,14 +313,18 @@ async def _handle_command(
         if change_id is None:
             responses.put(Notice(ROUTE_HINT))
         else:
-            bodies = await anyio.to_thread.run_sync(
+            events = await anyio.to_thread.run_sync(
                 control.recent_narrative, change_id, command.n)
-            if not bodies:
+            rendered = [
+                text for text in (format_replay_event(event) for event in events)
+                if text is not None
+            ]
+            if not rendered:
                 responses.put(Notice(
                     f"Nothing to replay for @{handle_for(change_id)} yet."))
             else:
-                for body in bodies:
-                    responses.put(Notice(body))
+                for text in rendered:
+                    responses.put(Notice(text, change_id=change_id))
     elif isinstance(command, Create):
         control.create(command.prompt)
         responses.put(Notice("Spawning a new Change… watch for its first question"))

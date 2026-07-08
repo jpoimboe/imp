@@ -56,7 +56,7 @@ class FakeControl:
     def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
         return self._snapshots.get(change_id)
 
-    def recent_narrative(self, change_id: str, n: int) -> list[str]:
+    def recent_narrative(self, change_id: str, n: int) -> list[dict]:
         return self._narratives.get(change_id, [])[-n:]
 
     async def reply(self, change_id: str, text: str) -> str:
@@ -154,7 +154,7 @@ async def test_reply_does_not_subscribe() -> None:
 
 
 @pytest.mark.anyio
-async def test_subscribe_replays_history_then_confirms() -> None:
+async def test_subscribe_seeds_seen_set_without_replaying() -> None:
     control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
         {"id": "e1", "type": "agent_output", "timestamp": "2026-06-25T14:32:05+00:00",
@@ -162,11 +162,11 @@ async def test_subscribe_replays_history_then_confirms() -> None:
     ]
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
-    first = responses.get_nowait()
-    assert isinstance(first, Notice) and "hi" in first.text
+    # History is not replayed — only the confirmation sends.
     assert responses.get_nowait() == Notice("Following @k3f9qa.")
     assert responses.empty()
     assert control.subscriptions.contains("k3f9qa")
+    # The snapshot still seeded the seen-set from full_history.
     assert control.subscriptions.seen("k3f9qa", "e1")
 
 
@@ -203,15 +203,33 @@ async def test_unsubscribe_removes_the_target_and_confirms() -> None:
     assert responses.get_nowait() == Notice("Unfollowed @k3f9qa.")
 
 
+def _narr_event(eid: str, text: str) -> dict:
+    return {
+        "id": eid, "type": "llm_response",
+        "timestamp": "2026-06-25T14:32:05+00:00",
+        "change": {"id": "k3f9qa", "title": "Dark mode"},
+        "payload": {"raw": {"content": [{"type": "text", "text": text}]}},
+    }
+
+
 @pytest.mark.anyio
-async def test_replay_resends_each_message_oldest_first() -> None:
-    control = FakeControl(
-        narratives={"k3f9qa": ["one", "two", "three"]})
+async def test_replay_renders_each_event_through_the_common_envelope() -> None:
+    control = FakeControl(narratives={"k3f9qa": [
+        _narr_event("e1", "one"), _narr_event("e2", "two")]})
     responses: queue.Queue = queue.Queue()
-    await _handle_command(Replay("k3f9qa", 2), control, responses)
-    assert responses.get_nowait() == Notice("two")
-    assert responses.get_nowait() == Notice("three")
+    await _handle_command(Replay("k3f9qa", 5), control, responses)
+    first = responses.get_nowait()
+    second = responses.get_nowait()
     assert responses.empty()
+    # Full envelope (id · title · time / body / reply footer), not a bare body.
+    assert isinstance(first, Notice) and isinstance(second, Notice)
+    assert first.text.startswith("k3f9qa · Dark mode · ")
+    assert first.text.endswith("\none\n↩ @k3f9qa")
+    assert second.text.startswith("k3f9qa · Dark mode · ")
+    assert second.text.endswith("\ntwo\n↩ @k3f9qa")
+    # Each replayed Notice is tagged so a reply routes back to the Change.
+    assert first.change_id == "k3f9qa"
+    assert second.change_id == "k3f9qa"
 
 
 @pytest.mark.anyio
@@ -272,6 +290,7 @@ async def test_dispatch_inbound_survives_a_failing_command(
 @pytest.mark.anyio
 async def test_alerts_on_sets_mode_and_confirms() -> None:
     alert_all = AlertAll()
+    alert_all.set(False)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(True), FakeControl(), responses, alert_all)
     assert alert_all.enabled() is True
@@ -293,6 +312,7 @@ async def test_alerts_off_clears_mode_and_confirms() -> None:
 @pytest.mark.anyio
 async def test_alerts_bare_reports_off_state() -> None:
     alert_all = AlertAll()
+    alert_all.set(False)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(None), FakeControl(), responses, alert_all)
     assert alert_all.enabled() is False   # bare query must not change the mode
@@ -320,6 +340,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     control = FakeControl(changes=rows)
     responses: queue.Queue = queue.Queue()
     alert_all = AlertAll()
+    alert_all.set(False)
     await _handle_command(Alerts(True), control, responses, alert_all)
     assert alert_all.enabled() is True
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)

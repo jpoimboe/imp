@@ -281,7 +281,7 @@ async def test_await_shutdown_signals_drains_then_escalates(
 
 
 @pytest.mark.anyio
-async def test_run_daemon_injects_a_default_off_alert_all_into_the_adapter(
+async def test_run_daemon_injects_a_default_on_alert_all_into_the_adapter(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
@@ -302,7 +302,7 @@ async def test_run_daemon_injects_a_default_off_alert_all_into_the_adapter(
         shutdown.set()
 
     assert isinstance(captured["alert_all"], AlertAll)
-    assert captured["alert_all"].enabled() is False
+    assert captured["alert_all"].enabled() is True
 
 
 @pytest.mark.anyio

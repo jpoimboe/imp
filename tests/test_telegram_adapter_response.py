@@ -4,7 +4,11 @@ from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import ListResult, Notice
 from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.subscriptions import Subscriptions
-from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, render_response
+from imp.remote.daemon.telegram_adapter import (
+    Inbound,
+    TelegramNorthAdapter,
+    render_response,
+)
 
 
 def _adapter(
@@ -81,8 +85,10 @@ def test_render_shows_subscribed_not_resident_with_mark() -> None:
 def test_on_response_marks_subscribed_rows() -> None:
     subs = Subscriptions()
     subs.add("bbbbbb")
+    off = AlertAll()
+    off.set(False)  # force OFF — default is now on
     sent: list = []
-    _adapter(sent, subs).on_response(ListResult([
+    _adapter(sent, subs, alert_all=off).on_response(ListResult([
         ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]))
     assert sent == [(
         "Alerts: subscribed only\n● @bbbbbb  Beta — running · implement", True)]
@@ -111,3 +117,26 @@ def test_render_listresult_header_reflects_alerts_off() -> None:
         ChangeInfo(id="k3f9qa", title="Dark mode", status="running", step="implement")],
         frozenset({"k3f9qa"})), (), False)
     assert out == "Alerts: subscribed only\n@k3f9qa  Dark mode — running · implement"
+
+
+def test_on_response_notice_with_change_id_is_reply_routable() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_response(Notice("replayed body", change_id="k3f9qa"))
+    # Still sent silently — a catch-up must not buzz.
+    assert sent == [("replayed body", True)]
+    # The recorded message id (1, from the fake send) routes a reply to the Change,
+    assert adapter.resolve(
+        Inbound(text="ok", reply_to_message_id=1)) == ("k3f9qa", "ok")
+    # and so does an @handle prefix.
+    assert adapter.resolve(
+        Inbound(text="@k3f9qa go", reply_to_message_id=None)) == ("k3f9qa", "go")
+
+
+def test_on_response_plain_notice_records_no_route() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_response(Notice("hello"))
+    # A Notice with no change_id records nothing — an unrelated reply stays unrouted.
+    assert adapter.resolve(
+        Inbound(text="ok", reply_to_message_id=1)) == (None, "ok")

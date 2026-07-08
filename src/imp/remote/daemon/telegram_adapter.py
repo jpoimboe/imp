@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from imp.remote.daemon.alert_all import AlertAll
-from imp.remote.daemon.commands import Command, ListResult, Response, parse
+from imp.remote.daemon.commands import Command, ListResult, Notice, Response, parse
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.drivers.telegram import (
     _compose_message,
@@ -169,8 +169,9 @@ class TelegramNorthAdapter:
         self._last_narration: dict[str, str] = {}
         self._msg_to_change: dict[int, str] = {}
         self._handle_to_change: dict[str, str] = {}
-        # The reply maps below are WRITTEN by on_event (sender thread) and READ by
-        # resolve (poll thread); _offset stays poll-thread-only. Guard only the maps.
+        # The reply maps below are WRITTEN by on_event and on_response (both run on
+        # the sender thread) and READ by resolve (poll thread); _offset stays
+        # poll-thread-only. Guard only the maps.
         self._lock = threading.Lock()
 
     @classmethod
@@ -283,8 +284,15 @@ class TelegramNorthAdapter:
     def on_response(self, response: Response) -> None:
         text = render_response(
             response, self._subscriptions.all(), self._alert_all.enabled())
-        if text:
-            self._send(text, True)
+        if not text:
+            return
+        message_id = self._send(text, True)
+        if isinstance(response, Notice) and response.change_id is not None:
+            handle = handle_for(response.change_id)
+            with self._lock:
+                self._handle_to_change[handle] = response.change_id
+                if message_id is not None:
+                    self._msg_to_change[message_id] = response.change_id
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
         """Resolve one inbound reply to (change_id, text) against the recorded maps."""

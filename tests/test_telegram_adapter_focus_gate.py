@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter
 
@@ -9,10 +10,13 @@ TS = "2026-06-25T14:32:05+00:00"
 
 
 def _adapter(subs: Subscriptions, sent: list) -> TelegramNorthAdapter:
+    alert_all = AlertAll()
+    alert_all.set(False)  # isolate the focus gate — default is now on
     return TelegramNorthAdapter(
         chat_id=1, submit=lambda command: None,
         send=lambda text, silent: (sent.append((text, silent)) or 1),
-        get_updates=lambda offset: {"result": []}, subscriptions=subs)
+        get_updates=lambda offset: {"result": []}, subscriptions=subs,
+        alert_all=alert_all)
 
 
 def _silent(change_id: str, event_id: str = "s1") -> dict:
