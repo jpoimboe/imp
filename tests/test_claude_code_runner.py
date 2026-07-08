@@ -4433,3 +4433,60 @@ async def test_interrupt_is_cooperative_only(tmp_path: Path) -> None:
     assert "interrupt" in holder["c"].order  # client.interrupt() was called
     assert "disconnect" not in holder["c"].order  # no hard kill from interrupt() itself
     await asyncio.wait_for(task, timeout=2)
+
+
+@pytest.mark.anyio
+async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> None:
+    """interrupt() waits for the steer landing however long it takes and never
+    calls disconnect() on its own — escalation is the coordinator's job.
+    The land gate models a >2s (unbounded) SDK landing deterministically."""
+    import asyncio
+
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    after_steer = [assistant(text("done")), result()]
+    holder: dict[str, CooperativeClient] = {}
+    land = asyncio.Event()
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer, land_gate=land)
+        holder["c"] = c
+        return c
+
+    def _input_fn(_prompt: str) -> str:
+        return "carry on"
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=_input_fn)
+
+    async def drive() -> None:
+        async for _ev in runner.run(_inv(tmp_path)):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    interrupt_task = asyncio.create_task(runner.interrupt())
+    # Yield enough turns for client.interrupt() to fire and the receive loop to
+    # park on the land gate.
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+    # Landing is NOT complete: interrupt() is still awaiting the steer latch.
+    assert not interrupt_task.done(), "interrupt() should still be pending"
+    assert "interrupt" in holder["c"].order   # client.interrupt() was called
+    assert "disconnect" not in holder["c"].order  # no self-escalation while waiting
+
+    # Release the gate: the receive loop can now yield the error result.
+    land.set()
+    await asyncio.wait_for(interrupt_task, timeout=2)
+
+    # interrupt() must never have called disconnect(), even after completion.
+    assert "disconnect" not in holder["c"].order
+    await asyncio.wait_for(task, timeout=2)
