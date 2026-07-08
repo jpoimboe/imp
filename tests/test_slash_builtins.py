@@ -245,3 +245,38 @@ def test_clear_is_in_the_help_text() -> None:
     lines: list[str] = []
     _help(lines.append)
     assert any("/clear" in line for line in lines)
+
+
+def test_search_builtin_matches_archived_change_by_body_term(tmp_path: Path) -> None:
+    from imp.engine import archive
+    events = tmp_path / "e.jsonl"
+    events.write_text(json.dumps({
+        "id": "e0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "llm_response",
+        "payload": {"provider": "anthropic", "raw": {
+            "content": [{"type": "text", "text": "the 300s deadline is enforced"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n")
+    change_json = tmp_path / "c.json"
+    change_json.write_text(json.dumps({
+        "id": "quietid", "title": "", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "s.json"
+    state_json.write_text(json.dumps({"id": "quietid", "status": "abandoned", "step": "spec"}))
+    archive.archive_change(
+        tmp_path, "quietid", events_path=events,
+        change_json_path=change_json, state_json_path=state_json)
+
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/search 300s", change=change, output_fn=out.append)
+    assert result is REPROMPT
+    # An untitled archived chat is found by a term living only in its body.
+    assert any("quietid" in line for line in out)
+
+
+def test_help_documents_content_search() -> None:
+    change = SimpleNamespace()
+    out: list[str] = []
+    result = handle_slash_line("/help", change=change, output_fn=out.append)
+    assert result is REPROMPT
+    assert any("/search" in line and "content" in line for line in out)
