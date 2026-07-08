@@ -1376,3 +1376,48 @@ async def test_hibernation_gate_without_input_does_not_broadcast_resolved(
         assert result["r"] == "hibernated"
         assert not any(e.get("type") == "user_input_resolved" for e in emitted)
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_dispatch_control_tags_frame_and_does_not_block() -> None:
+    import anyio
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_DETACH, CONTROL_INTERRUPT
+    from imp.remote.session.server import SessionServer
+    from tests.test_interrupt_events import RecordingLog
+
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    started = anyio.Event()
+    release = anyio.Event()
+
+    async def hanging_interrupt() -> None:
+        started.set()
+        await release.wait()
+
+    coord.attach_runner(hanging_interrupt)
+    server = SessionServer("/tmp/does-not-matter.sock", coordinator=coord)
+
+    detached = {"hit": False}
+
+    async def fake_detach_all() -> None:
+        detached["hit"] = True
+
+    server._socket.detach_all = fake_detach_all  # type: ignore[assignment]
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)
+        with anyio.fail_after(1):
+            # First frame: interrupt delivery hangs, but dispatch returns at once.
+            await server._dispatch_control(CONTROL_INTERRUPT)
+            # Second frame dispatches despite the still-hanging delivery.
+            await server._dispatch_control(CONTROL_DETACH)
+        assert detached["hit"] is True  # non-blocking: the second frame ran
+        # The daemon control frame is journaled as via="frame" (not "signal").
+        reqs = [r["payload"] for r in log.records if r["type"] == "interrupt_requested"]
+        assert reqs == [{"source": "ctrl-c", "via": "frame"}]
+        await started.wait()
+        release.set()       # let the spawned delivery task finish
+        coord.note_yield()  # disarm the spawned yield watchdog so the group closes

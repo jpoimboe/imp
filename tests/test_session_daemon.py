@@ -1477,7 +1477,8 @@ async def test_interrupt_leave_control_pauses_with_ctrl_d_reason(tmp_path: Path)
         def __init__(self) -> None:
             self.reasons: list[str] = []
 
-        async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
+        async def signal_pause(self, *, reason: str = "ctrl-c",
+                               via: str = "signal") -> None:
             self.reasons.append(reason)
 
     coord = _FakeCoord()
@@ -1495,7 +1496,8 @@ async def test_interrupt_leave_control_passes_frame_reason_through(tmp_path: Pat
         def __init__(self) -> None:
             self.reasons: list[str] = []
 
-        async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
+        async def signal_pause(self, *, reason: str = "ctrl-c",
+                               via: str = "signal") -> None:
             self.reasons.append(reason)
 
     coord = _FakeCoord()

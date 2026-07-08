@@ -114,11 +114,15 @@ class SessionServer:
                 self._serve_scope = tg.cancel_scope
                 tg.start_soon(self._socket.serve)
                 async with anyio.create_task_group() as pump_tg:
+                    if self._coordinator is not None:
+                        self._coordinator.set_delivery_spawner(pump_tg.start_soon)
                     pump_tg.start_soon(self._control_loop)
                     try:
                         result = await run_fn(
                             on_event=self._emit, user_chat_input_fn=self._chat)
                     finally:
+                        if self._coordinator is not None:
+                            self._coordinator.clear_delivery_spawner()
                         await self._control_send.aclose()
                 tg.cancel_scope.cancel()
         finally:
@@ -335,12 +339,12 @@ class SessionServer:
     async def _dispatch_control(self, action: str, reason: str | None = None) -> None:
         if action == _INTERNAL_PAUSE:
             if self._coordinator is not None and self.leased_count == 0:
-                await self._coordinator.signal_pause(reason="detached")
+                await self._coordinator.signal_pause(reason="detached", via="frame")
             return
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
-            await self._coordinator.signal_pause(reason="ctrl-c")
+            await self._coordinator.signal_pause(reason="ctrl-c", via="frame")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
-            await self._coordinator.signal_pause(reason=reason or "ctrl-d")
+            await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_DETACH:
             await self._socket.detach_all()
         elif action == CONTROL_ABANDON:
