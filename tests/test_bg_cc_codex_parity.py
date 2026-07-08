@@ -7,6 +7,7 @@ injection, the background_enabled flag, and teardown surfaces."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -76,24 +77,60 @@ async def _spawn_bg(ctx) -> dict:
 # Teardown unit tests
 # ---------------------------------------------------------------------------
 
-def test_cc_interrupt_tears_down_background(tmp_path: Path) -> None:
-    """Decision 7 site 1 under claude_code: interrupt() kills bg groups and
-    persists tombstones. Unit-level: _ctx is set directly (the runner sets it
-    the same way mid-_run_loop)."""
-    async def main() -> None:
-        runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
-        ctx = _bg_ctx(tmp_path)
-        runner._ctx = ctx
-        out = await _spawn_bg(ctx)
-        try:
-            await runner.interrupt()
-            with pytest.raises(ProcessLookupError):
-                os.killpg(out["pid"], 0)
-            bp = ctx.background_processes[out["id"]]
-            assert bp.status == "killed" and bp.kill_reason == "interrupted"
-        finally:
-            await _cleanup(ctx)
-    anyio.run(main)
+@pytest.mark.anyio
+async def test_cc_cooperative_interrupt_tears_down_background(tmp_path: Path) -> None:
+    """A cooperative interrupt tears down the bg group and persists the interrupted
+    tombstone — via the steer-landing sweep in run()'s receive loop (interrupt() is
+    cooperative-only; it no longer sweeps subprocesses directly)."""
+    import asyncio
+    from typing import Any
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient, assistant, result, text
+    from tests.test_claude_code_runner import _inv
+
+    coord = InterruptCoordinator()
+    after_steer = [assistant(text("done")), result()]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "carry on")
+    coord.attach_runner(runner.interrupt)
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "bash"}))
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    try:
+        for _ in range(1000):
+            if "c" in holder and runner._ctx is not None:
+                break
+            await asyncio.sleep(0)
+        await asyncio.sleep(0.02)
+        out = await _spawn_bg(runner._ctx)
+
+        await coord.signal_pause()
+        await asyncio.wait_for(task, timeout=3)
+
+        with pytest.raises(ProcessLookupError):
+            os.killpg(out["pid"], 0)
+        bp = runner._ctx.background_processes[out["id"]]
+        assert bp.status == "killed" and bp.kill_reason == "interrupted"
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if runner._ctx is not None:
+            await _cleanup(runner._ctx)
 
 
 def test_cc_interrupt_none_ctx_safe(tmp_path: Path) -> None:
