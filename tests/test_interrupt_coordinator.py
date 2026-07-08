@@ -322,6 +322,25 @@ def test_end_gesture_round_clears_latch_for_a_fresh_round() -> None:
 
 
 @pytest.mark.anyio
+async def test_signal_pause_dispatches_to_innermost_runner_only() -> None:
+    """Pins no-spawner inline dispatch to the top of the attach stack, not the parent."""
+    coord = InterruptCoordinator()
+    calls: list[str] = []
+
+    async def parent_interrupt() -> None:
+        calls.append("parent")
+
+    async def child_interrupt() -> None:
+        calls.append("child")
+
+    coord.attach_runner(parent_interrupt)
+    with coord.runner_attached(child_interrupt):
+        await coord.signal_pause(reason="ctrl-c")
+
+    assert calls == ["child"]
+
+
+@pytest.mark.anyio
 async def test_interrupted_flag_survives_end_gesture_round() -> None:
     """Regression: end_gesture_round clears the live gesture latch (should_pause)
     so the next ctrl-c is a fresh gesture, but must PRESERVE the durable
