@@ -249,3 +249,67 @@ async def test_note_yield_disarms_watchdog(monkeypatch: Any) -> None:
 
     assert killed == []  # yielded in time -> no escalation
     assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []
+
+
+@pytest.mark.anyio
+async def test_signal_force_skips_cooperative_and_hard_kills_whole_stack() -> None:
+    """A FORCE (second-gesture) delivery must NOT call any cooperative interrupt();
+    it hard-kills every runner on the attach stack and journals
+    interrupt_escalated{second_gesture} plus one interrupt_delivered{hard} each."""
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+
+    coop_calls = {"n": 0}
+
+    async def coop() -> None:
+        coop_calls["n"] += 1
+
+    killed: list[str] = []
+
+    async def fk_parent() -> None:
+        killed.append("parent")
+
+    async def fk_child() -> None:
+        killed.append("child")
+
+    with (
+        coord.runner_attached(coop, force_kill=fk_parent, agent_id="parent"),
+        coord.runner_attached(coop, force_kill=fk_child, agent_id="child"),
+    ):
+        await coord.signal_force()
+
+    assert coop_calls["n"] == 0                    # cooperative tier skipped
+    assert killed == ["parent", "child"]           # whole stack hard-killed
+    delivered = [(r["payload"]["agent_id"], r["payload"]["tier"],
+                  r["payload"]["outcome"])
+                 for r in log.records if r["type"] == "interrupt_delivered"]
+    assert delivered == [("parent", "hard", "ok"), ("child", "hard", "ok")]
+    esc = [r["payload"] for r in log.records if r["type"] == "interrupt_escalated"]
+    assert esc == [{"reason": "second_gesture", "killed": ["parent", "child"]}]
+
+
+@pytest.mark.anyio
+async def test_signal_force_disarms_the_yield_watchdog(monkeypatch: Any) -> None:
+    """signal_force calls note_yield() to disarm the watchdog the first gesture
+    armed. After a FORCE, a subsequently-awaited _yield_watchdog must NOT fire its
+    own interrupt_escalated{no_yield} — the only escalation is the FORCE's
+    second_gesture record."""
+    monkeypatch.setattr(_signals, "_YIELD_DEADLINE_S", 5.0)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+
+    async def fk() -> None: ...
+
+    with coord.runner_attached(lambda: None, force_kill=fk, agent_id="a1"):
+        # Arm the watchdog exactly as the first gesture would.
+        coord._first_gesture_at = coord._now()
+        coord._yielded = anyio.Event()
+        await coord.signal_force()          # calls note_yield() -> disarms watchdog
+        with anyio.fail_after(1):
+            await coord._yield_watchdog()   # must return promptly, no no_yield
+
+    reasons = [r["payload"]["reason"]
+               for r in log.records if r["type"] == "interrupt_escalated"]
+    assert reasons == ["second_gesture"]    # no no_yield escalation fired

@@ -475,6 +475,23 @@ class InterruptCoordinator:
             "outcome": outcome,
             "duration_ms": int((self._now() - t0) * 1000)})
 
+    async def signal_force(self) -> None:
+        """Second-gesture FORCE (CONTROL_INTERRUPT_FORCE): skip the cooperative
+        tier and hard-kill the whole attach stack now. Wait-free — each force_kill
+        is a non-waiting SIGKILL, so awaiting this inline never blocks the daemon
+        control loop. Journals one interrupt_delivered{hard} per runner (via
+        _hard_kill) and a single interrupt_escalated{reason: second_gesture,
+        killed:[...]}, then disarms the yield watchdog the first gesture armed."""
+        self._should_pause = True
+        killed: list[str | None] = []
+        for att in list(self._runner_stack):
+            if att.force_kill is not None:
+                await self._hard_kill(att)
+                killed.append(att.agent_id)
+        self._emit("interrupt_escalated",
+                   {"reason": "second_gesture", "killed": killed})
+        self.note_yield()
+
     async def _yield_watchdog(self) -> None:
         """Hard-kill the whole attach stack if the run doesn't yield within 5s of the gesture."""
         import anyio

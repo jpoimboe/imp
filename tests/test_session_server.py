@@ -1421,3 +1421,37 @@ async def test_dispatch_control_tags_frame_and_does_not_block() -> None:
         await started.wait()
         release.set()       # let the spawned delivery task finish
         coord.note_yield()  # disarm the spawned yield watchdog so the group closes
+
+
+@pytest.mark.anyio
+async def test_dispatch_control_force_skips_cooperative_and_hard_kills() -> None:
+    import anyio
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_INTERRUPT_FORCE
+    from imp.remote.session.server import SessionServer
+    from tests.test_interrupt_events import RecordingLog
+
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+
+    coop = {"n": 0}
+
+    async def cooperative() -> None:
+        coop["n"] += 1
+
+    killed = {"n": 0}
+
+    async def fk() -> None:
+        killed["n"] += 1
+
+    server = SessionServer("/tmp/does-not-matter.sock", coordinator=coord)
+    with coord.runner_attached(cooperative, force_kill=fk, agent_id="a1"):
+        with anyio.fail_after(1):
+            await server._dispatch_control(CONTROL_INTERRUPT_FORCE)
+
+    assert coop["n"] == 0        # cooperative tier skipped
+    assert killed["n"] == 1      # hard kill fired
+    esc = [r["payload"] for r in log.records if r["type"] == "interrupt_escalated"]
+    assert esc == [{"reason": "second_gesture", "killed": ["a1"]}]
