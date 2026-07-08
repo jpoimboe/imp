@@ -192,6 +192,45 @@ def test_worker_gate_omits_traceback_for_transient_network_errors(
     assert record.exc_info is None
 
 
+def test_worker_gate_treats_http_5xx_as_transient(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A 502/503 from Telegram's edge is a server-side blip, same class as a
+    # timeout: one concise WARNING line, no traceback.
+    bad_gateway = urllib.error.HTTPError("u", 502, "Bad Gateway", {}, None)  # type: ignore[arg-type]
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"):
+        runner._WorkerGate().fail(bad_gateway)
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "transient network error" in record.message
+    assert record.exc_info is None
+
+
+def test_drain_outbound_http_5xx_keeps_event_for_retry() -> None:
+    # A 502 mid-send is transient: the event must stay in `carry` for the next
+    # cycle, not be dropped as poison.
+    sent: list[dict] = []
+
+    class BadGatewayOnceAdapter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def on_event(self, event: dict) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise urllib.error.HTTPError("u", 502, "Bad Gateway", {}, None)  # type: ignore[arg-type]
+            sent.append(event)
+
+    q: queue.Queue[dict] = queue.Queue()
+    q.put({"type": "a"})
+    adapter = BadGatewayOnceAdapter()
+    carry: list[dict] = []
+    with pytest.raises(urllib.error.HTTPError):
+        runner.drain_outbound(adapter, q, carry)
+    assert carry == [{"type": "a"}]                  # held, not dropped
+    runner.drain_outbound(adapter, q, carry)
+    assert sent == [{"type": "a"}]
+
+
 def test_worker_gate_keeps_traceback_for_unexpected_errors(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

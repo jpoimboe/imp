@@ -210,10 +210,11 @@ _SENDER_GAP = 0.05   # idle wait between outbound/response drains (latency ceili
 def _is_transient_net_error(exc: BaseException) -> bool:
     """Connection resets, timeouts, and DNS blips on the Telegram long-poll are
     routine and self-healing — worth a one-line note, not an alarming traceback.
-    A real API error (HTTPError: 401 bad token, 409 conflict) is persistent, so
-    it keeps the full traceback."""
+    So is a 5xx from Telegram's edge (502 Bad Gateway). A real API error
+    (HTTPError: 401 bad token, 409 conflict) is persistent, so it keeps the
+    full traceback."""
     if isinstance(exc, urllib.error.HTTPError):
-        return False
+        return exc.code >= 500
     return isinstance(exc, (urllib.error.URLError, ConnectionError, TimeoutError))
 
 
