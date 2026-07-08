@@ -3,12 +3,16 @@ creation, permanent state home at <control_root>/.imp/changes/<id>/."""
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from imp.agents.prompts import render_label
 from imp.engine import worktree
@@ -17,6 +21,21 @@ from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
 LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout/schema change
+
+
+def _write_change_json(meta_path: Path, meta: dict[str, Any]) -> None:
+    """Atomically rewrite change.json (tmp file, fsync, os.replace); mirrors State.save."""
+    fd, tmp_name = tempfile.mkstemp(prefix=".change-", dir=meta_path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(meta, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, meta_path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
 
 
 def _fold_phantom(phantom: Path, home: Path) -> None:
