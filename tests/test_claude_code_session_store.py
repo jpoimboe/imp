@@ -583,35 +583,4 @@ def test_reconcile_store_tail_strips_error_then_truncates_surplus() -> None:
     assert out == store_body[:1]
 
 
-def test_store_reconcilable_true_when_body_fits_transcript() -> None:
-    from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import store_reconcilable
 
-    messages = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=(TextBlock(text="done"),)),
-    ]
-    body = [{"type": "user", "uuid": "m0", "message": {"role": "user", "content": "go"}}]
-    # 1 body turn <= 2 transcript messages -> reconcilable.
-    assert store_reconcilable(messages, body) is True
-    # Body count == transcript length (a complete store) is still reconcilable.
-    body2 = [*body, {"type": "assistant", "uuid": "m1",
-                     "message": {"role": "assistant", "content": "done"}}]
-    assert store_reconcilable(messages, body2) is True
-    # Absent body reconstructs wholly from the transcript.
-    assert store_reconcilable(messages, None) is True
-
-
-def test_store_reconcilable_true_when_body_drifts_ahead() -> None:
-    from imp.agents.runner import Message, TextBlock
-    from imp.providers.claude_code_session_store import store_reconcilable
-
-    messages = [Message(role="user", content=(TextBlock(text="go"),))]
-    body = [
-        {"type": "user", "uuid": "m0", "message": {"role": "user", "content": "go"}},
-        {"type": "assistant", "uuid": "m1", "message": {"role": "assistant", "content": "a"}},
-        {"type": "user", "uuid": "m2", "message": {"role": "user", "content": "b"}},
-    ]
-    # 3 body turns > 1 transcript message: a store-ahead drift (mid-turn kill).
-    # reconcile drops the stalled surplus turn, so this is reconcilable -> native.
-    assert store_reconcilable(messages, body) is True

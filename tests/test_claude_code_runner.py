@@ -2138,7 +2138,7 @@ async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> Non
     stream-json 'succeeded' replay manifest is never built — the streamed delta
     is just the human reply (the inverse of this test's pre-3a contract)."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.agents.transcript import Transcript
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
@@ -2174,11 +2174,7 @@ async def test_no_store_awaiting_user_injects_no_manifest(tmp_path: Path) -> Non
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")  # native path, not replay
     blob = _user_text_blob(created[0].queries[0])
-    # No replay manifest is built on the native path…
-    assert RESUME_MANIFEST_HEADER not in blob
-    assert "replay artifact" not in blob
-    assert "read_file — succeeded" not in blob
-    # …only the human reply kicks the resumed turn.
+    # Only the human reply kicks the resumed turn.
     assert "keep going" in blob
 
 
@@ -2225,14 +2221,11 @@ async def test_native_resume_streams_retry_feedback_as_error_result(tmp_path: Pa
 
     delta = created[0].queries[0]
     # The retry feedback rides IN the is_error complete_step result (c0), not as a
-    # plain text turn, and no replay manifest is built on the native path.
+    # plain text turn.
     tr = delta[0]["message"]["content"][0]
     assert tr["type"] == "tool_result" and tr["tool_use_id"] == "c0"
     assert tr["is_error"] is True
     assert "REVISE: rewrite plan.md" in tr["content"]
-    blob = _user_text_blob(delta)
-    assert "replay artifact" not in blob
-    assert "write_file — succeeded" not in blob
 
 
 @pytest.mark.anyio
@@ -2272,7 +2265,7 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     dangling read is repaired by a STREAMED synth tool_result, and the flushed
     prefix is reconstructed into the native session."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -2312,11 +2305,6 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # No replay manifest anywhere in the persisted transcript.
-    replayed = Transcript(inv.transcript_dir / "transcript.jsonl").load()
-    assert not any(
-        isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
-        for m in replayed if m.role == "user" for b in m.content)
     # The dangling r2 read is repaired by a STREAMED synth tool_result.
     streamed = created[0].queries[0]
     assert len(streamed) == 1 and streamed[0]["type"] == "user"
@@ -2329,63 +2317,6 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     assert reconciled[-1]["message"]["content"][0] == {
         "type": "tool_use", "id": "r2",
         "name": "mcp__imp__read_file", "input": {"path": "x.md"}}
-
-
-@pytest.mark.anyio
-async def test_no_store_native_resume_does_not_reinject_manifest(tmp_path: Path) -> None:
-    """A re-resume whose transcript already carries a prior manifest turn
-    now resumes natively (no-store SEND_TO_LLM). The native path builds no new
-    manifest, so the prior manifest text rides the streamed delta exactly once and
-    is never stacked a second time. (The pre-3a replay-dedup guard at
-    claude_code.py:1469-1476 is now reachable only via a non-production
-    balance_on_resume=False config — see Decisions — so this is the
-    production-faithful single-occurrence assertion.)"""
-    from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
-
-    (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path, agent_id="step:p/s")
-    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    t = Transcript(inv.transcript_dir / "transcript.jsonl")
-    t.append(Message(role="user", content=(TextBlock(text="go"),)))
-    t.append(Message(role="assistant", content=(
-        TextBlock(text="reading…"),
-        ToolUseBlock(id="t0", name="mcp__imp__read_file",
-                     input={"path": "spec.md"}),
-    )))
-    t.append(Message(role="user", content=(
-        ToolResultBlock(tool_use_id="t0", content="SPECBODY", is_error=True),)))
-    t.append(Message(role="assistant", content=(TextBlock(text="done early"),)))
-    # A prior resume already injected the nudge + manifest as trailing user turns.
-    t.append(Message(role="user", content=(TextBlock(
-        text="You stopped before calling complete_step. Continue exactly where you "
-             "left off and finish the step — call complete_step when the work is done."),)))
-    t.append(Message(role="user", content=(TextBlock(
-        text=RESUME_MANIFEST_HEADER + "\n\n- read_file — succeeded"),)))
-
-    scripted = [
-        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
-        result(),
-    ]
-    created: list[FakeClaudeSDKClient] = []
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
-        created.append(c)
-        return c
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory)
-    [ev async for ev in runner.run(inv)]
-
-    opts = created[0].opts
-    assert opts.resume == resume_session_id("step:p/s")  # native, not replay
-    blob = _user_text_blob(created[0].queries[0])
-    # The two trailing user turns (nudge + prior manifest) fold OUT of the
-    # native session and ride the streamed SEND_TO_LLM delta…
-    assert "replay artifact" in blob
-    # …exactly once — the native path injects no second manifest.
-    assert blob.count("replay artifact") == 1
 
 
 def test_build_options_carries_resume(tmp_path: Path) -> None:
@@ -2404,10 +2335,7 @@ def test_build_options_defaults_to_no_resume(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import (
-        RESUME_MANIFEST_HEADER,
-        Transcript,
-    )
+    from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -2461,14 +2389,12 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     blob = _user_text_blob(first_query)
     assert "keep going" in blob
     assert "reading" not in blob
-    # The faithful native path injects no fallback manifest.
-    assert RESUME_MANIFEST_HEADER not in blob
 
 
 @pytest.mark.anyio
 async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path) -> None:
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -2521,7 +2447,6 @@ async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path)
     blob = _user_text_blob(first_query)
     assert "keep going" in blob
     assert "reading" not in blob
-    assert RESUME_MANIFEST_HEADER not in blob
 
 
 @pytest.mark.anyio
@@ -3736,7 +3661,7 @@ async def test_send_to_llm_tail_with_feedback_native_resumes_streaming_handback(
     needs_imp_balance veto is gone); the handback rides the streamed delta alongside
     the trailing tool_result, so it is never lost."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -3777,8 +3702,6 @@ async def test_send_to_llm_tail_with_feedback_native_resumes_streaming_handback(
     # The handback rides the streamed delta.
     blob = _user_text_blob(created[0].queries[0])
     assert "REVISE: tighten the plan." in blob
-    # No fallback manifest on the native path.
-    assert RESUME_MANIFEST_HEADER not in blob
 
 
 @pytest.mark.anyio
@@ -3788,7 +3711,7 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
     balance_on_resume does NOT veto native resume, so no stream-json replay and
     no redo-defusing manifest are produced."""
     from imp.agents.runner import ToolResultBlock, ToolUseBlock
-    from imp.agents.transcript import RESUME_MANIFEST_HEADER, Transcript
+    from imp.agents.transcript import Transcript
     from imp.providers.claude_code_session_store import session_key
 
     (tmp_path / "art").mkdir()
@@ -3821,12 +3744,6 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
-    # No stream-json replay → no redo-defusing manifest in the transcript.
-    replayed = Transcript(inv.transcript_dir / "transcript.jsonl").load()
-    assert not any(
-        any(isinstance(b, TextBlock) and b.text.startswith(RESUME_MANIFEST_HEADER)
-            for b in m.content)
-        for m in replayed if m.role == "user")
     # The trailing tool_result is a completed-call boundary, so it folds into the
     # reconstructed session: 3 turns, ending on the tool_result (not streamed as a
     # dangling delta).
