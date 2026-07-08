@@ -7,6 +7,7 @@ output:
   findings: {type: string}
   blocking: {type: bool}
   has_minor_findings: {type: bool}
+  tolerated: {type: bool}
 ---
 
 You run at the HEAD of the merge queue, AFTER the change branch was rebased onto the
@@ -75,9 +76,12 @@ You are resumed in **two** distinct modes, told apart by the injected feedback:
 
     `- [ ] DEFERRED integration-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
 
-    Then return `blocking: false` and `has_minor_findings: false` so the workflow falls through
-    to `summarizer` — the toleration surfaces to the human at the `finalize` gate. A toleration
-    is **visibility, not reproduction**: it changes nothing about the merge.
+    Then return `blocking: false`, `has_minor_findings: false`, and `tolerated: true` so the
+    workflow falls through to `summarizer` and records the toleration. The accept edge copies
+    `tolerated` into the persistent `slow_verify_tolerated` var, so the pre-merge gate does not
+    re-litigate this same red tree, and the toleration also surfaces to the human at the
+    `finalize` gate. A toleration is **visibility, not reproduction**: it changes nothing about
+    the merge.
 
 Only an `integration-verify` `124` timeout pauses unconditionally (that routing is the
 workflow's, not yours).
@@ -99,6 +103,10 @@ absorbs every fix:
   reconciler integrates them too.
 - both false (Nit-only, clean, or a triaged "not ours" toleration) — the integration proceeds
   to `summarizer` and on to merge.
+- `tolerated: true` **only** when you are accepting a red `integration-verify` result in the
+  triage branch above (the "not ours / not worth it" toleration). On a clean resolution review
+  and on the "worth fixing" branch emit `tolerated: false` — the tree is either green or about
+  to be fixed forward, so there is nothing to tolerate.
 
 This step is non-soliciting — end with `complete_step` directly, without prompting a
 human. Do NOT make code changes and do NOT commit.

@@ -36,3 +36,19 @@ def test_integration_review_adjudicates_verify_failure_triage() -> None:
     assert "needs-decision" in low
     # The tolerated case returns both flags false and falls through to summarizer.
     assert "summarizer" in low
+
+
+def test_integration_review_declares_tolerated_bool_field() -> None:
+    from imp.engine.loader import parse_agent_file
+    agent = parse_agent_file((WF / "agents" / "integration-review.md").resolve())
+    fields = {f.name: f for f in agent.output_schema.fields}
+    assert fields["tolerated"].type == "bool"
+
+
+def test_integration_review_emits_tolerated_signal() -> None:
+    body = (WF / "agents" / "integration-review.md").read_text()
+    # tolerated:true only in the not-ours toleration branch; false otherwise.
+    assert "tolerated: true" in body
+    assert "tolerated: false" in body
+    # the prompt names the persistent var the accept edge copies the field into.
+    assert "slow_verify_tolerated" in body
