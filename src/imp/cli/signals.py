@@ -227,6 +227,9 @@ class InterruptCoordinator:
         # is why a busy subtree no longer trips the parent's watchdog. Shared
         # subtree-wide (one coordinator per run), so a child's appends push every
         # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
+        self._event_log: Any = None
+        self._spawn: Any = None       # fire-and-forget task spawner (start_soon shape)
+        self._yielded: Any = None     # anyio.Event set when the run yields (watchdog)
         self._activity_listeners: list[Any] = []
         # Suspend-during-solicit (this Change): True ONLY while an attended agent
         # is blocked awaiting a human reply at the bare-turn-end gate.
@@ -409,6 +412,23 @@ class InterruptCoordinator:
     def set_exit_hook(self, fn: Any) -> None:
         self._trigger_exit = fn
 
+    def set_event_log(self, log: Any) -> None:
+        """Attach the EventLog so interrupt delivery is journaled."""
+        self._event_log = log
+
+    def set_delivery_spawner(self, spawn: Any) -> None:
+        """Register an owning task group's start_soon for fire-and-forget delivery."""
+        self._spawn = spawn
+
+    def clear_delivery_spawner(self) -> None:
+        self._spawn = None
+
+    def _emit(self, etype: str, payload: dict[str, Any]) -> None:
+        log = self._event_log
+        if log is not None:
+            with _suppress(Exception):
+                log.append(agent_id=None, type=etype, payload=payload)
+
     def request_exit(self, reason: str) -> None:
         """Route an out-of-band stop (prompt-level SIGINT) to the exit path —
         sets pause state + fires the exit event the actuator watches."""
@@ -440,16 +460,20 @@ class InterruptCoordinator:
     def should_pause(self) -> bool:
         return self._should_pause
 
-    async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
-        """Fired by the signal receiver. Records the originating `reason`
-        (first-wins; later calls do not overwrite), calls the attached runner's
-        interrupt (if any), then flips the pause flag. Idempotent across
-        repeated calls."""
-        fn = self._runner_stack[-1].interrupt if self._runner_stack else None
-        if self.pause_reason is None:
+    async def signal_pause(self, *, reason: str = "ctrl-c",
+                           via: str = "signal") -> None:
+        """Fired by the signal receiver or a daemon control frame."""
+        first = self.pause_reason is None
+        if first:
             self.pause_reason = reason
             self._note_gesture_ack(force_quit_available=False)
+            if self._first_gesture_at is None:
+                self._first_gesture_at = self._now()
         self._should_pause = True
+        if not first:
+            return
+        self._emit("interrupt_requested", {"source": reason, "via": via})
+        fn = self._runner_stack[-1].interrupt if self._runner_stack else None
         if fn is not None:
             await fn()
 

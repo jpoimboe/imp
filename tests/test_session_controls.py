@@ -39,6 +39,9 @@ async def test_interrupt_gesture_forwards_interrupt_control_without_detaching(
                 await anyio.sleep(0.02)
         assert actions == ["interrupt"]
         assert server.attached_count == 1
+        # signal_pause is first-wins per round; a repeat gesture forwards again only
+        # after the round resets (as it does when the run yields to the prompt).
+        coord.reset()
         await coord.signal_pause()
         with anyio.fail_after(5):
             while len(actions) != 2:
