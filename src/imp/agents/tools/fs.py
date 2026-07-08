@@ -381,7 +381,13 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
         "retrying edit_file on it will keep failing). `old` must be "
         "file-faithful text — never read_file/grep display output with its "
         "line-number prefixes, `…[truncated]` suffixes, or U+FFFD "
-        "characters; those exist only in the display and will never match."
+        "characters; those exist only in the display and will never match. "
+        "To batch several edits to one file in a single call, pass `edits`: a "
+        "list of items, each `{old, new, replace_all?}` with the same match "
+        "rules as a single edit. The file is read once, the edits apply "
+        "sequentially (each edit sees the result of the earlier ones), and the "
+        "batch is all-or-nothing — if any edit fails its match rule the file is "
+        "left untouched. Pass EITHER `edits` OR top-level `old`/`new`, not both."
     ),
 )
 async def edit_file(ctx: ToolContext, path: str, old: str | None = None,

@@ -384,3 +384,11 @@ def test_batch_malformed_rejected_before_write(
     with pytest.raises(ValueError, match=msg):
         _edit(_ctx(tmp_path), path="x.py", edits=edits)
     assert p.read_text() == before
+
+
+def test_edit_file_description_documents_edits_batch() -> None:
+    desc = get_registry()["edit_file"].description
+    assert "edits" in desc
+    assert "replace_all?" in desc
+    assert "sequential" in desc.lower()
+    assert "all-or-nothing" in desc.lower()
