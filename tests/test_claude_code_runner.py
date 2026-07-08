@@ -3806,6 +3806,59 @@ async def test_coalesces_one_llm_response_per_message_id(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
+async def test_llm_response_precedes_tool_calls_for_prose_and_tool_turn(
+    tmp_path: Path,
+) -> None:
+    # AC (claude_code ordering): for a turn carrying both prose and tool_use,
+    # the coalesced llm_response is emitted BEFORE that turn's tool_call events.
+    # The prose group flushes at the text->tool_use transition, not at the next
+    # message boundary. The coalesced payload is unchanged ([text,tool_use,tool_use]).
+    (tmp_path / "art").mkdir()
+    scripted = [
+        # one turn m1: a prose fragment then a tool_use fragment (same message_id)
+        assistant(text("reading the files"), message_id="m1", model="served-x"),
+        assistant(tool_use("u1", "read_file", {"path": "a"}),
+                  tool_use("u2", "grep", {"pattern": "x"}),
+                  message_id="m1", model="served-x", stop_reason="tool_use"),
+        user(tool_result("u1", "data-a"), tool_result("u2", "data-b")),
+        # turn m2: prose + complete_step
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success"}),
+                  message_id="m2", model="served-x", stop_reason="end_turn"),
+        result(stop_reason="end_turn"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log,
+               tools=frozenset({"complete_step", "read_file", "grep"}))
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    async for _ev in runner.run(inv):
+        pass
+
+    events = list(log.read())
+    # Index of the m1 llm_response and of the m1 turn's read_file/grep tool_calls.
+    idx_resp = next(
+        i for i, e in enumerate(events)
+        if e["type"] == "llm_response" and e["payload"]["message_id"] == "m1")
+    idx_tcs = [
+        i for i, e in enumerate(events)
+        if e["type"] == "tool_call"
+        and e["payload"]["name"] in ("read_file", "grep")]
+    assert len(idx_tcs) == 2
+    # Ordering: the coalesced llm_response precedes BOTH of the turn's tool_calls.
+    assert all(idx_resp < i for i in idx_tcs)
+    # Regression: the flushed payload still carries the whole coalesced group.
+    m1 = events[idx_resp]["payload"]
+    assert [b["type"] for b in m1["raw"]["content"]] == \
+        ["text", "tool_use", "tool_use"]
+    assert m1["stop_reason"] == "tool_use"
+
+
+@pytest.mark.anyio
 async def test_none_message_id_folds_into_open_group(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     scripted = [

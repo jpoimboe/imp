@@ -2005,6 +2005,16 @@ class ClaudeCodeAgentRunner:
                                         with contextlib.suppress(Exception):
                                             await client.interrupt()
                                         continue
+                            # Close the coalesced prose group at the text->tool_use
+                            # transition: emit its llm_response BEFORE this fragment's
+                            # tool_calls, so narration renders above the tools it
+                            # introduced. Guard on tool-bearing fragments only — a
+                            # pure-text fragment must not flush (its text is still
+                            # accumulating toward one llm_response). The flush is a
+                            # no-op when the group is already closed.
+                            if any(isinstance(b, ToolUseBlock)
+                                   for b in imp_msg.content):
+                                await _flush_llm_group()
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
                                     # Web builtins (§5.2): server/CLI-side, already
