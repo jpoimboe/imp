@@ -16,7 +16,7 @@ import imp.agents.tools.image as image_mod
 import imp.agents.tools.lines as lines_mod
 from imp.agents.runner import ImagePart, TextPart
 from imp.agents.tools import get_registry
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ReadRecord, ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import ToolAborted
 from imp.engine.sandbox import SandboxPolicy
@@ -445,3 +445,31 @@ def test_read_file_same_image_twice_dedups_to_one_blob(tmp_path: Path) -> None:
     assert [p.name for p in blobs.iterdir()] == [r1[1].blob]
     # Blob lives under the change home, so per-change cleanup/archival removes it.
     assert (ctx.change_home / "blobs" / r1[1].blob).exists()
+
+
+def test_read_record_rendered_map_defaults_independent_and_mutable() -> None:
+    a = ReadRecord(mtime=1.0, content_sha256="x", full=True)
+    b = ReadRecord(mtime=2.0, content_sha256="y", full=True)
+    assert a.rendered == {}  # default is an empty map
+    a.rendered[(1, 50)] = (1, 42)  # frozen forbids rebinding, not dict mutation
+    assert b.rendered == {}  # each instance owns its own dict (no shared default)
+    assert a.rendered[(1, 50)] == (1, 42)
+
+
+def test_image_reads_are_never_deduped(tmp_path: Path) -> None:
+    (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
+    ctx = _vision_ctx(tmp_path)
+    first = _read_file(ctx, path="shot.png")
+    second = _read_file(ctx, path="shot.png")  # identical re-read
+    assert isinstance(first, list) and isinstance(second, list)
+    assert isinstance(second[1], ImagePart)  # full image part again, not a stub
+
+
+def test_write_after_stubbed_read_is_allowed(tmp_path: Path) -> None:
+    (tmp_path / "p.md").write_text("one\ntwo\nthree\n")
+    ctx = _ctx(tmp_path, "read", "write")
+    _read_file(ctx, path="p.md")
+    stub = _read_file(ctx, path="p.md")  # exact repeat -> stub
+    assert stub == "[unchanged since you read it at lines 1-3 above]"
+    _write_file(ctx, path="p.md", content="new")  # record still present -> allowed
+    assert (tmp_path / "p.md").read_text() == "new"

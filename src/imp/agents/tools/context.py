@@ -26,14 +26,19 @@ from imp.engine.types import AgentDef
 
 @dataclass(frozen=True)
 class ReadRecord:
-    """Per-step record of a successful read, for the read-before-write gate.
+    """Per-step record of a successful read, for the read-before-write gate and
+    read dedup.
 
     content_sha256 hashes the RAW file bytes (not read_file's lossy decoded
-    text). full is True iff the read reached EOF and was not cap-truncated."""
+    text). full is True iff the read reached EOF and was not cap-truncated.
+    rendered maps each (offset, limit) already shown for THIS file version this
+    step to the true (first_line, last_line) span it produced; mutated in place
+    (frozen forbids rebinding the attribute, not mutating the dict)."""
 
     mtime: float
     content_sha256: str
     full: bool
+    rendered: dict[tuple[int, int], tuple[int, int]] = field(default_factory=dict)
 
 
 @dataclass

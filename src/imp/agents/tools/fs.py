@@ -82,18 +82,32 @@ async def read_file(
     # st_size sampled AFTER the read (growth during the read must classify as
     # cap-truncated; a before-read sample would fabricate a final line).
     cap_truncated = file_is_cap_truncated(read_truncated, resolved)
-    # Skip recording (but still return the window) if the file vanished between
-    # the read and this stat — the parallel-shared-tree race file_is_cap_truncated
-    # already tolerates. An unguarded stat would turn a successful read into a
-    # FileNotFoundError; contextlib.suppress (already imported) restores prior
-    # behavior, leaving read_state without a record (a later write_file then
-    # refuses with "hasn't been read this step", which is correct).
-    with contextlib.suppress(OSError):
-        ctx.read_state[resolved] = ReadRecord(
-            mtime=resolved.stat().st_mtime,
-            content_sha256=hashlib.sha256(data).hexdigest(),
-            full=not cap_truncated,
-        )
+    sha = hashlib.sha256(data).hexdigest()
+    # Skip dedup AND recording (but still return the window) if the file vanished
+    # between the read and this stat — the parallel-shared-tree race
+    # file_is_cap_truncated already tolerates. An unguarded stat would turn a
+    # successful read into a FileNotFoundError; leaving read_state without a
+    # record means a later write_file refuses with "hasn't been read this step",
+    # which is correct.
+    record: ReadRecord | None = None
+    try:
+        mtime = resolved.stat().st_mtime
+    except OSError:
+        mtime = None
+    if mtime is not None:
+        prior = ctx.read_state.get(resolved)
+        # Same version == BOTH mtime AND sha equal. On a match the prior record's
+        # rendered map is valid and accumulates; any mismatch replaces it fresh.
+        if (prior is not None and prior.mtime == mtime
+                and prior.content_sha256 == sha):
+            if (offset, limit) in prior.rendered:
+                first, last = prior.rendered[(offset, limit)]
+                return f"[unchanged since you read it at lines {first}-{last} above]"
+            record = prior
+        else:
+            record = ReadRecord(
+                mtime=mtime, content_sha256=sha, full=not cap_truncated)
+        ctx.read_state[resolved] = record
     text = data.decode("utf-8", "replace")
     if not text:
         return "[empty file]"  # wins regardless of offset — never past-EOF
@@ -144,6 +158,11 @@ async def read_file(
                   f"continue with offset={last + 1}]")
     # else: a complete file's window reached (or overshot) EOF — ends silently.
 
+    # Remember the TRUE rendered span (offset..last) for this exact range, so an
+    # identical re-read of this unchanged version stubs above. record is None
+    # only when the file vanished before stat (dedup + recording both skipped).
+    if record is not None:
+        record.rendered[(offset, limit)] = (offset, last)
     body = "\n".join(rendered)
     return f"{body}\n{notice}" if notice else body
 
