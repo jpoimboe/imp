@@ -115,28 +115,98 @@ def test_non_task_item_completed_still_emits_call_and_result() -> None:
     assert "id_ns" not in next(e for e in rows if e["type"] == "tool_result")["payload"]
 
 
-def test_turn_completed_emits_reassembled_llm_response_before_usage() -> None:
+def test_preamble_prose_llm_response_precedes_tool_calls() -> None:
     elog = InMemoryEventLog()
     state = {"web_search_enabled": False}
     run_state = RunState(cap=10, agent_id="step:t")
-
-    # agent_message then a tool call, then turn.completed with usage.
-    msg = FakeItemEvent(type="item.completed", item=FakeAgentMessageItem(text="hello"))
+    msg = FakeItemEvent(type="item.completed",
+                        item=FakeAgentMessageItem(text="editing now"))
     call = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
         tool="write_file", arguments={"path": "x"}, result="ok", id="c1"))
     done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=10, output_tokens=5))
-
     for ev in (msg, call, done):
         process_event(ev, elog=elog, agent_id="step:t", state=state,
                       provider="codex", model="gpt-5.5", run_state=run_state)
+    types = [e["type"] for e in elog.read()]
+    assert types.index("llm_response") < types.index("tool_call")
+    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert len(llms) == 1
+    content = llms[0]["payload"]["raw"]["content"]
+    assert content == [{"type": "text", "text": "editing now"}]
+    assert all(b["type"] != "tool_use" for b in content)
+    assert llms[0]["payload"]["usage"]  # usage attached to the prose response
 
-    llm = [e for e in list(elog.read()) if e.get("type") == "llm_response"]
-    assert len(llm) == 1  # ONE full-turn response, not per-agent_message
-    content = llm[0]["payload"]["raw"]["content"]
-    kinds = [b["type"] for b in content]
-    assert "text" in kinds and "tool_use" in kinds  # carries tool_use now
-    # Usage attached to that same response.
-    assert llm[0]["payload"]["usage"]  # non-empty
+
+def test_summary_prose_llm_response_follows_tool_calls() -> None:
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    call = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="write_file", arguments={"path": "x"}, result="ok", id="c1"))
+    msg = FakeItemEvent(type="item.completed",
+                        item=FakeAgentMessageItem(text="all done"))
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=10, output_tokens=5))
+    for ev in (call, msg, done):
+        process_event(ev, elog=elog, agent_id="step:t", state=state,
+                      provider="codex", model="gpt-5.5", run_state=run_state)
+    types = [e["type"] for e in elog.read()]
+    assert types.index("tool_call") < types.index("llm_response")
+    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert len(llms) == 1
+    assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "all done"}]
+
+
+def test_text_only_turn_flushes_prose_at_turn_completed() -> None:
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    msg = FakeItemEvent(type="item.completed",
+                        item=FakeAgentMessageItem(text="just chatting"))
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=10, output_tokens=5))
+    for ev in (msg, done):
+        process_event(ev, elog=elog, agent_id="step:t", state=state,
+                      provider="codex", model="gpt-5.5", run_state=run_state)
+    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert len(llms) == 1
+    assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "just chatting"}]
+    assert llms[0]["payload"]["usage"]
+    assert [e for e in elog.read() if e["type"] == "tool_call"] == []
+
+
+def test_prose_less_turn_emits_empty_prose_usage_carrier() -> None:
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    call = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="write_file", arguments={"path": "x"}, result="ok", id="c1"))
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=10, output_tokens=5))
+    for ev in (call, done):
+        process_event(ev, elog=elog, agent_id="step:t", state=state,
+                      provider="codex", model="gpt-5.5", run_state=run_state)
+    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert len(llms) == 1
+    assert llms[0]["payload"]["raw"]["content"] == []      # empty-prose carrier
+    assert llms[0]["payload"]["usage"]                      # usage attached to it
+
+
+def test_preamble_before_subagent_dispatch_leads_tool_call() -> None:
+    elog = InMemoryEventLog()
+    run_state = RunState(cap=100)
+    args = {"subagent_name": "impl", "task_description": "x"}
+    st: dict = {"web_search_enabled": False}
+    kw = _pe_kwargs(elog, run_state, st)
+    msg = FakeItemEvent(type="item.completed",
+                        item=FakeAgentMessageItem(text="dispatching impl"))
+    process_event(msg, **kw)
+    process_event(_started("item_1", args), **kw)   # task tool_call opens HERE
+    process_event(_completed("item_1", args, result='{"status":"Success"}'), **kw)
+    process_event(FakeTurnCompletedEvent(
+        usage=FakeUsage(input_tokens=5, output_tokens=1)), **kw)
+    types = [e["type"] for e in elog.read()]
+    assert types.index("llm_response") < types.index("tool_call")
+    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert len(llms) == 1
+    assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "dispatching impl"}]
 
 
 def test_non_task_mcp_result_is_unstamped() -> None:

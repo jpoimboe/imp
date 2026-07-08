@@ -28,8 +28,8 @@ def test_reasoning_appends_thinking_event() -> None:
 
 
 def test_agent_message_appends_llm_response() -> None:
-    # F1: the agent_message is buffered; the full-turn llm_response is emitted
-    # once at turn.completed (carrying text + any tool_use blocks).
+    # The agent_message is buffered; a text-only turn flushes its prose-only
+    # llm_response at turn.completed (no tool_use ever rides in a codex response).
     elog = InMemoryEventLog()
     state = {"pending_usage": None, "auth_mode": "chatgpt"}
     process_event(agent_message("here is my plan"), elog=elog,

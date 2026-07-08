@@ -1043,49 +1043,30 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
-def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
-    """Reassemble one codex turn's ``item.completed`` items into a full-turn
-    ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
-    blocks.  This raw IS emitted live as the turn's single ``llm_response`` at
-    ``turn.completed`` (Unit F), and is also consumed by audit reconstruction
-    (``build_messages_from_events``) for tool_use/tool_result pairing.
-    A web_search item becomes a query-only tool_use (codex exposes no
-    results/citations).
-    """
-    content: list[dict[str, Any]] = []
-    for item in items:
-        itype = getattr(item, "type", None)
-        if itype == "agent_message":
-            content.append({"type": "text",
-                             "text": getattr(item, "text", "") or ""})
-        elif itype == "mcp_tool_call":
-            name = (getattr(item, "tool", "")
-                    or getattr(item, "name", "") or "")
-            block_id = getattr(item, "id", "") or ""
-            content.append({
-                "type": "tool_use",
-                "id": block_id,
-                "name": name,
-                "input": getattr(item, "arguments", None) or {},
-            })
-        elif itype == "web_search":
-            content.append({
-                "type": "tool_use",
-                "id": getattr(item, "id", "") or "",
-                "name": "web_search",
-                "input": {"query": getattr(item, "query", "") or ""},
-            })
-        # reasoning/command_execution/file_change/error are not part of the
-        # assistant message's reconstructable content.
-    return {"content": content}
+def _flush_codex_prose(
+    elog: Any, *, agent_id: str, provider: str, model: str,
+    state: dict[str, Any],
+) -> None:
+    """Emit the turn's buffered agent_message prose as a prose-only
+    `llm_response` and clear the buffer. No-op when the buffer is empty.
+    Sets `state["turn_had_llm"]` so `turn.completed` knows whether a
+    prose-less turn still needs an empty-prose usage carrier."""
+    parts = state.pop("prose_buffer", [])
+    if not parts:
+        return
+    elog.append_llm_response(
+        agent_id=agent_id, provider=provider, model=model,
+        raw={"content": [{"type": "text", "text": t} for t in parts]},
+        usage={}, stop_reason=None, auth_mode=state.get("auth_mode"))
+    state["turn_had_llm"] = True
 
 
 def _parse_codex_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message for codex.  Post-F1, the live `llm_response.raw`
-    (emitted at `turn.completed` via `reassemble_codex_turn`) carries both
-    text and tool_use blocks; this parser handles both.  A web_search appears
-    as a query-only tool_use block.
-    Unknown blocks are dropped.
+    """raw → assistant Message for codex.  A codex `llm_response.raw` now
+    carries prose text blocks only (tool_use lives in the standalone
+    `tool_call` events); this parser also tolerates a tool_use block for the
+    hand-built audit/parse fixtures.  A web_search appears as a query-only
+    tool_use block.  Unknown blocks are dropped.
 
     Lives here (not in replay.py) per the provider-exports-its-parser convention:
     replay.py imports + registers it, runner can reuse it, no replay-import cycle.
@@ -1149,6 +1130,11 @@ def process_event(
             sn = lookup.get("subagent_name")
             sub_def = defs.get(sn) if isinstance(sn, str) else None
             label = sub_def.label if sub_def is not None else None
+            # text->tool transition: a preamble before a sub_agent dispatch must
+            # lead its tool_call, and the task tool_call opens HERE (not at
+            # item.completed), so flush the prose buffer now.
+            _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
+                               model=model, state=state)
             elog.append_tool_call(
                 agent_id=agent_id,
                 block=ToolUseBlock(id=sdk_id, name="sub_agent", input=args),
@@ -1169,13 +1155,19 @@ def process_event(
         if itype == "agent_message":
             text = getattr(item, "text", "") or ""
             state["last_agent_text"] = text  # still needed by nudge/classify
-            # Buffer the item; the full-turn llm_response (text + tool_use) is
-            # reassembled and emitted once at turn.completed (Unit F). Emitting
-            # a per-message text-only response here would lose the tool_use
-            # blocks the audit pairing needs.
-            state.setdefault("turn_items", []).append(item)
+            # Buffer prose; it is emitted as a prose-only llm_response at the
+            # next text->tool transition (or at turn.completed for trailing /
+            # text-only prose). tool_use lives only in the standalone tool_call
+            # events, so a turn's prose can lead its tool_calls.
+            if text:
+                state.setdefault("prose_buffer", []).append(text)
             return
         if itype == "mcp_tool_call":
+            # text->tool transition: a preamble's prose must lead this call's
+            # tool_call. For a task (sub_agent) whose call already opened at
+            # item.started the buffer is already empty here (no-op).
+            _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
+                               model=model, state=state)
             # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
             # `name` silently recorded "" for every call (and made the
             # complete_step capture below dead). Fall back to `name` only for
@@ -1244,8 +1236,6 @@ def process_event(
                             input=match_args if match_args is not None else {},
                             is_error=is_error,
                             result_preview=_result_preview(content)))
-            # Buffer for the full-turn llm_response reassembly (Unit F).
-            state.setdefault("turn_items", []).append(item)
             return
         if itype == "web_search":
             query = getattr(item, "query", "") or ""
@@ -1255,6 +1245,9 @@ def process_event(
                 # the narrative/`imp log`. codex's WebSearchItem exposes only the
                 # query (no results/citations), so the result is informational.
                 call_id = getattr(item, "id", "") or ""
+                # text->tool transition: lead the tool_call with any buffered prose.
+                _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
+                                   model=model, state=state)
                 elog.append_tool_call(
                     agent_id=agent_id,
                     block=ToolUseBlock(
@@ -1266,9 +1259,6 @@ def process_event(
                     block=ToolResultBlock(
                         tool_use_id=call_id, content="", is_error=False),
                 )
-                # Buffer for the full-turn llm_response reassembly (Unit F);
-                # the reassembler maps it to a query-only tool_use block.
-                state.setdefault("turn_items", []).append(item)
                 return
             # Disabled (`webSearchEnabled=False`): the tool should be gone.
             # Seeing one is a soft tripwire (not fail-closed by itself; the
@@ -1317,22 +1307,25 @@ def process_event(
         return
 
     if etype == "turn.completed":
-        # Flush the turn's buffered items into ONE full-turn llm_response
-        # (text + tool_use) BEFORE usage attaches, so the usage patch below
-        # lands on this reassembled response (Unit F). Emitting it here — not
-        # per agent_message — gives the audit reconstruction a single response
-        # carrying the tool_use blocks paired with their tool_results.
-        items = state.pop("turn_items", [])
-        if items:
-            raw = reassemble_codex_turn(items)
-            elog.append_llm_response(
-                agent_id=agent_id, provider=provider, model=model,
-                raw=raw, usage={}, stop_reason=None,
-                auth_mode=state.get("auth_mode"),
-            )
+        # Flush any trailing prose (a post-tool summary, or a text-only turn) as
+        # a prose-only llm_response BEFORE usage attaches. A prose-less tool-only
+        # turn emitted no llm_response this turn, so synthesize an empty-prose
+        # carrier to hold the usage patch — update_last_llm_response_usage would
+        # otherwise land on the PRIOR turn's response (or raise on turn one).
+        # tool_use never rides in a codex llm_response now; it lives only in the
+        # standalone tool_call events.
+        _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
+                           model=model, state=state)
+        turn_had_llm = state.pop("turn_had_llm", False)
         usage = getattr(event, "usage", None)
         if usage is None:
             return
+        if not turn_had_llm:
+            elog.append_llm_response(
+                agent_id=agent_id, provider=provider, model=model,
+                raw={"content": []}, usage={}, stop_reason=None,
+                auth_mode=state.get("auth_mode"),
+            )
         # Map flat codex keys explicitly. The existing `_normalize_usage`
         # OpenAI-shape detector reads `input_tokens_details.cached_tokens`
         # (nested) — codex emits a FLAT `cached_input_tokens` instead, so

@@ -125,8 +125,8 @@ def test_real_error_item_is_diagnostic_not_unhandled() -> None:
 
 
 def test_real_agent_message_records_llm_response() -> None:
-    # F1: agent_message is buffered + last_agent_text captured immediately; the
-    # full-turn llm_response is emitted once at turn.completed.
+    # agent_message is buffered + last_agent_text captured immediately; a
+    # text-only turn flushes its prose-only llm_response at turn.completed.
     item = AgentMessageItem(id="a1", type="agent_message", text="the answer is 42")
     elog, st = _feed(item)
     assert st["last_agent_text"] == "the answer is 42"
