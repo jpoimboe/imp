@@ -1246,3 +1246,133 @@ async def test_lease_less_input_at_hibernating_gate_is_delivered_not_dropped(
         assert result["r"] == "the reply"   # consumed, NOT dropped to hibernation
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def _spy_emit(server: SessionServer) -> list[dict[str, Any]]:
+    """Record every event the server broadcasts, still forwarding each."""
+    emitted: list[dict[str, Any]] = []
+    orig = server._emit
+
+    def _wrapper(event: dict[str, Any]) -> None:
+        emitted.append(event)
+        orig(event)
+
+    server._emit = _wrapper  # type: ignore[method-assign]
+    return emitted
+
+
+@pytest.mark.anyio
+async def test_chat_broadcasts_user_input_resolved_after_gate(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock)
+    emitted = _spy_emit(server)
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        gate_reached.set()
+        return await user_chat_input_fn("")
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached.wait()
+        await client.send((encode_input("ship it") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "ship it"
+        resolved = [e for e in emitted if e.get("type") == "user_input_resolved"]
+        assert resolved == [{"type": "user_input_resolved", "payload": {}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_hibernation_gate_with_input_broadcasts_resolved(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+    emitted = _spy_emit(server)
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        gate_reached.set()
+        return await user_chat_input_fn("")
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached.wait()
+        await client.send((encode_input("ship it") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "ship it"
+        resolved = [e for e in emitted if e.get("type") == "user_input_resolved"]
+        assert resolved == [{"type": "user_input_resolved", "payload": {}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_hibernation_gate_without_input_does_not_broadcast_resolved(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+    emitted = _spy_emit(server)
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        try:
+            gate_reached.set()
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached.wait()
+        await client.aclose()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "hibernated"
+        assert not any(e.get("type") == "user_input_resolved" for e in emitted)
+        tg.cancel_scope.cancel()

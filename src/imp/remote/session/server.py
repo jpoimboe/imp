@@ -133,9 +133,10 @@ class SessionServer:
     async def _chat(self, _query: str) -> str:
         self.set_pending_prompt(self._last_gate_event)
         try:
-            if self._hibernate:
-                return await self._hibernation_gate()
-            return await self._socket.next_input()
+            text = (await self._hibernation_gate() if self._hibernate
+                    else await self._socket.next_input())
+            self._emit({"type": "user_input_resolved", "payload": {}})
+            return text
         finally:
             self.set_pending_prompt(None)
             self._last_gate_event = None
