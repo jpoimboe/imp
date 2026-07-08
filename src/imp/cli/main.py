@@ -830,6 +830,9 @@ async def _run_cleared_session(
             return 130
         _session_started = True
         opening_text = _normalize_opening_reply(reply)
+        # Persist the intent durably so the reopened chat's opening step seeds from
+        # change.json (mirroring the imp new path), surviving any later resume.
+        change.set_seed_opening(opening_text)
         if tui:
             return await _run_tui_session(
                 change, seed_opening=opening_text,
