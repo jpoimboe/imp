@@ -3,12 +3,16 @@ creation, permanent state home at <control_root>/.imp/changes/<id>/."""
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from imp.agents.prompts import render_label
 from imp.engine import worktree
@@ -17,6 +21,21 @@ from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
 LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout/schema change
+
+
+def _write_change_json(meta_path: Path, meta: dict[str, Any]) -> None:
+    """Atomically rewrite change.json (tmp file, fsync, os.replace); mirrors State.save."""
+    fd, tmp_name = tempfile.mkstemp(prefix=".change-", dir=meta_path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(meta, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, meta_path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
 
 
 def _fold_phantom(phantom: Path, home: Path) -> None:
@@ -69,7 +88,7 @@ def _migrate_v1_to_v2(change_dir: Path) -> None:
             cur = proc.stdout.strip()
     meta["cur_base_head"] = cur
     meta["layout_version"] = 2
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    _write_change_json(meta_path, meta)
 
 
 def _migrate_v2_to_v3(change_dir: Path) -> None:
@@ -78,7 +97,7 @@ def _migrate_v2_to_v3(change_dir: Path) -> None:
     meta_path = change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 3
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    _write_change_json(meta_path, meta)
 
 
 def _migrate_v3_to_v4(change_dir: Path) -> None:
@@ -87,7 +106,7 @@ def _migrate_v3_to_v4(change_dir: Path) -> None:
     meta_path = change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    _write_change_json(meta_path, meta)
 
 
 def _migrate_v4_to_v5(change_dir: Path) -> None:
@@ -96,7 +115,7 @@ def _migrate_v4_to_v5(change_dir: Path) -> None:
     meta_path = change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 5
-    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    _write_change_json(meta_path, meta)
 
 
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
@@ -150,7 +169,7 @@ class Change:
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
-        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        _write_change_json(meta_path, meta)
         log.append(agent_id=None, type="change_renamed",
                    payload={"id": self.id, "old_title": old_title,
                             "new_title": name})
@@ -161,27 +180,27 @@ class Change:
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["project_root"] = str(new_root)
-        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        _write_change_json(meta_path, meta)
 
     def set_origin(self, origin: str) -> None:
         self.origin = origin
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["origin"] = origin
-        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        _write_change_json(meta_path, meta)
 
     def set_depends_on(self, depends_on: list[str]) -> None:
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["depends_on"] = list(depends_on)
-        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        _write_change_json(meta_path, meta)
 
     def set_seed_opening(self, text: str | None) -> None:
         self.seed_opening = text
         meta_path = self.change_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["seed_opening"] = text
-        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        _write_change_json(meta_path, meta)
 
     def materialize(self) -> bool:
         """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
@@ -201,7 +220,7 @@ class Change:
         meta["project_root"] = str(wt_path)
         meta["materialized"] = True
         meta["cur_base_head"] = current_tip
-        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        _write_change_json(meta_path, meta)
         link_change_home(wt_path, self.change_dir)
         return head_changed
 
