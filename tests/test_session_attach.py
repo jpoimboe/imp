@@ -122,28 +122,6 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
         tg.cancel_scope.cancel()
 
 
-def test_spawn_session_daemon_includes_seed_opening_when_provided(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    captured: dict[str, Any] = {}
-
-    def fake_popen(argv: list[str], **kwargs: Any) -> object:
-        captured["argv"] = argv
-        return object()
-
-    monkeypatch.setattr(subprocess, "Popen", fake_popen)
-
-    spawn_session_daemon(change, seed_opening="ship the\nthing")
-
-    assert captured["argv"] == [
-        sys.executable, "-m", "imp.remote.session.daemon",
-        "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
-        "--seed-opening=ship the\nthing",
-    ]
-
-
 @pytest.mark.anyio
 async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-dead")
@@ -151,47 +129,6 @@ async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> Non
         await attach_or_spawn(
             change, on_event=lambda _e: None,
             spawn_fn=lambda _ch: None, connect_timeout=0.3)
-
-
-@pytest.mark.anyio
-async def test_build_session_attach_threads_seed_into_spawn(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from imp.remote.session import attach as attach_mod
-
-    change = _make_change(tmp_path, "2026-06-15-seed")
-    sock = str(session_socket_path(change.control_root, change.id))
-    captured: dict[str, Any] = {}
-    holder: dict[str, SessionSocket] = {}
-
-    async with anyio.create_task_group() as tg:
-        async def _start_server() -> None:
-            server = SessionSocket(sock)
-            await server.open()
-            holder["server"] = server
-            await server.serve()
-
-        def fake_spawn(
-            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
-            non_interactive: bool = False, autonomous: bool = False,
-        ) -> None:
-            captured["change"] = ch
-            captured["seed_opening"] = seed_opening
-            tg.start_soon(_start_server)
-
-        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
-
-        attach = attach_mod.build_session_attach(change, seed_opening="ship it")
-        client = await attach(lambda _e: None)
-
-        assert captured["change"] is change
-        assert captured["seed_opening"] == "ship it"
-        with anyio.fail_after(5):
-            while holder.get("server") is None or holder["server"].attached_count != 1:
-                await anyio.sleep(0.02)
-        await client.aclose()
-        await holder["server"].close()
-        tg.cancel_scope.cancel()
 
 
 def test_spawn_session_daemon_includes_resume_flag_when_set(
@@ -227,7 +164,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     spawned: list[Change] = []
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
-        lambda ch, *, seed_opening=None, resume=False,
+        lambda ch, *, resume=False,
         non_interactive=False, autonomous=False: spawned.append(ch))
 
     received: list[dict[str, Any]] = []
@@ -255,29 +192,6 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
         tg.cancel_scope.cancel()
 
 
-def test_spawn_session_daemon_seed_before_resume_when_both_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    captured: dict[str, Any] = {}
-
-    def fake_popen(argv: list[str], **kwargs: Any) -> object:
-        captured["argv"] = argv
-        return object()
-
-    monkeypatch.setattr(subprocess, "Popen", fake_popen)
-
-    spawn_session_daemon(change, seed_opening="hello", resume=True)
-
-    assert captured["argv"] == [
-        sys.executable, "-m", "imp.remote.session.daemon",
-        "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
-        "--seed-opening=hello",
-        "--resume",
-    ]
-
-
 @pytest.mark.anyio
 async def test_build_session_attach_threads_resume_into_spawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -297,7 +211,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
             await server.serve()
 
         def fake_spawn(
-            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+            ch: Change, *, resume: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
         ) -> None:
             captured["resume"] = resume

@@ -18,7 +18,7 @@ SpawnFn = Callable[[Change], None]
 
 
 def spawn_session_daemon(
-    change: Change, *, seed_opening: str | None = None, resume: bool = False,
+    change: Change, *, resume: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
 ) -> None:
     argv = [
@@ -26,8 +26,6 @@ def spawn_session_daemon(
         "--control-root", str(change.control_root),
         "--change-id", change.id,
     ]
-    if seed_opening is not None:
-        argv += [f"--seed-opening={seed_opening}"]
     if resume:
         argv.append("--resume")
     if non_interactive:
@@ -77,7 +75,6 @@ async def attach_or_spawn(
 def build_session_attach(
     change: Change,
     *,
-    seed_opening: str | None = None,
     resume: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
@@ -89,7 +86,7 @@ def build_session_attach(
             on_event=on_event,
             lease=lease,
             spawn_fn=lambda ch: spawn_session_daemon(
-                ch, seed_opening=seed_opening, resume=resume,
+                ch, resume=resume,
                 non_interactive=non_interactive, autonomous=autonomous),
         )
 

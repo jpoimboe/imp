@@ -93,7 +93,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     # No real subprocess: in-process server stands in; spawn is a no-op.
     monkeypatch.setattr(
         "imp.remote.session.attach.spawn_session_daemon",
-        lambda ch, *, seed_opening=None: None)
+        lambda ch, **_kw: None)
 
     sock = str(session_socket_path(change.control_root, change.id))
     server = SessionServer(sock, hibernate=False)
@@ -146,7 +146,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
     monkeypatch.setattr(
         "imp.remote.session.attach.spawn_session_daemon",
-        lambda ch, *, seed_opening=None: None)
+        lambda ch, **_kw: None)
 
     sock = str(session_socket_path(change.control_root, change.id))
     server = SessionServer(sock, hibernate=False)
@@ -315,7 +315,7 @@ async def test_run_session_client_threads_resume_into_attach(
     captured: dict[str, object] = {}
 
     def _fake_build(
-        ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+        ch: Change, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False,
     ) -> Any:
@@ -664,7 +664,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
     captured: dict[str, object] = {}
 
     def _fake_build(
-        ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+        ch: Change, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False,
     ) -> Any:

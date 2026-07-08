@@ -39,7 +39,6 @@ async def run_session_client(
     driver: Any,
     coord: InterruptCoordinator,
     solicit: Callable[[str], Awaitable[str]],
-    seed_opening: str | None = None,
     status: Any = None,
     resume: bool = False,
     leave_mode: str | None = None,
@@ -52,7 +51,7 @@ async def run_session_client(
     leave_state = {} if leave_state is None else leave_state
     title = title if title is not None else TerminalTitle(sys.stdout, change.id, change.title)
     attach = build_session_attach(
-        change, seed_opening=seed_opening, resume=resume,
+        change, resume=resume,
         non_interactive=non_interactive, autonomous=autonomous, lease=True)
     startup_failed = False
     async with anyio.create_task_group() as tg:

@@ -173,11 +173,10 @@ async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
                        change_id="aaa111", base_branch="main")
+    ch.seed_opening = "Implement this spec X"  # durable source, not the run parameter
 
     events: list[dict[str, Any]] = []
-    result = await run_change(
-        ch, on_event=events.append,
-        seed_opening="Implement this spec X", headless=True)
+    result = await run_change(ch, on_event=events.append, headless=True)
 
     assert result is RunResult.COMPLETED
     s1 = sink["step:p/s1"][0].content[0].text
@@ -201,7 +200,7 @@ async def test_run_change_none_seed_opening_has_empty_opening(
                        change_id="bbb222", base_branch="main")
 
     result = await run_change(
-        ch, on_event=lambda _e: None, seed_opening=None, headless=True)
+        ch, on_event=lambda _e: None, headless=True)
 
     assert result is RunResult.COMPLETED
     s1 = sink["step:p/s1"][0].content[0].text
@@ -211,7 +210,7 @@ async def test_run_change_none_seed_opening_has_empty_opening(
 
 
 @pytest.mark.anyio
-async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
+async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
     tmp_path: Path, provider_registry
 ) -> None:
     sink: dict[str, Any] = {}
@@ -220,14 +219,16 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
                        change_id="ccc333", base_branch="main")
+    ch.seed_opening = "Implement this spec SHOULD NOT LEAK"  # durable source
 
     state = State.load(ch.state_dir)
     state.resume_pending = state.step  # simulate a paused-then-resumed first step
     state.save(ch.state_dir)
     # A genuinely paused-then-resumed step actually ran: it has a non-empty,
-    # replayable transcript and a stored step_context. (An empty transcript is a
-    # never-ran step, which now correctly re-runs fresh instead of replaying an
-    # empty query — see _resume_replays_transcript.)
+    # replayable transcript and a stored step_context. The opening step (s1)
+    # takes the keep/replay branch, consuming the one-shot seed there; the seed
+    # is scoped to the first agent step and is NEVER forwarded to the downstream
+    # step s2 (the anti-leak invariant).
     s1_dir = ch.change_dir / "steps" / "p" / "s1"
     s1_dir.mkdir(parents=True, exist_ok=True)
     Transcript(s1_dir / "transcript.jsonl").append(
@@ -236,15 +237,14 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
         agent_id="step:p/s1", provider="anthropic", model="m",
         system_prompt="sys", tools_schema=[], params={}, max_tool_calls=None)
 
-    result = await run_change(
-        ch, on_event=lambda _e: None,
-        seed_opening="Implement this spec SHOULD NOT APPEAR",
-        headless=True)
+    result = await run_change(ch, on_event=lambda _e: None, headless=True)
 
     assert result is RunResult.COMPLETED
-    # On a resumed step the executor passes initial_messages=() — no seed injected
+    # s1 replays its stored transcript: initial_messages=() (no seed injected).
     assert sink["step:p/s1"] == ()
-    assert "Implement this spec SHOULD NOT APPEAR" in sink["step:p/s2"][0].content[0].text
+    # The opening step consumed the one-shot seed; s2 never receives it.
+    assert "SHOULD NOT LEAK" not in sink["step:p/s2"][0].content[0].text
+    assert "OPENING:" not in sink["step:p/s2"][0].content[0].text
 
 
 @pytest.fixture

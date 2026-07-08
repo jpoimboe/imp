@@ -769,7 +769,7 @@ async def _run_tui_session(
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width(),
                  seed_opening=seed_opening, display_width=_display_width())
     attach = build_session_attach(
-        change, seed_opening=seed_opening, resume=resume,
+        change, resume=resume,
         autonomous=autonomous, lease=True)
     leave_state = {} if leave_state is None else leave_state
 
@@ -830,6 +830,9 @@ async def _run_cleared_session(
             return 130
         _session_started = True
         opening_text = _normalize_opening_reply(reply)
+        # Persist the intent durably so the reopened chat's opening step seeds from
+        # change.json (mirroring the imp new path), surviving any later resume.
+        change.set_seed_opening(opening_text)
         if tui:
             return await _run_tui_session(
                 change, seed_opening=opening_text,
@@ -843,7 +846,7 @@ async def _run_cleared_session(
             change, status=status, driver=driver, coord=coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=opening_text, status=status,
+            status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title)
     finally:
@@ -905,7 +908,7 @@ def _select_headless(
 
 
 async def _run_fresh_session(
-    change: Change, *, args: argparse.Namespace, seed_opening: str | None,
+    change: Change, *, args: argparse.Namespace,
 ) -> int:
     """Run a freshly-created change (new / materialized backlog) through
     the per-change session daemon, dispatching on headless / --tui / interactive."""
@@ -928,12 +931,12 @@ async def _run_fresh_session(
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=seed_opening, status=status, non_interactive=True,
+            status=status, non_interactive=True,
             autonomous=autonomous)
     if _tui_requested(args):
         async def _first_tui(leave_state: dict[str, str]) -> int:
             return await _run_tui_session(
-                change, seed_opening=seed_opening, leave_state=leave_state,
+                change, seed_opening=change.seed_opening, leave_state=leave_state,
                 autonomous=autonomous)
 
         return await _clear_loop(change.control_root, tui=True, first=_first_tui)
@@ -948,7 +951,7 @@ async def _run_fresh_session(
             change, status=status, driver=driver, coord=coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=seed_opening, status=status, leave_state=leave_state,
+            status=status, leave_state=leave_state,
             autonomous=autonomous)
 
     return await _clear_loop(change.control_root, tui=False, first=_first)
@@ -1088,6 +1091,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
 
+    # Persist the finalized intent so it survives any resume (including a restart
+    # from an errored transcript). Covers both the positional and interactive
+    # forms; an empty/absent reply persists as None/empty (unseeded).
+    change.set_seed_opening(opening_text)
+
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
     if headless:
@@ -1105,7 +1113,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=opening_text, status=status,
+            status=status,
             title=term_title,
             non_interactive=True, autonomous=autonomous)
 
@@ -1134,7 +1142,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, status=status, driver=driver, coord=coord)
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
-            seed_opening=opening_text, status=status,
+            status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous)
 
@@ -1149,17 +1157,16 @@ def _cmd_chat(args: argparse.Namespace) -> int:
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
-def _resume_seed(change: Change) -> str | None:
-    """Return the seed_opening for an un-materialized home that has no prior conversation.
+def _resume_opens_fresh(change: Change) -> bool:
+    """Whether a resume should open a fresh seeded session rather than replay history.
 
-    Returns None for a materialized change, a home without a seed, or any home
-    that already holds a conversation (those resume into their existing event-log)."""
+    True for an un-materialized home that carries a seed and has no prior
+    conversation; False for a materialized change, a home without a seed, or any
+    home that already holds a conversation (those resume into their event-log)."""
     if change.materialized or not change.seed_opening:
-        return None
+        return False
     events = _load_events_for_id(change.control_root, change.id) or []
-    if _first_user_message(events) is not None:
-        return None
-    return change.seed_opening
+    return _first_user_message(events) is None
 
 
 def _warn_if_blocked(change: Change) -> None:
@@ -1193,10 +1200,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if isinstance(loaded, int):
         return loaded
     change = loaded
-    seed = _resume_seed(change)
-    if seed is not None:
+    if _resume_opens_fresh(change):
         _warn_if_blocked(change)
-        return await _run_fresh_session(change, args=args, seed_opening=seed)
+        return await _run_fresh_session(change, args=args)
     state = State.load(change.state_dir)
     # Persisted status is never `running` (it is derived from the lock at display
     # time); a crashed run is left at its resumable at-rest status (new/paused).

@@ -286,7 +286,6 @@ async def run_change(
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     headless: bool = False,
     autonomous: bool = False,
-    seed_opening: str | None = None,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
@@ -350,8 +349,8 @@ async def run_change(
                   {"tiers": details["tiers"], "steps": details["steps"],
                    "checkpoint_threshold": config.context_checkpoint_threshold()},
                   agent_id=None)
-            if seed_opening:
-                _emit(log, "opening_intent", {"text": seed_opening},
+            if change.seed_opening:
+                _emit(log, "opening_intent", {"text": change.seed_opening},
                       agent_id=None)
         elif workflow_refreshed:
             if _reconcile_resolved_run(state, workflow, config):
@@ -359,7 +358,10 @@ async def run_change(
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
-        pending_seed = seed_opening  # one-shot: consumed by the first fresh agent step
+        # Durable source of truth: the intent survives any resume via change.json,
+        # not the transient run parameter (which resume loops never re-pass).
+        pending_seed = change.seed_opening  # one-shot: consumed at the entry step's fresh render
+        opening_step = next((s.name for s in flat if s.kind == "agent"), None)
 
         # A hold mark surviving to process entry means a prior run died while holding
         # (a clean pause clears the mark). Don't evict when the merge already succeeded
@@ -391,10 +393,13 @@ async def run_change(
             step = flat[idx]
             is_resume = (state.resume_pending == state.step)
 
+            # Deliver the opening intent to the entry agent step on EVERY fresh
+            # render (first run or restart), never a downstream step. Scoping to
+            # the structural first agent step stops a mid-workflow resume from
+            # swallowing the one-shot seed.
             seed_for_step = (
                 pending_seed
-                if pending_seed is not None
-                and step.kind == "agent" and not is_resume
+                if pending_seed is not None and step.name == opening_step
                 else None)
             # Go-live mid-run flips change.project_root to the freshly-forked
             # worktree; the once-built policy is then rooted at the stale control

@@ -506,6 +506,31 @@ def test_set_origin_rewrites_change_json(tmp_path: Path) -> None:
     assert meta["origin"] == "idea"
 
 
+def test_set_seed_opening_rewrites_change_json(tmp_path: Path) -> None:
+    import json as _json
+
+    from imp.engine import worktree
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    base = worktree.current_branch(tmp_path)
+    change = Change.create_draft(
+        tmp_path, title="X", change_id="2026-06-24-seed01",
+        base_branch=base, origin="draft")
+
+    change.set_seed_opening("add a --json flag")
+    assert change.seed_opening == "add a --json flag"
+    meta = _json.loads((change.change_dir / "change.json").read_text())
+    assert meta["seed_opening"] == "add a --json flag"
+
+    # An unseeded fallback persists as null.
+    change.set_seed_opening(None)
+    assert change.seed_opening is None
+    meta = _json.loads((change.change_dir / "change.json").read_text())
+    assert meta["seed_opening"] is None
+
+
 def test_set_depends_on_rewrites_change_json(tmp_path: Path) -> None:
     import json as _json
 

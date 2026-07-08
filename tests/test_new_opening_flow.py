@@ -47,10 +47,59 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(
         main.Change, "create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
-            id="z9y8x7", title="", workflow_dir=tmp_path)))
+            id="z9y8x7", title="", workflow_dir=tmp_path,
+            set_seed_opening=lambda text: None)))
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
     monkeypatch.setattr(main, "_tui_requested", lambda args: False)
     return main
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "opening_arg,reply,expected",
+    [("build a parser", None, "build a parser"),   # positional: argv intent, no prompt
+     (None, "wire up json", "wire up json"),        # interactive: prompt reply
+     (None, "", None)],                             # empty interactive reply -> unseeded (None)
+)
+async def test_new_persists_finalized_opening_intent(
+    stub_new, monkeypatch, tmp_path, opening_arg, reply, expected,
+) -> None:
+    m = stub_new
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_print_opening", lambda *a, **k: None)
+
+    recorded: dict[str, object] = {}
+
+    def _make_draft(*a: object, **k: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            id="z9y8x7", title="", workflow_dir=tmp_path,
+            set_seed_opening=lambda text: recorded.__setitem__("text", text))
+
+    monkeypatch.setattr(m.Change, "create_draft", staticmethod(_make_draft))
+
+    class _FakePrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            return reply
+
+    monkeypatch.setattr(m, "Prompt", _FakePrompt)
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    args = _new_args()
+    args.opening = opening_arg
+    rc = await m._async_cmd_new(args, leave_mode="new")
+
+    assert rc == 0
+    assert "text" in recorded          # set_seed_opening was actually called...
+    assert recorded["text"] == expected  # ...with the finalized intent (None when unseeded)
 
 
 @pytest.mark.anyio

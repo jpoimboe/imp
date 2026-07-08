@@ -66,9 +66,11 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     assert rc == 0
     assert splash_calls == [True]                     # the splash was re-rendered (AC 5b)
     assert captured["leave_mode"] == "new"            # parks like imp new, not abandon
-    assert captured["seed_opening"] == "build a parser"   # opening prompt seeded the chat
     assert captured["leave_state"] is ls              # threads the loop's dict
     change = captured["change"]
+    # The typed intent is persisted durably so the reopened chat's opening step
+    # seeds from change.json (survives resume), not via a transient run parameter.
+    assert Change.load(tmp_path, change.id).seed_opening == "build a parser"
     assert (tmp_path / ".imp" / "changes" / change.id).exists()  # a brand-new draft home
     assert change.title == ""                          # imp new-style: unnamed draft
 
@@ -307,8 +309,7 @@ def test_fresh_session_line_routes_through_clear_loop(
     try:
         rc = anyio.run(functools.partial(
             m._run_fresh_session, ch,
-            args=argparse.Namespace(tui=False, non_interactive=False, message=None),
-            seed_opening="hi"))
+            args=argparse.Namespace(tui=False, non_interactive=False, message=None)))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
@@ -341,8 +342,7 @@ def test_fresh_session_tui_routes_through_clear_loop(
     try:
         rc = anyio.run(functools.partial(
             m._run_fresh_session, ch,
-            args=argparse.Namespace(tui=True, non_interactive=False, message=None),
-            seed_opening="hi"))
+            args=argparse.Namespace(tui=True, non_interactive=False, message=None)))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
@@ -745,6 +745,7 @@ async def test_run_cleared_session_intercepts_help(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, **kwargs: object) -> int:
+        captured["change"] = change
         captured.update(kwargs)
         return 0
 
@@ -756,7 +757,9 @@ async def test_run_cleared_session_intercepts_help(
     rc = await m._run_cleared_session(tmp_path, "main", tui=False, leave_state=ls)
 
     assert rc == 0
-    assert captured["seed_opening"] == "build a parser"   # /help intercepted, not seeded
+    # /help was intercepted; the following real line becomes the persisted intent.
+    change = captured["change"]
+    assert Change.load(tmp_path, change.id).seed_opening == "build a parser"
     assert "Available slash commands" in buf.getvalue()
 
 
