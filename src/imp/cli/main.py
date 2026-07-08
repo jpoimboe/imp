@@ -1968,7 +1968,11 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
         return _drain_from_archive(driver, tail, control, change_id)
     for event in tail.read_new():
         driver.on_event(event)
-    if State.load(home / "state").status in _FOLLOW_TERMINAL:
+    try:
+        state_status = State.load(home / "state").status
+    except FileNotFoundError:
+        return _drain_from_archive(driver, tail, control, change_id)
+    if state_status in _FOLLOW_TERMINAL:
         for event in tail.read_new():
             driver.on_event(event)
         driver.finish()

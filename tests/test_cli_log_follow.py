@@ -160,6 +160,35 @@ def test_follow_step_home_vanished_drains_archive(
     driver.finish.assert_called_once()
 
 
+def test_follow_step_state_vanished_mid_poll_drains_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """home.exists() passes but state.json is gone (teardown race) → archive drain.
+
+    tail.read_new() runs first (events.jsonl exists) and feeds the live event;
+    then State.load raises FileNotFoundError; the drain feeds only the archived
+    events beyond the count already emitted by tail.read_new().
+    """
+    import imp.cli.main as m
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "race"
+    home = tmp_path / ".imp" / "changes" / slug
+    # home dir + events.jsonl exist; state/state.json does NOT (race condition)
+    _write_events(home, [{"type": "live"}])
+    # Archive holds the complete sequence; drain skips what tail already emitted
+    archived = [{"type": "live"}, {"type": "arch1"}, {"type": "arch2"}]
+    raw = "".join(json.dumps(e) + "\n" for e in archived).encode()
+    monkeypatch.setattr(m.archive_read, "read_events", lambda c, i: raw)
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+    rc = _follow_step(driver, tail, status, tmp_path, slug, home)
+    assert rc == 0
+    # tail.read_new() fed "live" (emitted→1); drain fed archived[1:] = arch1, arch2
+    assert [c.args[0] for c in driver.on_event.call_args_list] == \
+        [{"type": "live"}, {"type": "arch1"}, {"type": "arch2"}]
+    driver.finish.assert_called_once()
+
+
 def test_follow_step_unknown_after_vanish_finishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
