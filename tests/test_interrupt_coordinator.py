@@ -287,3 +287,50 @@ async def test_on_received_signal_ordinary_signal_takes_pause_path() -> None:
 
     assert coord.should_pause is True
     assert coord.pause_reason == "ctrl-c"
+
+
+def test_end_gesture_round_clears_latch_for_a_fresh_round() -> None:
+    """When the run yields to the paused prompt the ctrl-c round is over: the
+    latch clears so the next gesture is a fresh first gesture. Narrower than
+    reset() — leave_reason / escalated / _yielded are left untouched."""
+    coord = InterruptCoordinator()
+    # A controlled clock: _first_gesture_at is stamped at 123.0 and "now" is 123.5,
+    # WITHIN the 1s suppression window. So if end_gesture_round did NOT clear the
+    # window, _register_gesture would return False (suppressed); only a genuine
+    # clear-to-None makes the next gesture a fresh first gesture that returns True.
+    coord._now = lambda: 123.5
+    coord._should_pause = True
+    coord.pause_reason = "ctrl-c"
+    coord._first_gesture_at = 123.0
+    coord.leave_reason = "sigterm"
+    coord.escalated = True
+    _yielded_sentinel = object()
+    coord._yielded = _yielded_sentinel
+    coord._interrupted = True
+
+    coord.end_gesture_round()
+
+    assert coord.should_pause is False
+    assert coord.pause_reason is None
+    assert coord._first_gesture_at is None
+    assert coord.leave_reason == "sigterm"          # narrower than reset()
+    assert coord.escalated is True                  # narrower than reset()
+    assert coord._yielded is _yielded_sentinel      # narrower than reset()
+    assert coord.interrupted is True                 # durable 130 signal, narrower than reset()
+    # Falsifiable now: without the clear, _now()=123.5 is <1s from 123.0 → False.
+    assert coord._register_gesture(kind="ctrl-c") is True   # fresh first gesture
+
+
+@pytest.mark.anyio
+async def test_interrupted_flag_survives_end_gesture_round() -> None:
+    """Regression: end_gesture_round clears the live gesture latch (should_pause)
+    so the next ctrl-c is a fresh gesture, but must PRESERVE the durable
+    `interrupted` flag that _session_exit_code reads to return 130 for an
+    interrupt-paused session."""
+    coord = InterruptCoordinator()
+    await coord.signal_pause(reason="ctrl-c")   # no runner attached: sets flags, returns
+    assert coord.should_pause is True
+    assert coord.interrupted is True
+    coord.end_gesture_round()
+    assert coord.should_pause is False   # live latch cleared (fresh next gesture)
+    assert coord.interrupted is True     # durable signal survives -> rc 130 preserved

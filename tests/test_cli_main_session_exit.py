@@ -16,7 +16,7 @@ def test_session_exit_code_emits_pause_summary_even_on_interrupt(
     monkeypatch.setattr(
         main, "_handle_terminal_outcome",
         lambda _c, result, _co: summarized.append(result) or 1)
-    coord = SimpleNamespace(should_pause=True)
+    coord = SimpleNamespace(should_pause=False, interrupted=True)
     rc = main._session_exit_code(SimpleNamespace(), coord)
     assert rc == 130                       # interrupt exit code
     assert summarized == [RunResult.PAUSED]  # summary path WAS invoked
@@ -30,6 +30,6 @@ def test_session_exit_code_returns_outcome_when_not_interrupted(
     monkeypatch.setattr(
         main, "_handle_terminal_outcome",
         lambda _c, result, _co: summarized.append(result) or 0)
-    coord = SimpleNamespace(should_pause=False)
+    coord = SimpleNamespace(should_pause=False, interrupted=False)
     assert main._session_exit_code(SimpleNamespace(), coord) == 0
     assert summarized == [RunResult.COMPLETED]

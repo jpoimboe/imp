@@ -547,7 +547,7 @@ def _print_leave_disposition(
 def _session_exit_code(change: Change, coord: Any) -> int:
     result = infer_session_result(change)
     outcome = _handle_terminal_outcome(change, result, coord)
-    if result is RunResult.PAUSED and coord.should_pause:
+    if result is RunResult.PAUSED and coord.interrupted:
         return 130
     return outcome
 

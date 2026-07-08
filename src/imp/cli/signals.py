@@ -204,6 +204,12 @@ class InterruptCoordinator:
         # reads it to fill the CONTROL_INTERRUPT_LEAVE frame's reason.
         self.leave_reason: str | None = None
         self._should_pause = False
+        # Durable "an interrupt/leave gesture drove a pause this session" signal
+        # for the 130 exit code (_session_exit_code). Set alongside should_pause on
+        # a gesture; unlike should_pause it SURVIVES end_gesture_round (which clears
+        # the live latch so the next ctrl-c is fresh), so a paused non-interactive
+        # session still exits 130 after the prompt posts.
+        self._interrupted = False
         self.pause_reason: str | None = None
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
@@ -365,6 +371,7 @@ class InterruptCoordinator:
         after run_change returns, before the prompt. Does NOT clear queued
         interjects."""
         self._should_pause = False
+        self._interrupted = False
         self.pause_reason = None
         self.leave_reason = None
         self._first_gesture_at = None
@@ -378,7 +385,20 @@ class InterruptCoordinator:
         escalation window untouched so a follow-up force-quit Ctrl-C still
         escalates."""
         self._should_pause = False
+        self._interrupted = False
         self.pause_reason = None
+
+    def end_gesture_round(self) -> None:
+        """Client round-over reset: the run yielded and the paused prompt is up,
+        so the ctrl-c round is done. Clear the gesture latch (should_pause /
+        pause_reason / first-gesture window) so the NEXT ctrl-c starts a fresh
+        round and forwards a new CONTROL_INTERRUPT. Distinct from the daemon's
+        brake (which holds until the reply is accepted, §3) and narrower than
+        reset() — leave_reason / escalated / _yielded AND the durable _interrupted
+        flag (the 130 exit-code signal) are left untouched."""
+        self._should_pause = False
+        self.pause_reason = None
+        self._first_gesture_at = None
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
@@ -541,6 +561,7 @@ class InterruptCoordinator:
         if self.pause_reason is None:
             self.pause_reason = reason
         self._should_pause = True
+        self._interrupted = True
         fn = self._trigger_exit
         if fn is not None:
             fn(reason)
@@ -566,6 +587,13 @@ class InterruptCoordinator:
     def should_pause(self) -> bool:
         return self._should_pause
 
+    @property
+    def interrupted(self) -> bool:
+        """Durable session-lifetime signal: an interrupt/leave gesture drove a
+        pause. Read by _session_exit_code for the 130 exit code; survives
+        end_gesture_round (unlike should_pause)."""
+        return self._interrupted
+
     async def signal_pause(self, *, reason: str = "ctrl-c",
                            via: str = "signal") -> None:
         """Fired by the signal receiver or a daemon control frame."""
@@ -576,6 +604,7 @@ class InterruptCoordinator:
             if self._first_gesture_at is None:
                 self._first_gesture_at = self._now()
         self._should_pause = True
+        self._interrupted = True
         if not first:
             return
         import anyio

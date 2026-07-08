@@ -1821,3 +1821,58 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
     # gate 1's own user_input_resolved did not spuriously cancel gate 2.
     assert received == ["one", "two"]
     assert "user_input_resolved" not in rendered
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_input_resets_client_gesture_latch(
+    tmp_path: Path,
+) -> None:
+    """When the run yields to the paused prompt (awaiting_user_input), the client
+    gesture latch is cleared, so a ctrl-c round in flight ends and the next
+    gesture is fresh."""
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    at_solicit: dict[str, Any] = {}
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "p?"}})
+        return await user_chat_input_fn("p?")
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    coord = InterruptCoordinator()
+    # A ctrl-c round is in flight before the run yields.
+    coord._should_pause = True
+    coord._first_gesture_at = 100.0
+
+    async def _solicit(prompt: str) -> str:
+        at_solicit["should_pause"] = coord.should_pause
+        at_solicit["first_gesture_at"] = coord._first_gesture_at
+        return "x"
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+
+    assert at_solicit["should_pause"] is False        # latch cleared on yield
+    assert at_solicit["first_gesture_at"] is None

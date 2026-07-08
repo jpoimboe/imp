@@ -216,7 +216,10 @@ async def test_run_session_client_returns_130_when_user_interrupted(
         return ""
 
     coord = InterruptCoordinator()
-    coord._should_pause = True  # simulate Ctrl-C/ESC forwarded to daemon
+    # The durable `interrupted` flag (set by signal_pause on a real Ctrl-C) is what
+    # _session_exit_code reads for 130 — set it ALONE (should_pause stays False) so
+    # this test fails if the exit-code guard regresses to reading should_pause.
+    coord._interrupted = True
     rc = await run_session_client(
         change, driver=_Driver(), coord=coord, solicit=_solicit)
     assert rc == 130
