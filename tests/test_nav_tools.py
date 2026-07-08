@@ -315,6 +315,15 @@ def test_glob_description_documents_path_and_sandbox() -> None:
     assert "bounded by the sandbox like bash" in desc
 
 
+def test_glob_description_notes_recency_and_cap() -> None:
+    desc = get_registry()["glob"].description
+    assert "most-recent" in desc
+    assert "50 KB" in desc
+    # retained guarantees
+    assert "bounded by the sandbox like bash" in desc
+    assert "git ignores" in desc
+
+
 def test_grep_reports_relative_paths(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("needle here\n")
     ctx = _ctx(tmp_path)

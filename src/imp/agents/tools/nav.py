@@ -195,7 +195,10 @@ def _cap_lines(lines: list[str]) -> str:
         "an ignored path searches it anyway. Uses pathlib glob "
         "semantics — a bare *.py matches top-level files only; this differs "
         "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
-        "stays relative; search elsewhere via `path`, not an absolute pattern."
+        "stays relative; search elsewhere via `path`, not an absolute pattern. "
+        "Results are ordered most-recent-first by mtime (ties broken by path) "
+        "and capped at 50 KB, head-truncated with a `… +N not shown` notice so "
+        "the most-recent matches are the ones kept."
     ),
     read_only=True,
 )
