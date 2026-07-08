@@ -197,3 +197,55 @@ async def test_signal_pause_empty_stack_does_not_arm_watchdog(monkeypatch: Any) 
     assert coord.should_pause is True
     assert coord.pause_reason == "ctrl-d"
     assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []
+
+
+@pytest.mark.anyio
+async def test_yield_watchdog_escalates_when_no_yield(monkeypatch: Any) -> None:
+    monkeypatch.setattr(_signals, "_YIELD_DEADLINE_S", 0.05)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    killed: list[str] = []
+
+    async def fk_parent() -> None:
+        killed.append("parent")
+
+    async def fk_child() -> None:
+        killed.append("child")
+
+    with (
+        coord.runner_attached(lambda: None, force_kill=fk_parent, agent_id="parent"),
+        coord.runner_attached(lambda: None, force_kill=fk_child, agent_id="child"),
+    ):
+        coord._first_gesture_at = coord._now()
+        coord._yielded = anyio.Event()  # never set -> no yield
+        with anyio.fail_after(1):
+            await coord._yield_watchdog()
+
+    assert set(killed) == {"parent", "child"}  # whole stack hard-killed
+    esc = [r["payload"] for r in log.records if r["type"] == "interrupt_escalated"]
+    assert len(esc) == 1
+    assert esc[0]["reason"] == "no_yield"
+    assert set(esc[0]["killed"]) == {"parent", "child"}
+
+
+@pytest.mark.anyio
+async def test_note_yield_disarms_watchdog(monkeypatch: Any) -> None:
+    monkeypatch.setattr(_signals, "_YIELD_DEADLINE_S", 5.0)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    killed: list[str] = []
+
+    async def fk_x() -> None:
+        killed.append("x")
+
+    with coord.runner_attached(lambda: None, force_kill=fk_x, agent_id="x"):
+        coord._first_gesture_at = coord._now()
+        coord._yielded = anyio.Event()
+        coord.note_yield()  # run yielded before the deadline
+        with anyio.fail_after(1):
+            await coord._yield_watchdog()
+
+    assert killed == []  # yielded in time -> no escalation
+    assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []

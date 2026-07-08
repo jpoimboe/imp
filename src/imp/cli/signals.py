@@ -366,6 +366,7 @@ class InterruptCoordinator:
         self.leave_reason = None
         self._first_gesture_at = None
         self.escalated = False
+        self._yielded = None
 
     def clear_pause(self) -> None:
         """Consume a pause that a cooperative interrupt resolved inline. The
@@ -475,7 +476,31 @@ class InterruptCoordinator:
             "duration_ms": int((self._now() - t0) * 1000)})
 
     async def _yield_watchdog(self) -> None:
-        return
+        """Hard-kill the whole attach stack if the run doesn't yield within 5s of the gesture."""
+        import anyio
+
+        started = self._first_gesture_at if self._first_gesture_at is not None else self._now()
+        remaining = (started + _YIELD_DEADLINE_S) - self._now()
+        evt = self._yielded
+        yielded = False
+        if evt is not None:
+            if remaining > 0:
+                with anyio.move_on_after(remaining):
+                    await evt.wait()
+                    yielded = True
+            else:
+                yielded = evt.is_set()
+        if yielded:
+            return
+        # Sweep the whole stack (order-independent: a hard kill of any runner
+        # unblocks a parked run); list only agents whose force_kill succeeded.
+        killed: list[str | None] = []
+        for att in list(self._runner_stack):
+            if att.force_kill is not None:
+                with _suppress(Exception):
+                    await att.force_kill()
+                    killed.append(att.agent_id)  # only list what was actually killed
+        self._emit("interrupt_escalated", {"reason": "no_yield", "killed": killed})
 
     def note_yield(self) -> None:
         """The run yielded (steer solicit posted, or run_change returned). Disarms

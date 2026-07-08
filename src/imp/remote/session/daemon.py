@@ -135,6 +135,7 @@ async def serve_change_session(
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
+            coordinator.note_yield()  # run_change returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         while prompt is not None:
             on_event({"type": "awaiting_user_input",
@@ -169,6 +170,7 @@ async def serve_change_session(
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
+            coordinator.note_yield()  # run_change returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         return result
 
