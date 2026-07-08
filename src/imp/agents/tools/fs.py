@@ -285,6 +285,23 @@ def _short_repr(s: str, cap: int = 200) -> str:
     return f"{s[:cap]!r}… [{len(s)} chars total]"
 
 
+def _apply_edit(
+    body: str, old: str, new: str, path: str, replace_all: bool, *, label: str = "",
+) -> tuple[str, int]:
+    """Count/find/replace `old`->`new` in an in-memory `body`. Returns the edited
+    body and the occurrence count. `label` prefixes error messages (empty for the
+    single-edit path -> today's exact text; `edit #N: ` for a batch item). Assumes
+    `old` is non-empty — callers validate that before invoking."""
+    count = body.count(old)
+    if count == 0:
+        raise ValueError(f"{label}{_short_repr(old)} not found in {path!r}")
+    if not replace_all and count > 1:
+        raise ValueError(f"{label}{_short_repr(old)} not unique in {path!r} "
+                         f"(found {count} occurrences)")
+    edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
+    return edited, count
+
+
 def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> None:
     """Atomic write-back: temp file + os.replace.
 
@@ -385,13 +402,7 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
             f"{path} is not valid UTF-8; edit_file refuses to rewrite it "
             f"(the write-back would corrupt non-UTF-8 bytes) — use bash instead"
         ) from None
-    count = body.count(old)
-    if count == 0:
-        raise ValueError(f"{_short_repr(old)} not found in {path!r}")
-    if not replace_all and count > 1:
-        raise ValueError(f"{_short_repr(old)} not unique in {path!r} "
-                         f"(found {count} occurrences)")
-    edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
+    edited, count = _apply_edit(body, old, new, path, replace_all)
     new_bytes = edited.encode("utf-8")
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).

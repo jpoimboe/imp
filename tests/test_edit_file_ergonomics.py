@@ -248,3 +248,26 @@ def test_short_old_repr_stays_full_and_escaped(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("content\n")
     with pytest.raises(ValueError, match=r"'nope\\nx' not found in 'x\.py'"):
         _edit(_ctx(tmp_path), path="x.py", old="nope\nx", new="y")
+
+
+def test_apply_edit_helper_computes_body_count_and_labels() -> None:
+    from imp.agents.tools.fs import _apply_edit
+
+    # Default mode: unique match -> replaced once, count reported.
+    edited, count = _apply_edit("a b a", "b", "X", "f.py", False)
+    assert (edited, count) == ("a X a", 1)
+
+    # replace_all: every occurrence replaced, count is the number found.
+    edited, count = _apply_edit("a a a", "a", "Q", "f.py", True)
+    assert (edited, count) == ("Q Q Q", 3)
+
+    # Not-found carries the label prefix and the pinned path-bearing message.
+    with pytest.raises(ValueError, match=r"edit #2: 'z' not found in 'f\.py'"):
+        _apply_edit("abc", "z", "Y", "f.py", False, label="edit #2: ")
+
+    # Non-unique without replace_all carries the label prefix and count.
+    with pytest.raises(
+        ValueError,
+        match=r"edit #3: 'a' not unique in 'f\.py' \(found 2 occurrences\)",
+    ):
+        _apply_edit("a a", "a", "Y", "f.py", False, label="edit #3: ")
