@@ -170,7 +170,7 @@ class SessionSocket:
                 while True:
                     try:
                         batch.append(recv.receive_nowait())
-                    except anyio.WouldBlock:
+                    except (anyio.WouldBlock, anyio.EndOfStream):
                         break
                 line = b"".join(
                     (encode_event(e) + "\n").encode("utf-8") for e in batch)
