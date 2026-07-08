@@ -1126,6 +1126,91 @@ async def test_pull_watchdog_restores_finite_window_after_tool_end(monkeypatch) 
 
 
 @pytest.mark.anyio
+async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) -> None:
+    """The _bump activity listener must NOT mutate the scope deadline once the
+    scope's cancellation is already in flight (cancel_called True). When
+    cancel_called is False it still resets to a finite window, or freezes to inf
+    under solicit_active/tool_active. Captures the listener via a fake
+    coordinator and drives it with fake scopes — no real anyio timing."""
+    import math
+
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 100.0)
+
+    class _CaptureCoord:
+        def __init__(self) -> None:
+            self.listener = None
+            self.solicit_active = False
+            self.tool_active = False
+
+        def add_activity_listener(self, fn):
+            self.listener = fn
+            return fn
+
+        def remove_activity_listener(self, fn) -> None:
+            if self.listener is fn:
+                self.listener = None
+
+        def note_activity(self) -> None:
+            pass
+
+    class _FakeScope:
+        def __init__(self, cancel_called: bool) -> None:
+            self.deadline = 555.0
+            self.cancel_called = cancel_called
+
+    coord = _CaptureCoord()
+    results: dict[str, float] = {}
+
+    async def _gen():
+        bump = coord.listener
+        assert bump is not None, "watchdog did not register the _bump listener"
+
+        # cancel_called True -> deadline left untouched (the root-cause guard).
+        s1 = _FakeScope(cancel_called=True)
+        coord.solicit_active = False
+        coord.tool_active = False
+        bump(s1)
+        results["cancelled"] = s1.deadline
+
+        # cancel_called False, no freeze -> finite now+window reset.
+        s2 = _FakeScope(cancel_called=False)
+        bump(s2)
+        results["finite"] = s2.deadline
+
+        # cancel_called False, solicit_active -> frozen to inf.
+        s3 = _FakeScope(cancel_called=False)
+        coord.solicit_active = True
+        bump(s3)
+        results["solicit"] = s3.deadline
+
+        # cancel_called False, tool_active -> frozen to inf.
+        s4 = _FakeScope(cancel_called=False)
+        coord.solicit_active = False
+        coord.tool_active = True
+        bump(s4)
+        results["tool"] = s4.deadline
+
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=object(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert results["cancelled"] == 555.0            # untouched once cancel in flight
+    assert results["finite"] != math.inf            # reset, not frozen
+    assert results["finite"] == pytest.approx(anyio.current_time() + 100.0, abs=1.0)
+    assert results["solicit"] == math.inf
+    assert results["tool"] == math.inf
+    assert stall["hit"] is False                    # happy path is not a stall
+    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
 async def test_inline_solicit_raises_awaiting_when_no_channel() -> None:
     from imp.engine.agent_run import build_inline_solicit
     from imp.engine.awaiting_user_input import AwaitingUserInput

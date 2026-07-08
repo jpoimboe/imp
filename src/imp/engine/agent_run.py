@@ -238,6 +238,26 @@ class SubagentSuspended(Exception):
     Resume re-enters the step fresh and re-dispatches the subagent subtree."""
 
 
+async def _teardown_stalled_agent(
+    runner: Any, gen: Any, stall: dict[str, bool],
+) -> None:
+    """Mark the stall and drive the agent's OWN teardown. Caps the cooperative
+    interrupt()+aclose() COLLECTIVELY: a wedged CLI can ignore the graceful
+    interrupt, so on overrun escalate to the optional fire-and-forget force_kill
+    seam (subprocess providers only)."""
+    stall["hit"] = True
+    with anyio.move_on_after(PROCESS_KILL_GRACE_S) as kill_scope:
+        with contextlib.suppress(Exception):
+            await runner.interrupt()
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+    if kill_scope.cancelled_caught:
+        force_kill = getattr(runner, "force_kill", None)
+        if force_kill is not None:
+            with contextlib.suppress(Exception):
+                await force_kill()
+
+
 async def _pull_with_inactivity_watchdog(
     gen: Any, *, runner: Any, stall: dict[str, bool], coordinator: Any = None,
 ) -> AsyncIterator[Any]:
@@ -262,22 +282,36 @@ async def _pull_with_inactivity_watchdog(
     pre-liveness behavior."""
     add_listener = getattr(coordinator, "add_activity_listener", None)
     remove_listener = getattr(coordinator, "remove_activity_listener", None)
+    unset = object()
     while True:
+        ev: Any = unset
         try:
             with anyio.fail_after(AGENT_INACTIVITY_TIMEOUT_S) as scope:
                 bump = None
                 if add_listener is not None:
                     def _bump(_scope: Any = scope) -> None:
-                        # Read the module global at call time so a monkeypatched
-                        # window (tests) and the live value agree. Freeze the
-                        # in-flight deadline to inf while EITHER an attended agent
-                        # is blocked awaiting a human reply (solicit_active) OR a
-                        # foreground tool call is in flight (tool_active): both are
-                        # periodic-activity-free blocked awaits, so a one-shot finite
-                        # bump would expire one window later and re-introduce the
-                        # false kill. end_solicit_watchdog / end_tool_watchdog's
-                        # note_activity then re-fires this with the flag cleared,
-                        # restoring a fresh finite window.
+                        # Once this scope's cancellation is already in flight,
+                        # leave the deadline untouched. A tool dispatch racing in
+                        # between the timer firing and the CancelledError being
+                        # delivered must NOT push the deadline: pushing it (to inf
+                        # under tool_active/solicit_active) makes fail_after's
+                        # post-check `cancelled_caught and now >= deadline`
+                        # evaluate False, so it swallows the cancel WITHOUT
+                        # raising TimeoutError and control falls through with no
+                        # event assigned. The timer only fires after a full window
+                        # of genuine inactivity, so this is the correct stall.
+                        if _scope.cancel_called:
+                            return
+                        # Read AGENT_INACTIVITY_TIMEOUT_S at call time so a
+                        # monkeypatched window (tests) and the live value agree.
+                        # Freeze the in-flight deadline to inf while EITHER an
+                        # attended agent is blocked awaiting a human reply
+                        # (solicit_active) OR a foreground tool call is in flight
+                        # (tool_active): both are periodic-activity-free blocked
+                        # awaits, so a one-shot finite bump would expire one window
+                        # later and re-introduce the false kill. end_solicit_/
+                        # end_tool_watchdog's note_activity re-fires this with the
+                        # flag cleared, restoring a fresh finite window.
                         if (getattr(coordinator, "solicit_active", False)
                                 or getattr(coordinator, "tool_active", False)):
                             _scope.deadline = math.inf
@@ -293,20 +327,14 @@ async def _pull_with_inactivity_watchdog(
         except StopAsyncIteration:
             return
         except TimeoutError:
-            stall["hit"] = True
-            # Cap the cooperative interrupt()+aclose() COLLECTIVELY: a wedged CLI
-            # can ignore the graceful interrupt, so on overrun escalate to the
-            # optional fire-and-forget force_kill seam (subprocess providers only).
-            with anyio.move_on_after(PROCESS_KILL_GRACE_S) as kill_scope:
-                with contextlib.suppress(Exception):
-                    await runner.interrupt()
-                with contextlib.suppress(Exception):
-                    await gen.aclose()
-            if kill_scope.cancelled_caught:
-                force_kill = getattr(runner, "force_kill", None)
-                if force_kill is not None:
-                    with contextlib.suppress(Exception):
-                        await force_kill()
+            await _teardown_stalled_agent(runner, gen, stall)
+            return
+        if ev is unset:
+            # The fail_after block exited without yielding a value and without
+            # raising (a swallowed self-cancel, or any future anyio behavior that
+            # reintroduces it). `yield ev` is reachable ONLY after a real pull, so
+            # treat this as a stall instead of yielding an unbound event.
+            await _teardown_stalled_agent(runner, gen, stall)
             return
         yield ev
 
