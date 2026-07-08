@@ -51,15 +51,21 @@ def derive_codex_resume_state(
         and rec.get("payload", {}).get("name") == "complete_step"
         for rec in records
     )
-    last_llm = None
+    # Read the most recent PROSE-BEARING llm_response (raw.content has a
+    # non-empty text block). A prose-less tool-only turn emits an empty-prose
+    # llm_response at turn.completed purely as the usage carrier; that carrier
+    # must not shadow the turn's real prose with "". The `is None` gate keys on
+    # this same lookup: no prose-bearing response anywhere -> nothing to replay
+    # -> SEND_TO_LLM (subsumes the old empty-history case).
+    last_prose_llm = None
     for rec in records:
-        if rec.get("type") == "llm_response":
-            last_llm = rec
-    if has_complete_step or last_llm is None:
+        if rec.get("type") == "llm_response" and _text_of(rec):
+            last_prose_llm = rec
+    if has_complete_step or last_prose_llm is None:
         return ResumeState.SEND_TO_LLM, ""
     has_awaiting = any(
         rec.get("type") == "awaiting_user_input" for rec in records)
-    last_text = _text_of(last_llm)
+    last_text = _text_of(last_prose_llm)
     if has_awaiting:
         return ResumeState.AWAITING_USER, last_text
     if subagent_depth > 0:

@@ -55,9 +55,8 @@ def test_fresh_when_no_records_for_agent(tmp_path: Path) -> None:
 
 
 def test_normal_resume_when_complete_step_present(tmp_path: Path) -> None:
-    # Post-F1 emit order: the in-turn tool_call/tool_result come FIRST, then the
-    # reassembled llm_response is the tail. Classification is presence-based, so
-    # a completed step → SEND_TO_LLM regardless of llm_response position.
+    # complete_step present → the turn completed; resume normally (SEND_TO_LLM)
+    # regardless of llm_response position. Classification is presence-based.
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         {"agent_id": "step:t", "type": "tool_call",

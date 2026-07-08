@@ -205,6 +205,59 @@ def test_derive_send_to_llm_when_complete_step_present(tmp_path: Path) -> None:
     assert state is ResumeState.SEND_TO_LLM
 
 
+def test_derive_skips_trailing_empty_prose_usage_carrier(tmp_path: Path) -> None:
+    # A prose turn, then a prose-less turn whose only llm_response is the empty-
+    # prose usage carrier. last_text must come from the prose turn, not "".
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": []}}},   # empty-prose usage carrier
+    ])
+    state, last_text = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.AWAITING_USER
+    assert last_text == "which file?"
+
+
+def test_derive_send_to_llm_when_only_empty_prose_carriers(tmp_path: Path) -> None:
+    # A run whose only llm_responses are empty-prose usage carriers (all turns
+    # tool-only, no agent_message) has no prose to replay -> SEND_TO_LLM.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"name": "write_file", "input": {}}},
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": []}}},
+    ])
+    state, last_text = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.SEND_TO_LLM
+    assert last_text == ""
+
+
+def test_derive_preamble_only_turn_recovers_last_text(tmp_path: Path) -> None:
+    # A preamble turn whose prose leads its tool_call, followed by a prose-less
+    # continuation whose only llm_response is an empty-prose usage carrier.
+    # Under old code the trailing carrier is last_llm → last_text == ""; under
+    # new code the prose-bearing lookup skips it and recovers "drafting the fix".
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "drafting the fix"}]}}},
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"name": "write_file", "input": {}}},
+        {"agent_id": "step:t", "type": "tool_result",
+         "payload": {"tool_use_id": "c1", "content": "ok"}},
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": []}}},   # trailing empty-prose carrier
+    ])
+    state, last_text = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.MISSING_COMPLETE_STEP
+    assert last_text == "drafting the fix"
+
+
 @pytest.mark.anyio
 async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path) -> None:
     from imp.agents.transcript import RESUME_CONTINUE_NUDGE
