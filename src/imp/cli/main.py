@@ -1890,6 +1890,18 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _follow_log(events: list[dict[str, Any]]) -> int:
+    """Replay a Change's narrative through the live run view's renderer."""
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(
+        stream=sys.stdout, color=should_use_color(sys.stdout),
+        width=_term_width, display_width=_display_width, status=status)
+    for event in events:
+        driver.on_event(event)
+    driver.finish()
+    return 0
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
@@ -1927,6 +1939,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if events is None:
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
+
+    if args.follow:
+        return _follow_log(events)
 
     if args.html is not None or args.md is not None:
         return _write_log_export(args, control, change_id, events)
