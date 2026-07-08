@@ -255,25 +255,35 @@ class TelegramNorthAdapter:
         is not None), mirroring the map write: a send that fails without raising
         must not record the event as delivered, or the re-attach replay that
         re-surfaces this blocked Change would be permanently suppressed. A
-        prompt-less awaiting_user_input needs no special handling: format_outbound
-        renders the '[title] needs your input' header alone, a useful alert."""
+        prompt-less awaiting_user_input falls back to this Change's preceding
+        llm_response narration (recorded before the enabled gate so the first
+        alert after /alerts on carries current context), mirroring the subscribed
+        path; with no prior narration it renders the '[title] needs your input'
+        header alone, still a useful alert."""
         if event.get("_replay"):
             event_id = event.get("id")
             if event_id is not None:
                 self._alert_all.mark(change_id, event_id)
             return
+        etype = event.get("type")
+        payload = event.get("payload") or {}
+        body = event_body(etype, payload)
+        if etype == "llm_response" and body.strip():
+            self._last_narration[change_id] = body
         if not self._alert_all.enabled():
             return
-        etype = event.get("type")
-        if curate(etype, event.get("payload") or {}) != "buzz":
+        if curate(etype, payload) != "buzz":
             return
         event_id = event.get("id")
         if event_id is not None and self._alert_all.seen(change_id, event_id):
             return
+        override: str | None = None
+        if etype == "awaiting_user_input" and not body.strip():
+            override = self._last_narration.get(change_id, "")
         handle = handle_for(change_id)
         with self._lock:
             self._handle_to_change[handle] = change_id
-        full = f"{header_line(event)}\n{format_outbound(event, handle)}"
+        full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
         message_id = self._send(full, False)
         with self._lock:
             if message_id is not None:
