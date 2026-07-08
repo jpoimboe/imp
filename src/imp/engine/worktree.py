@@ -101,7 +101,7 @@ def origin_head_branch(control_root: Path) -> str | None:
     )
     if proc.returncode != 0:
         return None
-    return proc.stdout.strip().removeprefix("origin/")
+    return proc.stdout.strip().removeprefix("origin/") or None
 
 
 def commit_count(control_root: Path, change_id: str, base: str) -> int:
