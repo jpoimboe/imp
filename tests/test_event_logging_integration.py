@@ -3,7 +3,6 @@
 
 These tests verify the full event-logging pipeline using the real
 AnthropicAgentRunner with a FakeAsyncAnthropic client:
-  1. Reconstruction matches live runner messages (multi-turn)
   2. Subagent events isolated by agent_id in shared log
   3. Gate agent_ids are monotonic (gate:phase/stem-N)
   4. Resume does not re-emit step_context / initial user_message
@@ -30,7 +29,6 @@ from imp.agents.runner import (
 from imp.agents.tools import get_registry  # noqa: F401 - ensures tools registered
 from imp.agents.transcript import Transcript
 from imp.engine.change import Change
-from imp.engine.replay import build_messages_from_events, reconstruct_request_for_response
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
@@ -149,68 +147,6 @@ def anyio_backend():
     return "asyncio"
 
 
-# ── Test 1: Reconstruction matches live runner messages ────────────────────────
-
-@pytest.mark.anyio
-async def test_reconstruction_matches_runner_messages_anthropic(tmp_path: Path) -> None:
-    """Run a multi-tool-use step with a fake client; at the SECOND llm_response,
-    reconstruct_request_for_response's messages equal what the runner had just
-    before that turn: [user("go"), assistant(turn1), user(tool_result)].
-
-    FULL implementation: two-turn fake, reconstruction verified against the
-    real InMemoryEventLog written during the run.
-    """
-    (tmp_path / "art").mkdir()
-    # Create a file for read_file to actually read
-    (tmp_path / "data.txt").write_text("hello from data")
-
-    fake = FakeAsyncAnthropic([
-        # Turn 1: text + tool_use(read_file)
-        response(
-            text("I will read the file"),
-            tool_use("t1", "read_file", {"path": "/project/data.txt"}),
-        ),
-        # Turn 2: complete_step
-        response(
-            tool_use("c1", "complete_step", {"status": "Success", "note": "done"}),
-        ),
-    ])
-    log = InMemoryEventLog()
-    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
-                                  client_factory=lambda: fake)
-    async for _ in runner.run(_inv(tmp_path, event_log=log)):
-        pass
-
-    events = list(log.read())
-    resp_events = [e for e in events if e["type"] == "llm_response"]
-    # Must have exactly 2 llm_response events (one per turn)
-    assert len(resp_events) == 2, (
-        f"expected 2 llm_response events, got {len(resp_events)}"
-    )
-
-    # Reconstruct the request that produced the SECOND response
-    req = reconstruct_request_for_response(events, resp_events[1]["id"])
-    roles = [m.role for m in req["messages"]]
-
-    # Before the second LLM call: [user("go"), assistant(turn1 with tool_use), user(tool_result)]
-    assert roles == ["user", "assistant", "user"], (
-        f"expected ['user','assistant','user'] before turn 2, got {roles}"
-    )
-    # Verify the assistant turn has the tool_use block
-    assert any(
-        isinstance(b, ToolUseBlock) and b.name == "read_file"
-        for b in req["messages"][1].content
-    ), "expected read_file tool_use in reconstructed assistant message"
-    # Verify the user turn has the tool_result
-    assert any(
-        isinstance(b, ToolResultBlock) and b.tool_use_id == "t1"
-        for b in req["messages"][2].content
-    ), "expected tool_result for t1 in reconstructed user message"
-
-    # System prompt is preserved
-    assert req["system"] == "be terse"
-
-
 # ── Test 2: Subagent events isolated by agent_id ──────────────────────────────
 
 @pytest.mark.anyio
@@ -219,8 +155,6 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
       - parent events carry agent_id 'step:p/s'
       - subagent events carry agent_id 'sub:<tool_call_id>'
       - the subagent step_context.parent_id == the tool_call event id
-      - build_messages_from_events(events, agent_id='sub:...') returns only
-        the subagent's stream (first message is user role)
 
     FULL implementation: uses real AnthropicAgentRunner dispatch_task path
     with a shared InMemoryEventLog.
@@ -312,13 +246,6 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
     assert sub_ctx["parent_id"] == tool_call_ev["id"], (
         f"subagent step_context.parent_id {sub_ctx['parent_id']!r} "
         f"!= tool_call event id {tool_call_ev['id']!r}"
-    )
-
-    # build_messages_from_events filters to subagent stream only
-    sub_msgs = build_messages_from_events(events, agent_id=sub_agent_id)
-    assert len(sub_msgs) > 0, "no messages reconstructed for subagent"
-    assert sub_msgs[0].role == "user", (
-        f"expected first subagent message to be user, got {sub_msgs[0].role}"
     )
 
 

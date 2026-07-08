@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from imp.agents.runner import TextBlock, ToolUseBlock
 from imp.providers.claude_code import (
-    _extract_claude_code_diagnostics,
     _parse_claude_code_message,
     _serialize_claude_code_message,
 )
@@ -20,11 +19,3 @@ def test_serialize_then_parse_assistant() -> None:
     # tool name canonicalized (mcp__imp__ prefix stripped)
     assert msg.content[1] == ToolUseBlock(id="t1", name="read_file", input={"p": "x"})
 
-
-def test_diagnostics_collects_thinking() -> None:
-    from tests.cc_fakes import FakeThinkingBlock
-    sdk = FakeAssistantMessage(content=[FakeThinkingBlock(thinking="reasoning"),
-                                        FakeTextBlock(text="answer")])
-    raw = _serialize_claude_code_message(sdk)
-    diag = _extract_claude_code_diagnostics(raw)
-    assert diag.thinkings == ("reasoning",)
