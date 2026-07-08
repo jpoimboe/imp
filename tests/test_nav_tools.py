@@ -149,6 +149,47 @@ def test_grep_default_output_stable_across_modes(tmp_path: Path) -> None:
     )
 
 
+def test_grep_multiline_content_reports_start_line(tmp_path: Path) -> None:
+    (tmp_path / "t.txt").write_text("foo\nbar\nbaz\n")
+    out = _grep(_ctx(tmp_path), pattern=r"foo\s+bar", path="t.txt",
+                output_mode="content", multiline=True)
+    # The match spans lines 1-2; it is reported at its START line (1).
+    assert out == "t.txt:1:foo"
+
+
+def test_grep_multiline_off_does_not_span_lines(tmp_path: Path) -> None:
+    (tmp_path / "t.txt").write_text("foo\nbar\nbaz\n")
+    out = _grep(_ctx(tmp_path), pattern=r"foo\s+bar", path="t.txt",
+                output_mode="content", multiline=False)
+    assert out == "(no matches)"
+
+
+def test_grep_multiline_count_counts_distinct_start_lines(tmp_path: Path) -> None:
+    (tmp_path / "t.txt").write_text("a1\na2\nb\na3\na4\n")
+    # Two non-overlapping cross-line matches: "a1\na2" (start line 1) and
+    # "a3\na4" (start line 4) -> two distinct start lines.
+    out = _grep(_ctx(tmp_path), pattern=r"a\d\na\d", path="t.txt",
+                output_mode="count", multiline=True)
+    assert out == "t.txt:2"
+
+
+def test_grep_multiline_files_with_matches(tmp_path: Path) -> None:
+    (tmp_path / "hit.txt").write_text("foo\nbar\n")
+    (tmp_path / "miss.txt").write_text("foo\nnope\n")
+    out = _grep(_ctx(tmp_path), pattern=r"foo\nbar", path=".", multiline=True)
+    assert out == "hit.txt"
+
+
+def test_grep_multiline_row_respects_per_line_cap(tmp_path: Path) -> None:
+    # A cross-line match whose START line is huge is still per-line truncated.
+    (tmp_path / "t.txt").write_text("A" * 3000 + "\nB\n")
+    out = _grep(_ctx(tmp_path), pattern=r"A\nB", path="t.txt",
+                output_mode="content", multiline=True)
+    assert out.startswith("t.txt:1:")
+    assert "…[truncated]" in out
+    assert len(out) < 3000  # the 3000-char line was truncated, not emitted whole
+
+
 def test_grep_excludes_imp_and_git(tmp_path: Path) -> None:
     (tmp_path / "code.py").write_text("SECRET token here\n")
     (tmp_path / ".imp").mkdir()

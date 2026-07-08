@@ -10,6 +10,7 @@ matches as absolute paths.
 
 from __future__ import annotations
 
+import bisect
 import fnmatch
 import os
 import re
@@ -281,6 +282,23 @@ def _compile_glob(pat: str) -> re.Pattern[str]:
         "(?:" + fnmatch.translate(v) + ")" for v in _glob_variants(pat)))
 
 
+def _multiline_start_lines(rgx: re.Pattern[str], text: str,
+                           n_lines: int) -> list[int]:
+    """Distinct ascending 1-based START lines of rgx's matches over `text`."""
+    newlines = [i for i, ch in enumerate(text) if ch == "\n"]
+    idxs: list[int] = []
+    for m in rgx.finditer(text):
+        ln = bisect.bisect_left(newlines, m.start()) + 1
+        # Drop a match starting past the last readable line (inside a fragment
+        # the 5 MB read cap cut off). finditer is non-overlapping/left-to-right
+        # so start lines are non-decreasing — adjacent-dup collapse suffices.
+        if ln > n_lines:
+            continue
+        if not idxs or idxs[-1] != ln:
+            idxs.append(ln)
+    return idxs
+
+
 _GREP_MODES = ("files_with_matches", "content", "count")
 
 
@@ -329,6 +347,7 @@ async def grep(
     after: int = 0,
     context: int = 0,
     head_limit: int | None = None,
+    multiline: bool = False,
 ) -> str:
     # No validation layer sits between the JSON schema and this call — every
     # constraint is enforced here in the body.
@@ -367,7 +386,10 @@ async def grep(
     inside = target.is_relative_to(root)
     external = not inside
     policy = ctx.sandbox_policy
-    rgx = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
+    flags = re.IGNORECASE if case_insensitive else 0
+    if multiline:
+        flags |= re.DOTALL | re.MULTILINE
+    rgx = re.compile(pattern, flags)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
@@ -416,8 +438,11 @@ async def grep(
         cap_truncated = file_is_cap_truncated(read_truncated, f)
         lines = split_lines(text, cap_truncated=cap_truncated)
 
-        match_idxs = [i for i, line in enumerate(lines, start=1)
-                      if rgx.search(line)]
+        if multiline:
+            match_idxs = _multiline_start_lines(rgx, text, len(lines))
+        else:
+            match_idxs = [i for i, line in enumerate(lines, start=1)
+                          if rgx.search(line)]
 
         if output_mode == "files_with_matches":
             # A LISTED truncated file resolved itself; an UNLISTED one is a
