@@ -312,6 +312,33 @@ def test_vanished_file_stat_split(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         "— the file continues but is not readable via read_file; total unknown]")
 
 
+def test_vanished_stat_skips_dedup_with_prior_record(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A prior ReadRecord already holds this range; on the repeat the file
+    # vanishes between the read and the st_mtime stat, so dedup AND recording
+    # are skipped: the full body re-renders (never a stub) and the prior record
+    # is left in place untouched.
+    import imp.agents.tools.fs as fs
+
+    (tmp_path / "v.txt").write_text("a\nb\n")
+    ctx = _ctx(tmp_path)
+    first = _read(ctx, path="v.txt", offset=1, limit=2000)
+    assert first == f"{_num(1, 'a')}\n{_num(2, 'b')}"
+    prior = next(iter(ctx.read_state.values()))
+    assert (1, 2000) in prior.rendered  # first read recorded the range
+
+    async def fake_read(path: Path, **kw: object) -> tuple[bytes, bool]:
+        path.unlink()  # vanish between the read and the st_mtime stat
+        return (b"a\nb\n", False)
+
+    monkeypatch.setattr(fs, "read_bytes_capped", fake_read)
+    second = _read(ctx, path="v.txt", offset=1, limit=2000)
+    assert second == f"{_num(1, 'a')}\n{_num(2, 'b')}"  # full body, not a stub
+    assert "[unchanged" not in second
+    assert next(iter(ctx.read_state.values())) is prior  # record untouched
+    assert len(ctx.read_state) == 1
+
+
 def test_stub_on_exact_repeat_unchanged_file(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)))
     ctx = _ctx(tmp_path)
