@@ -10,7 +10,11 @@ import pytest
 import imp.agents.tools.nav  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import ToolAborted
+from imp.agents.tools.limits import (
+    OUTPUT_TRUNCATION_MARKER,
+    TOOL_OUTPUT_CAP_BYTES,
+    ToolAborted,
+)
 
 
 class _Coord:
@@ -77,6 +81,31 @@ def test_glob_equal_mtime_falls_back_to_path_order(tmp_path: Path) -> None:
         os.utime(p, (5000, 5000))
     out = _glob(_ctx(tmp_path), pattern="**/*.py")
     assert out.splitlines() == ["z.py", "z/a.py"]
+
+
+def test_glob_caps_output_at_50kb(tmp_path: Path) -> None:
+    import os
+    stem = "x" * 200
+    for i in range(400):
+        f = tmp_path / f"{i:04d}_{stem}.py"
+        f.write_text("")
+        os.utime(f, (10000 + i, 10000 + i))  # higher i == newer
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert len(out.encode()) <= TOOL_OUTPUT_CAP_BYTES
+    assert out.rstrip().endswith(OUTPUT_TRUNCATION_MARKER.strip())
+    assert "not shown" in out
+    # The most-recent files are retained, the oldest are dropped.
+    assert f"0399_{stem}.py" in out
+    assert f"0000_{stem}.py" not in out
+
+
+def test_glob_under_cap_returns_output_unchanged(tmp_path: Path) -> None:
+    for name in ("a.py", "b.py", "c.py"):
+        (tmp_path / name).write_text("")
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert OUTPUT_TRUNCATION_MARKER.strip() not in out
+    assert "not shown" not in out
+    assert set(out.splitlines()) == {"a.py", "b.py", "c.py"}
 
 
 def test_grep_finds_match(tmp_path: Path) -> None:

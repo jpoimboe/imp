@@ -159,6 +159,29 @@ def _mtime(p: Path) -> float:
         return 0.0
 
 
+def _cap_lines(lines: list[str]) -> str:
+    """glob's flat-list analog of symbol_outline._thin_file (no header term):
+    return the joined lines unchanged when they fit, else keep as many leading
+    (most-recent) lines as the budget allows before the next line plus the
+    omitted-count notice and truncation marker would exceed the cap, then append
+    the notice and the marker."""
+    full = "\n".join(lines)
+    if len(full.encode()) <= TOOL_OUTPUT_CAP_BYTES:
+        return full
+    marker = OUTPUT_TRUNCATION_MARKER.strip()
+    kept: list[str] = []
+    size = 0
+    for i, line in enumerate(lines):
+        notice = f"… +{len(lines) - i} not shown"
+        line_bytes = len(line.encode()) + len(notice.encode()) + len(marker.encode()) + 3
+        if size + line_bytes > TOOL_OUTPUT_CAP_BYTES:
+            break
+        kept.append(line)
+        size += len(line.encode()) + 1
+    omitted = len(lines) - len(kept)
+    return "\n".join([*kept, f"… +{omitted} not shown", marker])
+
+
 @imp_tool(
     name="glob",
     description=(
@@ -219,7 +242,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
 
     matched.sort(key=lambda p: (-_mtime(p), _posix(p)))
     out = [_posix(p) for p in matched]
-    return "\n".join(out) if out else "(no matches)"
+    return _cap_lines(out) if out else "(no matches)"
 
 
 def _glob_variants(pat: str) -> list[str]:
