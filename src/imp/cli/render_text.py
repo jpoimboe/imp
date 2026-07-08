@@ -782,6 +782,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.FallbackLine):
+        if not full:
+            # An event with no curated rendering is engine bookkeeping
+            # (vars_backfilled, workflow_refreshed, …) — raw `type k=v` noise in
+            # the lean/live view; it survives in imp log --full below.
+            return
         kv = " ".join(f"{k}={_caret_escape(str(v))}" for k, v in node.payload.items())
         yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)

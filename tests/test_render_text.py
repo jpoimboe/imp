@@ -457,8 +457,17 @@ def test_breadcrumb_and_fallback_recede_to_gray() -> None:
     assert pal._ANSI["step"] not in crumb       # no longer bold step-blue
     fallback = next(iter(rt._render(
         nv.FallbackLine(event_type="change_merged", payload={"id": "s"}),
-        depth=0, full=False, color=True, width=80)))
+        depth=0, full=True, color=True, width=80)))
     assert pal._ANSI["gray"] in fallback
+
+
+def test_fallback_line_dropped_in_lean_mode() -> None:
+    # Engine bookkeeping events with no curated rendering (vars_backfilled,
+    # workflow_refreshed, …) are noise in the lean/live view; --full keeps them.
+    node = nv.FallbackLine(event_type="vars_backfilled",
+                           payload={"names": ["auto_merge"]})
+    assert list(rt._render(node, depth=0, full=False, color=False, width=80)) == []
+    assert list(rt._render(node, depth=0, full=True, color=False, width=80)) != []
 
 
 def test_header_line_matches_render_for_phase_and_step() -> None:
