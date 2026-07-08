@@ -43,7 +43,8 @@ _PAUSE_SILENT_REASONS = frozenset({
     "script_blocked",        # script_blocked companion buzzed
     "agent_output_missing",  # error companion buzzed
     "awaiting_turn",         # merge-queue hibernation; self-resolving
-    "interrupt",             # esc (self-inflicted) or awaiting-user bare-turn-end
+    "interrupt",             # esc / ctrl-c — self-inflicted, no companion buzz
+    "awaiting_user",         # genuine your-turn park; the "needs input" buzz is the signal
     "api",                   # terminal error companion buzzed
     "quota",                 # terminal error companion buzzed
     "content_filter",        # terminal error companion buzzed
