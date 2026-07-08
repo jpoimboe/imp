@@ -45,6 +45,10 @@ class _Counter:
     which: str = "stdout"
 
 
+_PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
+                          # (a real idle sleep — matches bg.py's _WAIT_POLL_S)
+
+
 @imp_tool(
     name="bash",
     description=(
@@ -184,6 +188,30 @@ async def bash(
                 await anyio.sleep(1.0)
                 await _sweep_bg(ctx)
 
+    # §4: watch for a pause landing MID-COMMAND. On one, SIGKILL the child's
+    # group (the same wait-free single-shot kill the cap/timeout paths use) so
+    # proc.wait() returns, and flag the call to return the terminated-by-pause
+    # tombstone instead of a normal result. Runs in its own CancelScope,
+    # cancelled right after proc.wait() returns (same discipline as _bg_ticker).
+    # The poller only sets `paused` while proc.returncode is None (still
+    # running), so a completed command can never be tombstoned by a stray tick.
+    paused = False
+    pause_scope = anyio.CancelScope()
+
+    async def _pause_poller() -> None:
+        nonlocal paused
+        assert coordinator is not None      # poller only started under this guard
+        with pause_scope:
+            while True:
+                await anyio.sleep(_PAUSE_POLL_S)
+                # proc.returncode is None => still running: a stray final tick
+                # after a natural completion (returncode already set) cannot
+                # tombstone a just-finished command.
+                if coordinator.should_pause and proc.returncode is None:
+                    paused = True
+                    await kill_process_tree(proc, signal.SIGKILL)
+                    return
+
     try:
         try:
             with anyio.fail_after(TOOL_WALLCLOCK_TIMEOUT_S):
@@ -194,9 +222,17 @@ async def bash(
                     tg.start_soon(_drain, proc.stderr, stderr_chunks, "stderr")
                     if has_bg:
                         tg.start_soon(_bg_ticker)
+                    if coordinator is not None:
+                        tg.start_soon(_pause_poller)
                     await proc.wait()
                     if has_bg:
                         ticker_scope.cancel()
+                    if coordinator is not None:
+                        # Cancel synchronously the instant proc.wait() returns:
+                        # a natural completion must stop the poller before its
+                        # next tick, so a pause flipping right after cannot set
+                        # `paused` on an already-finished command.
+                        pause_scope.cancel()
         except TimeoutError:
             # B.1: the call outran the wall clock. Kill the group, reap, and
             # surface a timeout the agent can react to (NOT a normal result).
@@ -210,6 +246,21 @@ async def bash(
 
     stdout = b"".join(stdout_chunks).decode("utf-8", "replace")
     stderr = b"".join(stderr_chunks).decode("utf-8", "replace")
+    if paused:
+        # A pause landed mid-command: the poller SIGKILL'd the group. Return the
+        # terminated-by-pause tombstone (status/kill_reason) — the same shape
+        # terminate_background_processes writes — so a resumed agent understands
+        # why its command died. returncode stays the real negative signal (an
+        # honest kill: unlike the cap path, this IS why the command died, so the
+        # provider's returncode<0 -> tool_killed heuristic firing is correct).
+        return json.dumps({
+            "stdout": stdout,
+            "stderr": stderr,
+            "status": "killed",
+            "kill_reason": "interrupted",
+            "returncode": (proc.returncode if proc.returncode is not None
+                           else -signal.SIGKILL),
+        }, ensure_ascii=False)
     if counter.capped:
         # Head-only: bound BOTH decoded streams to the cap and append the marker to
         # the one that actually crossed it (S2: a stderr-dominant flood must not
