@@ -474,6 +474,16 @@ class InterruptCoordinator:
             "outcome": outcome,
             "duration_ms": int((self._now() - t0) * 1000)})
 
+    async def _yield_watchdog(self) -> None:
+        return
+
+    def note_yield(self) -> None:
+        """The run yielded (steer solicit posted, or run_change returned). Disarms
+        the yield watchdog for the current round; no-op with no interrupt in flight."""
+        evt = self._yielded
+        if evt is not None:
+            evt.set()
+
     def request_exit(self, reason: str) -> None:
         """Route an out-of-band stop (prompt-level SIGINT) to the exit path —
         sets pause state + fires the exit event the actuator watches."""
@@ -517,10 +527,31 @@ class InterruptCoordinator:
         self._should_pause = True
         if not first:
             return
+        import anyio
+
         self._emit("interrupt_requested", {"source": reason, "via": via})
-        fn = self._runner_stack[-1].interrupt if self._runner_stack else None
-        if fn is not None:
-            await fn()
+        if not self._runner_stack:
+            # Nothing attached: the run already yielded (e.g. a ctrl-d leave at a
+            # turn-end / resume-hold prompt). The pause flags above are the whole
+            # effect — do NOT arm the watchdog against an empty stack: nothing would
+            # post a yield to disarm it, so it would false-fire interrupt_escalated
+            # after the window AND stall the pump task group's close for the window.
+            return
+        spawn = self._spawn
+        if spawn is not None:
+            # Owning task group present (the daemon): deliver fire-and-forget so the
+            # control loop proceeds to the next frame. The yield watchdog is armed
+            # from the gesture time recorded above.
+            self._yielded = anyio.Event()
+            spawn(self._deliver_interrupt)
+            spawn(self._yield_watchdog)
+        else:
+            # No spawner => client/local coordinator: only an INSTANT interrupt fn is
+            # ever attached here (SessionControls._forward_interrupt, a network frame
+            # send). A provider interrupt() is UNBOUNDED and only ever runs on the
+            # daemon's spawner path (bounded by _deliver_interrupt's 2s deadline), so an
+            # inline await here cannot wedge. Do NOT register a slow interrupt_fn here.
+            await self._runner_stack[-1].interrupt()
 
     async def leave_mid_run(self, *, reason: str = "ctrl-d") -> None:
         """Ctrl-D mid-run suspend & leave: stamp the leave trigger and take the

@@ -135,3 +135,65 @@ async def test_delivery_walks_stack_innermost_first() -> None:
         await coord._deliver_interrupt()
 
     assert order == ["child", "parent"]  # innermost first, then each ancestor
+
+
+@pytest.mark.anyio
+async def test_signal_pause_fire_and_forget_does_not_block() -> None:
+    coord = InterruptCoordinator()
+    coord.set_event_log(RecordingLog())
+    started = anyio.Event()
+    release = anyio.Event()
+
+    async def hanging_interrupt() -> None:
+        started.set()
+        await release.wait()  # would wedge an inline await forever
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)
+        coord.attach_runner(hanging_interrupt)
+        # With a spawner, signal_pause returns promptly despite the hang.
+        with anyio.fail_after(1):
+            await coord.signal_pause(reason="ctrl-c", via="frame")
+        assert coord.should_pause is True
+        assert coord.pause_reason == "ctrl-c"
+        await started.wait()  # delivery really ran (fire-and-forget), still hanging
+        release.set()         # let the spawned delivery task finish
+        coord.note_yield()    # disarm the spawned yield watchdog so the group closes
+
+
+@pytest.mark.anyio
+async def test_signal_pause_inline_when_no_spawner() -> None:
+    coord = InterruptCoordinator()
+    coord.set_event_log(RecordingLog())
+    calls: list[str] = []
+
+    async def coop() -> None:
+        calls.append("interrupt")
+
+    coord.attach_runner(coop)
+    await coord.signal_pause(reason="ctrl-c")  # no spawner -> inline cooperative
+    assert calls == ["interrupt"]
+
+
+@pytest.mark.anyio
+async def test_signal_pause_empty_stack_does_not_arm_watchdog(monkeypatch: Any) -> None:
+    """A leave gesture (ctrl-d) at an already-yielded prompt has an empty attach
+    stack. With a spawner registered it must NOT arm the yield watchdog — that would
+    stall the pump task group's close for the full window and false-fire
+    interrupt_escalated{no_yield, killed: []}."""
+    monkeypatch.setattr(_signals, "_YIELD_DEADLINE_S", 0.05)
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+
+    async with anyio.create_task_group() as tg:
+        coord.set_delivery_spawner(tg.start_soon)
+        # No runner attached (the run has already yielded).
+        with anyio.fail_after(1):
+            await coord.signal_pause(reason="ctrl-d", via="frame")
+
+    # NOTE: fully falsifiable only once the real _yield_watchdog lands (later task);
+    # against the current stub this pins the no-escalation invariant.
+    assert coord.should_pause is True
+    assert coord.pause_reason == "ctrl-d"
+    assert [r for r in log.records if r["type"] == "interrupt_escalated"] == []
