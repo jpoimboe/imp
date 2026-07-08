@@ -263,3 +263,48 @@ async def test_ctrl_d_interrupt_records_interrupt_reason_on_workflow_paused(
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert len(paused) == 1
     assert paused[0]["payload"]["interrupt_reason"] == "ctrl-d"
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_park_records_awaiting_user_reason(
+    tmp_path: Path,
+) -> None:
+    """A headless bare-turn-end yield (AwaitingUserInput with interrupt=False)
+    parks with workflow_paused reason="awaiting_user" and NO interrupt_reason —
+    the split away from the overloaded "interrupt" token."""
+    change = _seed_single_agent(tmp_path)
+
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _AwaitingRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            raise AwaitingUserInput("the agent's last question", interrupt=False)
+            yield  # unreachable — makes run() an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _AwaitingRunner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["reason"] == "awaiting_user"
+    assert "interrupt_reason" not in paused[0]["payload"]
+
+    # The step is marked resumable exactly as before (unchanged by the relabel).
+    assert State.load(change.state_dir).resume_pending == "w"
