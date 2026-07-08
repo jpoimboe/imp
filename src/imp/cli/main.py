@@ -1937,6 +1937,49 @@ class _EventTail:
         return events
 
 
+_FOLLOW_TERMINAL = frozenset({"completed", "abandoned", "saved"})
+
+
+def _follow_paused_status(change_id: str) -> Callable[[int, float], list[str]]:
+    """A static one-row footer composer shown while the run is paused."""
+    line = f"paused — resume with imp resume {change_id}"
+    return lambda frame, elapsed: [line]
+
+
+def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
+                        control: Path, change_id: str) -> int:
+    """The home vanished mid-follow: feed the archived events beyond the count
+    already emitted (none if the id is not archived), finish, and exit 0."""
+    raw = archive_read.read_events(control, change_id)
+    if raw is not None:
+        for event in _parse_jsonl(raw)[tail.emitted:]:
+            driver.on_event(event)
+    driver.finish()
+    return 0
+
+
+def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
+                 control: Path, change_id: str, home: Path) -> int | None:
+    """One poll iteration. Feeds newly-appended events through the driver and
+    drives the footer from the lock's liveness. Returns an exit code when the
+    follow should stop (terminal status, or the home vanished into the archive),
+    else None to keep polling."""
+    if not home.exists():
+        return _drain_from_archive(driver, tail, control, change_id)
+    for event in tail.read_new():
+        driver.on_event(event)
+    if State.load(home / "state").status in _FOLLOW_TERMINAL:
+        for event in tail.read_new():
+            driver.on_event(event)
+        driver.finish()
+        return 0
+    if lock_is_live(home / "lock"):
+        status.update(driver.compose_status)
+    else:
+        status.update(_follow_paused_status(change_id))
+    return None
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree

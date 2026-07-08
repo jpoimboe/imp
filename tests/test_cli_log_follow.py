@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -45,6 +46,130 @@ def _make_live_home(control: Path, slug: str) -> Path:
                       "payload": {"step": "s", "kind": "agent", "phase": "spec",
                                   "model": "m", "provider": "anthropic"}}) + "\n")
     return d
+
+
+def _write_events(home: Path, events: list[dict[str, object]]) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in events))
+
+
+def _write_state(home: Path, *, status: str, slug: str = "s") -> None:
+    (home / "state").mkdir(parents=True, exist_ok=True)
+    (home / "state" / "state.json").write_text(json.dumps(
+        {"id": slug, "step": "-", "step_attempt": 0, "status": status}))
+
+
+def _write_live_lock(home: Path) -> None:
+    """A lock naming this live process → lock_is_live reads True."""
+    (home / "lock").write_text(str(os.getpid()))
+
+
+def test_follow_step_feeds_only_new_events(tmp_path: Path) -> None:
+    """First step replays existing events; a later step feeds only the appended
+    one; a non-terminal status returns None and never finishes."""
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "s1"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, [{"type": "a"}])
+    _write_state(home, status="paused", slug=slug)
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+    assert [c.args[0] for c in driver.on_event.call_args_list] == [{"type": "a"}]
+    driver.finish.assert_not_called()
+    with (home / "events.jsonl").open("a") as f:
+        f.write(json.dumps({"type": "b"}) + "\n")
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+    assert driver.on_event.call_args_list[-1].args[0] == {"type": "b"}
+
+
+def test_follow_step_paused_footer(tmp_path: Path) -> None:
+    """No live lock → the footer composer renders the static paused line and no
+    finish() is called (pause is not terminal)."""
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "follow-me"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, [{"type": "a"}])
+    _write_state(home, status="paused", slug=slug)  # no lock file → not live
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+    compose = status.update.call_args.args[0]
+    assert compose(0, 0.0) == ["paused — resume with imp resume follow-me"]
+    driver.finish.assert_not_called()
+
+
+def test_follow_step_live_footer_uses_compose_status(tmp_path: Path) -> None:
+    """A live lock → the footer is driven by driver.compose_status."""
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "s2"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, [{"type": "a"}])
+    _write_state(home, status="new", slug=slug)
+    _write_live_lock(home)
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+    status.update.assert_called_with(driver.compose_status)
+
+
+@pytest.mark.parametrize("terminal", ["completed", "abandoned", "saved"])
+def test_follow_step_terminal_drains_and_finishes(
+    tmp_path: Path, terminal: str,
+) -> None:
+    """Each terminal status feeds remaining events, calls finish() once, and
+    returns exit code 0."""
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "s3"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, [{"type": "a"}, {"type": "b"}])
+    _write_state(home, status=terminal, slug=slug)
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+    rc = _follow_step(driver, tail, status, tmp_path, slug, home)
+    assert rc == 0
+    assert driver.on_event.call_count == 2
+    driver.finish.assert_called_once()
+
+
+def test_follow_step_home_vanished_drains_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the home dir is gone, drain from the archive only the events beyond
+    the already-emitted count, then finish() and exit 0."""
+    import imp.cli.main as m
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "gone"
+    home = tmp_path / ".imp" / "changes" / slug  # never created → not exists
+    tail = _EventTail(home / "events.jsonl")
+    tail.emitted = 1  # pretend one event was already shown before the vanish
+    archived = [{"type": "a"}, {"type": "b"}, {"type": "c"}]
+    raw = "".join(json.dumps(e) + "\n" for e in archived).encode()
+    monkeypatch.setattr(m.archive_read, "read_events", lambda c, i: raw)
+    driver, status = MagicMock(), MagicMock()
+    rc = _follow_step(driver, tail, status, tmp_path, slug, home)
+    assert rc == 0
+    assert [c.args[0] for c in driver.on_event.call_args_list] == \
+        [{"type": "b"}, {"type": "c"}]
+    driver.finish.assert_called_once()
+
+
+def test_follow_step_unknown_after_vanish_finishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Home gone AND not in the archive → finish() and exit 0, nothing fed."""
+    import imp.cli.main as m
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "poof"
+    home = tmp_path / ".imp" / "changes" / slug  # not exists
+    tail = _EventTail(home / "events.jsonl")
+    monkeypatch.setattr(m.archive_read, "read_events", lambda c, i: None)
+    driver, status = MagicMock(), MagicMock()
+    rc = _follow_step(driver, tail, status, tmp_path, slug, home)
+    assert rc == 0
+    driver.on_event.assert_not_called()
+    driver.finish.assert_called_once()
 
 
 def test_follow_conflict_flags_summary() -> None:
@@ -198,3 +323,32 @@ def test_event_tail_missing_file_then_created(tmp_path: Path) -> None:
     p.write_text(json.dumps({"type": "a"}) + "\n")
     assert tail.read_new() == [{"type": "a"}]
     assert tail.emitted == 1
+
+
+def test_follow_step_second_drain_catches_late_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An event appended in the window between the first read and the terminal
+    status check is fed by the second drain, not the first."""
+    import imp.cli.main as m
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "late"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, [{"type": "a"}])
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+
+    class _TerminalState:
+        status = "completed"
+
+    def _load_and_append(state_dir: Path) -> _TerminalState:
+        with (home / "events.jsonl").open("a") as f:
+            f.write(json.dumps({"type": "b"}) + "\n")
+        return _TerminalState()
+
+    monkeypatch.setattr(m.State, "load", _load_and_append)
+    rc = _follow_step(driver, tail, status, tmp_path, slug, home)
+    assert rc == 0
+    assert [c.args[0] for c in driver.on_event.call_args_list] == \
+        [{"type": "a"}, {"type": "b"}]
+    driver.finish.assert_called_once()
