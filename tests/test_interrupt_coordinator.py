@@ -259,3 +259,31 @@ def test_dispatch_signal_leave_branch_stamps_the_trigger() -> None:
         coord2.set_escalation_hook(lambda: None)
         coord2._dispatch_signal(sighup)
         assert coord2.leave_reason == "sighup"
+
+
+@pytest.mark.anyio
+async def test_on_received_signal_force_sentinel_forwards_force() -> None:
+    from imp.cli.signals import _FORCE_FORWARD
+
+    coord = InterruptCoordinator()
+    forwarded = {"n": 0}
+
+    async def _force() -> None:
+        forwarded["n"] += 1
+
+    coord.set_force_forward_hook(_force)
+    await coord._on_received_signal(_FORCE_FORWARD)
+
+    assert forwarded["n"] == 1
+    assert coord.should_pause is False   # a force forward never sets the pause flag
+
+
+@pytest.mark.anyio
+async def test_on_received_signal_ordinary_signal_takes_pause_path() -> None:
+    import signal
+
+    coord = InterruptCoordinator()
+    await coord._on_received_signal(signal.SIGINT)
+
+    assert coord.should_pause is True
+    assert coord.pause_reason == "ctrl-c"

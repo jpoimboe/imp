@@ -46,6 +46,8 @@ _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is
 _READ_TIMEOUT_S = 0.05  # cbreak select() poll window: lets the loop see quiesce state
 _COOPERATIVE_DEADLINE_S = 2.0   # per-runner cooperative interrupt() budget
 _YIELD_DEADLINE_S = 5.0         # gesture -> run-actually-yields watchdog
+_FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
+                      # CONTROL_INTERRUPT_FORCE (signal numbers are always > 0)
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
@@ -212,6 +214,7 @@ class InterruptCoordinator:
         self.escalation_event: Any = None   # anyio.Event set on escalation (C4)
         self._trigger_escalation: Any = None
         self._trigger_exit: Any = None
+        self._forward_force: Any = None   # client force-forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
         # True ONLY while an interactive prompt is being awaited (set/cleared by
@@ -414,6 +417,12 @@ class InterruptCoordinator:
 
     def set_exit_hook(self, fn: Any) -> None:
         self._trigger_exit = fn
+
+    def set_force_forward_hook(self, fn: Any) -> None:
+        """Register the client's CONTROL_INTERRUPT_FORCE forwarder (a network frame
+        send). Invoked by the receiver on the _FORCE_FORWARD sentinel — a repeat
+        ctrl-c hard-kills the run via the daemon and the client stays attached."""
+        self._forward_force = fn
 
     def set_event_log(self, log: Any) -> None:
         """Attach the EventLog so interrupt delivery is journaled."""
@@ -636,7 +645,7 @@ class InterruptCoordinator:
         rule does — so this path never touches pause state and is never suppressed.
 
         Intent A — "interrupt the run" (SIGINT): if a stop is already unwinding,
-        apply the suppression/escalation gate HERE (signal_pause can wedge on the
+        apply the suppression/force-forward gate HERE (signal_pause can wedge on the
         cancellation-immune interrupt()); at a prompt, route through the exit path;
         otherwise enqueue for the receiver (→ signal_pause → runner interrupt →
         pause-to-prompt)."""
@@ -647,13 +656,18 @@ class InterruptCoordinator:
                 fn()
             return
         if self._should_pause:
-            # A stop is already unwinding. Gate the repeat gesture synchronously.
+            # A stop is already unwinding. A repeat ctrl-c does NOT force-quit the
+            # client to bash (ctrl-c never exits) — it enqueues a FORCE forward so
+            # the daemon skips the cooperative tier and hard-kills now, while the
+            # client stays attached. Gate synchronously; forward only past the
+            # suppression window. The leave path above keeps _trigger_escalation.
             if self._register_gesture(kind="ctrl-c"):
                 self._note_gesture_ack(force_quit_available=True)
-                esc = self._trigger_escalation
-                if esc is not None:
-                    esc()
-            return  # suppressed or escalated — never re-enter a wedged interrupt()
+                send = self._sig_send
+                if send is not None:
+                    with _suppress(Exception):  # WouldBlock / closed stream
+                        send.send_nowait(_FORCE_FORWARD)
+            return  # suppressed or force-forwarded — never re-enter interrupt()
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT
             # (handle_sigint=False), so an out-of-band SIGINT lands here. Route it
@@ -678,6 +692,17 @@ class InterruptCoordinator:
         point (`ask_line_with_slash`) so mid-run Ctrl-C survives every prompt."""
         self._install_loop_signal_handlers()
 
+    async def _on_received_signal(self, sig: int) -> None:
+        """Dispatch one item read from the signal stream. The _FORCE_FORWARD
+        sentinel forwards a CONTROL_INTERRUPT_FORCE frame (second-gesture hard
+        kill); any real signal number takes the normal pause path."""
+        if sig == _FORCE_FORWARD:
+            fn = self._forward_force
+            if fn is not None:
+                await fn()
+            return
+        await self.signal_pause(reason=_reason_for_signal(sig))
+
     async def run_signal_receiver(self) -> None:
         """Long-running task: install the coordinator's loop signal handlers.
         SIGINT (Intent A) is turned into `signal_pause(reason='ctrl-c')` via this
@@ -697,7 +722,7 @@ class InterruptCoordinator:
         try:
             async with recv:
                 async for sig in recv:
-                    await self.signal_pause(reason=_reason_for_signal(sig))
+                    await self._on_received_signal(sig)
         finally:
             loop = self._loop
             if loop is not None:

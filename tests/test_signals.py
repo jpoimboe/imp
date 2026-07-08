@@ -133,26 +133,42 @@ async def test_signal_receiver_survives_prompt_via_rearm() -> None:
             tg.cancel_scope.cancel()
 
 
-def test_dispatch_signal_escalates_after_window_with_wedged_signal_pause() -> None:
+def test_dispatch_second_ctrl_c_forwards_force_not_escalation_after_window() -> None:
+    """A repeat ctrl-c while a stop is unwinding enqueues a FORCE forward (the
+    daemon hard-kills and the client stays attached) — it does NOT fire
+    _trigger_escalation (ctrl-c never force-quits to bash). Suppressed within the
+    1s window; forwarded after it."""
     import signal as _sig
+
+    from imp.cli.signals import _FORCE_FORWARD
+
     coord = InterruptCoordinator()
     t = {"now": 100.0}
     coord._now = lambda: t["now"]
 
-    # Simulate a wedged signal_pause: should_pause already set, interrupt never
-    # returns. _dispatch_signal must still detect escalation without awaiting it.
+    # A stop is already unwinding (first gesture landed).
     coord._should_pause = True
     coord._first_gesture_at = 100.0
     esc_fired = {"v": False}
-    coord._trigger_escalation = lambda: esc_fired.__setitem__("v", True)
+    coord.set_escalation_hook(lambda: esc_fired.__setitem__("v", True))
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
 
     t["now"] = 100.5
-    coord._dispatch_signal(_sig.SIGINT)   # within 1 s → suppressed, no escalation
+    coord._dispatch_signal(_sig.SIGINT)   # within 1s → suppressed
+    assert sent == []
     assert esc_fired["v"] is False
 
     t["now"] = 101.5
-    coord._dispatch_signal(_sig.SIGINT)   # >1 s, stop unwinding → escalate
-    assert esc_fired["v"] is True
+    coord._dispatch_signal(_sig.SIGINT)   # >1s → FORCE forward, NOT escalation
+    assert sent == [_FORCE_FORWARD]
+    assert esc_fired["v"] is False
 
 
 def test_dispatch_sigint_at_prompt_routes_to_exit_not_receiver() -> None:
@@ -209,11 +225,14 @@ def test_dispatch_sigint_during_run_takes_receiver_path_not_exit() -> None:
     assert sent == [_sig.SIGINT]                 # receiver-enqueue path taken
 
 
-def test_dispatch_second_sigint_at_prompt_still_escalates_after_window() -> None:
-    """A SECOND out-of-band SIGINT while at a prompt AND already pausing still
-    hits the existing escalation/suppression gate (force-quit): suppressed within
-    the window, escalates after it."""
+def test_dispatch_second_sigint_at_prompt_forwards_force_after_window() -> None:
+    """A SECOND out-of-band SIGINT while at a prompt AND already pausing hits the
+    _should_pause branch: suppressed within the window, then FORCE-forwarded after
+    it (ctrl-c never force-quits to bash) — _trigger_escalation never fires."""
     import signal as _sig
+
+    from imp.cli.signals import _FORCE_FORWARD
+
     coord = InterruptCoordinator()
     coord.set_at_prompt(True)
     t = {"now": 100.0}
@@ -224,20 +243,30 @@ def test_dispatch_second_sigint_at_prompt_still_escalates_after_window() -> None
     esc_fired = {"v": False}
     coord.set_escalation_hook(lambda: esc_fired.__setitem__("v", True))
 
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
     # First at-prompt SIGINT → exit path, registers the gesture (first-wins).
     coord._dispatch_signal(_sig.SIGINT)
     assert exited["reason"] == "ctrl-c"
     assert coord.should_pause is True
 
-    # Second within the suppression window → suppressed, no escalation.
+    # Second within the suppression window → suppressed, no forward.
     t["now"] = 100.5
     coord._dispatch_signal(_sig.SIGINT)
+    assert sent == []
     assert esc_fired["v"] is False
 
-    # After the window, the stop is unwinding (should_pause) → escalation fires.
+    # After the window, the stop is unwinding (should_pause) → FORCE forward.
     t["now"] = 101.5
     coord._dispatch_signal(_sig.SIGINT)
-    assert esc_fired["v"] is True
+    assert sent == [_FORCE_FORWARD]
+    assert esc_fired["v"] is False
 
 
 def test_dispatch_sighup_fires_leave_not_pause() -> None:

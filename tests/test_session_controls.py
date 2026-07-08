@@ -103,3 +103,35 @@ async def test_detach_drops_the_socket_and_daemon_sees_a_detach(
         assert detaches == [True]
         await server.close()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_force_gesture_forwards_interrupt_force_without_detaching(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.signals import _FORCE_FORWARD
+
+    sock = str(tmp_path / "s.sock")
+    actions: list[str] = []
+    server = SessionSocket(sock, on_control=lambda a, _r: actions.append(a))
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    coord = InterruptCoordinator()
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        SessionControls(client, coord)
+        # SessionControls registered the force-forward hook; drive it via the
+        # receiver dispatch (the second-gesture path enqueues _FORCE_FORWARD).
+        await coord._on_received_signal(_FORCE_FORWARD)
+        with anyio.fail_after(5):
+            while not actions:
+                await anyio.sleep(0.02)
+        assert actions == ["interrupt-force"]
+        assert server.attached_count == 1   # client stays attached
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
