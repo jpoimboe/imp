@@ -214,7 +214,7 @@ def test_main_log_follow_implies_no_pager_on_tty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`imp log -f <id>` never spawns a pager even on a TTY — --follow forces
-    no_pager. (Plain `imp log <id>` on a TTY does spawn one.)"""
+    no_pager and the follow path returns before any paging."""
     import imp.cli.main as m
     slug = "follow-me"
     _make_live_home(tmp_path, slug)
@@ -222,6 +222,7 @@ def test_main_log_follow_implies_no_pager_on_tty(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("PAGER", raising=False)
     _fake_tty(monkeypatch, isatty=True)
+    monkeypatch.setattr(m, "_follow_live", lambda control, cid, home: 0)
     with patch("imp.cli.main.subprocess.Popen") as popen:
         rc = m.main(["log", "-f", slug])
     assert rc == 0
@@ -242,29 +243,6 @@ def test_follow_log_replays_all_events_then_finishes() -> None:
         rc = m._follow_log(events)
     assert rc == 0
     assert [c.args[0] for c in driver.on_event.call_args_list] == events
-    driver.finish.assert_called_once()
-
-
-def test_main_log_follow_routes_through_livedriver(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`imp log -f <id>` on a live home routes to _follow_log: both narrative
-    events replay through LiveDriver, finish() runs, no pager, exit 0."""
-    import imp.cli.main as m
-    slug = "follow-me"
-    _make_live_home(tmp_path, slug)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.delenv("PAGER", raising=False)
-    _fake_tty(monkeypatch, isatty=False)
-    driver = MagicMock()
-    with patch.object(m, "LiveDriver", return_value=driver), \
-         patch.object(m, "LiveStatus"), \
-         patch("imp.cli.main.subprocess.Popen") as popen:
-        rc = m.main(["log", "-f", slug])
-    assert rc == 0
-    assert popen.call_count == 0
-    assert driver.on_event.call_count == 2
     driver.finish.assert_called_once()
 
 
@@ -352,3 +330,59 @@ def test_follow_step_second_drain_catches_late_append(
     assert [c.args[0] for c in driver.on_event.call_args_list] == \
         [{"type": "a"}, {"type": "b"}]
     driver.finish.assert_called_once()
+
+
+def test_cmd_log_follow_routes_live_home_to_follow_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`imp log -f <id>` on a present home routes to _follow_live with the
+    change home path."""
+    import imp.cli.main as m
+    slug = "live-one"
+    _make_live_home(tmp_path, slug)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    _fake_tty(monkeypatch, isatty=False)
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "_follow_live",
+        lambda control, cid, home: (seen.update(cid=cid, home=home), 7)[1])
+    rc = m.main(["log", "-f", slug])
+    assert rc == 7
+    assert seen["cid"] == slug
+    assert seen["home"] == tmp_path / ".imp" / "changes" / slug
+
+
+def test_cmd_log_follow_routes_archived_only_to_follow_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`imp log -f <id>` for an id with no live home (archived-only) keeps the
+    Part 1 replay-and-exit path _follow_log."""
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "arch")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    monkeypatch.setattr(
+        m, "_load_events_for_id",
+        lambda c, i: [{"type": "change_created", "payload": {}}])
+    monkeypatch.setattr(m, "_change_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(m, "_follow_log", lambda events: 9)
+    rc = m.main(["log", "-f", "arch"])
+    assert rc == 9
+
+
+def test_follow_live_ctrl_c_clears_and_returns_130(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ctrl-C during the poll loop clears the footer (status.reset) and exits
+    130, without calling finish()."""
+    import imp.cli.main as m
+    status = MagicMock()
+    driver = MagicMock()
+    monkeypatch.setattr(m, "LiveStatus", lambda stream: status)
+    monkeypatch.setattr(m, "LiveDriver", lambda **kw: driver)
+    monkeypatch.setattr(m.anyio, "run", MagicMock(side_effect=KeyboardInterrupt))
+    rc = m._follow_live(tmp_path, "id", tmp_path / "home")
+    assert rc == 130
+    status.reset.assert_called_once()
+    driver.finish.assert_not_called()

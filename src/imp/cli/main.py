@@ -1980,6 +1980,45 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
     return None
 
 
+_FOLLOW_POLL_INTERVAL = 0.3
+
+
+def _follow_live(control: Path, change_id: str, home: Path) -> int:
+    """Replay a live Change's narrative through LiveDriver, then tail
+    events.jsonl until a terminal status or the home is archived away. Ctrl-C
+    clears the footer and exits 130."""
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(
+        stream=sys.stdout, color=should_use_color(sys.stdout),
+        width=_term_width, display_width=_display_width, status=status)
+    tail = _EventTail(home / "events.jsonl")
+    try:
+        return anyio.run(
+            _follow_poll_loop, driver, tail, status, control, change_id, home)
+    except KeyboardInterrupt:
+        status.reset()
+        return 130
+
+
+async def _follow_poll_loop(
+    driver: LiveDriver, tail: _EventTail, status: LiveStatus,
+    control: Path, change_id: str, home: Path,
+) -> int:
+    """Advance the spinner (LiveStatus.tick) concurrently with a poll loop that
+    feeds new events and checks exit conditions every _FOLLOW_POLL_INTERVAL."""
+    rc = 0
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(status.tick)
+        while True:
+            step = _follow_step(driver, tail, status, control, change_id, home)
+            if step is not None:
+                rc = step
+                break
+            await anyio.sleep(_FOLLOW_POLL_INTERVAL)
+        tg.cancel_scope.cancel()
+    return rc
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
@@ -2019,6 +2058,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 2
 
     if args.follow:
+        home = _change_home(control, change_id)
+        if home.exists():
+            return _follow_live(control, change_id, home)
         return _follow_log(events)
 
     if args.html is not None or args.md is not None:
