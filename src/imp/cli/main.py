@@ -1088,6 +1088,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
 
+    # Persist the finalized intent so it survives any resume (including a restart
+    # from an errored transcript). Covers both the positional and interactive
+    # forms; an empty/absent reply persists as None/empty (unseeded).
+    change.set_seed_opening(opening_text)
+
     _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
     if headless:

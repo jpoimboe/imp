@@ -176,6 +176,13 @@ class Change:
         meta["depends_on"] = list(depends_on)
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
+    def set_seed_opening(self, text: str | None) -> None:
+        self.seed_opening = text
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["seed_opening"] = text
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
     def materialize(self) -> bool:
         """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
         flip project_root to the worktree, and persist project_root + cur_base_head.
