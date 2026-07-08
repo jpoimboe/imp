@@ -44,6 +44,8 @@ _suppress = contextlib.suppress
 
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 _READ_TIMEOUT_S = 0.05  # cbreak select() poll window: lets the loop see quiesce state
+_COOPERATIVE_DEADLINE_S = 2.0   # per-runner cooperative interrupt() budget
+_YIELD_DEADLINE_S = 5.0         # gesture -> run-actually-yields watchdog
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
@@ -428,6 +430,49 @@ class InterruptCoordinator:
         if log is not None:
             with _suppress(Exception):
                 log.append(agent_id=None, type=etype, payload=payload)
+
+    async def _deliver_interrupt(self) -> None:
+        """Tiered bounded delivery down the attach stack, innermost first."""
+        import anyio
+
+        for att in reversed(list(self._runner_stack)):
+            outcome = "ok"
+            t0 = self._now()
+            with anyio.move_on_after(_COOPERATIVE_DEADLINE_S) as scope:
+                try:
+                    await att.interrupt()
+                except Exception:
+                    outcome = "error"
+            if scope.cancelled_caught:
+                outcome = "timeout"
+            self._emit("interrupt_delivered", {
+                "agent_id": att.agent_id, "tier": "cooperative",
+                "outcome": outcome,
+                "duration_ms": int((self._now() - t0) * 1000)})
+            if outcome != "ok":
+                # Only a genuine timeout with a force_kill present gets the
+                # cooperative_timeout escalation record; an "error" outcome
+                # escalates via the hard record only.
+                if outcome == "timeout" and att.force_kill is not None:
+                    self._emit("interrupt_escalated", {
+                        "reason": "cooperative_timeout", "killed": [att.agent_id]})
+                await self._hard_kill(att)
+
+    async def _hard_kill(self, att: _Attached) -> None:
+        """Wait-free hard tier: run force_kill() (no waits); no-op when None."""
+        fk = att.force_kill
+        if fk is None:
+            return
+        outcome = "ok"
+        t0 = self._now()
+        try:
+            await fk()
+        except Exception:
+            outcome = "error"
+        self._emit("interrupt_delivered", {
+            "agent_id": att.agent_id, "tier": "hard",
+            "outcome": outcome,
+            "duration_ms": int((self._now() - t0) * 1000)})
 
     def request_exit(self, reason: str) -> None:
         """Route an out-of-band stop (prompt-level SIGINT) to the exit path —
