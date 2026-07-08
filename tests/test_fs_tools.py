@@ -16,7 +16,7 @@ import imp.agents.tools.image as image_mod
 import imp.agents.tools.lines as lines_mod
 from imp.agents.runner import ImagePart, TextPart
 from imp.agents.tools import get_registry
-from imp.agents.tools.context import ToolContext
+from imp.agents.tools.context import ReadRecord, ToolContext
 from imp.agents.tools.errors import PermissionDenied
 from imp.agents.tools.limits import ToolAborted
 from imp.engine.sandbox import SandboxPolicy
@@ -445,3 +445,12 @@ def test_read_file_same_image_twice_dedups_to_one_blob(tmp_path: Path) -> None:
     assert [p.name for p in blobs.iterdir()] == [r1[1].blob]
     # Blob lives under the change home, so per-change cleanup/archival removes it.
     assert (ctx.change_home / "blobs" / r1[1].blob).exists()
+
+
+def test_read_record_rendered_map_defaults_independent_and_mutable() -> None:
+    a = ReadRecord(mtime=1.0, content_sha256="x", full=True)
+    b = ReadRecord(mtime=2.0, content_sha256="y", full=True)
+    assert a.rendered == {}  # default is an empty map
+    a.rendered[(1, 50)] = (1, 42)  # frozen forbids rebinding, not dict mutation
+    assert b.rendered == {}  # each instance owns its own dict (no shared default)
+    assert a.rendered[(1, 50)] == (1, 42)
