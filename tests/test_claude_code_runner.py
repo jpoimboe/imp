@@ -4508,3 +4508,53 @@ def test_history_dicts_keeps_lone_user_text_as_plain_string() -> None:
         Message(role="user", content=(TextBlock(text="solo"),)),
     ]))
     assert dicts[0]["message"]["content"] == "solo"
+
+
+@pytest.mark.anyio
+async def test_brake_holds_until_reply_submitted(tmp_path: Path) -> None:
+    """The pause flag must stay set through the interrupted-prompt window and clear
+    only when the reply is accepted — not when the prompt posts."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [assistant(text("done")), result()]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    seen: dict[str, bool] = {}
+
+    def _input_fn(_prompt: str) -> str:
+        # Called when the steer prompt posts: the brake must STILL be held here.
+        seen["at_prompt"] = coord.should_pause
+        return "carry on"
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=_input_fn)
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    async def drive() -> None:
+        async for _ev in runner.run(inv):
+            pass
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert seen["at_prompt"] is True     # brake held while the prompt was up
+    assert coord.should_pause is False   # cleared only after the reply was accepted

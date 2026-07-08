@@ -2216,11 +2216,6 @@ class ClaudeCodeAgentRunner:
                             # Discard the interrupted turn's partial accumulators
                             # so they don't bleed into the next turn's loop-guard.
                             _flush_pending()
-                            # Consume the pause: the steer is resolved inside
-                            # this live invocation, so the run continues rather
-                            # than returning PAUSED.
-                            if invocation.coordinator is not None:
-                                invocation.coordinator.clear_pause()
                             # Reap leaked subprocesses only AFTER interrupt():
                             # a killed-process tool_result must not race the stop.
                             from imp.agents.tools.bg import terminate_background_processes
@@ -2243,6 +2238,9 @@ class ClaudeCodeAgentRunner:
                             reply = await steer(last_text)
                             if self._interrupted():
                                 return
+                            # Brake holds until reply is in hand: clear only now.
+                            if invocation.coordinator is not None:
+                                invocation.coordinator.clear_pause()
                             user_msg = Message(
                                 role="user",
                                 content=(TextBlock(text=reply),))
