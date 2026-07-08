@@ -151,7 +151,7 @@ def test_assert_stamped_is_readonly_gate_before_merge() -> None:
     assert names.index("assert-stamped") == names.index("merge-to-base") - 1
     step = next(s for s in wf.flat_steps() if s.name == "assert-stamped")
     assert step.kind == "script"
-    assert step.command == "./scripts/assert-stamped.sh"
+    assert step.command == './scripts/assert-stamped.sh "{{ vars.slow_verify_tolerated }}"'
     m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
     assert isinstance(m0.action, Continue)
     m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})

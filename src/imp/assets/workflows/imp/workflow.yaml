@@ -314,7 +314,7 @@ phases:
 
       - name: assert-stamped
         show_label: false
-        command: ./scripts/assert-stamped.sh
+        command: ./scripts/assert-stamped.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
