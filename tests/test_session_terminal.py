@@ -1020,6 +1020,8 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
     prompts: list[str] = []
     result: dict[str, Any] = {}
     captured: dict[str, Any] = {}
+    solicit_entered = anyio.Event()
+    duplicates_injected = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         # Liveness backstop only; generous so a CPU-starved -n auto worker
@@ -1027,9 +1029,11 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
         with anyio.fail_after(30):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        # The run blocks on ONE real gate here; the duplicate frames are fed
-        # straight through the captured _on_event below, mimicking the emit +
-        # resume re-announce + attach re-broadcast of the same open gate.
+        # Production emit->arm order: emit the gate, THEN arm next_input by
+        # awaiting input. The client cannot receive the broadcast until the
+        # server yields inside next_input() -- which is AFTER the receiver is
+        # armed -- so a reply can never outrun the arm (no reply-before-arm drop).
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "q1"}})
         return await user_chat_input_fn("q1")
 
     async def _attach(
@@ -1041,7 +1045,14 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
         return client
 
     async def _solicit(prompt: str) -> str:
+        # The single real gate drives this one solicit. Block here until the
+        # scenario has injected the duplicate re-announce frames, so they are
+        # provably buffered in the client's gate stream while this solicit is
+        # in flight -- the coalescing drain then empties them deterministically,
+        # independent of -n auto load timing.
         prompts.append(prompt)
+        solicit_entered.set()
+        await duplicates_injected.wait()
         return "answer"
 
     class _Driver:
@@ -1065,16 +1076,19 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
 
             tg.start_soon(_client)
 
-            # Feed several live (non-_replay) frames for the SAME gate back to
-            # back. With max_buffer_size=1 the second send_nowait raised
-            # anyio.WouldBlock here; without coalescing, solicit fires 3 times.
+            # Wait until the real gate has reached the client and entered the
+            # first solicit (proof the gate was delivered and the server armed
+            # next_input). Only THEN inject the duplicate re-announce frames for
+            # the SAME open gate (emit + resume re-announce + attach re-broadcast).
             with anyio.fail_after(30):
-                while "on_event" not in captured:
-                    await anyio.sleep(0.02)
+                await solicit_entered.wait()
             dup = {"type": "awaiting_user_input", "payload": {"prompt": "q1"}}
             captured["on_event"](dict(dup))
             captured["on_event"](dict(dup))
             captured["on_event"](dict(dup))
+            # Release the one solicit; the client coalesces the three buffered
+            # duplicates into the single reply for the one open gate.
+            duplicates_injected.set()
 
     assert prompts == ["q1"]         # exactly one solicit despite three frames
     assert result["r"] == "answer"   # exactly one reply reached the gate
