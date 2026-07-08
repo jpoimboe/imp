@@ -16,6 +16,7 @@ class _Events:
 
 class _Change:
     id = "2026-06-12-run-x"
+    title = ""
     base_branch = "master"
     state_dir = "/tmp/imp-test-state"   # never touched: State.load is patched
 

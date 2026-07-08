@@ -77,9 +77,10 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     change = Change(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, token, _reason = _pause_facts(change)
+    name, title, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"
     assert token == "qzbscf"
+    assert title == ""
 
 
 def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
@@ -90,9 +91,10 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, token, _reason = _pause_facts(change)
+    name, title, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
+    assert title == "Add version flag"
 
 
 def test_pause_reason_terminated_appends_first_line_of_last_agent_text() -> None:
@@ -264,7 +266,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
-    name, phase, token, reason = _pause_facts(change)
+    name, _title, phase, token, reason = _pause_facts(change)
     assert name == "mona44"
     assert phase == "converge"
     assert token == "mona44"
@@ -294,7 +296,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
-    _name, _phase, _token, reason = _pause_facts(change)
+    _name, _title, _phase, _token, reason = _pause_facts(change)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
     assert "ended unexpectedly" not in (reason or "")
@@ -345,12 +347,13 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     ]
     (change_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
-    change = Change(id="krol99", title="", base_branch="main",
+    change = Change(id="krol99", title="Leave now", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
 
-    name, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
+    name, title, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
     assert name == "krol99"
+    assert title == "Leave now"          # title carried on the deliberate-leave path
     assert phase == "implement"          # last-seen phase, local knowledge
     assert token == "krol99"
     assert reason == "sigterm"           # the client's trigger, NOT "ended unexpectedly"

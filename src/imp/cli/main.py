@@ -361,13 +361,13 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _pause_facts(
     change: Change, leave_trigger: str | None = None,
-) -> tuple[str, str | None, str, str | None]:
+) -> tuple[str, str, str | None, str, str | None]:
     name = change.id
     events = list(change.event_log().read())
     phase = _phase_from_events(events)
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, phase, change.id, leave_trigger
+        return name, change.title, phase, change.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(change.change_dir / "daemon.stderr"):
@@ -379,14 +379,14 @@ def _pause_facts(
             reason = "interrupt"
     else:
         reason = reason_val
-    return name, phase, change.id, reason
+    return name, change.title, phase, change.id, reason
 
 
 def _emit_paused_summary(change: Change, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    name, phase, token, reason = _pause_facts(change, leave_trigger)
-    for ln in _pause_lines(name, phase, token, reason=reason, color=color):
+    name, title, phase, token, reason = _pause_facts(change, leave_trigger)
+    for ln in _pause_lines(name, phase, token, reason=reason, title=title, color=color):
         print(ln)
 
 
