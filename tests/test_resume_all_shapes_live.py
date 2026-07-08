@@ -291,9 +291,11 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
         system_prompt=(
             completion_instruction(agent_def.output_schema)
             + "\n\nYou are resuming a step you already finished. Your previous "
-            "complete_step was recorded. The feedback below is the only remaining "
-            "instruction. Acknowledge the feedback in one "
-            "sentence, then call complete_step with status=Success now."
+            "complete_step was recorded. Your ONLY tool is complete_step: you "
+            "have no file-reading tool and must NOT attempt to read any file. "
+            "The feedback below is the only remaining instruction. Acknowledge "
+            "the feedback in one sentence, then call complete_step with "
+            "status=Success now."
         ),
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
@@ -320,7 +322,6 @@ async def test_complete_step_handback_native_resume(
         "not found on PATH"
     )
     _init_repo(tmp_path)
-    (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     inv = _corrective_live_inv(tmp_path)
     # Production gate/review handback: balance_on_resume + retry_feedback.
     inv = replace(inv, balance_on_resume=True,
@@ -331,7 +332,7 @@ async def test_complete_step_handback_native_resume(
 
     # Transcript ends on a SUCCESSFUL complete_step tool_use (no result).
     msgs = [
-        Message(role="user", content=(TextBlock(text="Read a.txt, then finish."),)),
+        Message(role="user", content=(TextBlock(text="Finish the step."),)),
         Message(role="assistant", content=(
             ToolUseBlock(id="c0", name="complete_step",
                          input={"status": "Success"}),)),
