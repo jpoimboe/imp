@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from imp.cli.render_helpers import render_llm_response, user_message_text
+from imp.cli.render_helpers import (
+    conversation_prose,
+    render_llm_response,
+    user_message_text,
+)
 
 
 def test_render_llm_response_extracts_text_and_tool_uses() -> None:
@@ -78,3 +82,61 @@ def test_prompt_message_caps_hr_at_display_width() -> None:
     msg = _prompt_message_text("Pick one\n\n---", color=True, width=10000,
                                display_width=18)
     assert pal.rule(18, enabled=True) in msg
+
+
+def _llm_event(text: str) -> dict:
+    return {
+        "type": "llm_response",
+        "payload": {
+            "provider": "anthropic",
+            "raw": {
+                "content": [
+                    {"type": "text", "text": text},
+                    {"type": "tool_use", "id": "t1", "name": "bash",
+                     "input": {"cmd": "grep TOOLNOISE"}},
+                ],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        },
+    }
+
+
+def test_conversation_prose_concatenates_prose_in_order() -> None:
+    events = [
+        {"type": "opening_intent", "payload": {"text": "make search better"}},
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "add a 300s timeout"}]}},
+        _llm_event("sure, the 300s deadline is wired"),
+    ]
+    prose = conversation_prose(events)
+    assert prose == (
+        "make search better\n"
+        "add a 300s timeout\n"
+        "sure, the 300s deadline is wired")
+
+
+def test_conversation_prose_excludes_tool_and_nonprose_events() -> None:
+    events = [
+        {"type": "step_context", "payload": {"step": "spec"}},
+        {"type": "tool_call", "payload": {"name": "bash", "input": {"cmd": "SECRET"}}},
+        {"type": "tool_result", "payload": {"content": "SECRET output"}},
+        _llm_event("visible assistant prose"),
+    ]
+    prose = conversation_prose(events)
+    assert prose == "visible assistant prose"   # only the assistant TextBlock text
+    assert "SECRET" not in prose                 # tool call/result payloads excluded
+    assert "TOOLNOISE" not in prose              # tool_use block text excluded
+
+
+def test_conversation_prose_skips_malformed_without_raising() -> None:
+    events = [
+        {"type": "opening_intent", "payload": {"text": "first"}},
+        {"_malformed": True, "raw": "NOT_JSON"},              # sentinel, no type/payload
+        "NOT_AN_EVENT_DICT",                                  # non-dict event
+        {"type": "llm_response", "payload": "not-a-dict-payload"},   # non-dict payload value
+        {"type": "llm_response", "payload": {"raw": "not-a-dict"}},  # would raise if parsed
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "second"}]}},
+    ]
+    assert conversation_prose(events) == "first\nsecond"
