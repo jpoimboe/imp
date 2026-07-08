@@ -40,6 +40,7 @@ class Help:
 @dataclass(frozen=True)
 class Notice:
     text: str
+    change_id: str | None = None
 
 
 @dataclass(frozen=True)
