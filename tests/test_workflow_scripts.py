@@ -391,3 +391,43 @@ def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> N
         "IMP_CHANGE_DIR": str(change_dir)})
     assert proc.returncode == 0, proc.stderr
     assert not (change_dir / "last_verified_tree_slow").exists()   # slow-only stamp
+
+
+def test_run_verify_slow_no_command_stamps_tree_as_cleared(tmp_path: Path) -> None:
+    """An opt-out project (no slow/fast command) runs no gate but still stamps
+    HEAD's tree green + verified, so the pre-merge clearance backstop treats an
+    unconfigured project as cleared rather than deadlocking every merge."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow",
+                env_extra={"IMP_PROJECT_ROOT": str(project),
+                           "IMP_CHANGE_DIR": str(change_dir)},
+                env_remove=("IMP_TEST_CMD_FAST", "IMP_TEST_CMD_SLOW"))
+    assert proc.returncode == 0, proc.stderr
+    assert "no test command configured" in proc.stdout
+    tree = _head_tree(project)
+    assert (change_dir / "last_green_tree_slow").read_text().strip() == tree
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+
+
+def test_run_verify_fast_no_command_stamps_only_its_tier(tmp_path: Path) -> None:
+    """A no-op FAST gate stamps only its own tier's green marker, never the slow
+    clearance stamps."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "fast",
+                env_extra={"IMP_PROJECT_ROOT": str(project),
+                           "IMP_CHANGE_DIR": str(change_dir)},
+                env_remove=("IMP_TEST_CMD_FAST",))
+    assert proc.returncode == 0, proc.stderr
+    assert (change_dir / "last_green_tree_fast").read_text().strip() == _head_tree(project)
+    assert not (change_dir / "last_green_tree_slow").exists()
+    assert not (change_dir / "last_verified_tree_slow").exists()
