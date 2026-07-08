@@ -17,6 +17,7 @@ from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_WAITING, GLYPH_WORKING, TerminalTitle
 from imp.engine.change import Change
 from imp.remote.session.client import SessionClient
+from imp.remote.session.protocol import encode_attach, encode_input
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
@@ -1665,3 +1666,144 @@ async def test_replayed_ordinary_event_does_not_flip_to_working(
     assert waiting in out
     post_gate = out[out.index(waiting) + len(waiting):]
     assert working not in post_gate
+
+
+@pytest.mark.anyio
+async def test_remote_answer_tears_down_local_prompt_without_resending(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    received: list[str] = []
+    gate_reached = anyio.Event()
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "answer?"}})
+        gate_reached.set()
+        reply = await user_chat_input_fn("answer?")
+        received.append(reply)
+        # Mimic the provider: the gate answer is broadcast as a user_message.
+        on_event({"type": "user_message", "payload": {"text": reply}})
+        return reply
+
+    rendered: list[str] = []
+    solicit_cancelled = anyio.Event()
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            rendered.append(event.get("type"))
+
+        def finish(self) -> None:
+            rendered.append("__finish__")
+
+    async def _attach_a(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "cA", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit_a(_prompt: str) -> str:
+        try:
+            await anyio.sleep_forever()
+        except anyio.get_cancelled_exc_class():
+            solicit_cancelled.set()
+            raise
+        return ""  # unreachable: this prompt only ends by cancellation
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client_a() -> None:
+                await run_terminal_client(
+                    attach=_attach_a, driver=_Driver(),
+                    coord=coord, solicit=_solicit_a)
+
+            tg.start_soon(_client_a)
+            await gate_reached.wait()
+            # Second raw-socket client answers the open gate.
+            raw = await anyio.connect_unix(sock)
+            await raw.send((encode_attach("cB", "T", True) + "\n").encode())
+            await raw.send((encode_input("remote-answer") + "\n").encode())
+            with anyio.fail_after(5):
+                while not received:
+                    await anyio.sleep(0.02)
+            with anyio.fail_after(5):
+                await solicit_cancelled.wait()
+            await raw.aclose()
+
+    # The daemon's gate reply is the raw client's; A never sent an input frame.
+    assert received == ["remote-answer"]
+    # A's prompt was torn down (its blocking solicit was cancelled).
+    assert solicit_cancelled.is_set()
+    # A's driver observed the provider's echo but never the control signal.
+    assert "user_message" in rendered
+    assert "user_input_resolved" not in rendered
+
+
+@pytest.mark.anyio
+async def test_two_sequential_local_answers_no_spurious_self_cancellation(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    received: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "g1?"}})
+        r1 = await user_chat_input_fn("g1?")
+        received.append(r1)
+        on_event({"type": "user_message", "payload": {"text": r1}})
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "g2?"}})
+        r2 = await user_chat_input_fn("g2?")
+        received.append(r2)
+        on_event({"type": "user_message", "payload": {"text": r2}})
+        return r2
+
+    rendered: list[str] = []
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            rendered.append(event.get("type"))
+
+        def finish(self) -> None:
+            rendered.append("__finish__")
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["one", "two"])
+
+    async def _solicit(_prompt: str) -> str:
+        return next(replies)
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+
+    # Both replies reached the daemon in order: gate 2 was NOT skipped, so
+    # gate 1's own user_input_resolved did not spuriously cancel gate 2.
+    assert received == ["one", "two"]
+    assert "user_input_resolved" not in rendered

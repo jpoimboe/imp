@@ -48,8 +48,15 @@ async def run_terminal_client(
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=math.inf)
+    resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
+        max_buffer_size=math.inf)
+    gate_state: dict[str, Any] = {"scope": None, "elsewhere": False}
 
     def _on_event(event: dict[str, Any]) -> None:
+        if event.get("type") == "user_input_resolved":
+            if not event.get("_replay"):
+                resolved_send.send_nowait(None)
+            return
         driver.on_event(event)
         replay = bool(event.get("_replay"))
         etype = event.get("type")
@@ -90,44 +97,58 @@ async def run_terminal_client(
         try:
             controls = SessionControls(client, coord)
             async with anyio.create_task_group() as tg:
+                async def _watch_resolved() -> None:
+                    async for _ in resolved_recv:
+                        scope = gate_state["scope"]
+                        if scope is not None:
+                            gate_state["elsewhere"] = True
+                            scope.cancel()
+
                 async def _answer_gates() -> None:
                     try:
                         async for prompt in gate_recv:
+                            gate_state["elsewhere"] = False
+                            reply = ""
+                            with anyio.CancelScope() as scope:
+                                gate_state["scope"] = scope
+                                try:
+                                    reply = await solicit(prompt)
+                                finally:
+                                    gate_state["scope"] = None
+                            if gate_state["elsewhere"]:
+                                continue     # answered elsewhere: no send_input
+                            # Coalesce re-announce frames: mid-solicit the run is
+                            # blocked on this reply and cannot have opened a new gate.
                             while True:
-                                reply = await solicit(prompt)
-                                # Coalesce re-announce frames: mid-solicit the run is
-                                # blocked on this reply and cannot have opened a new gate.
-                                while True:
-                                    try:
-                                        gate_recv.receive_nowait()
-                                    except anyio.WouldBlock:
-                                        break
-                                if reply.strip() == "/abandon":
-                                    if leave_state is not None:
-                                        leave_state["intent"] = "abandon"
-                                        if control_root is not None:
-                                            try:
-                                                reloaded = Change.load(
-                                                    control_root, change_id)
-                                                leave_state["materialized"] = (
-                                                    "1" if reloaded.materialized
-                                                    else "")
-                                            except (LoadError, LoadErrors):
-                                                leave_state["materialized"] = ""
-                                    await controls.abandon()
-                                    return
-                                if reply.strip() == "/save":
-                                    if leave_state is not None:
-                                        leave_state["intent"] = "save"
-                                    coord.escalation_event.set()
-                                    return
-                                if reply.strip() == "/clear":
-                                    if leave_state is not None:
-                                        leave_state["intent"] = "clear"
-                                    coord.escalation_event.set()
-                                    return
-                                await client.send_input(reply)
-                                break
+                                try:
+                                    gate_recv.receive_nowait()
+                                except anyio.WouldBlock:
+                                    break
+                            if reply.strip() == "/abandon":
+                                if leave_state is not None:
+                                    leave_state["intent"] = "abandon"
+                                    if control_root is not None:
+                                        try:
+                                            reloaded = Change.load(
+                                                control_root, change_id)
+                                            leave_state["materialized"] = (
+                                                "1" if reloaded.materialized
+                                                else "")
+                                        except (LoadError, LoadErrors):
+                                            leave_state["materialized"] = ""
+                                await controls.abandon()
+                                return
+                            if reply.strip() == "/save":
+                                if leave_state is not None:
+                                    leave_state["intent"] = "save"
+                                coord.escalation_event.set()
+                                return
+                            if reply.strip() == "/clear":
+                                if leave_state is not None:
+                                    leave_state["intent"] = "clear"
+                                coord.escalation_event.set()
+                                return
+                            await client.send_input(reply)
                     except EOFError:
                         # A non-tty solicit (prompt_toolkit add_reader on a piped
                         # stdin) or Ctrl-D at a real tty surfaces as EOFError.
@@ -159,6 +180,7 @@ async def run_terminal_client(
                         await client.send_control(CONTROL_INTERRUPT)
 
                 tg.start_soon(_answer_gates)
+                tg.start_soon(_watch_resolved)
                 tg.start_soon(_watch_force_quit)
                 tg.start_soon(_watch_sigquit)
                 tg.start_soon(_flush_pending_interrupt)
@@ -169,6 +191,8 @@ async def run_terminal_client(
             coord.set_escalation_hook(None)
             await gate_send.aclose()
             gate_recv.close()
+            await resolved_send.aclose()
+            resolved_recv.close()
             driver.finish()
             if title is not None:
                 title.reset()
