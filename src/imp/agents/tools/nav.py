@@ -416,11 +416,13 @@ async def grep(
         cap_truncated = file_is_cap_truncated(read_truncated, f)
         lines = split_lines(text, cap_truncated=cap_truncated)
 
+        match_idxs = [i for i, line in enumerate(lines, start=1)
+                      if rgx.search(line)]
+
         if output_mode == "files_with_matches":
-            # Stop at the FIRST match — a regex-time win only (the bounded
-            # read is already paid). A LISTED truncated file resolved itself;
-            # an UNLISTED one is a potential false negative — note it.
-            if any(rgx.search(line) for line in lines):
+            # A LISTED truncated file resolved itself; an UNLISTED one is a
+            # potential false negative — note it.
+            if match_idxs:
                 capped = emit(disp)
                 result_rows += 1
                 if head_limit is not None and result_rows >= head_limit:
@@ -428,7 +430,7 @@ async def grep(
             elif cap_truncated:
                 notes.append(f"[{disp}: scanned first 5 MB only]")
         elif output_mode == "count":
-            n = sum(1 for line in lines if rgx.search(line))
+            n = len(match_idxs)
             if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
                 capped = emit(f"{disp}:{n}")
                 result_rows += 1
@@ -437,8 +439,6 @@ async def grep(
             if cap_truncated:  # the count is a lower bound — always note
                 notes.append(f"[{disp}: scanned first 5 MB only]")
         else:  # content
-            match_idxs = [i for i, line in enumerate(lines, start=1)
-                          if rgx.search(line)]
             if eff_before == 0 and eff_after == 0:
                 # Zero-context: the bare row stream. Every match is its own
                 # "block" but NO -- separators (GNU grep emits group

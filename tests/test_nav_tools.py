@@ -116,6 +116,39 @@ def test_grep_finds_match(tmp_path: Path) -> None:
     assert "b.py" not in out
 
 
+def test_grep_default_output_stable_across_modes(tmp_path: Path) -> None:
+    # Pins the pre-refactor default output for all three modes (plus context
+    # and head_limit) so the match_idxs unification stays byte-for-byte.
+    (tmp_path / "a.txt").write_text("alpha\nbeta\ngamma\nalpha\n")
+
+    fwm = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt")
+    assert fwm == "a.txt"
+
+    cnt = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                output_mode="count")
+    assert cnt == "a.txt:2"
+
+    content = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                    output_mode="content")
+    assert content == "a.txt:1:alpha\na.txt:4:alpha"
+
+    ctx1 = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                 output_mode="content", context=1)
+    # Windows [1,2] and [3,4] are adjacent (lo=3 <= prev_hi+1) so they merge
+    # into ONE block — no `--` separator between them.
+    assert ctx1 == (
+        "a.txt:1:alpha\na.txt-2-beta\na.txt-3-gamma\na.txt:4:alpha"
+    )
+
+    limited = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                    output_mode="content", head_limit=1)
+    assert limited == (
+        "a.txt:1:alpha\n"
+        "[further results omitted: head_limit=1 reached "
+        "— raise head_limit or narrow the pattern]"
+    )
+
+
 def test_grep_excludes_imp_and_git(tmp_path: Path) -> None:
     (tmp_path / "code.py").write_text("SECRET token here\n")
     (tmp_path / ".imp").mkdir()
