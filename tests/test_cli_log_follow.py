@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import gzip
+import io
 import json
 import os
 from pathlib import Path
@@ -10,7 +12,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from imp.cli.live_driver import LiveDriver
+from imp.cli.live_status import LiveStatus
 from imp.engine.change import LAYOUT_VERSION
+from tests.conftest import FIXTURES
 
 
 def _log_ns(**over: object) -> argparse.Namespace:
@@ -386,3 +391,101 @@ def test_follow_live_ctrl_c_clears_and_returns_130(
     assert rc == 130
     status.reset.assert_called_once()
     driver.finish.assert_not_called()
+
+
+class _Pipe(io.StringIO):
+    """A non-TTY stream: LiveStatus self-disables on it, so only the driver's
+    permanent narrative lines are written."""
+
+    def isatty(self) -> bool:
+        return False
+
+
+def _full_run_events() -> list[dict[str, object]]:
+    """The complete journaled run behind the live-view golden snapshots."""
+    gz = FIXTURES / "cc_open_by_asking_full.jsonl.gz"
+    with gzip.open(gz, "rt", encoding="utf-8") as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+def _live_capture(events: list[dict[str, object]]) -> str:
+    """The live-session capture: feed every event straight through a LiveDriver
+    (as a headless session does), then finish() to flush the final block."""
+    out = _Pipe()
+    driver = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in events:
+        driver.on_event(e)
+    driver.finish()
+    return out.getvalue()
+
+
+def _live_narrative_no_finish(events: list[dict[str, object]]) -> str:
+    """The permanent narrative a LiveDriver emits mid-stream (no finish()) — the
+    exact bytes a non-terminal follow poll should have produced."""
+    out = _Pipe()
+    driver = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in events:
+        driver.on_event(e)
+    return out.getvalue()
+
+
+def test_follow_matches_live_session_capture(tmp_path: Path) -> None:
+    """Following a run to completion — replaying the narrative already present,
+    then tailing the rest across polls until a terminal status — produces
+    byte-for-byte the same output as feeding every event straight through
+    LiveDriver. This is the spec's golden comparison against a live capture."""
+    from imp.cli.main import _EventTail, _follow_step
+    events = _full_run_events()
+    capture = _live_capture(events)
+
+    slug = "goldenrun"
+    home = tmp_path / ".imp" / "changes" / slug
+    split = 500
+    _write_events(home, events[:split])           # narrative present at start
+    _write_state(home, status="new", slug=slug)   # not terminal yet
+
+    out = _Pipe()
+    status = LiveStatus(out)
+    driver = LiveDriver(stream=out, color=False, width=80, status=status)
+    tail = _EventTail(home / "events.jsonl")
+
+    # Poll 1: replay everything present; still running → keep polling.
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+
+    # The run appends the remaining events and reaches a terminal status.
+    with (home / "events.jsonl").open("a") as f:
+        for e in events[split:]:
+            f.write(json.dumps(e) + "\n")
+    _write_state(home, status="completed", slug=slug)
+
+    # Poll 2: drain the tail, finish(), exit 0 — output equals the live capture,
+    # and finish() is independently pinned (byte-identical with/without it here).
+    with patch.object(driver, "finish", wraps=driver.finish) as finish_spy:
+        assert _follow_step(driver, tail, status, tmp_path, slug, home) == 0
+    assert out.getvalue() == capture
+    finish_spy.assert_called_once()
+
+
+def test_follow_non_tty_footer_stays_inert(tmp_path: Path) -> None:
+    """Off a TTY, LiveStatus is inert even on the LIVE footer branch (lock live →
+    driver.compose_status): a non-terminal poll writes only the plain
+    append-only narrative and no footer bytes, so a piped `imp log -f` degrades
+    to the driver-only stream."""
+    from imp.cli.main import _EventTail, _follow_step
+    events = _full_run_events()[:120]
+    slug = "piped"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, events)
+    _write_state(home, status="new", slug=slug)
+    _write_live_lock(home)                         # lock live → live-spinner branch
+
+    out = _Pipe()                                  # isatty() → False
+    status = LiveStatus(out)
+    driver = LiveDriver(stream=out, color=False, width=80, status=status)
+    tail = _EventTail(home / "events.jsonl")
+
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+    body = out.getvalue()
+    # Equal to the driver-only narrative → the footer contributed nothing.
+    assert body == _live_narrative_no_finish(events)
+    assert "\x1b" not in body                      # no cursor-hide / erase ANSI
