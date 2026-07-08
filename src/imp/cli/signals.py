@@ -109,6 +109,29 @@ def install_process_group() -> None:
         os.setpgrp()
 
 
+def _feed_prompt_ctrl_c() -> None:
+    """Route an out-of-band SIGINT at a prompt through the SAME path as a typed
+    Ctrl-C: feed a synthetic ControlC key into the running prompt_toolkit app so
+    its `c-c` binding (clear line / show the ctrl-d hint, prompt.py) runs. With no
+    app running (or prompt_toolkit unavailable) this is a harmless no-op. NEVER
+    raises, NEVER exits — ctrl-c never exits at a prompt."""
+    try:
+        from prompt_toolkit.application import get_app
+        from prompt_toolkit.key_binding.key_processor import KeyPress
+        from prompt_toolkit.keys import Keys
+    except Exception:
+        return
+    try:
+        app = get_app()
+    except Exception:
+        return
+    if not getattr(app, "is_running", False):
+        return   # get_app() returns a non-running dummy when no prompt is active
+    with _suppress(Exception):
+        app.key_processor.feed(KeyPress(Keys.ControlC))
+        app.key_processor.process_keys()
+
+
 @contextlib.asynccontextmanager
 async def sigint_cancels_scope() -> AsyncIterator[None]:
     """Cancel the wrapped body on an out-of-band SIGINT and re-raise it as
@@ -675,7 +698,8 @@ class InterruptCoordinator:
 
         Intent A — "interrupt the run" (SIGINT): if a stop is already unwinding,
         apply the suppression/force-forward gate HERE (signal_pause can wedge on the
-        cancellation-immune interrupt()); at a prompt, route through the exit path;
+        cancellation-immune interrupt()); at a prompt, feed a synthetic Ctrl-C
+        into the running app (clear line / hint) — it never exits;
         otherwise enqueue for the receiver (→ signal_pause → runner interrupt →
         pause-to-prompt)."""
         if sig in _leave_signals():
@@ -699,12 +723,16 @@ class InterruptCoordinator:
             return  # suppressed or force-forwarded — never re-enter interrupt()
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT
-            # (handle_sigint=False), so an out-of-band SIGINT lands here. Route it
-            # through the coordinator exit path. Register the gesture first so a
-            # SECOND out-of-band SIGINT still hits the escalation/suppression gate
-            # above (force-quit).
-            self._register_gesture(kind="ctrl-c")
-            self.request_exit("ctrl-c")
+            # (handle_sigint=False), so an out-of-band SIGINT lands here. Ctrl-c
+            # NEVER exits at a prompt: route it through the prompt's own Ctrl-C
+            # binding (clear line / ctrl-d hint), exactly like a typed ctrl-c — do
+            # NOT request_exit. Do NOT register the gesture either: a prompt-time
+            # SIGINT must leave the gesture/suppression window untouched so the
+            # NEXT run round's <1s double-tap suppression stays accurate (AC4) —
+            # _first_gesture_at is stamped only by a real in-run gesture, and the
+            # prompt path no longer escalates, so it needs no gesture record.
+            # Ctrl-d remains the only leave gesture.
+            _feed_prompt_ctrl_c()
             return
         # First gesture during a run: record it and enqueue for the receiver.
         self._register_gesture(kind="ctrl-c")

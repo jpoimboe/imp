@@ -171,19 +171,24 @@ def test_dispatch_second_ctrl_c_forwards_force_not_escalation_after_window() -> 
     assert esc_fired["v"] is False
 
 
-def test_dispatch_sigint_at_prompt_routes_to_exit_not_receiver() -> None:
-    """An out-of-band SIGINT while AT a prompt (handle_sigint=False so it lands
-    in the coordinator's loop handler, not as a prompt_toolkit KBI) must take the
-    exit path — NOT the receiver/signal_pause/runner path (that is the
-    DURING-A-RUN behavior)."""
+def test_dispatch_sigint_at_prompt_feeds_ctrl_c_and_never_exits(monkeypatch) -> None:
+    """An out-of-band SIGINT while AT a prompt is routed through the prompt's own
+    Ctrl-C binding (clear/hint) — it does NOT take the exit path, does NOT set the
+    pause flag, and does NOT enqueue to the receiver. Ctrl-c never exits."""
     import signal as _sig
+
+    import imp.cli.signals as _signals
+
     coord = InterruptCoordinator()
     coord.set_at_prompt(True)
+
+    fed = {"n": 0}
+    monkeypatch.setattr(_signals, "_feed_prompt_ctrl_c",
+                        lambda: fed.__setitem__("n", fed["n"] + 1))
 
     exited = {"reason": None}
     coord.set_exit_hook(lambda reason: exited.__setitem__("reason", reason))
 
-    # A receiver send-stream is wired but must NOT be touched on this path.
     sent: list = []
 
     class _Send:
@@ -194,10 +199,11 @@ def test_dispatch_sigint_at_prompt_routes_to_exit_not_receiver() -> None:
 
     coord._dispatch_signal(_sig.SIGINT)
 
-    assert exited["reason"] == "ctrl-c"          # exit hook fired with ctrl-c
-    assert coord.should_pause is True
-    assert coord.pause_reason == "ctrl-c"
-    assert sent == []                            # receiver path NOT taken
+    assert fed["n"] == 1                  # prompt ctrl-c binding invoked
+    assert exited["reason"] is None       # exit path NOT taken
+    assert coord.should_pause is False    # never sets pause / never exits
+    assert sent == []                     # receiver path NOT taken
+    assert coord._first_gesture_at is None  # gesture window left untouched (AC4)
 
 
 def test_dispatch_sigint_during_run_takes_receiver_path_not_exit() -> None:
@@ -225,48 +231,37 @@ def test_dispatch_sigint_during_run_takes_receiver_path_not_exit() -> None:
     assert sent == [_sig.SIGINT]                 # receiver-enqueue path taken
 
 
-def test_dispatch_second_sigint_at_prompt_forwards_force_after_window() -> None:
-    """A SECOND out-of-band SIGINT while at a prompt AND already pausing hits the
-    _should_pause branch: suppressed within the window, then FORCE-forwarded after
-    it (ctrl-c never force-quits to bash) — _trigger_escalation never fires."""
+def test_repeated_sigint_at_prompt_never_escalates_or_exits(monkeypatch) -> None:
+    """Repeated out-of-band SIGINTs at a prompt keep clearing/hinting via the
+    prompt binding — they NEVER escalate to a force-quit and NEVER exit, however
+    many arrive and however far apart (ctrl-c never exits at a prompt)."""
     import signal as _sig
 
-    from imp.cli.signals import _FORCE_FORWARD
+    import imp.cli.signals as _signals
 
     coord = InterruptCoordinator()
     coord.set_at_prompt(True)
     t = {"now": 100.0}
     coord._now = lambda: t["now"]
 
-    exited = {"reason": None}
-    coord.set_exit_hook(lambda reason: exited.__setitem__("reason", reason))
+    fed = {"n": 0}
+    monkeypatch.setattr(_signals, "_feed_prompt_ctrl_c",
+                        lambda: fed.__setitem__("n", fed["n"] + 1))
+
+    exited = {"v": False}
+    coord.set_exit_hook(lambda _reason: exited.__setitem__("v", True))
     esc_fired = {"v": False}
     coord.set_escalation_hook(lambda: esc_fired.__setitem__("v", True))
 
-    sent: list = []
-
-    class _Send:
-        def send_nowait(self, item):  # type: ignore[no-untyped-def]
-            sent.append(item)
-
-    coord._sig_send = _Send()
-
-    # First at-prompt SIGINT → exit path, registers the gesture (first-wins).
     coord._dispatch_signal(_sig.SIGINT)
-    assert exited["reason"] == "ctrl-c"
-    assert coord.should_pause is True
-
-    # Second within the suppression window → suppressed, no forward.
-    t["now"] = 100.5
+    t["now"] = 101.5                      # >1s later
     coord._dispatch_signal(_sig.SIGINT)
-    assert sent == []
+
+    assert fed["n"] == 2
+    assert exited["v"] is False
     assert esc_fired["v"] is False
-
-    # After the window, the stop is unwinding (should_pause) → FORCE forward.
-    t["now"] = 101.5
-    coord._dispatch_signal(_sig.SIGINT)
-    assert sent == [_FORCE_FORWARD]
-    assert esc_fired["v"] is False
+    assert coord.should_pause is False
+    assert coord._first_gesture_at is None  # window never stamped at the prompt (AC4)
 
 
 def test_dispatch_sighup_fires_leave_not_pause() -> None:
@@ -477,3 +472,54 @@ async def test_sigint_guard_passes_body_exception_through_and_restores() -> None
         assert signal.getsignal(signal.SIGINT) is _sentinel
     finally:
         signal.signal(signal.SIGINT, prev)
+
+
+def test_feed_prompt_ctrl_c_is_a_noop_with_no_running_app() -> None:
+    """With no prompt_toolkit app running, feeding a synthetic ctrl-c is a
+    harmless no-op — it never raises and never exits."""
+    from imp.cli.signals import _feed_prompt_ctrl_c
+
+    _feed_prompt_ctrl_c()   # must return cleanly
+
+
+def test_prompt_sigint_does_not_pollute_next_round_suppression(monkeypatch) -> None:
+    """Regression (AC4): an out-of-band SIGINT at a prompt must NOT stamp the
+    gesture window. Otherwise the NEXT run round's <1s double-tap suppression is
+    defeated — the first real ctrl-c would inherit a stale window and a rapid
+    second ctrl-c would forward FORCE (hard-kill) instead of being suppressed."""
+    import signal as _sig
+
+    import imp.cli.signals as _signals
+    from imp.cli.signals import _FORCE_FORWARD
+
+    coord = InterruptCoordinator()
+    monkeypatch.setattr(_signals, "_feed_prompt_ctrl_c", lambda: None)
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+
+    # 1) kill -INT at a prompt — must leave the gesture window untouched.
+    coord.set_at_prompt(True)
+    coord._dispatch_signal(_sig.SIGINT)
+    assert coord._first_gesture_at is None
+
+    # 2) Next run round (not at a prompt): a first real ctrl-c, then a rapid
+    #    (<1s) second. The window must be fresh, so the second is SUPPRESSED.
+    coord.set_at_prompt(False)
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    t["now"] = 110.0
+    coord._dispatch_signal(_sig.SIGINT)       # first real gesture → enqueue SIGINT
+    assert sent == [_sig.SIGINT]
+    assert coord._first_gesture_at == 110.0   # window opened HERE, not at the prompt
+    # Simulate the receiver's signal_pause landing so the repeat hits the gate.
+    coord._should_pause = True
+
+    t["now"] = 110.2                          # rapid second, <1s from the first
+    coord._dispatch_signal(_sig.SIGINT)
+    assert _FORCE_FORWARD not in sent         # suppressed within the fresh window
