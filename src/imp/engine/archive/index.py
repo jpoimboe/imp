@@ -11,12 +11,12 @@ _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS changes ("
     " id TEXT PRIMARY KEY, title TEXT, base TEXT, created_at TEXT,"
     " status TEXT, step TEXT, events_hash TEXT, ingested_at TEXT,"
-    " last_event_ts TEXT)",
+    " last_event_ts TEXT, content TEXT)",
     "CREATE TABLE IF NOT EXISTS deps ("
     " change_id TEXT, depends_on_id TEXT)",
 )
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 def connect(index_path: Path) -> sqlite3.Connection:
@@ -43,13 +43,16 @@ def ingest(
     final_state = record.get("final_state") or {}
     timestamps = [ts for ev in events if (ts := ev.get("timestamp")) is not None]
     last_event_ts = max(timestamps) if timestamps else None
+    from imp.cli.render_helpers import conversation_prose
+    content = conversation_prose(events)
     conn.execute(
         "INSERT INTO changes (id, title, base, created_at, status, step,"
-        " events_hash, ingested_at, last_event_ts)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " events_hash, ingested_at, last_event_ts, content)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (cid, record.get("title"), record.get("base"), record.get("created_at"),
          final_state.get("status"), final_state.get("step"),
-         record.get("events_hash"), datetime.now(UTC).isoformat(), last_event_ts))
+         record.get("events_hash"), datetime.now(UTC).isoformat(), last_event_ts,
+         content))
     for dep in record.get("depends_on") or []:
         conn.execute("INSERT INTO deps (change_id, depends_on_id) VALUES (?, ?)",
                      (cid, dep))
