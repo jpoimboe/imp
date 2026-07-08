@@ -84,6 +84,28 @@ def test_anthropic_specs() -> None:
     assert all(s["name"] in {"web_search", "web_fetch"} for s in specs)
 
 
+def test_anthropic_specs_carry_caps() -> None:
+    specs = wn.anthropic_web_tool_specs(_agent(frozenset({"web_search", "web_fetch"})))
+    by_name = {s["name"]: s for s in specs}
+
+    fetch = by_name["web_fetch"]
+    assert fetch["max_content_tokens"] == wn.WEB_FETCH_MAX_CONTENT_TOKENS
+    assert fetch["max_uses"] == wn.WEB_MAX_USES
+
+    search = by_name["web_search"]
+    assert search["max_uses"] == wn.WEB_MAX_USES
+    assert "max_content_tokens" not in search
+
+
+def test_anthropic_search_only_spec_caps() -> None:
+    specs = wn.anthropic_web_tool_specs(_agent(frozenset({"web_search"})))
+    assert len(specs) == 1
+    search = specs[0]
+    assert search["name"] == "web_search"
+    assert search["max_uses"] == wn.WEB_MAX_USES
+    assert "max_content_tokens" not in search
+
+
 def test_openai_specs_web_search_only() -> None:
     assert wn.openai_web_tool_specs(_agent(frozenset({"web_search"}))) == [
         {"type": "web_search"}]

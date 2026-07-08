@@ -44,6 +44,15 @@ _PROVIDER_WEB_SUPPORT: dict[str, frozenset[str]] = {
 _ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305"
 _ANTHROPIC_WEB_FETCH_TYPE = "web_fetch_20250910"
 
+# Per-fetch ceiling on injected page content for the Anthropic web_fetch server
+# tool. ~25K tokens ≈ Claude Code's 100 KB-char markdown cap (~4 chars/token):
+# generous enough that ordinary docs pass whole, clips only a runaway page.
+WEB_FETCH_MAX_CONTENT_TOKENS = 25_000
+
+# Per-turn invocation ceiling on each Anthropic web tool; a runaway-loop
+# backstop, far beyond normal use.
+WEB_MAX_USES = 10
+
 # Claude Code builtin names that back each normalized web tool, and the
 # inverse used by the CC receive loop (Task 11) to normalize an observed
 # builtin tool_use. Single source of truth for both directions.
@@ -90,13 +99,24 @@ def check_web_capability(provider_name: str, agent_def: AgentDef) -> None:
 
 
 def anthropic_web_tool_specs(agent_def: AgentDef) -> list[dict[str, Any]]:
-    """Native Anthropic server-tool specs for the declared web tools."""
+    """Native Anthropic server-tool specs for the declared web tools, each
+    carrying its cap parameters: a per-turn `max_uses` on both tools and a
+    per-fetch `max_content_tokens` on `web_fetch`."""
     specs: list[dict[str, Any]] = []
     for n in declared_web_tools(agent_def):
         if n == "web_search":
-            specs.append({"type": _ANTHROPIC_WEB_SEARCH_TYPE, "name": "web_search"})
+            specs.append({
+                "type": _ANTHROPIC_WEB_SEARCH_TYPE,
+                "name": "web_search",
+                "max_uses": WEB_MAX_USES,
+            })
         elif n == "web_fetch":
-            specs.append({"type": _ANTHROPIC_WEB_FETCH_TYPE, "name": "web_fetch"})
+            specs.append({
+                "type": _ANTHROPIC_WEB_FETCH_TYPE,
+                "name": "web_fetch",
+                "max_content_tokens": WEB_FETCH_MAX_CONTENT_TOKENS,
+                "max_uses": WEB_MAX_USES,
+            })
     return specs
 
 
