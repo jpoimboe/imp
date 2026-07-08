@@ -151,6 +151,14 @@ async def _grep_file_source(target: Path, root: Path, inside: bool,
     return _git_files(unignored, gtarget, root, policy)
 
 
+def _mtime(p: Path) -> float:
+    """st_mtime, or 0.0 (sorts as oldest) if the entry vanished mid-call."""
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 @imp_tool(
     name="glob",
     description=(
@@ -206,8 +214,11 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
             if ignored:
                 matched = [p for p in matched if p.resolve() not in ignored]
 
-    out = [p.relative_to(root).as_posix() if inside else p.as_posix()
-           for p in matched]
+    def _posix(p: Path) -> str:
+        return p.relative_to(root).as_posix() if inside else p.as_posix()
+
+    matched.sort(key=lambda p: (-_mtime(p), _posix(p)))
+    out = [_posix(p) for p in matched]
     return "\n".join(out) if out else "(no matches)"
 
 

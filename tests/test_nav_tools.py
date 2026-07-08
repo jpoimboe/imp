@@ -52,6 +52,33 @@ def test_glob_recursive(tmp_path: Path) -> None:
     assert "sub/x.md" in out
 
 
+def test_glob_orders_by_mtime_descending(tmp_path: Path) -> None:
+    import os
+    (tmp_path / "old.py").write_text("")
+    (tmp_path / "mid.py").write_text("")
+    (tmp_path / "new.py").write_text("")
+    os.utime(tmp_path / "old.py", (1000, 1000))
+    os.utime(tmp_path / "mid.py", (2000, 2000))
+    os.utime(tmp_path / "new.py", (3000, 3000))
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert out.splitlines() == ["new.py", "mid.py", "old.py"]
+
+
+def test_glob_equal_mtime_falls_back_to_path_order(tmp_path: Path) -> None:
+    import os
+    # Path-sort orders these as ["z/a.py", "z.py"] (component-wise: "z" < "z.py"),
+    # but the posix-string tie-break orders them ["z.py", "z/a.py"] ("." < "/").
+    # Asserting the posix order makes the tie-break falsifiable: dropping the
+    # _posix(p) term from the sort key would leave the Path-sort order and fail.
+    (tmp_path / "z.py").write_text("")
+    (tmp_path / "z").mkdir()
+    (tmp_path / "z" / "a.py").write_text("")
+    for p in (tmp_path / "z.py", tmp_path / "z" / "a.py"):
+        os.utime(p, (5000, 5000))
+    out = _glob(_ctx(tmp_path), pattern="**/*.py")
+    assert out.splitlines() == ["z.py", "z/a.py"]
+
+
 def test_grep_finds_match(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("hello world\nfoo bar\n")
     (tmp_path / "b.py").write_text("nothing\n")
