@@ -8,6 +8,13 @@ from imp.cli.main import _build_parser, _cmd_search, _command_names
 from imp.engine import archive
 
 
+def _user_msg_line(text: str) -> str:
+    return json.dumps({
+        "type": "user_message",
+        "payload": {"content": [{"type": "text", "text": text}]},
+    }) + "\n"
+
+
 def test_search_is_a_subcommand() -> None:
     assert "search" in _command_names(_build_parser())
 
@@ -61,3 +68,37 @@ def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) ->
     assert rc == 0
     assert "liveid" in out and "Dark mode inflight" in out   # in-flight title now visible
     assert "[new]" in out                                    # in-flight status is legible
+
+
+def test_cmd_search_matches_inflight_by_body_term(tmp_path: Path, capsys) -> None:
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    # The term "300s" appears in neither id nor title — only in the body.
+    hit = Change.create(tmp_path, title="Quiet chat",
+                        change_id="liveid", base_branch="main")
+    hit.events_path.write_text(_user_msg_line("please wire a 300s deadline"))
+    miss = Change.create(tmp_path, title="Other work",
+                         change_id="missid", base_branch="main")
+    miss.events_path.write_text(_user_msg_line("nothing relevant here"))
+
+    rc = _cmd_search(argparse.Namespace(query="300s"), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "liveid" in out          # matched only by the conversation body term
+    assert "missid" not in out      # the body term genuinely filters in-flight rows
+
+
+def test_cmd_search_no_match_notice_with_inflight_content(tmp_path: Path, capsys) -> None:
+    from imp.engine.change import Change
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    live = Change.create(tmp_path, title="Quiet chat",
+                         change_id="liveid", base_branch="main")
+    live.events_path.write_text(_user_msg_line("the deadline holds"))
+
+    rc = _cmd_search(argparse.Namespace(query="zzzznope"), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No changes match" in out     # the notice still prints
+    assert "liveid" not in out           # a body without the term does not match
