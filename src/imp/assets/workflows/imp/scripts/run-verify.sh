@@ -96,6 +96,11 @@ elif (( rc != 0 )); then
   printf '%s\n' "$out" | tail -n 15
 fi
 
+# Record the tree of every slow run (pass or fail) so a later pre-merge gate will be able to
+# tell an explicitly-tolerated red on THIS tree from a stale toleration on a different tree.
+if [[ "$tier" == "slow" && -n "$tree" ]]; then
+  mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$IMP_CHANGE_DIR/last_verified_tree_slow" || true
+fi
 if (( rc == 0 )) && [[ -n "$tree" ]]; then
   mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$cache" || true
 fi

@@ -339,3 +339,55 @@ def test_run_verify_success_summary_is_silent(tmp_path: Path) -> None:
     assert "ran-ok" in proc.stdout
     assert "gate ceiling" not in proc.stdout
     assert "gate failed" not in proc.stdout
+
+
+def _head_tree(project: Path) -> str:
+    out = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project,
+                         capture_output=True, text=True, check=True)
+    return out.stdout.strip()
+
+
+def test_run_verify_slow_records_verified_tree_on_pass(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "true",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode == 0, proc.stderr
+    tree = _head_tree(project)
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert (change_dir / "last_green_tree_slow").read_text().strip() == tree
+
+
+def test_run_verify_slow_records_verified_tree_on_fail(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "false",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode != 0
+    tree = _head_tree(project)
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert not (change_dir / "last_green_tree_slow").exists()   # red => no green stamp
+
+
+def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode == 0, proc.stderr
+    assert not (change_dir / "last_verified_tree_slow").exists()   # slow-only stamp
