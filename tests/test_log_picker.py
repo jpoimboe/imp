@@ -71,7 +71,7 @@ def test_cmd_log_non_tty_keeps_resolve_default(
         raise AssertionError("picker invoked on a non-tty")
 
     monkeypatch.setattr(m, "_pick_log_target", boom)
-    rc = m._cmd_log(argparse.Namespace(token=None, full=False))
+    rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))
     out = capsys.readouterr().out
     assert rc == 0
     assert "No changes yet — start one with imp new" in out
@@ -94,7 +94,7 @@ def test_cmd_log_tty_no_token_routes_to_picker(
         return None  # → "no such Change" rc 2, but proves the routing
 
     monkeypatch.setattr(m, "_load_events_for_id", fake_load)
-    rc = m._cmd_log(argparse.Namespace(token=None, full=False))
+    rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))
     assert seen["id"] == "2026-06-11-picked"
     assert rc == 2
 
@@ -114,7 +114,7 @@ def test_cmd_log_tty_picker_rc_short_circuits(
         raise AssertionError("load attempted despite picker rc")
 
     monkeypatch.setattr(m, "_load_events_for_id", boom)
-    assert m._cmd_log(argparse.Namespace(token=None, full=False)) == 2
+    assert m._cmd_log(argparse.Namespace(token=None, full=False, follow=False)) == 2
 
 
 def test_cmd_log_with_token_skips_picker(
@@ -131,4 +131,4 @@ def test_cmd_log_with_token_skips_picker(
         raise AssertionError("picker invoked despite explicit token")
 
     monkeypatch.setattr(m, "_pick_log_target", boom)
-    assert m._cmd_log(argparse.Namespace(token="bogus", full=False)) == 2
+    assert m._cmd_log(argparse.Namespace(token="bogus", full=False, follow=False)) == 2

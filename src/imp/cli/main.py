@@ -1877,11 +1877,31 @@ _LOG_EXPORT_DEFAULT = object()
 """Sentinel `const` for `--html`/`--md` given without a FILE argument."""
 
 
+def _follow_conflict(args: argparse.Namespace) -> str | None:
+    """Return the first output-mode flag `--follow` conflicts with, or None."""
+    for name, present in (
+        ("--summary", args.summary),
+        ("--full", args.full),
+        ("--html", args.html is not None),
+        ("--md", args.md is not None),
+    ):
+        if present:
+            return name
+    return None
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
 
     control = _control_root()
+    if args.follow:
+        conflict = _follow_conflict(args)
+        if conflict is not None:
+            print(f"imp log: error: argument -f/--follow: not allowed with "
+                  f"argument {conflict}", file=sys.stderr)
+            return 2
+        args.no_pager = True
     change_id: str | None
     if args.token is not None:
         try:
@@ -2803,6 +2823,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.",
+    )
+    p_log.add_argument(
+        "-f", "--follow", action="store_true",
+        help="Live-tail the narrative (tail -f): replay it, then stream new "
+             "events until the Change reaches a terminal status. Renders the "
+             "live run view; implies --no-pager.",
     )
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(

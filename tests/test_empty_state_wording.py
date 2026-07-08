@@ -22,7 +22,7 @@ def test_status_and_log_share_one_empty_message(tmp_path, monkeypatch, capsys) -
     assert rc_status == 0
     assert m._NO_CHANGES_MESSAGE in status_out.out
 
-    rc_log = m._cmd_log(argparse.Namespace(token=None, full=False))
+    rc_log = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))
     log_out = capsys.readouterr()
     assert rc_log == 0
     assert m._NO_CHANGES_MESSAGE in log_out.out
