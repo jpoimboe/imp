@@ -17,6 +17,7 @@ import anyio
 TOOL_OUTPUT_CAP_BYTES = 50_000           # head-only cap on what the LLM sees
 FILE_READ_CAP_BYTES = 5_000_000          # per-file ceiling for the bounded reader
 MATCH_LINE_CAP_BYTES = 2_000             # byte-truncate each matched grep line
+PREVIEW_BYTES = 2_000                    # spill-to-disk preview head (spill.py)
 READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # F4: the "50 KB" text is bound to TOOL_OUTPUT_CAP_BYTES above — if you change the
 # cap, change this label (and the tests that assert the literal) together. The
