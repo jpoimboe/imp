@@ -1211,6 +1211,49 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
 
 
 @pytest.mark.anyio
+async def test_pull_watchdog_treats_swallowed_cancel_fallthrough_as_stall(
+        monkeypatch) -> None:
+    """Simulates the swallowed-self-cancel fall-through: a fake fail_after scope
+    that suppresses the pull's exception leaves ev unset without raising, so the
+    safety-net branch routes through _teardown_stalled_agent instead of yielding
+    an unbound ev."""
+    import imp.engine.agent_run as ar
+
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    class _FakeScope:
+        deadline = 0.0
+        cancel_called = False
+
+    class _FakeCM:
+        def __enter__(self):
+            return _FakeScope()
+
+        def __exit__(self, exc_type, exc, tb):
+            return exc_type is not None  # swallow all exceptions, leaving ev unset
+
+    monkeypatch.setattr(ar.anyio, "fail_after", lambda _: _FakeCM())
+
+    async def _gen():
+        raise RuntimeError("boom")
+        yield  # unreachable; required to make this an async generator
+
+    stall = {"hit": False}
+    events = []
+    async for ev in ar._pull_with_inactivity_watchdog(
+            _gen(), runner=_Runner(), stall=stall, coordinator=None):
+        events.append(ev)
+
+    assert events == []
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+
+
+@pytest.mark.anyio
 async def test_inline_solicit_raises_awaiting_when_no_channel() -> None:
     from imp.engine.agent_run import build_inline_solicit
     from imp.engine.awaiting_user_input import AwaitingUserInput
