@@ -3,17 +3,23 @@
 # cannot move under it. Rebase the branch ONTO the base tip ONLY when the base
 # moved (non-empty base-side incoming diff); otherwise merge directly. Linear
 # history, no merge commit; the eventual branch->base merge is the only merge.
-# On the clean (exit 0) and conflict (exit 6) paths the bare pre-rebase fork SHA
-# P is printed on STDOUT (and nothing else) so the workflow can capture it into
+# On the clean (0), conflict (6), and recovery (7) paths the bare pre-rebase fork
+# SHA P is printed on STDOUT (and nothing else) so the workflow can capture it into
 # the integration_fork var; the base tip B is always recoverable downstream as
 # `git rev-parse "${BASE}^{commit}"`. All human-readable status goes to STDERR.
 #   3  -> bad/missing base ref -> pause
 #   5  -> dirty entry tree / leftover rebase / git refused to start -> pause
-#   2  -> base unmoved (empty base-side incoming diff): merge directly, NO review, no fork SHA
+#   2  -> base unmoved AND tree already cleared for merge: merge directly, NO review, no fork SHA
 #   0  -> clean rebase (base moved, no conflict) -> integration-reviewer
 #   6  -> rebase stopped on a conflict (left in progress) -> reconciler
+#   7  -> base unmoved but tree NOT cleared for merge -> integration-verify (recovery), prints fork SHA
 set -uo pipefail
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_here/lib-verify-clear.sh"
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 5
+# Toleration flag from the workflow (bool var renders capitalized) -> lowercase.
+# Portable normalization (tr), not the bash-4-only ${x,,}, so this parses on bash 3.2.
+tolerated="$(printf '%s' "${1:-false}" | tr '[:upper:]' '[:lower:]')"
 CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
 CHANGE_JSON="$CHANGE_DIR/change.json"
 BASE=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['base_branch'])") || exit 5
@@ -45,8 +51,14 @@ P=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP
 # has not moved relative to this branch -> merge directly, no integration/review,
 # no fork SHA. Leave cur_base_head untouched.
 if git diff --quiet "$P" "$B"; then
-  echo "base ($BASE) unmoved since fork; merging directly" >&2
-  exit 2
+  tree=$(git rev-parse 'HEAD^{tree}') || exit 5
+  if _cleared_for_merge "$tree" "$tolerated"; then
+    echo "base ($BASE) unmoved; tree already verified/accepted; merging directly" >&2
+    exit 2 # -> summarizer (fast path, unchanged)
+  fi
+  echo "base ($BASE) unmoved but tree not verified/accepted; routing to integration-verify" >&2
+  echo "$P"                                 # fork SHA for the downstream reviewer's diff
+  exit 7 # -> integration-verify (recovery)
 fi
 
 # Base moved: rebase the branch onto base. rerere replays any recorded resolution;

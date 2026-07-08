@@ -238,10 +238,11 @@ phases:
 
       - name: integrate-rebase
         show_label: false
-        command: ./scripts/integrate-rebase.sh
+        command: ./scripts/integrate-rebase.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 2}, goto: summarizer}
           - {if: {exit: 0}, set: {integration_fork: output.stdout}, goto: integration-verify}
+          - {if: {exit: 7}, set: {integration_fork: output.stdout}, goto: integration-verify}
           - {if: {exit: 6}, set: {integration_fork: output.stdout}, continue: true}
           - {else: true, pause: true}
 

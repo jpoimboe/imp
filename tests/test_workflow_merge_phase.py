@@ -41,6 +41,9 @@ def test_integrate_rebase_routing_into_summarizer_and_gate() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
     assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
+    m = evaluate_rules(rules, vars={}, output={"exit": 7, "stdout": "forkSHA"})
+    assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
+    assert m.var_mutations.get("integration_fork") == "forkSHA"
     m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA"})
     assert isinstance(m.action, Continue)
     assert "review_base" not in m.var_mutations
