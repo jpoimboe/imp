@@ -1164,6 +1164,12 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
         for fold in self._open_sub_by_event.values():
             fold.running = False
             fold.terminal_state = "interrupted"
+        # A genuine your-turn yield is a normal solicit, not an interrupt: the
+        # agent's prose and the eventual reply already carry it, so the pause
+        # line is redundant. Finalize folds and mark paused above, but append no
+        # PauseNode. (Shared render path — covers both imp log and the live view.)
+        if reason == "awaiting_user":
+            return
         # Anchor the pause in the innermost open scope so it renders where it fired.
         self._append(PauseNode(reason=reason))
         self._pause_outcome_shown = True
