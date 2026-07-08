@@ -63,7 +63,6 @@ from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
     ContentPart,
-    Diagnostics,
     Event,
     ImagePart,
     Message,
@@ -1086,20 +1085,6 @@ def _parse_claude_code_message(raw: dict[str, Any]) -> Message:
             content.append(ToolUseBlock(id=block["id"], name=block["name"],
                                         input=block.get("input", {})))
     return Message(role="assistant", content=tuple(content))
-
-
-def _extract_claude_code_diagnostics(raw: dict[str, Any]) -> Diagnostics:
-    warnings: list[str] = []
-    thinkings: list[str] = []
-    for block in raw.get("content", []):
-        kind = block.get("type")
-        if kind in ("text", "tool_use"):
-            continue
-        if kind == "thinking":
-            thinkings.append(str(block.get("thinking", "") or ""))
-        else:
-            warnings.append(f"skipped unknown block type {kind!r}")
-    return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
 
 
 def _parse_cc_web_citations(

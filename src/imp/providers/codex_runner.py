@@ -31,7 +31,6 @@ from imp.agents.output_guard import (
 )
 from imp.agents.runner import (
     AgentInvocation,
-    Diagnostics,
     Event,
     Message,
     TextBlock,
@@ -1086,7 +1085,7 @@ def _parse_codex_message(raw: dict[str, Any]) -> Message:
     (emitted at `turn.completed` via `reassemble_codex_turn`) carries both
     text and tool_use blocks; this parser handles both.  A web_search appears
     as a query-only tool_use block.
-    Unknown blocks are dropped (surfaced via `_extract_codex_diagnostics`).
+    Unknown blocks are dropped.
 
     Lives here (not in replay.py) per the provider-exports-its-parser convention:
     replay.py imports + registers it, runner can reuse it, no replay-import cycle.
@@ -1100,22 +1099,8 @@ def _parse_codex_message(raw: dict[str, Any]) -> Message:
             content.append(ToolUseBlock(
                 id=block["id"], name=block["name"],
                 input=block.get("input", {})))
-        # unknown: skipped (see _extract_codex_diagnostics)
+        # unknown: skipped
     return Message(role="assistant", content=tuple(content))
-
-
-def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
-    """Render-only diagnostics for codex. text/tool_use are conversation
-    history (not warnings); any other block type is surfaced as a warning.
-    codex's reasoning is emitted as a separate `thinking` event, not in
-    `llm_response.raw`, so there are no inline thinkings to extract here."""
-    warnings: list[str] = []
-    for block in raw.get("content", []):
-        kind = block.get("type")
-        if kind in ("text", "tool_use"):
-            continue
-        warnings.append(f"skipped unknown block type {kind!r}")
-    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
 
 
 def process_event(
