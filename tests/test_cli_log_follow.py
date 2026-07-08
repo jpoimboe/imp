@@ -105,6 +105,19 @@ def test_follow_step_paused_footer(tmp_path: Path) -> None:
     driver.finish.assert_not_called()
 
 
+def test_follow_step_merge_blocked_is_non_terminal(tmp_path: Path) -> None:
+    """merge_blocked is not terminal: returns None and finish() is not called."""
+    from imp.cli.main import _EventTail, _follow_step
+    slug = "blocked-me"
+    home = tmp_path / ".imp" / "changes" / slug
+    _write_events(home, [{"type": "a"}])
+    _write_state(home, status="merge_blocked", slug=slug)
+    driver, status = MagicMock(), MagicMock()
+    tail = _EventTail(home / "events.jsonl")
+    assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
+    driver.finish.assert_not_called()
+
+
 def test_follow_step_live_footer_uses_compose_status(tmp_path: Path) -> None:
     """A live lock → the footer is driven by driver.compose_status."""
     from imp.cli.main import _EventTail, _follow_step
