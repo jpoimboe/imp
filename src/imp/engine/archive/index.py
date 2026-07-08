@@ -103,8 +103,9 @@ def search(
     rows = conn.execute(
         "SELECT id, title, status, created_at FROM changes"
         " WHERE id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
+        " OR content LIKE ? ESCAPE '\\'"
         " ORDER BY created_at DESC, id",
-        (like, like)).fetchall()
+        (like, like, like)).fetchall()
     return [
         (cid, title or "", status or "", created or "")
         for (cid, title, status, created) in rows

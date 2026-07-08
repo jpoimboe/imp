@@ -7,9 +7,12 @@ from imp.engine import archive
 from imp.engine.archive import read as archive_read
 
 
-def _archive(tmp_path: Path, change_id: str, title: str, status: str = "abandoned") -> None:
+def _archive(
+    tmp_path: Path, change_id: str, title: str, status: str = "abandoned",
+    events_text: str = "",
+) -> None:
     events = tmp_path / f"{change_id}.jsonl"
-    events.write_text("")
+    events.write_text(events_text)
     change_json = tmp_path / f"{change_id}.change.json"
     change_json.write_text(json.dumps({
         "id": change_id, "title": title, "base_branch": "main",
@@ -19,6 +22,15 @@ def _archive(tmp_path: Path, change_id: str, title: str, status: str = "abandone
     archive.archive_change(
         tmp_path, change_id, events_path=events,
         change_json_path=change_json, state_json_path=state_json)
+
+
+def _prose_line(text: str) -> str:
+    return json.dumps({
+        "id": "e0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "llm_response",
+        "payload": {"provider": "anthropic", "raw": {
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n"
 
 
 def test_search_archive_matches_title_substring(tmp_path: Path) -> None:
@@ -49,4 +61,18 @@ def test_search_archive_treats_percent_as_literal(tmp_path: Path) -> None:
     _archive(tmp_path, "alpha", "Dark mode toggle")
     _archive(tmp_path, "pct", "50% faster")
     _archive(tmp_path, "other", "50 items")
+    assert [h[0] for h in archive_read.search_archive(tmp_path, "50%")] == ["pct"]
+
+
+def test_search_archive_matches_untitled_chat_by_body_term(tmp_path: Path) -> None:
+    # An untitled Q&A chat: empty title, the term lives only in the body.
+    _archive(tmp_path, "quiet", "", events_text=_prose_line("the 300s deadline holds"))
+    _archive(tmp_path, "other", "Login flow")
+    assert [h[0] for h in archive_read.search_archive(tmp_path, "300s")] == ["quiet"]
+
+
+def test_search_archive_content_percent_is_literal(tmp_path: Path) -> None:
+    # A `%` in the query must match a literal percent inside body content.
+    _archive(tmp_path, "pct", "", events_text=_prose_line("throughput up 50% today"))
+    _archive(tmp_path, "plain", "", events_text=_prose_line("50 items processed"))
     assert [h[0] for h in archive_read.search_archive(tmp_path, "50%")] == ["pct"]
