@@ -166,7 +166,7 @@ def test_emit_paused_summary_renders_terminated_reason(capsys) -> None:
     ])
     main._emit_paused_summary(change)
     out = capsys.readouterr().out
-    assert "(terminated: API Error 400 — tool use concurrency)" in out
+    assert "· terminated: API Error 400 — tool use concurrency" in out
     assert "at reviewing plan" in out
 
 
@@ -177,7 +177,7 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     ])
     main._emit_paused_summary(change)
     out = capsys.readouterr().out
-    assert "(interrupt)" in out
+    assert "· interrupt" in out
 
 
 def test_emit_completed_appends_warning_count_suffix(monkeypatch, capsys) -> None:

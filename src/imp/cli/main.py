@@ -318,14 +318,13 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
 
 def _pause_lines(
     name: str, phase: str | None, token: str,
-    *, reason: str | None = None, color: bool,
+    *, reason: str | None = None, title: str = "", color: bool,
 ) -> list[str]:
+    head = f"{name} · {title}" if title else name
     at = f"  at {phase}" if phase else ""
-    why = f"  ({reason})" if reason else ""
-    glyph = "⏸ " if color else ""
+    why = f" · {reason}" if reason else ""
     return [
-        ansi(f"{glyph}Paused  {name}{at}{why}", *pal.NODE_COLORS["lifecycle"],
-             enabled=color),
+        ansi(f"{head}{at}{why}", *pal.NODE_COLORS["lifecycle"], enabled=color),
         ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
              enabled=color),
     ]
