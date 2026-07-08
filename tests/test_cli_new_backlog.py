@@ -26,7 +26,7 @@ def test_new_idea_creates_change_home_with_origin_idea(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    rc = main._record_idea(_args(), tmp_path)
+    rc = main._record_idea(_args(), tmp_path, "main")
     assert rc == 0
     new_id = _only_new_id(tmp_path)
     change = Change.load(tmp_path, new_id)
@@ -43,7 +43,7 @@ def test_new_idea_description_populates_seed_opening(
         tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    main._record_idea(_args(opening="the longer brief"), tmp_path)
+    main._record_idea(_args(opening="the longer brief"), tmp_path, "main")
     change = Change.load(tmp_path, _only_new_id(tmp_path))
     assert change.seed_opening == "Wire OAuth login\n\nthe longer brief"
 
@@ -51,7 +51,7 @@ def test_new_idea_description_populates_seed_opening(
 def test_new_idea_no_deps(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    main._record_idea(_args(depends_on=None), tmp_path)
+    main._record_idea(_args(depends_on=None), tmp_path, "main")
     meta = json.loads((Change.load(tmp_path, _only_new_id(tmp_path)).change_dir
                        / "change.json").read_text())
     assert meta["depends_on"] == []
@@ -61,7 +61,7 @@ def test_new_idea_blank_title_errors_without_creating(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    rc = main._record_idea(_args(idea="   "), tmp_path)
+    rc = main._record_idea(_args(idea="   "), tmp_path, "main")
     assert rc == 2
     assert not (tmp_path / ".imp" / "changes").exists()
     captured = capsys.readouterr()
@@ -114,8 +114,8 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.chdir(tmp_path)
     captured: list[tuple] = []
 
-    def _fake_record(args, control):
-        captured.append((args, control))
+    def _fake_record(args, control, base):
+        captured.append((args, control, base))
         return 0
 
     monkeypatch.setattr(main, "_record_idea", _fake_record)
@@ -125,6 +125,7 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
                            autonomous=False, tui=False, workflow=None)))
     assert rc == 0
     assert captured
+    assert captured[0][2] == "main"
 
 
 @pytest.mark.parametrize("flag,expected", [

@@ -88,8 +88,9 @@ extend-exclude = ["spikes", "docs/superpowers/spikes"]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # ❯ (U+276F) is the intentional prompt caret (palette.CARET) and › (U+203A) is the
 # phase/step divider glyph; × (U+00D7) is the warnings-summary repeat-count multiplier
-# (e.g. "×2"); all read as confusables but are deliberate UI glyphs (RUF001-003).
-allowed-confusables = ["❯", "›", "×"]
+# (e.g. "×2"); ℹ (U+2139) prefixes the `imp new` base-resolution notice; all read as
+# confusables but are deliberate UI glyphs (RUF001-003).
+allowed-confusables = ["❯", "›", "×", "ℹ"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["imp", "impty"]

@@ -547,6 +547,18 @@ def test_artifact_commit_starts_new_lineage_on_unreadable_parent(
                 "refs/imp/artifacts/feat:spec/feat.md").stdout == "# v3\n"
 
 
+def test_origin_head_branch_none_without_remote(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    assert wt.origin_head_branch(tmp_path) is None
+
+
+def test_origin_head_branch_strips_origin_prefix(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    _git(tmp_path, "symbolic-ref",
+         "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    assert wt.origin_head_branch(tmp_path) == "trunk"
+
+
 def test_artifact_commit_warn_defaults_to_none(tmp_path: Path) -> None:
     # warn is optional: omitting it on the corrupt-parent path must not raise.
     _init_repo(tmp_path)
@@ -565,4 +577,21 @@ def test_artifact_commit_warn_defaults_to_none(tmp_path: Path) -> None:
         tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: b") is True
     assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
                 "refs/imp/artifacts/feat~1").returncode != 0
+
+
+def test_checked_out_branch_unborn_returns_branch(tmp_path: Path) -> None:
+    # Fresh `git init` on `trunk`, no commit yet: HEAD is an unborn branch.
+    _git(tmp_path, "init", "-q", "-b", "trunk")
+    assert wt.checked_out_branch(tmp_path) == "trunk"
+
+
+def test_checked_out_branch_born_returns_branch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)  # one commit on branch `main`
+    assert wt.checked_out_branch(tmp_path) == "main"
+
+
+def test_checked_out_branch_detached_is_none(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    _git(tmp_path, "checkout", "--detach", "-q")
+    assert wt.checked_out_branch(tmp_path) is None
 
