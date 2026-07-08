@@ -352,6 +352,14 @@ class LiveDriver:
         self._maybe_reemit_header()
         self._refresh_status()
 
+    def seed_pending_reply(self, text: str) -> None:
+        # Optimistic local echo for a terminal your-turn reply. Emission flows
+        # through _walk/_maybe_lift (never a direct write) so replay suppression
+        # lifts at the brand-new pending node before it emits.
+        self._builder.seed_pending_reply(text)
+        self._walk()
+        self._refresh_status()
+
     def finish(self) -> None:
         """Run end / pause / error: force-flush any still-open burst/subagent so
         the final block is emitted, then clear the status line."""

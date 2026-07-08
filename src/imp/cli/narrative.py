@@ -660,9 +660,10 @@ class NarrativeBuilder:
         self._root.children.append(node)
 
     def seed_pending_reply(self, text: str) -> None:
-        """TUI-only optimistic echo for a your-turn reply: append a pending
-        interactive node; the next user_message reconciles into it via the
-        single-outstanding awaiting-reply invariant."""
+        """Optimistic echo for a your-turn reply (TUI via _resolve_prompt, terminal
+        via LiveDriver.seed_pending_reply): append a pending interactive node; the
+        next user_message reconciles into it via the single-outstanding
+        awaiting-reply invariant."""
         node = UserMessageNode(text=text, interactive=True)
         self._pending_reply_node = node
         self._append(node)

@@ -2435,3 +2435,50 @@ def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:
     ]:
         drv.on_event(e)
     assert calls == ["restart", "restart", "restart"]
+
+
+def test_seed_pending_reply_emits_once_and_reconciles() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
+    ]:
+        drv.on_event(e)
+    # Optimistic echo fires at submit time — before any round-trip user_message.
+    drv.seed_pending_reply("typed reply")
+    assert out.getvalue().count("> typed reply") == 1
+    # The round-tripped authoritative user_message reconciles into the pending
+    # node in place: no second emission.
+    drv.on_event(ev("3", "user_message", agent_id="step:spec/spec-writer",
+                    content=[{"type": "text", "text": "typed reply"}]))
+    assert out.getvalue().count("> typed reply") == 1
+    # Exactly one UserMessageNode survives in the tree.
+    tree = drv._builder.tree
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    replies = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(replies) == 1
+
+
+def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Replayed prefix (marked _replay): stays suppressed, nothing printed.
+    for e in [
+        ev("1", "change_created", change_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    # First LIVE (un-marked) event: the gate the user is now at. It freezes the
+    # replayed-node snapshot; the replayed prefix stays hidden.
+    drv.on_event(ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"))
+    assert out.getvalue() == ""
+    # The seeded node is created AFTER the boundary, so the walk lifts
+    # suppression at it and emits the echo.
+    drv.seed_pending_reply("resume reply")
+    assert out.getvalue().count("> resume reply") == 1
