@@ -310,3 +310,82 @@ def test_vanished_file_stat_split(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert out.rsplit("\n", 1)[1] == (
         "[showing lines 1-2; end of the readable window (first 5 MB) "
         "— the file continues but is not readable via read_file; total unknown]")
+
+
+def test_stub_on_exact_repeat_unchanged_file(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("".join(f"line{i}\n" for i in range(1, 11)))
+    ctx = _ctx(tmp_path)
+    first = _read(ctx, path="a.txt", offset=3, limit=2)
+    assert first == (f"{_num(3, 'line3')}\n{_num(4, 'line4')}\n"
+                     "[showing lines 3-4 of 10; continue with offset=5]")
+    second = _read(ctx, path="a.txt", offset=3, limit=2)
+    assert second == "[unchanged since you read it at lines 3-4 above]"
+
+
+def test_stub_span_reflects_overshoot_not_requested_range(tmp_path: Path) -> None:
+    # Window overshoots EOF: true last (3) != offset + limit - 1 (2000).
+    (tmp_path / "a.txt").write_text("alpha\nbeta\ngamma\n")
+    ctx = _ctx(tmp_path)
+    _read(ctx, path="a.txt", offset=1, limit=2000)
+    stub = _read(ctx, path="a.txt", offset=1, limit=2000)
+    assert stub == "[unchanged since you read it at lines 1-3 above]"
+
+
+def test_stub_span_reflects_budget_cutoff(tmp_path: Path) -> None:
+    # The 50 KB budget ends the window before limit=2000; the stub must cite the
+    # true rendered last line, not the requested range.
+    content = "".join(f"line {i:04d} " + "x" * 90 + "\n" for i in range(1, 3001))
+    (tmp_path / "big.txt").write_text(content)
+    lines = content.split("\n")[:-1]
+    acc = 0
+    expected_last = 0
+    for i, line in enumerate(lines[:2000], start=1):
+        acc += len(f"{i:>6}\t{line}") + 1
+        expected_last = i
+        if acc >= TOOL_OUTPUT_CAP_BYTES:
+            break
+    assert expected_last < 2000  # budget, not limit, is the limiter here
+    ctx = _ctx(tmp_path)
+    _read(ctx, path="big.txt", offset=1, limit=2000)
+    stub = _read(ctx, path="big.txt", offset=1, limit=2000)
+    assert stub == f"[unchanged since you read it at lines 1-{expected_last} above]"
+
+
+def test_mutation_invalidates_and_resets_ranges(tmp_path: Path) -> None:
+    p = tmp_path / "a.txt"
+    p.write_text("aaa\nbbb\nccc\n")
+    ctx = _ctx(tmp_path)
+    _read(ctx, path="a.txt", offset=1, limit=2000)
+    p.write_text("xxx\nyyy\n")  # sha differs -> not the same version
+    reread = _read(ctx, path="a.txt", offset=1, limit=2000)
+    assert reread == f"{_num(1, 'xxx')}\n{_num(2, 'yyy')}"  # full new body, no stub
+    assert "[unchanged" not in reread
+    # ranges reset to the new version: a repeat now stubs with the NEW span
+    stub = _read(ctx, path="a.txt", offset=1, limit=2000)
+    assert stub == "[unchanged since you read it at lines 1-2 above]"
+
+
+def test_different_range_never_stubs_then_each_repeat_stubs(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("".join(f"l{i}\n" for i in range(1, 101)))
+    ctx = _ctx(tmp_path)
+    first = _read(ctx, path="a.txt", offset=1, limit=50)
+    assert first.startswith(_num(1, "l1"))
+    assert "[unchanged" not in first
+    second = _read(ctx, path="a.txt", offset=51, limit=50)  # different range
+    assert second.startswith(_num(51, "l51"))
+    assert "[unchanged" not in second
+    # each remembered range now stubs on an exact repeat
+    assert _read(ctx, path="a.txt", offset=1, limit=50) == (
+        "[unchanged since you read it at lines 1-50 above]")
+    assert _read(ctx, path="a.txt", offset=51, limit=50) == (
+        "[unchanged since you read it at lines 51-100 above]")
+
+
+def test_fresh_context_starts_with_empty_range_map(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("alpha\nbeta\ngamma\n")
+    ctx1 = _ctx(tmp_path)
+    _read(ctx1, path="a.txt", offset=1, limit=2000)
+    ctx2 = _ctx(tmp_path)  # new ToolContext == fresh per-step state
+    out = _read(ctx2, path="a.txt", offset=1, limit=2000)
+    assert out == f"{_num(1, 'alpha')}\n{_num(2, 'beta')}\n{_num(3, 'gamma')}"
+    assert "[unchanged" not in out
