@@ -881,7 +881,7 @@ async def _make_impty_sdk_tools(driver: Any) -> list[Any]:
 
     from impty.mcp import impty_tool_specs
 
-    specs = await impty_tool_specs(driver)
+    specs = impty_tool_specs(driver)
     return [_wrap_impty_one(spec, sdk_tool) for spec in specs]
 
 

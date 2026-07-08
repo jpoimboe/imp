@@ -61,17 +61,19 @@ def build_server(driver: ImptyDriver) -> FastMCP:
     return server
 
 
-async def impty_tool_specs(driver: ImptyDriver) -> list[ImptyToolSpec]:
+def impty_tool_specs(driver: ImptyDriver) -> list[ImptyToolSpec]:
     """The tool specs (name, description, JSON schema, bound method) for `driver`,
-    in `tool_methods()` order. Introspected from a FastMCP build so the schema and
-    description match the codex/standalone hosts exactly."""
-    server = build_server(driver)
-    tools_by_name = {t.name: t for t in await server.list_tools()}
+    in `tool_methods()` order. Each is introspected directly via FastMCP's
+    `Tool.from_function` — the same code path `server.tool()` runs internally — so
+    the name/schema match the codex/standalone hosts exactly, with no throwaway
+    server or async round-trip."""
+    from mcp.server.fastmcp.tools.base import Tool as MCPTool
+
     return [
         ImptyToolSpec(
-            name=m.__name__,
-            description=tools_by_name[m.__name__].description or "",
-            input_schema=tools_by_name[m.__name__].inputSchema,
+            name=(tool := MCPTool.from_function(m)).name,
+            description=m.__doc__ or "",
+            input_schema=tool.parameters,
             method=m,
         )
         for m in driver.tool_methods()

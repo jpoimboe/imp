@@ -27,7 +27,7 @@ def test_tool_descriptions_come_from_driver_method_docstrings() -> None:
 
 def test_impty_tool_specs_pair_each_method_with_its_schema() -> None:
     driver = ImptyDriver()
-    specs = asyncio.run(impty_tool_specs(driver))
+    specs = impty_tool_specs(driver)
     assert [s.name for s in specs] == [
         "start", "view", "send", "send_signal", "resize",
         "wait", "snapshot", "stop"]
@@ -48,3 +48,16 @@ def test_build_server_registers_thread_offloaded_tools_that_are_callable() -> No
     # driver method, not a stub.
     with pytest.raises(ToolError, match="no session"):
         asyncio.run(server.call_tool("view", {}))
+
+
+def test_impty_tool_specs_match_build_server_introspection() -> None:
+    driver = ImptyDriver()
+    old = {t.name: t for t in asyncio.run(build_server(driver).list_tools())}
+    specs = impty_tool_specs(driver)
+    assert {s.name for s in specs} == set(old)
+    assert len(specs) == len(old)
+    for spec in specs:
+        tool = old[spec.name]
+        assert spec.name == tool.name
+        assert spec.description == (tool.description or "")
+        assert spec.input_schema == tool.inputSchema
