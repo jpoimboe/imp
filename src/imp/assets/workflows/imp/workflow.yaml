@@ -23,6 +23,7 @@ vars:
   plan_minors_integrated: {type: bool, default: false}
   coverage_settled:       {type: bool, default: false}
   integration_fork:       {type: string, default: ""}
+  slow_verify_tolerated:  {type: bool, default: false}
   plan_index:             {type: int, default: 1}
   plan_total:             {type: int, default: 1}
   task_total:             {type: int, default: 0}
@@ -206,7 +207,7 @@ phases:
         tier: high
         label: sweeping deferred tasks
         rules:
-          - {if: {converge_verify_tolerated: true}, goto: wait-for-head}
+          - {if: {converge_verify_tolerated: true}, set: {slow_verify_tolerated: true}, goto: wait-for-head}
           - {else: true, continue: true}
 
       # Slow tests on the change's own base (off-lock). Clean -> enter integrate. A failure
@@ -272,7 +273,7 @@ phases:
           - {if: {blocking: true}, resume: reconciler, label: "addressing integration review feedback", feedback: "Here's review feedback to address:"}
           - {if: {has_minor_findings: true}, resume: reconciler, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
           - {if: {status: Error}, pause: true}
-          - {else: true, goto: summarizer}
+          - {else: true, set: {slow_verify_tolerated: output.tolerated}, goto: summarizer}
 
       - name: summarizer
         file: agents/summarizer.md

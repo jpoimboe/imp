@@ -91,7 +91,7 @@ def test_integration_verify_routes_failure_to_integration_reviewer() -> None:
 def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-reviewer")
-    base = {"status": "Success", "findings": ""}
+    base = {"status": "Success", "findings": "", "tolerated": False}
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": True, "has_minor_findings": False})
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"
@@ -106,7 +106,8 @@ def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "summarizer"
     m = evaluate_rules(rules, vars={},
                        output={"status": "Error", "findings": "",
-                               "blocking": False, "has_minor_findings": False})
+                               "blocking": False, "has_minor_findings": False,
+                               "tolerated": False})
     assert isinstance(m.action, Pause)
 
 
