@@ -81,8 +81,10 @@ def test_render_shows_subscribed_not_resident_with_mark() -> None:
 def test_on_response_marks_subscribed_rows() -> None:
     subs = Subscriptions()
     subs.add("bbbbbb")
+    off = AlertAll()
+    off.set(False)  # force OFF — default is now on
     sent: list = []
-    _adapter(sent, subs).on_response(ListResult([
+    _adapter(sent, subs, alert_all=off).on_response(ListResult([
         ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]))
     assert sent == [(
         "Alerts: subscribed only\n● @bbbbbb  Beta — running · implement", True)]

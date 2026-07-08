@@ -3,12 +3,22 @@ from __future__ import annotations
 from imp.remote.daemon.alert_all import AlertAll
 
 
-def test_default_is_off() -> None:
-    assert AlertAll().enabled() is False
+def test_default_is_on() -> None:
+    assert AlertAll().enabled() is True
+
+
+def test_off_then_on_round_trip_restores_enabled() -> None:
+    a = AlertAll()
+    assert a.enabled() is True
+    a.set(False)
+    assert a.enabled() is False
+    a.set(True)
+    assert a.enabled() is True
 
 
 def test_set_true_enables() -> None:
     a = AlertAll()
+    a.set(False)
     a.set(True)
     assert a.enabled() is True
 

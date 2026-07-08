@@ -272,6 +272,7 @@ async def test_dispatch_inbound_survives_a_failing_command(
 @pytest.mark.anyio
 async def test_alerts_on_sets_mode_and_confirms() -> None:
     alert_all = AlertAll()
+    alert_all.set(False)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(True), FakeControl(), responses, alert_all)
     assert alert_all.enabled() is True
@@ -293,6 +294,7 @@ async def test_alerts_off_clears_mode_and_confirms() -> None:
 @pytest.mark.anyio
 async def test_alerts_bare_reports_off_state() -> None:
     alert_all = AlertAll()
+    alert_all.set(False)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(None), FakeControl(), responses, alert_all)
     assert alert_all.enabled() is False   # bare query must not change the mode
@@ -320,6 +322,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     control = FakeControl(changes=rows)
     responses: queue.Queue = queue.Queue()
     alert_all = AlertAll()
+    alert_all.set(False)
     await _handle_command(Alerts(True), control, responses, alert_all)
     assert alert_all.enabled() is True
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
