@@ -2315,6 +2315,17 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     return rows
 
 
+def _left_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
+    """Left conversations — archived final status `paused` with no live home —
+    for the `--all` history block. Mirrors _completed_rows' live-id dedup so a
+    resumed left conversation, which now has a live home and shows in-flight,
+    is not duplicated here. Reads the same indexed archive query as
+    _completed_rows but selects `paused` rows instead of terminal ones."""
+    live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
+    return [r for r in archive_read.completed_rows(control)
+            if r[1] == "paused" and r[0] not in live]
+
+
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
     return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
 
