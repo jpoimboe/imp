@@ -110,7 +110,7 @@ HELP_TEXT = (
     "Commands:\n"
     "/show — show running changes (● = subscribed)\n"
     "/new <prompt> — start a Change\n"
-    "/subscribe @handle — follow a Change (replays its history, then streams it)\n"
+    "/subscribe @handle — follow a Change (streams from now; /replay for history)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a Change\n"
     "/replay [n] (reply or @handle) — re-send last n messages\n"
     "/abandon (reply or @handle) — stop a Change\n"
