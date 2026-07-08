@@ -93,13 +93,12 @@ def test_new_positional_delivers_verbatim_seed(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object,
+                           solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False) -> int:
         captured["change"] = change
-        captured["seed_opening"] = seed_opening
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -108,7 +107,8 @@ def test_new_positional_delivers_verbatim_seed(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    assert captured["seed_opening"] == "add a dark-mode toggle"
+    # The intent is persisted durably to change.json, not threaded as a run param.
+    assert captured["change"].seed_opening == "add a dark-mode toggle"  # type: ignore[union-attr]
     assert captured["change"].title == ""  # type: ignore[union-attr]
 
 
@@ -120,13 +120,12 @@ def test_new_title_flag_sets_change_title(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object,
+                           solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False) -> int:
         captured["change"] = change
-        captured["seed_opening"] = seed_opening
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -135,7 +134,7 @@ def test_new_title_flag_sets_change_title(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    assert captured["seed_opening"] is None
+    assert captured["change"].seed_opening is None  # type: ignore[union-attr]
     assert captured["change"].title == "dark mode"  # type: ignore[union-attr]
 
 
@@ -147,12 +146,12 @@ def test_new_positional_with_message_legal(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object,
+                           solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False) -> int:
-        captured["seed_opening"] = seed_opening
+        captured["change"] = change
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
 
@@ -162,7 +161,7 @@ def test_new_positional_with_message_legal(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    assert captured["seed_opening"] == "add dark mode"
+    assert captured["change"].seed_opening == "add dark mode"  # type: ignore[union-attr]
     assert captured["reply"] == "reply"
 
 
@@ -259,14 +258,14 @@ def test_opening_prompt_reply_wires_to_seed_opening(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object = None,
+                           solicit: object,
                            status: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False) -> int:
-        captured["seed_opening"] = seed_opening
+        captured["change"] = change
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -288,7 +287,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
-    assert captured["seed_opening"] == "add a feature"
+    assert captured["change"].seed_opening == "add a feature"  # type: ignore[union-attr]
 
 
 def test_opening_prompt_empty_reply_gives_none_seed_opening(
@@ -299,14 +298,14 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object = None,
+                           solicit: object,
                            status: object = None,
                            leave_mode: object = None,
                            leave_state: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False) -> int:
-        captured["seed_opening"] = seed_opening
+        captured["change"] = change
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -328,7 +327,7 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
-    assert captured["seed_opening"] is None
+    assert captured["change"].seed_opening is None  # type: ignore[union-attr]
 
 
 def test_new_creates_unmaterialized_draft(
@@ -339,7 +338,7 @@ def test_new_creates_unmaterialized_draft(
     captured: dict[str, object] = {}
 
     async def _fake_client(change: object, *, driver: object, coord: object,
-                           solicit: object, seed_opening: object,
+                           solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,

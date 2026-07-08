@@ -200,7 +200,7 @@ async def test_run_change_none_seed_opening_has_empty_opening(
                        change_id="bbb222", base_branch="main")
 
     result = await run_change(
-        ch, on_event=lambda _e: None, seed_opening=None, headless=True)
+        ch, on_event=lambda _e: None, headless=True)
 
     assert result is RunResult.COMPLETED
     s1 = sink["step:p/s1"][0].content[0].text

@@ -383,87 +383,6 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
     assert calls["n"] == 1
 
 
-def test_main_forwards_seed_opening_via_partial(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import functools
-
-    import imp.remote.session.daemon as daemon
-
-    loaded = object()
-    captured: dict[str, Any] = {}
-
-    def fake_load(control_root: Path, change_id: str) -> object:
-        return loaded
-
-    def fake_run(fn: Any) -> None:   # partial form takes a single positional
-        captured["fn"] = fn
-
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
-    monkeypatch.setattr(daemon.anyio, "run", fake_run)
-
-    rc = daemon.main([
-        "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
-        "--seed-opening", "ship the thing",
-    ])
-
-    assert rc == 0
-    fn = captured["fn"]
-    assert isinstance(fn, functools.partial)
-    assert fn.func is daemon.serve_change_session
-    assert fn.args == (loaded,)
-    assert fn.keywords == {"seed_opening": "ship the thing"}
-
-
-@pytest.mark.anyio
-async def test_seed_opening_is_forwarded_to_the_first_run_only(
-    tmp_path: Path,
-) -> None:
-    change = _make_change(tmp_path, "2026-06-15-sed")
-    sock = str(session_socket_path(change.control_root, change.id))
-    seeds: list[str | None] = []
-
-    async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
-        coordinator: Any, seed_opening: str | None = None,
-        wait_for_turn_fn: Any = None,
-    ) -> RunResult:
-        seeds.append(seed_opening)
-        if len(seeds) == 1:
-            await coordinator.signal_pause(reason="ctrl-c")
-            return RunResult.PAUSED
-        return RunResult.COMPLETED
-
-    async with anyio.create_task_group() as tg:
-        result: dict[str, Any] = {}
-
-        async def _serve() -> None:
-            result["r"] = await serve_change_session(
-                change, run_fn=fake_run, hibernate=False,
-                seed_opening="open the door")
-
-        tg.start_soon(_serve)
-        await _wait_for_socket(sock)
-        received: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title,
-                               on_event=received.append)
-        await client.connect()
-        tg.start_soon(client.receive_events)
-        with anyio.fail_after(5):
-            while not any(
-                    e.get("type") == "awaiting_user_input" for e in received):
-                await anyio.sleep(0.02)
-        await client.send_input("go")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
-        assert result["r"] is RunResult.COMPLETED
-        assert seeds == ["open the door", None]
-        await client.aclose()
-        tg.cancel_scope.cancel()
-
-
 @pytest.mark.anyio
 async def test_resume_journals_workflow_resumed_without_flipping_status(
     tmp_path: Path,
@@ -630,40 +549,6 @@ def test_main_forwards_resume_flag_via_partial(
     assert fn.func is daemon.serve_change_session
     assert fn.args == (loaded,)
     assert fn.keywords == {"resume": True}
-
-
-def test_main_forwards_both_seed_and_resume_via_partial(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import functools
-
-    import imp.remote.session.daemon as daemon
-
-    loaded = object()
-    captured: dict[str, Any] = {}
-
-    def fake_load(control_root: Path, change_id: str) -> object:
-        return loaded
-
-    def fake_run(fn: Any) -> None:
-        captured["fn"] = fn
-
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
-    monkeypatch.setattr(daemon.anyio, "run", fake_run)
-
-    rc = daemon.main([
-        "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
-        "--seed-opening", "hello seed",
-        "--resume",
-    ])
-
-    assert rc == 0
-    fn = captured["fn"]
-    assert isinstance(fn, functools.partial)
-    assert fn.func is daemon.serve_change_session
-    assert fn.args == (loaded,)
-    assert fn.keywords == {"seed_opening": "hello seed", "resume": True}
 
 
 def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> None:

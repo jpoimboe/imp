@@ -309,8 +309,7 @@ def test_fresh_session_line_routes_through_clear_loop(
     try:
         rc = anyio.run(functools.partial(
             m._run_fresh_session, ch,
-            args=argparse.Namespace(tui=False, non_interactive=False, message=None),
-            seed_opening="hi"))
+            args=argparse.Namespace(tui=False, non_interactive=False, message=None)))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
@@ -343,8 +342,7 @@ def test_fresh_session_tui_routes_through_clear_loop(
     try:
         rc = anyio.run(functools.partial(
             m._run_fresh_session, ch,
-            args=argparse.Namespace(tui=True, non_interactive=False, message=None),
-            seed_opening="hi"))
+            args=argparse.Namespace(tui=True, non_interactive=False, message=None)))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]

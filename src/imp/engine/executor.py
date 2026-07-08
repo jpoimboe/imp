@@ -286,7 +286,6 @@ async def run_change(
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     headless: bool = False,
     autonomous: bool = False,
-    seed_opening: str | None = None,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)

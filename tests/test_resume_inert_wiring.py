@@ -37,7 +37,7 @@ def _patch_common(monkeypatch, tmp_path: Path, ch: Change) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "c")
     monkeypatch.setattr(m, "_load_or_rehydrate", lambda control, cid: ch)
-    monkeypatch.setattr(m, "_resume_seed", lambda change: None)
+    monkeypatch.setattr(m, "_resume_opens_fresh", lambda change: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
     monkeypatch.setattr(m, "_tui_requested", lambda args: False)
 

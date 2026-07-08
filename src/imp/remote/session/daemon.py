@@ -68,7 +68,6 @@ async def serve_change_session(
     archive_left: Callable[[Change], None] = archive_conversation,
     save_left: Callable[[Change], None] = save_to_backlog,
     discard_left: Callable[[Change], None] = discard_conversation,
-    seed_opening: str | None = None,
     resume: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
@@ -117,9 +116,6 @@ async def serve_change_session(
             run_kwargs["headless"] = True
         if autonomous:
             run_kwargs["autonomous"] = True
-        first_kwargs: dict[str, Any] = {}
-        if seed_opening is not None:
-            first_kwargs["seed_opening"] = seed_opening
         if resume_target == "prompt" and not (non_interactive or autonomous):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
@@ -138,7 +134,6 @@ async def serve_change_session(
                 coordinator=coordinator,
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
-                **first_kwargs,
             )
             prompt = _hold_prompt(result, coordinator)
         while prompt is not None:
@@ -212,7 +207,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="imp-session-daemon")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--change-id", required=True)
-    parser.add_argument("--seed-opening", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
@@ -223,8 +217,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"imp: {exc}", file=sys.stderr)
         return 2
     kwargs: dict[str, Any] = {}
-    if ns.seed_opening is not None:
-        kwargs["seed_opening"] = ns.seed_opening
     if ns.resume:
         kwargs["resume"] = True
     if ns.non_interactive:

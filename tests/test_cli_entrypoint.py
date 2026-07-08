@@ -165,7 +165,7 @@ async def test_run_fresh_session_threads_autonomous(
     monkeypatch.setattr(main, "run_session_client", _fake_rsc)
     args = main._build_parser().parse_args(["new", "--non-interactive", "--autonomous"])
     rc = await main._run_fresh_session(
-        SimpleNamespace(id="x", title="t"), args=args, seed_opening=None)
+        SimpleNamespace(id="x", title="t"), args=args)
     assert rc == 0
     assert captured["autonomous"] is True
 
@@ -193,8 +193,8 @@ async def test_run_fresh_session_tui_branch_threads_autonomous(
 
     args = m._build_parser().parse_args(["new", "--tui", "--autonomous"])
     rc = await m._run_fresh_session(
-        SimpleNamespace(id="x", title="t", control_root=None),
-        args=args, seed_opening=None)
+        SimpleNamespace(id="x", title="t", control_root=None, seed_opening=None),
+        args=args)
     assert rc == 0
     assert captured.get("autonomous") is True
 
@@ -225,7 +225,7 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
     args = m._build_parser().parse_args(["new", "--autonomous"])
     rc = await m._run_fresh_session(
         SimpleNamespace(id="x", title="t", control_root=None),
-        args=args, seed_opening=None)
+        args=args)
     assert rc == 0
     assert captured.get("autonomous") is True
 
