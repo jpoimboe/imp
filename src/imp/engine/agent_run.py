@@ -664,7 +664,10 @@ async def drive_invocation(
 
     agent_output: dict[str, Any] | None = None
     stall = {"hit": False}
-    attach = (coordinator.runner_attached(runner.interrupt)
+    attach = (coordinator.runner_attached(
+                  runner.interrupt,
+                  force_kill=getattr(runner, "force_kill", None),
+                  agent_id=invocation.agent_id)
               if coordinator is not None else contextlib.nullcontext())
     gen = runner.run(invocation)
     try:

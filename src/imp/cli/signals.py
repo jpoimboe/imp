@@ -31,6 +31,7 @@ import os
 import signal
 import time
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from anyio import TASK_STATUS_IGNORED
@@ -168,6 +169,15 @@ def _leave_reason_for_signal(sig: int) -> str:
     return "sigterm"
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class _Attached:
+    """A runner attached for one drive: cooperative interrupt, wait-free force_kill, agent_id."""
+    # eq=False: identity equality — .remove(att) pops this exact entry
+    interrupt: Any
+    force_kill: Any = None
+    agent_id: str | None = None
+
+
 class InterruptCoordinator:
     """Signal-driven pause coordinator.
 
@@ -183,7 +193,7 @@ class InterruptCoordinator:
     """
 
     def __init__(self) -> None:
-        self._runner_interrupt: Any = None
+        self._runner_stack: list[_Attached] = []
         self._ctrl_d_reader: Any = None  # CtrlDReader | None — CLI cbreak /dev/tty reader
         # Client-side leave trigger, stamped at gesture time (distinct from the
         # first-wins pause_reason). The single choke point in run_terminal_client
@@ -362,18 +372,20 @@ class InterruptCoordinator:
         self.pause_reason = None
 
     def attach_runner(self, interrupt_fn: Any) -> None:
-        """interrupt_fn is an `async def () -> None` callable. All three V1
-        runners (AnthropicAgentRunner / OpenAIAgentRunner /
-        ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None`
-        per the AgentRunner protocol (`src/imp/agents/runner.py:172`).
+        """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
+        callable; all three V1 runners (AnthropicAgentRunner / OpenAIAgentRunner
+        / ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None` per
+        the AgentRunner protocol (`src/imp/agents/runner.py:172`).
 
-        The run-level attach/detach API; the per-drive wrapper is
-        `runner_attached` (used by `drive_invocation`), which the executor and
-        dispatch_task now go through instead of calling this directly."""
-        self._runner_interrupt = interrupt_fn
+        The run-level attach API; the per-drive wrapper is `runner_attached`
+        (used by `drive_invocation`), which the executor and dispatch_task go
+        through instead of calling this directly. The client's
+        forward-interrupt uses this."""
+        self._runner_stack.append(_Attached(interrupt_fn))
 
     def detach_runner(self) -> None:
-        self._runner_interrupt = None
+        if self._runner_stack:
+            self._runner_stack.pop()
 
     def attach_ctrl_d_reader(self, reader: Any) -> None:
         self._ctrl_d_reader = reader
@@ -408,18 +420,21 @@ class InterruptCoordinator:
             fn(reason)
 
     @contextlib.contextmanager
-    def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
-        """Attach `interrupt_fn` for the duration of a single drive, then
-        RESTORE the previous attachment (not clear it). Nesting-safe: a nested
-        subagent drive saves the parent's interrupt and reinstates it on exit,
-        so a Ctrl-C stays clean for the parent after a subagent returns, and a
-        Ctrl-C mid-subagent cancels the subagent runner."""
-        prev = self._runner_interrupt
-        self._runner_interrupt = interrupt_fn
+    def runner_attached(
+        self, interrupt_fn: Any, *, force_kill: Any = None,
+        agent_id: str | None = None,
+    ) -> Iterator[None]:
+        """Push `interrupt_fn` (with optional wait-free `force_kill` and `agent_id`)
+        for one drive, then pop it. Nesting-safe: a nested subagent drive pushes on
+        top so delivery interrupts the innermost runner first, each ancestor after;
+        on exit the exact entry is removed, restoring the parent as the chain top."""
+        att = _Attached(interrupt_fn, force_kill, agent_id)
+        self._runner_stack.append(att)
         try:
             yield
         finally:
-            self._runner_interrupt = prev
+            with _suppress(ValueError):
+                self._runner_stack.remove(att)
 
     @property
     def should_pause(self) -> bool:
@@ -430,7 +445,7 @@ class InterruptCoordinator:
         (first-wins; later calls do not overwrite), calls the attached runner's
         interrupt (if any), then flips the pause flag. Idempotent across
         repeated calls."""
-        fn = self._runner_interrupt
+        fn = self._runner_stack[-1].interrupt if self._runner_stack else None
         if self.pause_reason is None:
             self.pause_reason = reason
             self._note_gesture_ack(force_quit_available=False)

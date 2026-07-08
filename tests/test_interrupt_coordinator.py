@@ -14,23 +14,28 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_runner_attached_saves_and_restores_previous() -> None:
+def _tops(coord: InterruptCoordinator) -> list:
+    return [att.interrupt for att in coord._runner_stack]
+
+
+def test_runner_attached_pushes_and_pops() -> None:
     coord = InterruptCoordinator()
 
     async def parent_interrupt() -> None: ...
     async def child_interrupt() -> None: ...
 
     coord.attach_runner(parent_interrupt)
-    assert coord._runner_interrupt is parent_interrupt
+    assert _tops(coord) == [parent_interrupt]
 
     with coord.runner_attached(child_interrupt):
-        assert coord._runner_interrupt is child_interrupt
+        # innermost is on top; the parent is still on the stack (full-chain).
+        assert _tops(coord) == [parent_interrupt, child_interrupt]
 
-    # Restored, NOT cleared to None.
-    assert coord._runner_interrupt is parent_interrupt
+    # child popped, parent remains (restored, NOT cleared).
+    assert _tops(coord) == [parent_interrupt]
 
 
-def test_runner_attached_restores_on_exception() -> None:
+def test_runner_attached_pops_on_exception() -> None:
     coord = InterruptCoordinator()
 
     async def parent_interrupt() -> None: ...
@@ -42,17 +47,30 @@ def test_runner_attached_restores_on_exception() -> None:
             raise RuntimeError("boom")
     except RuntimeError:
         pass
-    assert coord._runner_interrupt is parent_interrupt
+    assert _tops(coord) == [parent_interrupt]
 
 
-def test_runner_attached_from_empty_restores_none() -> None:
+def test_runner_attached_from_empty_pops_to_empty() -> None:
     coord = InterruptCoordinator()
 
     async def child_interrupt() -> None: ...
 
     with coord.runner_attached(child_interrupt):
-        assert coord._runner_interrupt is child_interrupt
-    assert coord._runner_interrupt is None
+        assert _tops(coord) == [child_interrupt]
+    assert _tops(coord) == []
+
+
+def test_runner_attached_carries_force_kill_and_agent_id() -> None:
+    coord = InterruptCoordinator()
+
+    async def i() -> None: ...
+    async def fk() -> None: ...
+
+    with coord.runner_attached(i, force_kill=fk, agent_id="agent-7"):
+        att = coord._runner_stack[-1]
+        assert att.interrupt is i
+        assert att.force_kill is fk
+        assert att.agent_id == "agent-7"
 
 
 def test_reason_for_signal_maps_sigint_and_sigterm() -> None:
