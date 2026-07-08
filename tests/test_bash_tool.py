@@ -11,6 +11,7 @@ import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import ChangeContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.limits import ToolAborted
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -226,6 +227,21 @@ def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     with pytest.raises(RuntimeError):
         _run_bash(_ctx(tmp_path), {"command": "echo hi"})
     assert captured["argv"] == ["sh", "-c", "echo hi"]
+
+
+def test_bash_pending_pause_never_spawns_child(tmp_path: Path) -> None:
+    # §4 pre-spawn contract: a pending pause aborts before the child spawns.
+    class _PausedCoord:
+        should_pause = True
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = _PausedCoord()
+    sentinel = tmp_path / "ran"
+    with pytest.raises(ToolAborted) as ei:
+        _run_bash(ctx, {"command": f"touch {sentinel}"})
+    assert ei.value.reason == "interrupted"
+    assert not sentinel.exists()          # child never spawned
+    assert ctx.running_processes == []
 
 
 def test_bash_editor_git_op_completes_without_blocking(

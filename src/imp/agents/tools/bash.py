@@ -28,6 +28,7 @@ from imp.agents.tools.limits import (
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
     ToolAborted,
+    tool_checkpoint,
 )
 from imp.engine.env import engine_env, overlay_engine_env
 from imp.engine.sandbox import build_sandbox_argv
@@ -112,6 +113,9 @@ async def bash(
         from imp.agents.tools.bg import spawn_background
         return await spawn_background(
             ctx, command=command, argv=argv, cwd=cwd_path, env=env)
+    # §4: a pending pause must not spawn the child (mirrors the bg-process contract).
+    coordinator = getattr(ctx, "coordinator", None)
+    await tool_checkpoint(coordinator, None)
     proc = await anyio.open_process(
         argv,
         stdin=None,
