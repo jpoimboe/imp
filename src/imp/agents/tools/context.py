@@ -342,7 +342,9 @@ async def terminate_running_processes(
         survivors = captured[id(p)] | fresh
         if getattr(p, "returncode", None) is None:
             await kill_process_group(p, _signal.SIGKILL)
-            with contextlib.suppress(Exception):
-                await p.wait()
+            # Bound the reap like bg.py: a D-state child could block here forever.
+            with anyio.move_on_after(timeout):
+                with contextlib.suppress(Exception):
+                    await p.wait()
         _signal_pids(survivors, _signal.SIGKILL)
     return procs
