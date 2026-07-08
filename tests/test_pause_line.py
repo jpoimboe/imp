@@ -409,3 +409,15 @@ def test_daemon_stderr_has_crash_false_when_file_absent(tmp_path: Path) -> None:
     from imp.cli.main import _daemon_stderr_has_crash
 
     assert _daemon_stderr_has_crash(tmp_path / "daemon.stderr") is False
+
+
+def test_pause_reason_awaiting_user_has_no_reason() -> None:
+    from imp.cli.main import _pause_reason
+
+    # A genuine your-turn park surfaces no banner reason suffix: the trailing
+    # line reads "Paused <name> at <phase>" with no "(...)".
+    reason = _pause_reason([
+        ev("1", "step_started", step="coder", kind="agent", phase="implement"),
+        ev("2", "workflow_paused", reason="awaiting_user"),
+    ])
+    assert reason is None

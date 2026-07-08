@@ -304,6 +304,11 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     base = paused.get("interrupt_reason") or paused.get("reason")
     if not base:
         return None
+    # A genuine your-turn park is a normal solicit, not an interrupt: surface no
+    # reason, so the trailing banner omits the "(...)" suffix (via _pause_lines'
+    # `why` guard). Scoped to awaiting_user; STALE / error-cause paths untouched.
+    if base == "awaiting_user":
+        return None
     cause: str | None = None
     if paused_error is not None:
         d = paused_error.get("detail")
