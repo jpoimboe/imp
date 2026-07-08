@@ -154,7 +154,7 @@ async def test_reply_does_not_subscribe() -> None:
 
 
 @pytest.mark.anyio
-async def test_subscribe_replays_history_then_confirms() -> None:
+async def test_subscribe_seeds_seen_set_without_replaying() -> None:
     control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
         {"id": "e1", "type": "agent_output", "timestamp": "2026-06-25T14:32:05+00:00",
@@ -162,11 +162,11 @@ async def test_subscribe_replays_history_then_confirms() -> None:
     ]
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
-    first = responses.get_nowait()
-    assert isinstance(first, Notice) and "hi" in first.text
+    # History is not replayed — only the confirmation sends.
     assert responses.get_nowait() == Notice("Following @k3f9qa.")
     assert responses.empty()
     assert control.subscriptions.contains("k3f9qa")
+    # The snapshot still seeded the seen-set from full_history.
     assert control.subscriptions.seen("k3f9qa", "e1")
 
 

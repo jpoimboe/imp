@@ -57,7 +57,7 @@ def _drain(q: queue.Queue) -> list:
 
 
 @pytest.mark.anyio
-async def test_subscribe_replays_in_order_then_confirms_and_dedups_live() -> None:
+async def test_subscribe_streams_from_now_without_replaying_history() -> None:
     subs = Subscriptions()
     history = [
         _event("e1", "agent_output", {"text": "one"}),
@@ -68,21 +68,20 @@ async def test_subscribe_replays_in_order_then_confirms_and_dedups_live() -> Non
 
     await _handle_command(Subscribe("c"), control, responses)
 
-    msgs = _drain(responses)
-    assert msgs[0].text == "c · T · 2:32pm\none\n↩ @c"
-    assert msgs[1].text == "c · T · 2:32pm\ntwo\n↩ @c"
-    assert msgs[-1] == Notice("Following @c.")
+    # Only the confirmation sends — history is not replayed.
+    assert _drain(responses) == [Notice("Following @c.")]
+    # The snapshot still seeded the seen-set from full_history.
     assert subs.contains("c")
     assert subs.seen("c", "e1") and subs.seen("c", "e2")
 
-    # The live relay re-delivers the same on-disk events; an id in the replayed
+    # The live relay re-delivers the same on-disk events; an id in the seeded
     # set is suppressed (no duplicate), a fresh id streams silently.
     sent: list[tuple[str, bool]] = []
     adapter = TelegramNorthAdapter(
         chat_id=1, submit=lambda _c: None,
         send=lambda text, silent: (sent.append((text, silent)) or 1),
         get_updates=lambda _o: {"result": []}, subscriptions=subs)
-    adapter.on_event(_event("e1", "agent_output", {"text": "one"}))   # already replayed
+    adapter.on_event(_event("e1", "agent_output", {"text": "one"}))   # already seeded
     assert sent == []
     adapter.on_event(_event("e9", "agent_output", {"text": "live"}))  # new → streams
     assert len(sent) == 1 and sent[0][1] is True
