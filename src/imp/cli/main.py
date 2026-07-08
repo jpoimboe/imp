@@ -64,7 +64,11 @@ from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.state import LockHeld, State, lock_is_live
-from imp.providers.config import parse_default_workflow, validate_workflow_name
+from imp.providers.config import (
+    parse_default_base,
+    parse_default_workflow,
+    validate_workflow_name,
+)
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.attach import build_session_attach
 
@@ -959,6 +963,37 @@ def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
     if getattr(args, "autonomous", False):
         return "--autonomous"
     return None
+
+
+def _auto_detect_base(control: Path) -> str | None:
+    """Runtime base guess: origin/HEAD, else `master`/`main` if they exist, else None."""
+    origin = worktree.origin_head_branch(control)
+    if origin is not None:
+        return origin
+    for candidate in ("master", "main"):
+        if worktree.branch_exists(control, candidate):
+            return candidate
+    return None
+
+
+def _resolve_new_base(
+    control: Path, base_flag: str | None
+) -> tuple[str, str | None]:
+    """Resolve `imp new`'s base by priority; returns (base, notice) for the caller to print."""
+    current = worktree.current_branch(control)
+    if base_flag is not None:
+        return (current if base_flag in (".", "HEAD") else base_flag), None
+    resolved = (
+        parse_default_base(control / "imp" / "project.yaml")
+        or _auto_detect_base(control)
+    )
+    if resolved is None or resolved == current:
+        return current, None
+    notice = (
+        f"ℹ basing on {resolved}  "
+        f"(you're on {current} — use --base . to base here)"
+    )
+    return resolved, notice
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
